@@ -8,7 +8,7 @@ pub struct Value {
     value_: Val,
     size_: Size,
     manage_data_: bool,
-    type_id_: TypeId
+    pub(crate) type_id_: TypeId
 }
 
 #[derive(Clone, Debug)]
@@ -87,83 +87,81 @@ impl Value {
         }
     }
 
-    // pub fn from_tinyint(type_id: TypeId, i: i8) -> Self {
-    //     Self {
-    //         value_: Val::new_tinyint(i),
-    //         size_: Size::Length(1),
-    //         manage_data_: false,
-    //         type_id_: TypeId::TinyInt,
-    //     }
-    // }
-    //
-    // pub fn from_smallint(type_id: TypeId, i: i16) -> Self {
-    //     Self {
-    //         value_: Val::new_smallint(i),
-    //         size_: Size::Length(2),
-    //         manage_data_: false,
-    //         type_id_: TypeId::SmallInt,
-    //     }
-    // }
-    //
-    // pub fn from_integer(type_id: TypeId, i: i32) -> Self {
-    //     Self {
-    //         value_: Val::new_integer(i),
-    //         size_: Size::Length(4),
-    //         manage_data_: false,
-    //         type_id_: TypeId::Integer,
-    //     }
-    // }
-    //
-    // pub fn from_bigint(type_id: TypeId, i: i64) -> Self {
-    //     Self {
-    //         value_: Val::new_bigint(i),
-    //         size_: Size::Length(8),
-    //         manage_data_: false,
-    //         type_id_: TypeId::BigInt,
-    //     }
-    // }
-    //
-    // pub fn from_decimal(type_id: TypeId, d: f64) -> Self {
-    //     Self {
-    //         value_: Val::new_decimal(d),
-    //         size_: Size::Length(8),
-    //         manage_data_: false,
-    //         type_id_: TypeId::Decimal,
-    //     }
-    // }
-    //
-    // pub fn from_timestamp(type_id: TypeId, t: u64) -> Self {
-    //     Self {
-    //         value_: Val::new_timestamp(t),
-    //         size_: Size::Length(8),
-    //         manage_data_: false,
-    //         type_id_: TypeId::Timestamp,
-    //     }
-    // }
-    //
-    // pub fn from_str(type_id: TypeId, data: &str) -> Self {
-    //     Self {
-    //         value_: Val::new_varlen(data.as_ptr() as *mut u8),
-    //         size_: Size::Length(data.len() as u32),
-    //         manage_data_: false,
-    //         type_id_: TypeId::Varchar,
-    //     }
-    // }
-    //
-    // pub fn from_const_str(type_id: TypeId, data: &str) -> Self {
-    //     Self {
-    //         value_: Val::new_const_varlen(data.as_ptr()),
-    //         size_: Size::Length(data.len() as u32),
-    //         manage_data_: false,
-    //         type_id_: TypeId::Varchar,
-    //     }
-    // }
-    //
-    // // Add other constructors as needed...
-    //
-    // pub fn check_integer(&self) -> bool {
-    //     matches!(self.type_id_, TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt)
-    // }
+    pub fn from_tinyint(type_id: TypeId, i: i8) -> Self {
+        Self {
+            value_: Val::new_tinyint(i),
+            size_: Size::Length(1),
+            manage_data_: false,
+            type_id_: TypeId::TinyInt,
+        }
+    }
+
+    pub fn from_smallint(type_id: TypeId, i: i16) -> Self {
+        Self {
+            value_: Val::new_smallint(i),
+            size_: Size::Length(2),
+            manage_data_: false,
+            type_id_: TypeId::SmallInt,
+        }
+    }
+
+    pub fn from_integer(type_id: TypeId, i: i32) -> Self {
+        Self {
+            value_: Val::new_integer(i),
+            size_: Size::Length(4),
+            manage_data_: false,
+            type_id_: TypeId::Integer,
+        }
+    }
+
+    pub fn from_bigint(type_id: TypeId, i: i64) -> Self {
+        Self {
+            value_: Val::new_bigint(i),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::BigInt,
+        }
+    }
+
+    pub fn from_decimal(type_id: TypeId, d: f64) -> Self {
+        Self {
+            value_: Val::new_decimal(d),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::Decimal,
+        }
+    }
+
+    pub fn from_timestamp(type_id: TypeId, t: u64) -> Self {
+        Self {
+            value_: Val::new_timestamp(t),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::Timestamp,
+        }
+    }
+
+    pub fn from_str(type_id: TypeId, data: &str) -> Self {
+        Self {
+            value_: Val::new_varlen(data.as_ptr() as *mut u8),
+            size_: Size::Length(data.len() as u32),
+            manage_data_: false,
+            type_id_: TypeId::Varchar,
+        }
+    }
+
+    pub fn from_const_str(type_id: TypeId, data: &str) -> Self {
+        Self {
+            value_: Val::new_const_varlen(data.as_ptr()),
+            size_: Size::Length(data.len() as u32),
+            manage_data_: false,
+            type_id_: TypeId::Varchar,
+        }
+    }
+
+    pub fn check_integer(&self) -> bool {
+        matches!(self.type_id_, TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt)
+    }
 
     pub fn check_comparable(&self, other: &Value) -> bool {
         self.type_id_ == other.type_id_
@@ -172,8 +170,6 @@ impl Value {
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
     }
-
-    // Additional methods...
 }
 
 // Implement fmt::Display for Value to use with fmt::formatter
