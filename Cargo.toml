@@ -3,3 +3,10 @@ name = "tkdb"
 description = "DBMS inspired by CMU 15-415/445 - Introduction to DBMS Course"
 version = "0.1.0"
 authors = ["Thomas Korrison <thomas_korrison@hotmail.com>"]
+
+
+# Exclude specific files or directories
+exclude = [
+    "types/**",
+
+]
