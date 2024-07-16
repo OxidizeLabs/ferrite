@@ -1,0 +1,191 @@
+use std::fmt;
+use crate::type_id::TypeId;
+
+const DB_VALUE_NULL: u32 = u32::MAX;
+
+#[derive(Debug, Clone)]
+pub struct Value {
+    value_: Val,
+    size_: Size,
+    manage_data_: bool,
+    type_id_: TypeId
+}
+
+#[derive(Clone, Debug)]
+enum Val {
+    Boolean(i8),
+    TinyInt(i8),
+    SmallInt(i16),
+    Integer(i32),
+    BigInt(i64),
+    Decimal(f64),
+    Timestamp(u64),
+    VarLen(*mut u8),
+    ConstVarLen(*const u8),
+}
+
+#[derive(Debug, Clone)]
+enum Size {
+    Length(u32),
+    ElemTypeId(TypeId),
+}
+
+impl Val {
+    pub fn new_boolean(value: i8) -> Self {
+        Val::Boolean(value)
+    }
+
+    pub fn new_tinyint(value: i8) -> Self {
+        Val::TinyInt(value)
+    }
+
+    pub fn new_smallint(value: i16) -> Self {
+        Val::SmallInt(value)
+    }
+
+    pub fn new_integer(value: i32) -> Self {
+        Val::Integer(value)
+    }
+
+    pub fn new_bigint(value: i64) -> Self {
+        Val::BigInt(value)
+    }
+
+    pub fn new_decimal(value: f64) -> Self {
+        Val::Decimal(value)
+    }
+
+    pub fn new_timestamp(value: u64) -> Self {
+        Val::Timestamp(value)
+    }
+
+    pub fn new_varlen(value: *mut u8) -> Self {
+        Val::VarLen(value)
+    }
+
+    pub fn new_const_varlen(value: *const u8) -> Self {
+        Val::ConstVarLen(value)
+    }
+}
+
+impl Value {
+    pub fn new(type_id: TypeId) -> Self {
+        Self {
+            value_: Val::Integer(0),  // Default to Integer with value 0
+            size_: Size::Length(0),
+            manage_data_: false,
+            type_id_: type_id,
+        }
+    }
+
+    pub fn from_boolean(type_id: TypeId, b: i8) -> Self {
+        Self {
+            value_: Val::new_boolean(b),
+            size_: Size::Length(1),
+            manage_data_: false,
+            type_id_: type_id,
+        }
+    }
+
+    // pub fn from_tinyint(type_id: TypeId, i: i8) -> Self {
+    //     Self {
+    //         value_: Val::new_tinyint(i),
+    //         size_: Size::Length(1),
+    //         manage_data_: false,
+    //         type_id_: TypeId::TinyInt,
+    //     }
+    // }
+    //
+    // pub fn from_smallint(type_id: TypeId, i: i16) -> Self {
+    //     Self {
+    //         value_: Val::new_smallint(i),
+    //         size_: Size::Length(2),
+    //         manage_data_: false,
+    //         type_id_: TypeId::SmallInt,
+    //     }
+    // }
+    //
+    // pub fn from_integer(type_id: TypeId, i: i32) -> Self {
+    //     Self {
+    //         value_: Val::new_integer(i),
+    //         size_: Size::Length(4),
+    //         manage_data_: false,
+    //         type_id_: TypeId::Integer,
+    //     }
+    // }
+    //
+    // pub fn from_bigint(type_id: TypeId, i: i64) -> Self {
+    //     Self {
+    //         value_: Val::new_bigint(i),
+    //         size_: Size::Length(8),
+    //         manage_data_: false,
+    //         type_id_: TypeId::BigInt,
+    //     }
+    // }
+    //
+    // pub fn from_decimal(type_id: TypeId, d: f64) -> Self {
+    //     Self {
+    //         value_: Val::new_decimal(d),
+    //         size_: Size::Length(8),
+    //         manage_data_: false,
+    //         type_id_: TypeId::Decimal,
+    //     }
+    // }
+    //
+    // pub fn from_timestamp(type_id: TypeId, t: u64) -> Self {
+    //     Self {
+    //         value_: Val::new_timestamp(t),
+    //         size_: Size::Length(8),
+    //         manage_data_: false,
+    //         type_id_: TypeId::Timestamp,
+    //     }
+    // }
+    //
+    // pub fn from_str(type_id: TypeId, data: &str) -> Self {
+    //     Self {
+    //         value_: Val::new_varlen(data.as_ptr() as *mut u8),
+    //         size_: Size::Length(data.len() as u32),
+    //         manage_data_: false,
+    //         type_id_: TypeId::Varchar,
+    //     }
+    // }
+    //
+    // pub fn from_const_str(type_id: TypeId, data: &str) -> Self {
+    //     Self {
+    //         value_: Val::new_const_varlen(data.as_ptr()),
+    //         size_: Size::Length(data.len() as u32),
+    //         manage_data_: false,
+    //         type_id_: TypeId::Varchar,
+    //     }
+    // }
+    //
+    // // Add other constructors as needed...
+    //
+    // pub fn check_integer(&self) -> bool {
+    //     matches!(self.type_id_, TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt)
+    // }
+
+    pub fn check_comparable(&self, other: &Value) -> bool {
+        self.type_id_ == other.type_id_
+    }
+
+    pub fn get_type_id(&self) -> TypeId {
+        self.type_id_
+    }
+
+    // Additional methods...
+}
+
+// Implement fmt::Display for Value to use with fmt::formatter
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+// Example usage with fmt::Debug
+// fn main() {
+//     let val = Value::new(TypeId::Boolean);
+//     println!("{:?}", val);
+//     println!("{}", val.to_string());
+// }
