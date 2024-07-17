@@ -70,6 +70,10 @@ impl Column {
         self.column_offset
     }
 
+    pub fn set_offset(&mut self, value: u32) {
+        self.column_offset = value
+    }
+
     pub fn get_type(&self) -> TypeId {
         self.column_type
     }
