@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use type_id::TypeId;
+use std::mem::size_of;
 
 #[derive(Clone)]
 pub struct Column {
@@ -18,11 +19,10 @@ impl Column {
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar => length as u8,
-            TypeId::Vector => (length * std::mem::size_of::<f64>() as u32) as u8,
+            TypeId::Vector => (length * size_of::<f64>() as u32) as u8,
             _ => panic!("Cannot get size of invalid type"),
         }
     }
-
     pub fn new(column_name: String, column_type: TypeId) -> Self {
         assert!(column_type != TypeId::VarChar, "Wrong constructor for VARCHAR type.");
         assert!(column_type != TypeId::Vector, "Wrong constructor for VECTOR type.");
@@ -33,7 +33,6 @@ impl Column {
             column_offset: 0,
         }
     }
-
     pub fn new_varlen(column_name: String, column_type: TypeId, length: u32) -> Self {
         assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
         Column {
