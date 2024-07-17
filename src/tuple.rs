@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use std::ptr::null;
-use limits::BUSTUB_VALUE_NULL;
+use limits::DB_VALUE_NULL;
 use value::Value;
 use schema::Schema;
 use type_id::TypeId;
@@ -19,7 +19,7 @@ impl Tuple {
         let mut tuple_size = schema.get_inlined_storage_size() as usize;
         for value in &values {
             let mut len = value.get_storage_size();
-            if len == BUSTUB_VALUE_NULL {
+            if len == DB_VALUE_NULL {
                 len = 0;
             }
             tuple_size += size_of::<u32>() + len as usize;
