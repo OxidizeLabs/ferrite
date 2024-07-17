@@ -146,7 +146,7 @@ impl Value {
             value_: Val::new_varlen(data.as_ptr() as *mut u8),
             size_: Size::Length(data.len() as u32),
             manage_data_: false,
-            type_id_: TypeId::Varchar,
+            type_id_: TypeId::VarChar,
         }
     }
 
@@ -155,7 +155,7 @@ impl Value {
             value_: Val::new_const_varlen(data.as_ptr()),
             size_: Size::Length(data.len() as u32),
             manage_data_: false,
-            type_id_: TypeId::Varchar,
+            type_id_: TypeId::VarChar,
         }
     }
 

@@ -7,7 +7,7 @@ use timestamp_type::TimestampType;
 use tinyint_type::TinyIntType;
 use type_id::TypeId;
 use value::Value;
-use varlen_type::VarcharType;
+use varlen_type::VarCharType;
 use vector_type::VectorType;
 
 
@@ -26,14 +26,14 @@ pub trait Type {
             TypeId::Boolean => true,
             TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal => {
                 match type_id {
-                    TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Varchar => true,
+                    TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::VarChar => true,
                     _ => false,
                 }
             },
-            TypeId::Timestamp => type_id == TypeId::Varchar || type_id == TypeId::Timestamp,
-            TypeId::Varchar => {
+            TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
+            TypeId::VarChar => {
                 match type_id {
-                    TypeId::Boolean | TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp | TypeId::Varchar => true,
+                    TypeId::Boolean | TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp | TypeId::VarChar => true,
                     _ => false,
                 }
             },
@@ -49,7 +49,7 @@ pub trait Type {
             TypeId::BigInt => Value::from_bigint(TypeId::BigInt, i64::MIN),
             TypeId::Decimal => Value::from_decimal(TypeId::Decimal, f64::MIN),
             TypeId::Timestamp => Value::from_timestamp(TypeId::Timestamp, 0),
-            TypeId::Varchar => Value::from_const_str(TypeId::Varchar, ""),
+            TypeId::VarChar => Value::from_const_str(TypeId::VarChar, ""),
             _ => panic!()
         }
     }
@@ -62,7 +62,7 @@ pub trait Type {
             TypeId::BigInt => Value::from_bigint(TypeId::BigInt, i64::MAX),
             TypeId::Decimal => Value::from_decimal(TypeId::Decimal, f64::MAX),
             TypeId::Timestamp => Value::from_timestamp(TypeId::Timestamp, 0),
-            TypeId::Varchar => Value::from_const_str(TypeId::Varchar, ""),
+            TypeId::VarChar => Value::from_const_str(TypeId::VarChar, ""),
             _ => panic!()
         }
     }
@@ -148,7 +148,7 @@ pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
         TypeId::Integer => &INTEGER_TYPE_INSTANCE,
         TypeId::BigInt => &BIGINT_TYPE_INSTANCE,
         TypeId::Decimal => &DECIMAL_TYPE_INSTANCE,
-        TypeId::Varchar => &VARLEN_TYPE_INSTANCE,
+        TypeId::VarChar => &VARLEN_TYPE_INSTANCE,
         TypeId::Timestamp => &TIMESTAMP_TYPE_INSTANCE,
         TypeId::Vector => &VECTOR_TYPE_INSTANCE,
         TypeId::Invalid => &INVALID_TYPE_INSTANCE,
@@ -161,7 +161,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::SmallInt => 2,
         TypeId::Integer => 4,
         TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
-        TypeId::Varchar => 0,
+        TypeId::VarChar => 0,
         _ => panic!()
     }
 }
@@ -174,7 +174,7 @@ pub fn type_id_to_string(type_id: TypeId) -> String {
         TypeId::Integer => "Integer".to_string(),
         TypeId::BigInt => "BigInt".to_string(),
         TypeId::Decimal => "Decimal".to_string(),
-        TypeId::Varchar => "Varchar".to_string(),
+        TypeId::VarChar => "VarChar".to_string(),
         TypeId::Timestamp => "Timestamp".to_string(),
         TypeId::Vector => "Vector".to_string(),
         TypeId::Invalid => "Invalid".to_string()
@@ -188,7 +188,7 @@ static SMALLINT_TYPE_INSTANCE: SmallIntType = SmallIntType;
 static INTEGER_TYPE_INSTANCE: IntegerType = IntegerType;
 static BIGINT_TYPE_INSTANCE: BigIntType = BigIntType;
 static DECIMAL_TYPE_INSTANCE: DecimalType = DecimalType;
-static VARLEN_TYPE_INSTANCE: VarcharType = VarcharType;
+static VARLEN_TYPE_INSTANCE: VarCharType = VarCharType;
 static TIMESTAMP_TYPE_INSTANCE: TimestampType = TimestampType;
 static VECTOR_TYPE_INSTANCE: VectorType = VectorType;
 static INVALID_TYPE_INSTANCE: InvalidType = InvalidType;

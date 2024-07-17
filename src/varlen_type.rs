@@ -1,23 +1,22 @@
 use type_id::TypeId;
-use types::{CmpBool, Type};
-use value::Value;
+use types::{Type};
 
 // Implementation for VarcharType
-pub struct VarcharType;
+pub struct VarCharType;
 
-impl VarcharType {
+impl VarCharType {
     pub fn new() -> Self {
-        VarcharType
+        VarCharType
     }
 }
 
-impl Type for VarcharType {
+impl Type for VarCharType {
     fn get_type_id(&self) -> TypeId {
-        TypeId::Varchar
+        TypeId::VarChar
     }
 
     fn is_coercible_from(&self, type_id: TypeId) -> bool {
-        matches!(type_id, TypeId::Varchar)
+        matches!(type_id, TypeId::VarChar)
     }
 }
 

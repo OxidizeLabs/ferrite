@@ -5,7 +5,7 @@ pub enum TypeId {
     Boolean,
     Integer,
     Decimal,
-    Varchar,
+    VarChar,
     Timestamp,
     Vector,
     TinyInt,
