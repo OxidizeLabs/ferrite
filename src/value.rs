@@ -1,5 +1,6 @@
 use std::fmt;
-use crate::type_id::TypeId;
+use type_id::TypeId;
+use types::{get_instance, Type};
 
 const DB_VALUE_NULL: u32 = u32::MAX;
 
@@ -169,6 +170,114 @@ impl Value {
 
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
+    }
+
+    pub fn get_storage_size(&self) -> u32 {
+        get_instance(self.type_id_).get_storage_size(self)
+    }
+
+    pub fn get_data() {
+        unimplemented!()
+    }
+
+    pub fn get_vector() {
+        unimplemented!()
+    }
+
+    pub fn cast_as() {
+        unimplemented!()
+    }
+
+    pub fn compare_exactly_equals() {
+        unimplemented!()
+    }
+
+    pub fn compare_equals() {
+        unimplemented!()
+    }
+
+    pub fn compare_not_equals() {
+        unimplemented!()
+    }
+
+    pub fn compare_less_than() {
+        unimplemented!()
+    }
+
+    pub fn compare_less_than_equals() {
+        unimplemented!()
+    }
+
+    pub fn compare_greater_than() {
+        unimplemented!()
+    }
+
+    pub fn compare_greater_than_equals() {
+        unimplemented!()
+    }
+
+    pub fn add() {
+        unimplemented!()
+    }
+
+    pub fn subtract() {
+        unimplemented!()
+    }
+
+    pub fn multiply() {
+        unimplemented!()
+    }
+
+    pub fn divide() {
+        unimplemented!()
+    }
+
+    pub fn modulo() {
+        unimplemented!()
+    }
+
+    pub fn min() {
+        unimplemented!()
+    }
+
+    pub fn max() {
+        unimplemented!()
+    }
+
+    pub fn sqrt() {
+        unimplemented!()
+    }
+
+    pub fn operate_null() {
+        unimplemented!()
+    }
+
+    pub fn is_zero() {
+        unimplemented!()
+    }
+
+    pub fn is_null() {
+        unimplemented!()
+    }
+
+    pub fn serialize_to() {
+        unimplemented!()
+    }
+
+    pub fn serialize_from() {
+        unimplemented!()
+    }
+
+    pub fn deserialize_from() {
+        unimplemented!()
+    }
+
+    pub fn to_string() {
+        unimplemented!()
+    }
+
+    pub fn copy() {
+        unimplemented!()
     }
 }
 
