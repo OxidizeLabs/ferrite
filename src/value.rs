@@ -9,7 +9,7 @@ pub struct Value {
     value_: Val,
     size_: Size,
     manage_data_: bool,
-    pub(crate) type_id_: TypeId
+    type_id_: TypeId
 }
 
 #[derive(Clone, Debug)]
@@ -260,7 +260,7 @@ impl Value {
         unimplemented!()
     }
 
-    pub fn serialize_to() {
+    pub fn serialize_to(x: &mut [u8]) {
         unimplemented!()
     }
 
