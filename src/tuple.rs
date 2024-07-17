@@ -42,14 +42,14 @@ impl Tuple {
                     offset_ptr.copy_from_slice(&(offset as u32).to_ne_bytes());
 
                     // Serialize varchar value, in place (size + data).
-                    Value::serialize_to(&mut data[offset..]);
+                    value.serialize_to(&mut data[offset..]);
                     let mut len = value.get_storage_size();
                     if len == DB_VALUE_NULL {
                         len = 0;
                     }
                     offset += size_of::<u32>() + len as usize;
                 } else {
-                    Value::serialize_to(&mut data[col.get_offset() as usize..]);
+                    value.serialize_to(&mut data[col.get_offset() as usize..]);
                 }
             } else {
                 panic!("Column at index {} not found", i);

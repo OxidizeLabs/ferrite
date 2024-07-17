@@ -1,6 +1,6 @@
 use type_id::TypeId;
-use types::{CmpBool, Type};
-use value::Value;
+use types::Type;
+use value::{Value, Val};
 
 // Implementation for BooleanType
 pub struct BooleanType;
@@ -18,6 +18,14 @@ impl Type for BooleanType {
 
     fn is_coercible_from(&self, type_id: TypeId) -> bool {
         matches!(type_id, TypeId::Boolean)
+    }
+
+    fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
+        if let Val::Boolean(b) = val.get_value() {
+            storage[0] = *b as u8;
+        } else {
+            panic!("Expected a boolean value");
+        }
     }
 }
 
