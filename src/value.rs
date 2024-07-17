@@ -13,7 +13,7 @@ pub struct Value {
 }
 
 #[derive(Clone, Debug)]
-enum Val {
+pub enum Val {
     Boolean(i8),
     TinyInt(i8),
     SmallInt(i16),
@@ -26,7 +26,7 @@ enum Val {
 }
 
 #[derive(Debug, Clone)]
-enum Size {
+pub enum Size {
     Length(u32),
     ElemTypeId(TypeId),
 }
@@ -180,6 +180,10 @@ impl Value {
         unimplemented!()
     }
 
+    pub fn get_value(&self) -> &Val {
+        &self.value_
+    }
+
     pub fn get_vector() {
         unimplemented!()
     }
@@ -260,8 +264,8 @@ impl Value {
         unimplemented!()
     }
 
-    pub fn serialize_to(x: &mut [u8]) {
-        unimplemented!()
+    pub fn serialize_to(&self, storage: &mut [u8]) {
+        get_instance(self.type_id_).serialize_to(self, storage);
     }
 
     pub fn serialize_from() {
