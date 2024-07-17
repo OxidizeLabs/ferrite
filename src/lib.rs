@@ -10,3 +10,5 @@ pub mod varlen_type;
 pub mod tinyint_type;
 pub mod timestamp_type;
 pub mod smallint_type;
+pub mod column;
+pub mod schema;
