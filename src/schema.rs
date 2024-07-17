@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use column::Column;
 
 pub struct Schema {
@@ -8,6 +9,35 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn new(columns: Vec<Column>) -> Schema {
+        let mut curr_offset = 0;
+        let mut tuple_is_inlined = true;
+        let mut uninlined_columns: Vec<u32> = Vec::new();
+        let mut columns_processed = Vec::new();
+
+        for (index, mut column) in columns.into_iter().enumerate() {
+            if !column.is_inlined() {
+                tuple_is_inlined = false;
+                uninlined_columns.push(index as u32);
+            }
+            column.set_offset(curr_offset);
+            if column.is_inlined() {
+                curr_offset += column.get_storage_size();
+            } else {
+                curr_offset += size_of::<u32>() as u32;
+            }
+
+            columns_processed.push(column);
+        }
+
+        Schema {
+            tuple_is_inlined,
+            columns: columns_processed,
+            length: curr_offset,
+            unlined_columns: uninlined_columns
+        }
+    }
+
     pub fn copy_schema(from: Schema) -> Self {
         unimplemented!()
     }
@@ -33,12 +63,12 @@ impl Schema {
         &self.unlined_columns
     }
 
-    pub fn get_unlined_column_count() -> u32 {
-        unimplemented!()
+    pub fn get_unlined_column_count(&self) -> u32 {
+        self.unlined_columns.len() as u32
     }
 
-    pub fn get_column_count(&self) -> usize {
-        self.columns.iter().count()
+    pub fn get_column_count(&self) -> u32 {
+        self.columns.len() as u32
     }
 
     pub fn get_inlined_storage_size(&self) -> u32 {
@@ -48,7 +78,24 @@ impl Schema {
     pub fn is_inlined() -> bool {
         unimplemented!()
     }
+
     pub fn to_string(&self, simplified: bool) -> String {
-        unimplemented!()
+        if simplified {
+            let column_strings: Vec<String> = self.columns.iter()
+                .map(|col| col.to_string(true))
+                .collect();
+            format!("({})", column_strings.join(", "))
+        } else {
+            let column_strings: Vec<String> = self.columns.iter()
+                .map(|col| col.to_string(false))
+                .collect();
+            format!(
+                "Schema[NumColumns: {}, IsInlined: {}, Length: {}] :: ({})",
+                self.get_column_count(),
+                self.tuple_is_inlined,
+                self.length,
+                column_strings.join(", ")
+            )
+        }
     }
 }
