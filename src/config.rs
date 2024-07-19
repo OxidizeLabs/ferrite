@@ -18,9 +18,9 @@ pub const INVALID_PAGE_ID: i32 = -1;          // invalid page id
 pub const INVALID_TXN_ID: i32 = -1;           // invalid transaction id
 pub const INVALID_LSN: i32 = -1;              // invalid log sequence number
 pub const HEADER_PAGE_ID: i32 = 0;            // the header page id
-pub const BUSTUB_PAGE_SIZE: usize = 4096;     // size of a data page in bytes
+pub const DB_PAGE_SIZE: usize = 4096;     // size of a data page in bytes
 pub const BUFFER_POOL_SIZE: usize = 10;       // size of buffer pool
-pub const LOG_BUFFER_SIZE: usize = (BUFFER_POOL_SIZE + 1) * BUSTUB_PAGE_SIZE; // size of a log buffer in bytes
+pub const LOG_BUFFER_SIZE: usize = (BUFFER_POOL_SIZE + 1) * DB_PAGE_SIZE; // size of a log buffer in bytes
 pub const BUCKET_SIZE: usize = 50;            // size of extendible hash bucket
 pub const LRUK_REPLACER_K: usize = 10;        // lookback window for lru-k replacer
 
