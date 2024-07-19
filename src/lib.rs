@@ -14,6 +14,7 @@ pub mod column;
 pub mod schema;
 pub mod tuple;
 pub mod limits;
+pub mod config;
 
 extern crate bincode;
 extern crate serde;
