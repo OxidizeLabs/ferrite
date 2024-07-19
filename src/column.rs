@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use type_id::TypeId;
 use std::mem::size_of;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Column {
     column_name: String,
     column_type: TypeId,
@@ -19,13 +19,13 @@ impl Column {
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar => length as u8,
-            TypeId::Vector => (length * size_of::<f64>() as u32) as u8,
+            // TypeId::Vector => (length * size_of::<f64>() as u32) as u8,
             _ => panic!("Cannot get size of invalid type"),
         }
     }
     pub fn new(column_name: String, column_type: TypeId) -> Self {
         assert!(column_type != TypeId::VarChar, "Wrong constructor for VARCHAR type.");
-        assert!(column_type != TypeId::Vector, "Wrong constructor for VECTOR type.");
+        // assert!(column_type != TypeId::Vector, "Wrong constructor for VECTOR type.");
         Column {
             column_name,
             column_type,
@@ -34,7 +34,7 @@ impl Column {
         }
     }
     pub fn new_varlen(column_name: String, column_type: TypeId, length: u32) -> Self {
-        assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
+        // assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
         Column {
             column_name,
             column_type,
@@ -79,7 +79,7 @@ impl Column {
     }
 
     pub fn is_inlined(&self) -> bool {
-        self.column_type != TypeId::VarChar && self.column_type != TypeId::Vector
+        self.column_type != TypeId::VarChar
     }
 
     pub fn to_string(&self, simplified: bool) -> String {

@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use limits::DB_VALUE_NULL;
-use value::Value;
+use value::{Value, Serializable};
 use schema::Schema;
 
 pub struct Tuple {
@@ -14,7 +14,7 @@ impl Tuple {
     pub fn new(values: Vec<Value>, schema: Schema, rid: u32) -> Self {
         assert_eq!(
             values.len(),
-            schema.get_column_count(),
+            schema.get_column_count() as usize,
             "Values length does not match schema column count"
         );
 
@@ -59,49 +59,87 @@ impl Tuple {
         Tuple { values, schema, rid, data }
     }
 
-
-    pub fn serialize_to() {
-        unimplemented!()
+    pub fn serialize_to(&self, storage: &mut [u8]) {
+        assert!(storage.len() >= self.data.len(), "Storage buffer is too small");
+        storage[..self.data.len()].copy_from_slice(&self.data);
     }
 
-    pub fn deserialize_from() {
-        unimplemented!()
+    pub fn deserialize_from(storage: &[u8], schema: Schema, rid: u32) -> Self {
+        let mut values = Vec::new();
+
+        for (i, col) in schema.get_columns().iter().enumerate() {
+            if col.is_inlined() {
+                let val = Value::deserialize_from(&storage[col.get_offset() as usize..], col.get_type());
+                values.push(val);
+            } else {
+                let offset = u32::from_ne_bytes([
+                    storage[col.get_offset() as usize],
+                    storage[col.get_offset() as usize + 1],
+                    storage[col.get_offset() as usize + 2],
+                    storage[col.get_offset() as usize + 3],
+                ]) as usize;
+                let val = Value::deserialize_from(&storage[offset..], col.get_type());
+                values.push(val);
+            }
+        }
+
+        Tuple { values, schema, rid, data: storage.to_vec() }
     }
 
     pub fn get_rid(&self) -> u32 {
         self.rid
     }
 
-    pub fn set_rid(&self, rid: u32) {
-        unimplemented!()
+    pub fn set_rid(&mut self, rid: u32) {
+        self.rid = rid;
     }
 
-    pub fn get_data(&self) {
-        unimplemented!()
+    pub fn get_data(&self) -> &[u8] {
+        &self.data
     }
 
     pub fn get_length(&self) -> u32 {
-        unimplemented!()
+        self.data.len() as u32
     }
 
-    pub fn get_value(&self, schema: &Schema, column_index: u32) -> Value {
-        unimplemented!()
+    pub fn get_value(&self, column_index: usize) -> &Value {
+        &self.values[column_index]
     }
 
-    pub fn key_from_tuple(&self, schema: &Schema, key_schema: Schema, key_attrs: Vec<u32>) -> Tuple {
-        unimplemented!()
-    }
+    pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: Vec<u32>) -> Tuple {
+        let mut key_values = Vec::new();
 
-    // pub fn is_null(&self, schema: &Schema, column_index: u32) -> bool {
-    //     let value = Value::GetValue(schema, column_index);
-    //     return value.IsNull();
-    // }
+        for &attr in &key_attrs {
+            key_values.push(self.get_value(attr as usize).clone());
+        }
+
+        Tuple::new(key_values, key_schema, self.rid)
+    }
 
     pub fn to_string(&self, schema: &Schema) -> String {
-        unimplemented!()
+        let mut output = String::new();
+        for (i, value) in self.values.iter().enumerate() {
+            if let Some(col) = schema.get_column(i) {
+                output.push_str(&format!("{}: {}, ", col.get_name(), value.to_string()));
+            }
+        }
+        output.pop(); // Remove last comma
+        output.pop(); // Remove last space
+        output
     }
 
-    fn get_data_ptr(&self, schema: Schema, column_index: u32) {
-        unimplemented!()
+    fn get_data_ptr(&self, column_index: u32) -> &[u8] {
+        let col = self.schema.get_column(column_index as usize).unwrap();
+        if col.is_inlined() {
+            &self.data[col.get_offset() as usize..]
+        } else {
+            let offset = u32::from_ne_bytes([
+                self.data[col.get_offset() as usize],
+                self.data[col.get_offset() as usize + 1],
+                self.data[col.get_offset() as usize + 2],
+                self.data[col.get_offset() as usize + 3],
+            ]) as usize;
+            &self.data[offset..]
+        }
     }
 }

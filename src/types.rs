@@ -6,10 +6,9 @@ use smallint_type::SmallIntType;
 use timestamp_type::TimestampType;
 use tinyint_type::TinyIntType;
 use type_id::TypeId;
-use value::Value;
+use value::{Value, ToValue};
 use varlen_type::VarCharType;
 use vector_type::VectorType;
-
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CmpBool {
@@ -42,27 +41,27 @@ pub trait Type {
     }
     fn get_min_value(type_id: TypeId) -> Value where Self: Sized {
         match type_id {
-            TypeId::Boolean => Value::from_boolean(TypeId::Boolean, 0),
-            TypeId::TinyInt => Value::from_tinyint(TypeId::TinyInt, i8::MIN),
-            TypeId::SmallInt => Value::from_smallint(TypeId::SmallInt, i16::MIN),
-            TypeId::Integer => Value::from_integer(TypeId::Integer, i32::MIN),
-            TypeId::BigInt => Value::from_bigint(TypeId::BigInt, i64::MIN),
-            TypeId::Decimal => Value::from_decimal(TypeId::Decimal, f64::MIN),
-            TypeId::Timestamp => Value::from_timestamp(TypeId::Timestamp, 0),
-            TypeId::VarChar => Value::from_const_str(TypeId::VarChar, ""),
+            TypeId::Boolean => false.to_value(),
+            TypeId::TinyInt => i8::MIN.to_value(),
+            TypeId::SmallInt => i16::MIN.to_value(),
+            TypeId::Integer => i32::MIN.to_value(),
+            TypeId::BigInt => i64::MIN.to_value(),
+            TypeId::Decimal => f64::MIN.to_value(),
+            TypeId::Timestamp => 0_u64.to_value(),
+            TypeId::VarChar => "".to_value(),
             _ => panic!()
         }
     }
     fn get_max_value(type_id: TypeId) -> Value where Self: Sized {
         match type_id {
-            TypeId::Boolean => Value::from_boolean(TypeId::Boolean, 1),
-            TypeId::TinyInt => Value::from_tinyint(TypeId::TinyInt, i8::MAX),
-            TypeId::SmallInt => Value::from_smallint(TypeId::SmallInt, i16::MAX),
-            TypeId::Integer => Value::from_integer(TypeId::Integer, i32::MAX),
-            TypeId::BigInt => Value::from_bigint(TypeId::BigInt, i64::MAX),
-            TypeId::Decimal => Value::from_decimal(TypeId::Decimal, f64::MAX),
-            TypeId::Timestamp => Value::from_timestamp(TypeId::Timestamp, 0),
-            TypeId::VarChar => Value::from_const_str(TypeId::VarChar, ""),
+            TypeId::Boolean => true.to_value(),
+            TypeId::TinyInt => i8::MAX.to_value(),
+            TypeId::SmallInt => i16::MAX.to_value(),
+            TypeId::Integer => i32::MAX.to_value(),
+            TypeId::BigInt => i64::MAX.to_value(),
+            TypeId::Decimal => f64::MAX.to_value(),
+            TypeId::Timestamp => u64::MAX.to_value(),
+            TypeId::VarChar => "".to_value(),
             _ => panic!()
         }
     }
@@ -72,10 +71,10 @@ pub trait Type {
     fn compare_not_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn compare_less_than(&self, _left: &Value, right: &Value) -> CmpBool {
+    fn compare_less_than(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn compare_less_than_equals(&self, _left: &Value, right: &Value) -> CmpBool {
+    fn compare_less_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
     fn compare_greater_than(&self, _left: &Value, _right: &Value) -> CmpBool {
@@ -84,58 +83,54 @@ pub trait Type {
     fn compare_greater_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn add(&self, left: &Value, right: &Value) -> Value {
+    fn add(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn subtract(&self, left: &Value, right: &Value) -> Value {
+    fn subtract(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn multiply(&self, left: &Value, right: &Value) -> Value {
+    fn multiply(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn divide(&self, left: &Value, right: &Value) -> Value {
+    fn divide(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn modulo(&self, left: &Value, right: &Value) -> Value {
+    fn modulo(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn min(&self, left: &Value, right: &Value) -> Value {
+    fn min(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn max(&self, left: &Value, right: &Value) -> Value {
+    fn max(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn sqrt(&self, val: &Value) -> Value {
+    fn sqrt(&self, _val: &Value) -> Value {
         unimplemented!()
     }
-    fn operate_null(&self, val: &Value, right: &Value) -> Value {
+    fn operate_null(&self, _val: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
-    fn is_zero(&self, val: &Value) -> bool {
+    fn is_zero(&self, _val: &Value) -> bool {
         unimplemented!()
     }
-    fn is_inlined(&self, val: &Value) -> bool {
+    fn is_inlined(&self, _val: &Value) -> bool {
         unimplemented!()
     }
-    fn to_string(&self, val: &Value) -> String {
+    fn to_string(&self, _val: &Value) -> String {
         unimplemented!()
     }
-    fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
+    fn serialize_to(&self, val: &Value, storage: &mut [u8]);
+    fn deserialize_from(&self, storage: &mut [u8]) -> Value;
+    fn copy(&self, _val: &Value) -> Value {
         unimplemented!()
     }
-    fn deserialize_from(&self, storage: &[u8]) -> Value {
+    fn cast_as(&self, _val: &Value, _type_id: TypeId) -> Value {
         unimplemented!()
     }
-    fn copy(&self, val: &Value) -> Value {
+    fn get_data(&self, _val: &Value) -> &[u8] {
         unimplemented!()
     }
-    fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
-        unimplemented!()
-    }
-    fn get_data(&self, val: &Value) -> &[u8] {
-        unimplemented!()
-    }
-    fn get_storage_size(&self, val: &Value) -> u32 {
+    fn get_storage_size(&self, _val: &Value) -> u32 {
         unimplemented!()
     }
 }
@@ -200,122 +195,120 @@ impl Type for InvalidType {
         TypeId::Invalid
     }
 
-    fn compare_equals(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn compare_not_equals(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_not_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn compare_less_than(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_less_than(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn compare_less_than_equals(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_less_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn compare_greater_than(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_greater_than(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn compare_greater_than_equals(&self, left: &Value, right: &Value) -> CmpBool {
+    fn compare_greater_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
 
-    fn add(&self, left: &Value, right: &Value) -> Value {
+    fn add(&self, _left: &Value, _right: &Value) -> Value {
         // Implement addition logic
         unimplemented!()
     }
 
-    fn subtract(&self, left: &Value, right: &Value) -> Value {
+    fn subtract(&self, _left: &Value, _right: &Value) -> Value {
         // Implement subtraction logic
         unimplemented!()
     }
 
-    fn multiply(&self, left: &Value, right: &Value) -> Value {
+    fn multiply(&self, _left: &Value, _right: &Value) -> Value {
         // Implement multiplication logic
         unimplemented!()
     }
 
-    fn divide(&self, left: &Value, right: &Value) -> Value {
+    fn divide(&self, _left: &Value, _right: &Value) -> Value {
         // Implement division logic
         unimplemented!()
     }
 
-    fn modulo(&self, left: &Value, right: &Value) -> Value {
+    fn modulo(&self, _left: &Value, _right: &Value) -> Value {
         // Implement modulo logic
         unimplemented!()
     }
 
-    fn min(&self, left: &Value, right: &Value) -> Value {
+    fn min(&self, _left: &Value, _right: &Value) -> Value {
         // Implement min logic
         unimplemented!()
     }
 
-    fn max(&self, left: &Value, right: &Value) -> Value {
+    fn max(&self, _left: &Value, _right: &Value) -> Value {
         // Implement max logic
         unimplemented!()
     }
 
-    fn sqrt(&self, val: &Value) -> Value {
+    fn sqrt(&self, _val: &Value) -> Value {
         // Implement sqrt logic
         unimplemented!()
     }
 
-    fn operate_null(&self, val: &Value, right: &Value) -> Value {
+    fn operate_null(&self, _val: &Value, _right: &Value) -> Value {
         // Implement null operation logic
         unimplemented!()
     }
 
-    fn is_zero(&self, val: &Value) -> bool {
+    fn is_zero(&self, _val: &Value) -> bool {
         // Implement is_zero logic
         unimplemented!()
     }
 
-    fn is_inlined(&self, val: &Value) -> bool {
+    fn is_inlined(&self, _val: &Value) -> bool {
         // Implement is_inlined logic
         unimplemented!()
     }
 
-    fn to_string(&self, val: &Value) -> String {
+    fn to_string(&self, _val: &Value) -> String {
         // Implement to_string logic
         unimplemented!()
     }
 
     fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
-        // Implement serialization logic
         unimplemented!()
     }
 
-    fn deserialize_from(&self, storage: &[u8]) -> Value {
-        // Implement deserialization logic
+    fn deserialize_from(&self, storage: &mut [u8]) -> Value {
         unimplemented!()
     }
 
-    fn copy(&self, val: &Value) -> Value {
+    fn copy(&self, _val: &Value) -> Value {
         // Implement copy logic
         unimplemented!()
     }
 
-    fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
+    fn cast_as(&self, _val: &Value, _type_id: TypeId) -> Value {
         // Implement cast logic
         unimplemented!()
     }
 
-    fn get_data(&self, val: &Value) -> &[u8] {
+    fn get_data(&self, _val: &Value) -> &[u8] {
         // Implement get_data logic
         unimplemented!()
     }
 
-    fn get_storage_size(&self, val: &Value) -> u32 {
+    fn get_storage_size(&self, _val: &Value) -> u32 {
         // Implement get_storage_size logic
         unimplemented!()
     }

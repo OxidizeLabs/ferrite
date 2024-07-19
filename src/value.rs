@@ -1,294 +1,396 @@
+use serde::{Serialize, Deserialize};
+use bincode::{serialize, deserialize};
 use std::fmt;
+use std::fmt::Debug;
 use type_id::TypeId;
-use types::{get_instance, Type};
+use types::{get_instance, get_type_size, Type};
+use std::mem;
 
 const DB_VALUE_NULL: u32 = u32::MAX;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Value {
     value_: Val,
     size_: Size,
     manage_data_: bool,
-    type_id_: TypeId
+    type_id_: TypeId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Val {
-    Boolean(i8),
+    Boolean(bool),
     TinyInt(i8),
     SmallInt(i16),
     Integer(i32),
     BigInt(i64),
     Decimal(f64),
     Timestamp(u64),
-    VarLen(*mut u8),
-    ConstVarLen(*const u8),
+    VarLen(String),
+    ConstVarLen(String),
+    Vector(Vec<i32>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Size {
-    Length(u32),
+    Length(usize),
     ElemTypeId(TypeId),
 }
 
-impl Val {
-    pub fn new_boolean(value: i8) -> Self {
-        Val::Boolean(value)
-    }
-
-    pub fn new_tinyint(value: i8) -> Self {
-        Val::TinyInt(value)
-    }
-
-    pub fn new_smallint(value: i16) -> Self {
-        Val::SmallInt(value)
-    }
-
-    pub fn new_integer(value: i32) -> Self {
-        Val::Integer(value)
-    }
-
-    pub fn new_bigint(value: i64) -> Self {
-        Val::BigInt(value)
-    }
-
-    pub fn new_decimal(value: f64) -> Self {
-        Val::Decimal(value)
-    }
-
-    pub fn new_timestamp(value: u64) -> Self {
-        Val::Timestamp(value)
-    }
-
-    pub fn new_varlen(value: *mut u8) -> Self {
-        Val::VarLen(value)
-    }
-
-    pub fn new_const_varlen(value: *const u8) -> Self {
-        Val::ConstVarLen(value)
-    }
-}
-
 impl Value {
-    pub fn new(type_id: TypeId) -> Self {
-        Self {
-            value_: Val::Integer(0),  // Default to Integer with value 0
-            size_: Size::Length(0),
-            manage_data_: false,
-            type_id_: type_id,
-        }
-    }
-
-    pub fn from_boolean(type_id: TypeId, b: i8) -> Self {
-        Self {
-            value_: Val::new_boolean(b),
-            size_: Size::Length(1),
-            manage_data_: false,
-            type_id_: type_id,
-        }
-    }
-
-    pub fn from_tinyint(type_id: TypeId, i: i8) -> Self {
-        Self {
-            value_: Val::new_tinyint(i),
-            size_: Size::Length(1),
-            manage_data_: false,
-            type_id_: TypeId::TinyInt,
-        }
-    }
-
-    pub fn from_smallint(type_id: TypeId, i: i16) -> Self {
-        Self {
-            value_: Val::new_smallint(i),
-            size_: Size::Length(2),
-            manage_data_: false,
-            type_id_: TypeId::SmallInt,
-        }
-    }
-
-    pub fn from_integer(type_id: TypeId, i: i32) -> Self {
-        Self {
-            value_: Val::new_integer(i),
-            size_: Size::Length(4),
-            manage_data_: false,
-            type_id_: TypeId::Integer,
-        }
-    }
-
-    pub fn from_bigint(type_id: TypeId, i: i64) -> Self {
-        Self {
-            value_: Val::new_bigint(i),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::BigInt,
-        }
-    }
-
-    pub fn from_decimal(type_id: TypeId, d: f64) -> Self {
-        Self {
-            value_: Val::new_decimal(d),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::Decimal,
-        }
-    }
-
-    pub fn from_timestamp(type_id: TypeId, t: u64) -> Self {
-        Self {
-            value_: Val::new_timestamp(t),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::Timestamp,
-        }
-    }
-
-    pub fn from_str(type_id: TypeId, data: &str) -> Self {
-        Self {
-            value_: Val::new_varlen(data.as_ptr() as *mut u8),
-            size_: Size::Length(data.len() as u32),
-            manage_data_: false,
-            type_id_: TypeId::VarChar,
-        }
-    }
-
-    pub fn from_const_str(type_id: TypeId, data: &str) -> Self {
-        Self {
-            value_: Val::new_const_varlen(data.as_ptr()),
-            size_: Size::Length(data.len() as u32),
-            manage_data_: false,
-            type_id_: TypeId::VarChar,
-        }
-    }
-
-    pub fn check_integer(&self) -> bool {
-        matches!(self.type_id_, TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt)
-    }
-
-    pub fn check_comparable(&self, other: &Value) -> bool {
-        self.type_id_ == other.type_id_
-    }
-
-    pub fn get_type_id(&self) -> TypeId {
-        self.type_id_
-    }
-
-    pub fn get_storage_size(&self) -> u32 {
-        get_instance(self.type_id_).get_storage_size(self)
-    }
-
-    pub fn get_data() {
-        unimplemented!()
+    pub fn new<T: Into<Val>>(value: T) -> Self {
+        let val = value.into();
+        let type_id = match &val {
+            Val::Boolean(_) => TypeId::Boolean,
+            Val::TinyInt(_) => TypeId::TinyInt,
+            Val::SmallInt(_) => TypeId::SmallInt,
+            Val::Integer(_) => TypeId::Integer,
+            Val::BigInt(_) => TypeId::BigInt,
+            Val::Decimal(_) => TypeId::Decimal,
+            Val::Timestamp(_) => TypeId::Timestamp,
+            Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
+            Val::Vector(_) => TypeId::Vector,
+        };
+        Value { value_: val, size_: Size::Length(get_type_size(type_id) as usize), manage_data_: false, type_id_: type_id }
     }
 
     pub fn get_value(&self) -> &Val {
         &self.value_
     }
 
-    pub fn get_vector() {
-        unimplemented!()
-    }
-
-    pub fn cast_as() {
-        unimplemented!()
-    }
-
-    pub fn compare_exactly_equals() {
-        unimplemented!()
-    }
-
-    pub fn compare_equals() {
-        unimplemented!()
-    }
-
-    pub fn compare_not_equals() {
-        unimplemented!()
-    }
-
-    pub fn compare_less_than() {
-        unimplemented!()
-    }
-
-    pub fn compare_less_than_equals() {
-        unimplemented!()
-    }
-
-    pub fn compare_greater_than() {
-        unimplemented!()
-    }
-
-    pub fn compare_greater_than_equals() {
-        unimplemented!()
-    }
-
-    pub fn add() {
-        unimplemented!()
-    }
-
-    pub fn subtract() {
-        unimplemented!()
-    }
-
-    pub fn multiply() {
-        unimplemented!()
-    }
-
-    pub fn divide() {
-        unimplemented!()
-    }
-
-    pub fn modulo() {
-        unimplemented!()
-    }
-
-    pub fn min() {
-        unimplemented!()
-    }
-
-    pub fn max() {
-        unimplemented!()
-    }
-
-    pub fn sqrt() {
-        unimplemented!()
-    }
-
-    pub fn operate_null() {
-        unimplemented!()
-    }
-
-    pub fn is_zero() {
-        unimplemented!()
-    }
-
-    pub fn is_null() {
-        unimplemented!()
+    pub fn get_storage_size(&self) -> u32 {
+        match &self.value_ {
+            Val::Boolean(_) => 1,
+            Val::TinyInt(_) => 1,
+            Val::SmallInt(_) => 2,
+            Val::Integer(_) => 4,
+            Val::BigInt(_) => 8,
+            Val::Decimal(_) => 8,
+            Val::Timestamp(_) => 8,
+            Val::VarLen(s) | Val::ConstVarLen(s) => s.len() as u32,
+            Val::Vector(v) => 4 + v.len() as u32 * 4,
+        }
     }
 
     pub fn serialize_to(&self, storage: &mut [u8]) {
-        get_instance(self.type_id_).serialize_to(self, storage);
+        self.value_.serialize_to(storage)
     }
 
-    pub fn serialize_from() {
-        unimplemented!()
-    }
-
-    pub fn deserialize_from() {
-        unimplemented!()
-    }
-
-    pub fn to_string() {
-        unimplemented!()
-    }
-
-    pub fn copy() {
-        unimplemented!()
+    pub fn deserialize_from(storage: &[u8], type_id: TypeId) -> Self {
+        Value {
+            value_: Val::deserialize_from(storage, type_id),
+            size_: Size::Length(storage.len()),
+            manage_data_: false,
+            type_id_: type_id,
+        }
     }
 }
 
-// Implement fmt::Display for Value to use with fmt::formatter
+impl Val {
+    pub fn serialize_to(&self, storage: &mut [u8]) {
+        match self {
+            Val::Boolean(b) => storage[0] = *b as u8,
+            Val::TinyInt(i) => storage[0] = *i as u8,
+            Val::SmallInt(i) => storage[..2].copy_from_slice(&i.to_le_bytes()),
+            Val::Integer(i) => storage[..4].copy_from_slice(&i.to_le_bytes()),
+            Val::BigInt(i) => storage[..8].copy_from_slice(&i.to_le_bytes()),
+            Val::Decimal(f) => storage[..8].copy_from_slice(&f.to_le_bytes()),
+            Val::Timestamp(t) => storage[..8].copy_from_slice(&t.to_le_bytes()),
+            Val::VarLen(s) | Val::ConstVarLen(s) => {
+                let bytes = s.as_bytes();
+                storage[..bytes.len()].copy_from_slice(bytes);
+            },
+            Val::Vector(v) => {
+                let len = v.len() as u32;
+                storage[..4].copy_from_slice(&len.to_le_bytes());
+                for (i, val) in v.iter().enumerate() {
+                    let start = 4 + i * 4;
+                    let end = start + 4;
+                    storage[start..end].copy_from_slice(&val.to_le_bytes());
+                }
+            },
+        }
+    }
+
+    pub fn deserialize_from(storage: &[u8], type_id: TypeId) -> Self {
+        match type_id {
+            TypeId::Boolean => Val::Boolean(storage[0] != 0),
+            TypeId::TinyInt => Val::TinyInt(storage[0] as i8),
+            TypeId::SmallInt => Val::SmallInt(i16::from_le_bytes([storage[0], storage[1]])),
+            TypeId::Integer => Val::Integer(i32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]])),
+            TypeId::BigInt => Val::BigInt(i64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
+            TypeId::Decimal => Val::Decimal(f64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
+            TypeId::Timestamp => Val::Timestamp(u64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
+            TypeId::VarChar => Val::VarLen(String::from_utf8_lossy(storage).to_string()),
+            TypeId::Vector => {
+                let len = u32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]]) as usize;
+                let mut v = Vec::with_capacity(len);
+                for i in 0..len {
+                    let start = 4 + i * 4;
+                    let end = start + 4;
+                    v.push(i32::from_le_bytes([storage[start], storage[start + 1], storage[start + 2], storage[start + 3]]));
+                }
+                Val::Vector(v)
+            },
+            _ => panic!("Unsupported type for deserialization"),
+        }
+    }
+}
+
+impl From<bool> for Val {
+    fn from(b: bool) -> Self {
+        Val::Boolean(b)
+    }
+}
+
+impl From<i8> for Val {
+    fn from(i: i8) -> Self {
+        Val::TinyInt(i)
+    }
+}
+
+impl From<i16> for Val {
+    fn from(i: i16) -> Self {
+        Val::SmallInt(i)
+    }
+}
+
+impl From<i32> for Val {
+    fn from(i: i32) -> Self {
+        Val::Integer(i)
+    }
+}
+
+impl From<i64> for Val {
+    fn from(i: i64) -> Self {
+        Val::BigInt(i)
+    }
+}
+
+impl From<f64> for Val {
+    fn from(f: f64) -> Self {
+        Val::Decimal(f)
+    }
+}
+
+impl From<u64> for Val {
+    fn from(t: u64) -> Self {
+        Val::Timestamp(t)
+    }
+}
+
+impl From<String> for Val {
+    fn from(s: String) -> Self {
+        Val::VarLen(s)
+    }
+}
+
+impl From<&str> for Val {
+    fn from(s: &str) -> Self {
+        Val::VarLen(s.to_string())
+    }
+}
+
+impl From<Vec<i32>> for Val {
+    fn from(v: Vec<i32>) -> Self {
+        Val::Vector(v)
+    }
+}
+
+// Implement trait for each type conversion to Value
+pub trait ToValue {
+    fn to_value(self) -> Value;
+}
+
+impl ToValue for bool {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::Boolean(self),
+            size_: Size::Length(1),
+            manage_data_: false,
+            type_id_: TypeId::Boolean,
+        }
+    }
+}
+
+impl ToValue for i8 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::TinyInt(self),
+            size_: Size::Length(1),
+            manage_data_: false,
+            type_id_: TypeId::TinyInt,
+        }
+    }
+}
+
+impl ToValue for i16 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::SmallInt(self),
+            size_: Size::Length(2),
+            manage_data_: false,
+            type_id_: TypeId::SmallInt,
+        }
+    }
+}
+
+impl ToValue for i32 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::Integer(self),
+            size_: Size::Length(4),
+            manage_data_: false,
+            type_id_: TypeId::Integer,
+        }
+    }
+}
+
+impl ToValue for i64 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::BigInt(self),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::BigInt,
+        }
+    }
+}
+
+impl ToValue for f64 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::Decimal(self),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::Decimal,
+        }
+    }
+}
+
+impl ToValue for u64 {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::Timestamp(self),
+            size_: Size::Length(8),
+            manage_data_: false,
+            type_id_: TypeId::Timestamp,
+        }
+    }
+}
+
+impl ToValue for &str {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::VarLen(self.to_string()),
+            size_: Size::Length(self.len()),
+            manage_data_: false,
+            type_id_: TypeId::VarChar,
+        }
+    }
+}
+
+impl ToValue for Vec<i32> {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::Vector(self.clone()),
+            size_: Size::Length(4 + self.len() * 4),  // 4 bytes for the length + 4 bytes per i32
+            manage_data_: false,
+            type_id_: TypeId::Vector,
+        }
+    }
+}
+
+impl ToValue for String {
+    fn to_value(self) -> Value {
+        Value {
+            value_: Val::VarLen(self.clone()),
+            size_: Size::Length(self.len()),
+            manage_data_: false,
+            type_id_: TypeId::VarChar,
+        }
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        b.to_value()
+    }
+}
+
+impl From<i8> for Value {
+    fn from(i: i8) -> Self {
+        i.to_value()
+    }
+}
+
+impl From<i16> for Value {
+    fn from(i: i16) -> Self {
+        i.to_value()
+    }
+}
+
+impl From<i32> for Value {
+    fn from(i: i32) -> Self {
+        i.to_value()
+    }
+}
+
+impl From<i64> for Value {
+    fn from(i: i64) -> Self {
+        i.to_value()
+    }
+}
+
+impl From<f64> for Value {
+    fn from(d: f64) -> Self {
+        d.to_value()
+    }
+}
+
+impl From<u64> for Value {
+    fn from(t: u64) -> Self {
+        t.to_value()
+    }
+}
+
+impl From<&str> for Value {
+    fn from(data: &str) -> Self {
+        data.to_value()
+    }
+}
+
+impl From<Vec<i32>> for Value {
+    fn from(data: Vec<i32>) -> Self {
+        data.to_value()
+    }
+}
+
+impl From<String> for Value {
+    fn from(data: String) -> Self {
+        data.to_value()
+    }
+}
+
+pub trait Serializable: Debug {
+    fn serialize_to(&self, storage: &mut [u8]);
+    fn deserialize_from(storage: &[u8]) -> Self where Self: Sized;
+}
+
+impl Serializable for i32 {
+    fn serialize_to(&self, storage: &mut [u8]) {
+        let bytes = self.to_le_bytes();
+        storage[..4].copy_from_slice(&bytes);
+    }
+
+    fn deserialize_from(storage: &[u8]) -> Self {
+        i32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]])
+    }
+}
+
+// Implement fmt::Display for Value to use with fmt::Formatter
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{:?}", self.value_)
     }
 }
 

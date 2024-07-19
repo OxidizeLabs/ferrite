@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 // Every possible SQL type ID
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeId {
     Invalid = 0,
     Boolean,
