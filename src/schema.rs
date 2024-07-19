@@ -1,11 +1,12 @@
 use std::mem::size_of;
 use column::Column;
 
+#[derive(Debug, Clone)]
 pub struct Schema {
     columns: Vec<Column>,
     length: u32,
     tuple_is_inlined: bool,
-    unlined_columns: Vec<u32>
+    unlined_columns: Vec<u32>,
 }
 
 impl Schema {
@@ -34,12 +35,18 @@ impl Schema {
             tuple_is_inlined,
             columns: columns_processed,
             length: curr_offset,
-            unlined_columns: uninlined_columns
+            unlined_columns: uninlined_columns,
         }
     }
 
-    pub fn copy_schema(from: Schema) -> Self {
-        unimplemented!()
+    pub fn copy_schema(from: &Schema, attrs: Vec<usize>) -> Schema {
+        let columns: Vec<Column> = attrs.iter().map(|&i| from.columns[i].clone()).collect();
+        Schema {
+            columns,
+            length: from.length,
+            tuple_is_inlined: from.tuple_is_inlined,
+            unlined_columns: from.unlined_columns.clone(), // Assuming uninlined_columns is not affected
+        }
     }
 
     pub fn get_columns(&self) -> &Vec<Column> {
@@ -75,8 +82,8 @@ impl Schema {
         self.length
     }
 
-    pub fn is_inlined() -> bool {
-        unimplemented!()
+    pub fn is_inlined(&self) -> bool {
+        self.tuple_is_inlined
     }
 
     pub fn to_string(&self, simplified: bool) -> String {
@@ -99,3 +106,22 @@ impl Schema {
         }
     }
 }
+
+
+// fn main() {
+//     let col1 = Column::new("id".to_string(), true, 4);
+//     let col2 = Column::new_varlen("name".to_string(), 100);
+//     let col3 = Column::replicate("id_copy".to_string(), &col1);
+//
+//     println!("Column 1: {}", col1.to_string(false));
+//     println!("Column 2: {}", col2.to_string(false));
+//     println!("Column 3: {}", col3.to_string(false));
+//
+//     let columns = vec![col1, col2, col3];
+//     let schema = Schema::new(columns);
+//     println!("{}", schema.to_string(false));
+//     println!("{}", schema.to_string(true));
+//
+//     let copied_schema = Schema::copy_schema(&schema, vec![0, 2]);
+//     println!("Copied Schema: {}", copied_schema.to_string(false));
+// }

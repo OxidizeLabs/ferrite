@@ -19,6 +19,14 @@ impl Type for SmallIntType {
     fn is_coercible_from(&self, type_id: TypeId) -> bool {
         matches!(type_id, TypeId::SmallInt)
     }
+
+    fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
+        todo!()
+    }
+
+    fn deserialize_from(&self, storage: &mut [u8]) -> Value {
+        todo!()
+    }
 }
 
 // fn main() {

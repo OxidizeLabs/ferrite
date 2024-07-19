@@ -27,6 +27,11 @@ impl Type for BooleanType {
             panic!("Expected a boolean value");
         }
     }
+
+    fn deserialize_from(&self, storage: &mut [u8]) -> Value {
+        let b = storage[0] != 0; // 0 is false, anything else is true
+        Value::new(b)
+    }
 }
 
 // fn main() {
