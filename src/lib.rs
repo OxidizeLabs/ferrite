@@ -15,6 +15,8 @@ pub mod schema;
 pub mod tuple;
 pub mod limits;
 pub mod config;
+pub mod page;
+pub mod rwlatch;
 
 extern crate bincode;
 extern crate serde;
