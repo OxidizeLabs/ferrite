@@ -5,6 +5,11 @@ use std::sync::RwLockReadGuard;
 use crate::config::*;
 use crate::rwlatch::ReaderWriterLatch;
 
+// Constants
+const SIZE_PAGE_HEADER: usize = 8;
+const OFFSET_PAGE_START: usize = 0;
+const OFFSET_LSN: usize = 4;
+
 /**
  * Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
  * held in main memory. Page also contains book-keeping information that is used by the buffer pool manager, e.g.
@@ -27,10 +32,10 @@ pub struct Page {
 
 impl Page {
     /** Constructor. Zeros out the page data. */
-    pub fn new() -> Self {
+    pub fn new(page_id: PageId) -> Self {
         let mut page = Page {
             data: Box::new([0; DB_PAGE_SIZE]),
-            page_id: INVALID_PAGE_ID,
+            page_id,
             pin_count: 0,
             is_dirty: false,
             rwlatch: ReaderWriterLatch::new(),
@@ -98,8 +103,3 @@ impl Page {
         }
     }
 }
-
-// Constants
-const SIZE_PAGE_HEADER: usize = 8;
-const OFFSET_PAGE_START: usize = 0;
-const OFFSET_LSN: usize = 4;
