@@ -1,15 +1,3 @@
-//===----------------------------------------------------------------------===//
-//
-//                         BusTub
-//
-// rwmutex.rs
-//
-// Identification: src/common/rwlatch.rs
-//
-// Copyright (c) 2015-2019, Carnegie Mellon University Database Group
-//
-//===----------------------------------------------------------------------===//
-
 use std::sync::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 
 pub struct ReaderWriterLatch {
