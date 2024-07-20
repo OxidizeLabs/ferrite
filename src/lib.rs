@@ -17,6 +17,12 @@ pub mod limits;
 pub mod config;
 pub mod page;
 pub mod rwlatch;
+pub mod table_page;
+pub mod table_heap;
+pub mod buffer_pool_manager;
+pub mod disk_manager;
+pub mod replacer;
+pub mod lru_k_replacer;
 
 extern crate bincode;
 extern crate serde;
