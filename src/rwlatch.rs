@@ -1,4 +1,4 @@
-use std::sync::{RwLock, RwLockWriteGuard, RwLockReadGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Debug)]
 pub struct ReaderWriterLatch {

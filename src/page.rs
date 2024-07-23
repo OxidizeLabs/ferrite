@@ -1,12 +1,8 @@
 use std::convert::TryInto;
-use std::sync::RwLockWriteGuard;
-use std::sync::RwLockReadGuard;
 
 use crate::config::*;
-use crate::rwlatch::ReaderWriterLatch;
 
 // Constants
-const SIZE_PAGE_HEADER: usize = 8;
 const OFFSET_PAGE_START: usize = 0;
 const OFFSET_LSN: usize = 4;
 
@@ -26,10 +22,23 @@ pub struct Page {
     /** The pin count of this page. */
     pin_count: i32,
     /** True if the page is dirty, i.e. it is different from its corresponding page on disk. */
-    is_dirty: bool
+    is_dirty: bool,
 }
 
 impl Page {
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id`:
+    ///
+    /// returns: Page
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
     /** Constructor. Zeros out the page data. */
     pub fn new(page_id: PageId) -> Self {
         let mut page = Page {

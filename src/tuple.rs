@@ -1,7 +1,7 @@
-use std::mem::size_of;
 use limits::DB_VALUE_NULL;
-use value::{Value, Serializable};
 use schema::Schema;
+use std::mem::size_of;
+use value::{Serializable, Value};
 
 pub struct Tuple {
     values: Vec<Value>,
@@ -38,7 +38,8 @@ impl Tuple {
             if let Some(col) = schema.get_column(i) {
                 if !col.is_inlined() {
                     // Serialize relative offset, where the actual varchar data is stored.
-                    let offset_ptr = &mut data[col.get_offset() as usize..col.get_offset() as usize + size_of::<u32>()];
+                    let offset_ptr = &mut data
+                        [col.get_offset() as usize..col.get_offset() as usize + size_of::<u32>()];
                     offset_ptr.copy_from_slice(&(offset as u32).to_ne_bytes());
 
                     // Serialize varchar value, in place (size + data).
@@ -56,11 +57,19 @@ impl Tuple {
             }
         }
 
-        Tuple { values, schema, rid, data }
+        Tuple {
+            values,
+            schema,
+            rid,
+            data,
+        }
     }
 
     pub fn serialize_to(&self, storage: &mut [u8]) {
-        assert!(storage.len() >= self.data.len(), "Storage buffer is too small");
+        assert!(
+            storage.len() >= self.data.len(),
+            "Storage buffer is too small"
+        );
         storage[..self.data.len()].copy_from_slice(&self.data);
     }
 
@@ -69,7 +78,8 @@ impl Tuple {
 
         for (i, col) in schema.get_columns().iter().enumerate() {
             if col.is_inlined() {
-                let val = Value::deserialize_from(&storage[col.get_offset() as usize..], col.get_type());
+                let val =
+                    Value::deserialize_from(&storage[col.get_offset() as usize..], col.get_type());
                 values.push(val);
             } else {
                 let offset = u32::from_ne_bytes([
@@ -83,7 +93,12 @@ impl Tuple {
             }
         }
 
-        Tuple { values, schema, rid, data: storage.to_vec() }
+        Tuple {
+            values,
+            schema,
+            rid,
+            data: storage.to_vec(),
+        }
     }
 
     pub fn get_rid(&self) -> u32 {

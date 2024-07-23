@@ -1,8 +1,8 @@
-use std::sync::{Arc, Mutex};
-use std::sync::MutexGuard;
+use buffer_pool_manager::BufferPoolManager;
 use std::collections::HashMap;
 use std::option::Option;
-use buffer_pool_manager::BufferPoolManager;
+use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex};
 use table_page::TablePage;
 use tuple::Tuple;
 
@@ -51,32 +51,27 @@ impl TableHeap {
         txn: Option<&Transaction>,
         oid: TableOid,
     ) -> Option<RID> {
-        // Insert tuple logic here
-        None
+        unimplemented!()
     }
 
     pub fn update_tuple_meta(&self, meta: &TupleMeta, rid: &RID) {
-        // Update tuple meta logic here
+        unimplemented!()
     }
 
     pub fn get_tuple(&self, rid: &RID) -> Option<(TupleMeta, Tuple)> {
-        // Get tuple logic here
-        None
+        unimplemented!()
     }
 
     pub fn get_tuple_meta(&self, rid: &RID) -> Option<TupleMeta> {
-        // Get tuple meta logic here
-        None
+        unimplemented!()
     }
 
     pub fn make_iterator(&self) -> TableIterator {
-        // Create and return an iterator
-        TableIterator {}
+        unimplemented!()
     }
 
     pub fn make_eager_iterator(&self) -> TableIterator {
-        // Create and return an eager iterator
-        TableIterator {}
+        unimplemented!()
     }
 
     pub fn get_first_page_id(&self) -> PageId {
@@ -98,19 +93,20 @@ impl TableHeap {
     }
 
     pub fn create_empty_heap(create_table_heap: bool) -> Option<Box<Self>> {
-        assert!(!create_table_heap, "create_table_heap should be false to generate an empty heap");
+        assert!(
+            !create_table_heap,
+            "create_table_heap should be false to generate an empty heap"
+        );
         // Some(Box::new(Self::new(Arc::new(Mutex::new(BufferPoolManager {})))))
         unimplemented!()
     }
 
     pub fn acquire_table_page_read_lock(&self, rid: &RID) -> ReadPageGuard {
-        // Acquire read lock logic here
-        ReadPageGuard {}
+        unimplemented!()
     }
 
     pub fn acquire_table_page_write_lock(&self, rid: &RID) -> WritePageGuard {
-        // Acquire write lock logic here
-        WritePageGuard {}
+        unimplemented!()
     }
 
     pub fn update_tuple_in_place_with_lock_acquired(
@@ -120,7 +116,7 @@ impl TableHeap {
         rid: &RID,
         page: &mut TablePage,
     ) {
-        // Update tuple in place with lock acquired logic here
+        unimplemented!()
     }
 
     pub fn get_tuple_with_lock_acquired(
@@ -128,13 +124,15 @@ impl TableHeap {
         rid: &RID,
         page: &TablePage,
     ) -> Option<(TupleMeta, Tuple)> {
-        // Get tuple with lock acquired logic here
-        None
+        unimplemented!()
     }
 
-    pub fn get_tuple_meta_with_lock_acquired(&self, rid: &RID, page: &TablePage) -> Option<TupleMeta> {
-        // Get tuple meta with lock acquired logic here
-        None
+    pub fn get_tuple_meta_with_lock_acquired(
+        &self,
+        rid: &RID,
+        page: &TablePage,
+    ) -> Option<TupleMeta> {
+        unimplemented!()
     }
 }
 

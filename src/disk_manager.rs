@@ -1,8 +1,8 @@
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::sync::Mutex;
-use std::path::Path;
 use std::future::Future;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use std::sync::Mutex;
 
 type PageId = i32;
 
@@ -19,8 +19,18 @@ pub struct DiskManager {
 
 impl DiskManager {
     pub fn new(db_file: &str, log_file: &str) -> Self {
-        let db_io = OpenOptions::new().read(true).write(true).create(true).open(db_file).unwrap();
-        let log_io = OpenOptions::new().read(true).write(true).create(true).open(log_file).unwrap();
+        let db_io = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(db_file)
+            .unwrap();
+        let log_io = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(log_file)
+            .unwrap();
 
         Self {
             file_name: db_file.to_string(),

@@ -1,12 +1,8 @@
-use serde::{Serialize, Deserialize};
-use bincode::{serialize, deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Debug;
 use type_id::TypeId;
-use types::{get_instance, get_type_size, Type};
-use std::mem;
-
-const DB_VALUE_NULL: u32 = u32::MAX;
+use types::{get_type_size, Type};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Value {
@@ -50,7 +46,12 @@ impl Value {
             Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
             Val::Vector(_) => TypeId::Vector,
         };
-        Value { value_: val, size_: Size::Length(get_type_size(type_id) as usize), manage_data_: false, type_id_: type_id }
+        Value {
+            value_: val,
+            size_: Size::Length(get_type_size(type_id) as usize),
+            manage_data_: false,
+            type_id_: type_id,
+        }
     }
 
     pub fn get_value(&self) -> &Val {
@@ -98,7 +99,7 @@ impl Val {
             Val::VarLen(s) | Val::ConstVarLen(s) => {
                 let bytes = s.as_bytes();
                 storage[..bytes.len()].copy_from_slice(bytes);
-            },
+            }
             Val::Vector(v) => {
                 let len = v.len() as u32;
                 storage[..4].copy_from_slice(&len.to_le_bytes());
@@ -107,7 +108,7 @@ impl Val {
                     let end = start + 4;
                     storage[start..end].copy_from_slice(&val.to_le_bytes());
                 }
-            },
+            }
         }
     }
 
@@ -116,21 +117,38 @@ impl Val {
             TypeId::Boolean => Val::Boolean(storage[0] != 0),
             TypeId::TinyInt => Val::TinyInt(storage[0] as i8),
             TypeId::SmallInt => Val::SmallInt(i16::from_le_bytes([storage[0], storage[1]])),
-            TypeId::Integer => Val::Integer(i32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]])),
-            TypeId::BigInt => Val::BigInt(i64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
-            TypeId::Decimal => Val::Decimal(f64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
-            TypeId::Timestamp => Val::Timestamp(u64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]])),
+            TypeId::Integer => Val::Integer(i32::from_le_bytes([
+                storage[0], storage[1], storage[2], storage[3],
+            ])),
+            TypeId::BigInt => Val::BigInt(i64::from_le_bytes([
+                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
+                storage[7],
+            ])),
+            TypeId::Decimal => Val::Decimal(f64::from_le_bytes([
+                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
+                storage[7],
+            ])),
+            TypeId::Timestamp => Val::Timestamp(u64::from_le_bytes([
+                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
+                storage[7],
+            ])),
             TypeId::VarChar => Val::VarLen(String::from_utf8_lossy(storage).to_string()),
             TypeId::Vector => {
-                let len = u32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]]) as usize;
+                let len =
+                    u32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]]) as usize;
                 let mut v = Vec::with_capacity(len);
                 for i in 0..len {
                     let start = 4 + i * 4;
                     let end = start + 4;
-                    v.push(i32::from_le_bytes([storage[start], storage[start + 1], storage[start + 2], storage[start + 3]]));
+                    v.push(i32::from_le_bytes([
+                        storage[start],
+                        storage[start + 1],
+                        storage[start + 2],
+                        storage[start + 3],
+                    ]));
                 }
                 Val::Vector(v)
-            },
+            }
             _ => panic!("Unsupported type for deserialization"),
         }
     }
@@ -293,7 +311,7 @@ impl ToValue for Vec<i32> {
     fn to_value(self) -> Value {
         Value {
             value_: Val::Vector(self.clone()),
-            size_: Size::Length(4 + self.len() * 4),  // 4 bytes for the length + 4 bytes per i32
+            size_: Size::Length(4 + self.len() * 4), // 4 bytes for the length + 4 bytes per i32
             manage_data_: false,
             type_id_: TypeId::Vector,
         }
@@ -373,7 +391,9 @@ impl From<String> for Value {
 
 pub trait Serializable: Debug {
     fn serialize_to(&self, storage: &mut [u8]);
-    fn deserialize_from(storage: &[u8]) -> Self where Self: Sized;
+    fn deserialize_from(storage: &[u8]) -> Self
+    where
+        Self: Sized;
 }
 
 impl Serializable for i32 {

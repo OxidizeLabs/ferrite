@@ -37,4 +37,3 @@ pub const DB_TEXT_MAX_LEN: u32 = 1_000_000_000;
 
 // Objects (i.e., VARCHAR) with length prefix of -1 are NULL
 pub const OBJECTLENGTH_NULL: i32 = -1;
-

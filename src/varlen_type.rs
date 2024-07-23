@@ -1,6 +1,6 @@
 use type_id::TypeId;
-use types::{Type};
-use value::{Value, Val};
+use types::Type;
+use value::{Val, Value};
 
 // Implementation for VarCharType
 pub struct VarCharType;
@@ -32,7 +32,7 @@ impl Type for VarCharType {
             }
 
             storage[..4].copy_from_slice(&len_bytes);
-            storage[4..4+string_bytes.len()].copy_from_slice(&string_bytes);
+            storage[4..4 + string_bytes.len()].copy_from_slice(&string_bytes);
         } else {
             panic!("Expected a VarChar value");
         }
@@ -40,7 +40,7 @@ impl Type for VarCharType {
 
     fn deserialize_from(&self, storage: &mut [u8]) -> Value {
         let len = u32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]]) as usize;
-        let string_bytes = &storage[4..4+len];
+        let string_bytes = &storage[4..4 + len];
         let s = String::from_utf8_lossy(string_bytes).to_string();
         Value::new(s)
     }

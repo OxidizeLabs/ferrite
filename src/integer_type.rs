@@ -1,5 +1,5 @@
 use type_id::TypeId;
-use types::{CmpBool, Type};
+use types::Type;
 use value::Value;
 
 // Implementation for IntegerType
