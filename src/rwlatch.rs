@@ -1,5 +1,6 @@
 use std::sync::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 
+#[derive(Debug)]
 pub struct ReaderWriterLatch {
     mutex: RwLock<()>,
 }
