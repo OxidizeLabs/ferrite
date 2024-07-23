@@ -1,7 +1,6 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use type_id::TypeId;
-use std::mem::size_of;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -24,7 +23,10 @@ impl Column {
         }
     }
     pub fn new(column_name: String, column_type: TypeId) -> Self {
-        assert!(column_type != TypeId::VarChar, "Wrong constructor for VARCHAR type.");
+        assert!(
+            column_type != TypeId::VarChar,
+            "Wrong constructor for VARCHAR type."
+        );
         // assert!(column_type != TypeId::Vector, "Wrong constructor for VECTOR type.");
         Column {
             column_name,
@@ -84,7 +86,10 @@ impl Column {
 
     pub fn to_string(&self, simplified: bool) -> String {
         if simplified {
-            format!("Column(name: {}, type: {:?})", self.column_name, self.column_type)
+            format!(
+                "Column(name: {}, type: {:?})",
+                self.column_name, self.column_type
+            )
         } else {
             format!(
                 "Column(name: {}, type: {:?}, length: {}, offset: {})",

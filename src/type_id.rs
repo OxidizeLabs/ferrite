@@ -12,9 +12,8 @@ pub enum TypeId {
     Vector,
     TinyInt,
     SmallInt,
-    BigInt
+    BigInt,
 }
-
 
 // fn main() {
 //     let type_id = TypeId::Integer;

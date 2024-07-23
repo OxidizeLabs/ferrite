@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::{AtomicI32, Ordering};
 use config::{FrameId, PageId};
 use disk_manager::DiskManager;
-use lru_k_replacer::{AccessType, LRUKReplacer};
 use lru_k_replacer::AccessType::Lookup;
+use lru_k_replacer::{AccessType, LRUKReplacer};
 use page::Page;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 const INVALID_PAGE_ID: PageId = -1;
 
@@ -64,21 +64,25 @@ impl BufferPoolManager {
         // Remove the old page from the page table if necessary
         let old_page_id = {
             let page_table = self.page_table.lock().unwrap();
-            page_table.iter().find_map(|(&page_id, &fid)| {
-                if fid == frame_id {
-                    Some(page_id)
-                } else {
-                    None
-                }
-            })
+            page_table.iter().find_map(
+                |(&page_id, &fid)| {
+                    if fid == frame_id {
+                        Some(page_id)
+                    } else {
+                        None
+                    }
+                },
+            )
         };
 
         if let Some(old_page_id) = old_page_id {
             if let Some(page) = self.pages.read().unwrap().iter().find(|p| {
-                p.as_ref().map_or(false, |pg| pg.get_page_id() == old_page_id)
+                p.as_ref()
+                    .map_or(false, |pg| pg.get_page_id() == old_page_id)
             }) {
                 if page.as_ref().unwrap().is_dirty() {
-                    self.disk_manager.write_page(old_page_id, page.as_ref().unwrap().get_data());
+                    self.disk_manager
+                        .write_page(old_page_id, page.as_ref().unwrap().get_data());
                 }
                 let mut page_table = self.page_table.lock().unwrap();
                 page_table.remove(&old_page_id);

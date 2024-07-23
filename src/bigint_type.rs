@@ -1,6 +1,6 @@
 use type_id::TypeId;
-use types::{CmpBool, Type};
-use value::{Value, Val};
+use types::Type;
+use value::{Val, Value};
 
 // Implementation for BigIntType
 pub struct BigIntType;
@@ -30,7 +30,10 @@ impl Type for BigIntType {
     }
 
     fn deserialize_from(&self, storage: &mut [u8]) -> Value {
-        let val = i64::from_le_bytes([storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6], storage[7]]);
+        let val = i64::from_le_bytes([
+            storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
+            storage[7],
+        ]);
         Value::new(val)
     }
 }

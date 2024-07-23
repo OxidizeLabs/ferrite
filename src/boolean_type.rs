@@ -1,6 +1,6 @@
 use type_id::TypeId;
 use types::Type;
-use value::{Value, Val};
+use value::{Val, Value};
 
 // Implementation for BooleanType
 pub struct BooleanType;

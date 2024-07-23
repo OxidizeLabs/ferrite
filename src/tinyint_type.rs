@@ -1,6 +1,6 @@
 use type_id::TypeId;
-use types::{CmpBool, Type};
-use value::{Value, Val};
+use types::Type;
+use value::{Val, Value};
 
 // Implementation for TinyIntType
 pub struct TinyIntType;

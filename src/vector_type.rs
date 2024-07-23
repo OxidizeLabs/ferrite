@@ -1,6 +1,6 @@
 use type_id::TypeId;
-use types::{Type};
-use value::{Value, Val};
+use types::Type;
+use value::{Val, Value};
 
 // Implementation for VectorType
 pub struct VectorType;
@@ -48,7 +48,12 @@ impl Type for VectorType {
         for i in 0..len {
             let start = 4 + i * 4;
             let end = start + 4;
-            let val = i32::from_le_bytes([storage[start], storage[start + 1], storage[start + 2], storage[start + 3]]);
+            let val = i32::from_le_bytes([
+                storage[start],
+                storage[start + 1],
+                storage[start + 2],
+                storage[start + 3],
+            ]);
             v.push(val);
         }
         Value::new(v)
@@ -56,17 +61,17 @@ impl Type for VectorType {
 }
 
 // Test main function to demonstrate usage
-fn main() {
-    // Example usage
-    let vector_type = VectorType::new();
-
-    // Test serialization
-    let val = Value::new(vec![1, 2, 3, 4, 5]);
-    let mut storage = vec![0u8; 4 + 5 * 4];
-    vector_type.serialize_to(&val, &mut storage);
-    println!("Serialized storage: {:?}", storage);
-
-    // Test deserialization
-    let deserialized_val = vector_type.deserialize_from(&mut storage);
-    println!("Deserialized value: {:?}", deserialized_val.get_value());
-}
+// fn main() {
+//     // Example usage
+//     let vector_type = VectorType::new();
+//
+//     // Test serialization
+//     let val = Value::new(vec![1, 2, 3, 4, 5]);
+//     let mut storage = vec![0u8; 4 + 5 * 4];
+//     vector_type.serialize_to(&val, &mut storage);
+//     println!("Serialized storage: {:?}", storage);
+//
+//     // Test deserialization
+//     let deserialized_val = vector_type.deserialize_from(&mut storage);
+//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+// }

@@ -6,10 +6,10 @@ authors = ["Thomas Korrison <ferrite.db@gmail.com>"]
 
 
 # Exclude specific files or directories
-exclude = [
-    "types/**",
-
-]
+#exclude = [
+#    "types/**",
+#
+#]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

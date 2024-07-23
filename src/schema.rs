@@ -1,5 +1,5 @@
-use std::mem::size_of;
 use column::Column;
+use std::mem::size_of;
 
 #[derive(Debug, Clone)]
 pub struct Schema {
@@ -88,12 +88,13 @@ impl Schema {
 
     pub fn to_string(&self, simplified: bool) -> String {
         if simplified {
-            let column_strings: Vec<String> = self.columns.iter()
-                .map(|col| col.to_string(true))
-                .collect();
+            let column_strings: Vec<String> =
+                self.columns.iter().map(|col| col.to_string(true)).collect();
             format!("({})", column_strings.join(", "))
         } else {
-            let column_strings: Vec<String> = self.columns.iter()
+            let column_strings: Vec<String> = self
+                .columns
+                .iter()
                 .map(|col| col.to_string(false))
                 .collect();
             format!(
@@ -106,7 +107,6 @@ impl Schema {
         }
     }
 }
-
 
 // fn main() {
 //     let col1 = Column::new("id".to_string(), true, 4);

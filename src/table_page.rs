@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::option::Option;
+
 use tuple::Tuple;
 
 type PageId = i32;
-const INVALID_PAGE_ID: PageId = -1;
+
 
 #[derive(Clone, Debug)]
 struct TupleMeta {}
@@ -33,7 +32,7 @@ impl TablePage {
     }
 
     pub fn init(&mut self) {
-        // Initialize the TablePage header
+        unimplemented!()
     }
 
     pub fn get_num_tuples(&self) -> u32 {
@@ -49,31 +48,27 @@ impl TablePage {
     }
 
     pub fn get_next_tuple_offset(&self, meta: &TupleMeta, tuple: &Tuple) -> Option<u16> {
-        // Calculate the next offset to insert, return None if this tuple cannot fit in this page
-        None
+        unimplemented!()
     }
 
     pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &Tuple) -> Option<u16> {
-        // Insert tuple logic here, return the offset if successful
-        None
+        unimplemented!()
     }
 
     pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) {
-        // Update tuple meta logic here
+        unimplemented!()
     }
 
     pub fn get_tuple(&self, rid: &RID) -> Option<(TupleMeta, Tuple)> {
-        // Get tuple logic here
-        None
+        unimplemented!()
     }
 
     pub fn get_tuple_meta(&self, rid: &RID) -> Option<TupleMeta> {
-        // Get tuple meta logic here
-        None
+        unimplemented!()
     }
 
     pub fn update_tuple_in_place_unsafe(&mut self, meta: &TupleMeta, tuple: &Tuple, rid: &RID) {
-        // Update tuple in place logic here
+        unimplemented!()
     }
 }
 

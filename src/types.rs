@@ -6,7 +6,7 @@ use smallint_type::SmallIntType;
 use timestamp_type::TimestampType;
 use tinyint_type::TinyIntType;
 use type_id::TypeId;
-use value::{Value, ToValue};
+use value::{ToValue, Value};
 use varlen_type::VarCharType;
 use vector_type::VectorType;
 
@@ -23,23 +23,38 @@ pub trait Type {
         match self.get_type_id() {
             TypeId::Invalid => false,
             TypeId::Boolean => true,
-            TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal => {
-                match type_id {
-                    TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::VarChar => true,
-                    _ => false,
-                }
+            TypeId::TinyInt
+            | TypeId::SmallInt
+            | TypeId::Integer
+            | TypeId::BigInt
+            | TypeId::Decimal => match type_id {
+                TypeId::TinyInt
+                | TypeId::SmallInt
+                | TypeId::Integer
+                | TypeId::BigInt
+                | TypeId::Decimal
+                | TypeId::VarChar => true,
+                _ => false,
             },
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
-            TypeId::VarChar => {
-                match type_id {
-                    TypeId::Boolean | TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp | TypeId::VarChar => true,
-                    _ => false,
-                }
+            TypeId::VarChar => match type_id {
+                TypeId::Boolean
+                | TypeId::TinyInt
+                | TypeId::SmallInt
+                | TypeId::Integer
+                | TypeId::BigInt
+                | TypeId::Decimal
+                | TypeId::Timestamp
+                | TypeId::VarChar => true,
+                _ => false,
             },
             _ => type_id == self.get_type_id(),
         }
     }
-    fn get_min_value(type_id: TypeId) -> Value where Self: Sized {
+    fn get_min_value(type_id: TypeId) -> Value
+    where
+        Self: Sized,
+    {
         match type_id {
             TypeId::Boolean => false.to_value(),
             TypeId::TinyInt => i8::MIN.to_value(),
@@ -49,10 +64,13 @@ pub trait Type {
             TypeId::Decimal => f64::MIN.to_value(),
             TypeId::Timestamp => 0_u64.to_value(),
             TypeId::VarChar => "".to_value(),
-            _ => panic!()
+            _ => panic!(),
         }
     }
-    fn get_max_value(type_id: TypeId) -> Value where Self: Sized {
+    fn get_max_value(type_id: TypeId) -> Value
+    where
+        Self: Sized,
+    {
         match type_id {
             TypeId::Boolean => true.to_value(),
             TypeId::TinyInt => i8::MAX.to_value(),
@@ -62,7 +80,7 @@ pub trait Type {
             TypeId::Decimal => f64::MAX.to_value(),
             TypeId::Timestamp => u64::MAX.to_value(),
             TypeId::VarChar => "".to_value(),
-            _ => panic!()
+            _ => panic!(),
         }
     }
     fn compare_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
@@ -157,7 +175,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::Integer => 4,
         TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
         TypeId::VarChar => 0,
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
@@ -172,7 +190,7 @@ pub fn type_id_to_string(type_id: TypeId) -> String {
         TypeId::VarChar => "VarChar".to_string(),
         TypeId::Timestamp => "Timestamp".to_string(),
         TypeId::Vector => "Vector".to_string(),
-        TypeId::Invalid => "Invalid".to_string()
+        TypeId::Invalid => "Invalid".to_string(),
     }
 }
 
