@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 
-use crate::config::*;
+use crate::common::config::*;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -14,8 +14,6 @@ const OFFSET_LSN: usize = 4;
 #[derive(Debug, Clone)]
 pub struct Page {
     /** The actual data that is stored within a page. */
-    // Usually this should be stored as `char data_[DB_PAGE_SIZE]{};`. But to enable ASAN to detect page overflow,
-    // we store it as a ptr.
     data: Box<[u8; DB_PAGE_SIZE]>,
     /** The ID of this page. */
     page_id: PageId,
@@ -26,19 +24,6 @@ pub struct Page {
 }
 
 impl Page {
-    ///
-    ///
-    /// # Arguments
-    ///
-    /// * `page_id`:
-    ///
-    /// returns: Page
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// ```
     /** Constructor. Zeros out the page data. */
     pub fn new(page_id: PageId) -> Self {
         let mut page = Page {
@@ -46,7 +31,6 @@ impl Page {
             page_id,
             pin_count: 0,
             is_dirty: false,
-            //rwlatch: ReaderWriterLatch::new(),
         };
         page.reset_memory();
         page
@@ -72,30 +56,6 @@ impl Page {
         self.is_dirty
     }
 
-    pub fn set_dirty(&mut self, is_dirty: bool) {
-        self.is_dirty = is_dirty;
-    }
-
-    // /** Acquire the page write latch. */
-    // pub fn w_latch(&self) -> RwLockWriteGuard<()> {
-    //     self.rwlatch.w_lock()
-    // }
-    //
-    // /** Release the page write latch. */
-    // pub fn w_unlatch(&self, guard: RwLockWriteGuard<()>) {
-    //     self.rwlatch.w_unlock(guard)
-    // }
-    //
-    // /** Acquire the page read latch. */
-    // pub fn r_latch(&self) -> RwLockReadGuard<()> {
-    //     self.rwlatch.r_lock()
-    // }
-    //
-    // /** Release the page read latch. */
-    // pub fn r_unlatch(&self, guard: RwLockReadGuard<()>) {
-    //     self.rwlatch.r_unlock(guard)
-    // }
-
     /** @return the page LSN. */
     pub fn get_lsn(&self) -> Lsn {
         let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 4];
@@ -110,8 +70,6 @@ impl Page {
 
     /** Zeroes out the data that is held within the page. */
     pub(crate) fn reset_memory(&mut self) {
-        for byte in self.data.iter_mut() {
-            *byte = OFFSET_PAGE_START as u8;
-        }
+        self.data.fill(OFFSET_PAGE_START as u8);
     }
 }

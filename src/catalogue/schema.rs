@@ -1,4 +1,4 @@
-use column::Column;
+use crate::catalogue::column::Column;
 use std::mem::size_of;
 
 #[derive(Debug, Clone)]

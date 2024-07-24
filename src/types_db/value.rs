@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Debug;
-use type_id::TypeId;
-use types::{get_type_size, Type};
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::get_type_size;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Value {
@@ -139,7 +139,7 @@ impl Val {
                 let mut v = Vec::with_capacity(len);
                 for i in 0..len {
                     let start = 4 + i * 4;
-                    let end = start + 4;
+                    let _end = start + 4;
                     v.push(i32::from_le_bytes([
                         storage[start],
                         storage[start + 1],

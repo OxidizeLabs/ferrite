@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::option::Option;
 
-use tuple::Tuple;
+use crate::table::tuple::Tuple;
 
 type PageId = i32;
 

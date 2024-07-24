@@ -1,8 +1,8 @@
-use config::{FrameId, PageId};
-use disk_manager::DiskManager;
-use lru_k_replacer::AccessType::Lookup;
-use lru_k_replacer::{AccessType, LRUKReplacer};
-use page::Page;
+use crate::common::config::{FrameId, PageId};
+use crate::disk::disk_manager::DiskManager;
+use crate::buffer::lru_k_replacer::AccessType::Lookup;
+use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::page_db::page::Page;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -18,23 +18,25 @@ struct WritePageGuard {}
 pub struct BufferPoolManager {
     pool_size: usize,
     next_page_id: AtomicI32,
-    pages: Arc<RwLock<Vec<Option<Page>>>>, // Use RwLock for concurrent reads/writes
+    pages: Arc<RwLock<Vec<Option<Page>>>>,
     page_table: Arc<Mutex<HashMap<PageId, FrameId>>>,
-    replacer: Arc<Mutex<LRUKReplacer>>, // Use Mutex for exclusive access
+    replacer: Arc<Mutex<LRUKReplacer>>,
     free_list: Arc<Mutex<Vec<FrameId>>>,
     disk_manager: Arc<DiskManager>,
     write_back_cache: Option<Arc<WriteBackCache>>,
 }
 
 impl BufferPoolManager {
-    pub fn new(pool_size: usize, disk_manager: Arc<DiskManager>, replacer: LRUKReplacer) -> Self {
+    pub fn new(pool_size: usize, disk_manager: Arc<DiskManager>, replacer: Arc<Mutex<LRUKReplacer>>) -> Self {
+
+        let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
         Self {
             pool_size,
             next_page_id: AtomicI32::new(0),
             pages: Arc::new(RwLock::new(vec![None; pool_size])),
             page_table: Arc::new(Mutex::new(HashMap::new())),
-            replacer: Arc::new(Mutex::new(replacer)),
-            free_list: Arc::new(Mutex::new(Vec::with_capacity(pool_size))),
+            replacer,
+            free_list: Arc::new(Mutex::new(free_list)),
             disk_manager,
             write_back_cache: None,
         }
@@ -56,7 +58,7 @@ impl BufferPoolManager {
                 frame_id
             } else {
                 // Lock the replacer to evict a frame
-                let mut replacer = self.replacer.lock().unwrap();
+                let replacer = self.replacer.lock().unwrap();
                 replacer.evict()?
             }
         };
@@ -94,7 +96,6 @@ impl BufferPoolManager {
 
         // Create a new page and reset its metadata
         let mut new_page = Page::new(new_page_id);
-        new_page.set_dirty(false);
         new_page.reset_memory();
 
         // Insert the new page into the pages map and page table
@@ -108,7 +109,7 @@ impl BufferPoolManager {
         page_table.insert(new_page_id, frame_id);
 
         // Lock the replacer to mark this frame as non-evictable
-        let mut replacer = self.replacer.lock().unwrap();
+        let replacer = self.replacer.lock().unwrap();
         replacer.set_evictable(frame_id, false);
         replacer.record_access(frame_id, Lookup);
 
@@ -119,8 +120,40 @@ impl BufferPoolManager {
         unimplemented!()
     }
 
-    pub fn fetch_page(&self, page_id: PageId, access_type: AccessType) -> Option<&Page> {
+    pub fn fetch_page(&self, page_id: PageId, access_type: AccessType) -> Arc<RwLock<Page>> {
+        /**
+         * TODO(P1): Add implementation
+         *
+         * @brief Fetch the requested page from the buffer pool. Return nullptr if page_id needs to be fetched from the disk
+         * but all frames are currently in use and not evictable (in another word, pinned).
+         *
+         * First search for page_id in the buffer pool. If not found, pick a replacement frame from either the free list or
+         * the replacer (always find from the free list first), read the page from disk by scheduling a read DiskRequest with
+         * disk_scheduler_->Schedule(), and replace the old page in the frame. Similar to NewPage(), if the old page is dirty,
+         * you need to write it back to disk and update the metadata of the new page
+         *
+         * In addition, remember to disable eviction and record the access history of the frame like you did for NewPage().
+         *
+         * @param page_id id of page to be fetched
+         * @param access_type type of access to the page, only needed for leaderboard tests.
+         * @return nullptr if page_id cannot be fetched, otherwise pointer to the requested page
+         */
+        // let page_table = self.page_table.lock().unwrap();
+        // if let Some(&frame_id) = page_table.get(&page_id) {
+        //     let pages = self.pages.read().unwrap();
+        //     Some(Arc::new(RwLock::new(pages[frame_id].clone().unwrap())))
+        // } else if let frame_id = {
+        //     let mut free_list = self.free_list.lock().unwrap();
+        //     if let Some(frame_id) = free_list.pop() {
+        //         self.d
+        //     } else {
+        //         // Lock the replacer to evict a frame
+        //         let replacer = self.replacer.lock().unwrap();
+        //         replacer.evict()?
+        //     }
+        // }
         unimplemented!()
+
     }
 
     pub fn fetch_page_basic(&self, page_id: PageId) -> Option<BasicPageGuard> {
@@ -152,7 +185,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write().unwrap();
             if let Some(page) = pages.get_mut(*frame_id as usize).and_then(Option::as_mut) {
                 page.reset_memory();
-                let mut replacer = self.replacer.lock().unwrap();
+                let replacer = self.replacer.lock().unwrap();
                 replacer.remove(*frame_id);
                 self.free_list.lock().unwrap().push(*frame_id);
                 return true;

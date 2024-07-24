@@ -1,6 +1,7 @@
-use type_id::TypeId;
-use types::Type;
-use value::Value;
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
+use crate::types_db::value::Value;
+use crate::types_db::value::Val;
 
 // Implementation for IntegerType
 pub struct IntegerType;
@@ -21,7 +22,7 @@ impl Type for IntegerType {
     }
 
     fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
-        if let crate::value::Val::Integer(i) = val.get_value() {
+        if let Val::Integer(i) = val.get_value() {
             let bytes = i.to_le_bytes();
             storage[..4].copy_from_slice(&bytes);
         }

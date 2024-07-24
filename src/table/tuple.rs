@@ -1,7 +1,8 @@
-use limits::DB_VALUE_NULL;
-use schema::Schema;
 use std::mem::size_of;
-use value::{Serializable, Value};
+
+use crate::common::limits::DB_VALUE_NULL;
+use crate::catalogue::schema::Schema;
+use crate::types_db::value::Value;
 
 pub struct Tuple {
     values: Vec<Value>,
@@ -76,7 +77,7 @@ impl Tuple {
     pub fn deserialize_from(storage: &[u8], schema: Schema, rid: u32) -> Self {
         let mut values = Vec::new();
 
-        for (i, col) in schema.get_columns().iter().enumerate() {
+        for (_i, col) in schema.get_columns().iter().enumerate() {
             if col.is_inlined() {
                 let val =
                     Value::deserialize_from(&storage[col.get_offset() as usize..], col.get_type());

@@ -1,5 +1,5 @@
 // src/tests/lru_k_replacer_tests.rs
-use crate::lru_k_replacer::{LRUKReplacer, AccessType};
+use crate::buffer::lru_k_replacer::{LRUKReplacer, AccessType};
 use std::{thread, time};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;

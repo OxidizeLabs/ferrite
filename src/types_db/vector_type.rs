@@ -1,6 +1,6 @@
-use type_id::TypeId;
-use types::Type;
-use value::{Val, Value};
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
+use crate::types_db::value::{Val, Value};
 
 // Implementation for VectorType
 pub struct VectorType;
@@ -47,7 +47,7 @@ impl Type for VectorType {
         let mut v = Vec::with_capacity(len);
         for i in 0..len {
             let start = 4 + i * 4;
-            let end = start + 4;
+            let _end = start + 4;
             let val = i32::from_le_bytes([
                 storage[start],
                 storage[start + 1],
