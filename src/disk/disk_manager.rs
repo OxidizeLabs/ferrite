@@ -1,10 +1,9 @@
+use crate::common::config::PageId;
 use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
-
-type PageId = i32;
 
 pub struct DiskManager {
     file_name: String,
@@ -64,7 +63,14 @@ impl DiskManager {
         let mut db_io = self.db_io.lock().unwrap();
         let offset = page_id as u64 * page_data.len() as u64;
         db_io.seek(SeekFrom::Start(offset)).unwrap();
-        db_io.read_exact(page_data).unwrap();
+        match db_io.read_exact(page_data) {
+            Ok(_) => {}
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // If there's an UnexpectedEof error, we simply fill the page_data with zeroes.
+                page_data.fill(0);
+            }
+            Err(e) => panic!("Unexpected error reading page: {}", e),
+        }
     }
 
     pub fn write_log(&self, log_data: &[u8]) {
@@ -108,25 +114,3 @@ impl DiskManager {
         path.metadata().unwrap().len()
     }
 }
-
-// fn main() {
-//     // Example usage of DiskManager
-//     let disk_manager = DiskManager::new("db_file.txt", "log_file.txt");
-//
-//     // Write and read page
-//     let page_id = 1;
-//     let page_data = vec![1u8; 4096];
-//     disk_manager.write_page(page_id, &page_data);
-//
-//     let mut read_data = vec![0u8; 4096];
-//     disk_manager.read_page(page_id, &mut read_data);
-//     assert_eq!(page_data, read_data);
-//
-//     // Write and read log
-//     let log_data = b"example log data";
-//     disk_manager.write_log(log_data);
-//
-//     let mut log_read_data = vec![0u8; log_data.len()];
-//     disk_manager.read_log(&mut log_read_data, 0);
-//     assert_eq!(log_data, &log_read_data[..]);
-// }
