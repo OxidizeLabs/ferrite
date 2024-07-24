@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, Condvar};
-use std::thread;
-use tokio::sync::oneshot;
 use crate::common::config::PageId;
 use crate::disk::disk_manager::DiskManager;
+use std::collections::VecDeque;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use tokio::sync::oneshot;
 
 pub struct DiskRequest {
     is_write: bool,
@@ -33,7 +33,12 @@ impl DiskScheduler {
         scheduler
     }
 
-    pub fn schedule(&self, is_write: bool, data: Arc<Mutex<[u8; 4096]>>, page_id: PageId) -> oneshot::Receiver<()> {
+    pub fn schedule(
+        &self,
+        is_write: bool,
+        data: Arc<Mutex<[u8; 4096]>>,
+        page_id: PageId,
+    ) -> oneshot::Receiver<()> {
         let (sender, receiver) = oneshot::channel();
         let request = DiskRequest {
             is_write,

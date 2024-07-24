@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
-use crate::common::limits::DB_VALUE_NULL;
 use crate::catalogue::schema::Schema;
+use crate::common::limits::DB_VALUE_NULL;
 use crate::types_db::value::Value;
 
 pub struct Tuple {

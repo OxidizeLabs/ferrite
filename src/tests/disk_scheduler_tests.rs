@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::common::config::{DB_PAGE_SIZE};
+use crate::common::config::DB_PAGE_SIZE;
 use crate::disk::disk_manager::DiskManager;
 use crate::disk::disk_scheduler::DiskScheduler;
 
