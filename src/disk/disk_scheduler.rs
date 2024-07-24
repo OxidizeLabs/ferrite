@@ -1,142 +1,115 @@
-use crate::common::config::PageId;
-use futures::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
-
+use tokio::sync::oneshot;
+use crate::common::config::PageId;
 use crate::disk::disk_manager::DiskManager;
 
-/// Represents a Write or Read request for the DiskManager to execute.
 pub struct DiskRequest {
-    /// Flag indicating whether the request is a write or a read.
     is_write: bool,
-
-    /// Arc to a Mutex that protects the data being read/written.
     data: Arc<Mutex<[u8; 4096]>>,
-
-    /// ID of the page being read from / written to disk.
     page_id: PageId,
-
-    /// Callback used to signal to the request issuer when the request has been completed.
-    callback: DiskSchedulerPromise,
+    sender: oneshot::Sender<()>,
 }
 
-/// A future that completes when a DiskRequest is done.
-pub struct DiskSchedulerPromise {
-    shared_state: Arc<Mutex<SharedState>>,
-}
-
-pub struct SharedState {
-    completed: bool,
-    waker: Option<Waker>,
-}
-
-impl Future for DiskSchedulerPromise {
-    type Output = bool;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut shared_state = self.shared_state.lock().unwrap();
-        if shared_state.completed {
-            Poll::Ready(true)
-        } else {
-            shared_state.waker = Some(cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-impl DiskSchedulerPromise {
-    fn new() -> Self {
-        DiskSchedulerPromise {
-            shared_state: Arc::new(Mutex::new(SharedState {
-                completed: false,
-                waker: None,
-            })),
-        }
-    }
-
-    fn complete(&self) {
-        let mut shared_state = self.shared_state.lock().unwrap();
-        shared_state.completed = true;
-        if let Some(waker) = shared_state.waker.take() {
-            waker.wake();
-        }
-    }
-}
-
-impl DiskRequest {
-    fn new(is_write: bool, data: [u8; 4096], page_id: PageId) -> Self {
-        DiskRequest {
-            is_write,
-            data: Arc::new(Mutex::new(data)),
-            page_id,
-            callback: DiskSchedulerPromise::new(),
-        }
-    }
-}
-
-/// The DiskScheduler schedules disk read and write operations.
 pub struct DiskScheduler {
     disk_manager: Arc<DiskManager>,
     request_queue: Arc<(Mutex<VecDeque<DiskRequest>>, Condvar)>,
-    background_thread: Option<thread::JoinHandle<()>>,
+    stop_flag: Arc<(Mutex<bool>, Condvar)>,
+    worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
     pub fn new(disk_manager: Arc<DiskManager>) -> Self {
         let request_queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let stop_flag = Arc::new((Mutex::new(false), Condvar::new()));
         let mut scheduler = DiskScheduler {
             disk_manager,
             request_queue: Arc::clone(&request_queue),
-            background_thread: None,
+            stop_flag: Arc::clone(&stop_flag),
+            worker_thread: None,
         };
         scheduler.start_worker_thread();
         scheduler
     }
 
-    /// Schedules a request for the DiskManager to execute.
-    pub fn schedule(&self, r: DiskRequest) {
+    pub fn schedule(&self, is_write: bool, data: Arc<Mutex<[u8; 4096]>>, page_id: PageId) -> oneshot::Receiver<()> {
+        let (sender, receiver) = oneshot::channel();
+        let request = DiskRequest {
+            is_write,
+            data,
+            page_id,
+            sender,
+        };
+
         let (lock, cvar) = &*self.request_queue;
         let mut queue = lock.lock().unwrap();
-        queue.push_back(r);
+        queue.push_back(request);
         cvar.notify_one();
+
+        receiver
     }
 
-    /// Background worker thread function that processes scheduled requests.
     fn start_worker_thread(&mut self) {
         let request_queue = Arc::clone(&self.request_queue);
         let disk_manager = Arc::clone(&self.disk_manager);
+        let stop_flag = Arc::clone(&self.stop_flag);
 
-        self.background_thread = Some(thread::spawn(move || {
+        self.worker_thread = Some(thread::spawn(move || {
             let (lock, cvar) = &*request_queue;
+            let (stop_lock, stop_cvar) = &*stop_flag;
             loop {
                 let mut queue = lock.lock().unwrap();
+
+                // Check for stop condition
+                if *stop_lock.lock().unwrap() && queue.is_empty() {
+                    break;
+                }
+
                 while queue.is_empty() {
                     queue = cvar.wait(queue).unwrap();
+
+                    // Re-check for stop condition after waking up
+                    if *stop_lock.lock().unwrap() && queue.is_empty() {
+                        return;
+                    }
                 }
+
                 if let Some(request) = queue.pop_front() {
+                    drop(queue);
+
                     let mut data = request.data.lock().unwrap();
                     if request.is_write {
                         disk_manager.write_page(request.page_id, *data);
                     } else {
                         disk_manager.read_page(request.page_id, &mut *data);
                     }
-                    request.callback.complete();
+                    let _ = request.sender.send(());
+
+                    queue = lock.lock().unwrap();
                 }
             }
+
+            stop_cvar.notify_all();
         }));
     }
 
-    pub fn create_promise() -> DiskSchedulerPromise {
-        DiskSchedulerPromise::new()
+    pub fn shut_down(&self) {
+        let (stop_lock, stop_cvar) = &*self.stop_flag;
+        let mut stop = stop_lock.lock().unwrap();
+        *stop = true;
+        stop_cvar.notify_all();
+
+        // Notify the request queue to unblock worker thread
+        let (lock, cvar) = &*self.request_queue;
+        let _ = cvar.notify_all();
     }
 }
 
 impl Drop for DiskScheduler {
     fn drop(&mut self) {
-        if let Some(handle) = self.background_thread.take() {
+        self.shut_down();
+        if let Some(handle) = self.worker_thread.take() {
             handle.join().unwrap();
         }
     }
