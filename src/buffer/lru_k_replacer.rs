@@ -91,7 +91,6 @@ impl LRUKReplacer {
             });
     }
 
-
     pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
         let mut frame_store = self.frame_store.lock().unwrap();
         if let Some(frame) = frame_store.get_mut(&frame_id) {
@@ -112,7 +111,10 @@ impl LRUKReplacer {
 
     pub fn size(&self) -> usize {
         let frame_store = self.frame_store.lock().unwrap();
-        frame_store.iter().filter(|&frame| frame.1.is_evictable ).count()
+        frame_store
+            .iter()
+            .filter(|&frame| frame.1.is_evictable)
+            .count()
     }
 
     fn current_time() -> u64 {

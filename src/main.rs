@@ -1,17 +1,15 @@
 use std::sync::{Arc, Mutex};
-use tkdb::types_db::boolean_type::BooleanType;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
-use tkdb::catalogue::column::Column;
-use tkdb::disk::disk_manager::DiskManager;
-use tkdb::types_db::integer_type::IntegerType;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalogue::column::Column;
 use tkdb::catalogue::schema::Schema;
+use tkdb::disk::disk_manager::DiskManager;
 use tkdb::table::tuple::Tuple;
+use tkdb::types_db::boolean_type::BooleanType;
+use tkdb::types_db::integer_type::IntegerType;
 use tkdb::types_db::type_id::TypeId;
 use tkdb::types_db::types::Type;
 use tkdb::types_db::value::Value;
-
-
 
 fn main() {
     let boolean_type = BooleanType::new();

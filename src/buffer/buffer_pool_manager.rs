@@ -1,7 +1,7 @@
-use crate::common::config::{FrameId, PageId};
-use crate::disk::disk_manager::DiskManager;
 use crate::buffer::lru_k_replacer::AccessType::Lookup;
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::common::config::{FrameId, PageId};
+use crate::disk::disk_manager::DiskManager;
 use crate::page_db::page::Page;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -27,8 +27,11 @@ pub struct BufferPoolManager {
 }
 
 impl BufferPoolManager {
-    pub fn new(pool_size: usize, disk_manager: Arc<DiskManager>, replacer: Arc<Mutex<LRUKReplacer>>) -> Self {
-
+    pub fn new(
+        pool_size: usize,
+        disk_manager: Arc<DiskManager>,
+        replacer: Arc<Mutex<LRUKReplacer>>,
+    ) -> Self {
         let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
         Self {
             pool_size,
@@ -153,7 +156,6 @@ impl BufferPoolManager {
         //     }
         // }
         unimplemented!()
-
     }
 
     pub fn fetch_page_basic(&self, page_id: PageId) -> Option<BasicPageGuard> {

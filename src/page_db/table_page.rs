@@ -5,7 +5,6 @@ use crate::table::tuple::Tuple;
 
 type PageId = i32;
 
-
 #[derive(Clone, Debug)]
 struct TupleMeta {}
 

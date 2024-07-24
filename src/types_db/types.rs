@@ -10,7 +10,6 @@ use crate::types_db::value::{ToValue, Value};
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
 
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum CmpBool {
     CmpFalse = 0,
