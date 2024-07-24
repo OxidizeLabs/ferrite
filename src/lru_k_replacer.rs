@@ -1,6 +1,6 @@
 use config::FrameId;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy)]
@@ -13,7 +13,6 @@ pub enum AccessType {
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Frame {
-    /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
     access_times: Vec<u64>,
     k: usize,
     fid: FrameId,
@@ -21,49 +20,30 @@ pub struct Frame {
 }
 
 pub struct LRUKReplacer {
-    frame_store: HashMap<FrameId, Frame>,
-    current_timestamp: usize,
-    curr_size_: usize,
+    frame_store: Arc<Mutex<HashMap<FrameId, Frame>>>,
+    current_timestamp: Mutex<usize>,
+    curr_size_: Mutex<usize>,
     replacer_size: usize,
     k: usize,
-    latch: Mutex<usize>,
 }
 
-/**
- * LRUKReplacer implements the LRU-k replacement policy.
- *
- * The LRU-k algorithm evicts a frame whose backward k-distance is maximum
- * of all frames. Backward k-distance is computed as the difference in time between
- * current timestamp and the timestamp of kth previous access.
- *
- * A frame with less than k historical references is given
- * +inf as its backward k-distance. When multiple frames have +inf backward k-distance,
- * classical LRU algorithm is used to choose victim.
- */
 impl LRUKReplacer {
     pub fn new(num_frames: usize, k: usize) -> Self {
-        let frame = Frame {
-            access_times: vec![],
-            k: 0,
-            fid: 0,
-            is_evictable: false,
-        };
-
         Self {
-            frame_store: HashMap::from([(0, frame)]),
-            current_timestamp: 0,
-            curr_size_: 0,
+            frame_store: Arc::new(Mutex::new(HashMap::new())),
+            current_timestamp: Mutex::new(0),
+            curr_size_: Mutex::new(0),
             replacer_size: num_frames,
             k,
-            latch: Mutex::new(0),
         }
     }
 
-    pub fn evict(&mut self) -> Option<FrameId> {
+    pub fn evict(&self) -> Option<FrameId> {
+        let mut frame_store = self.frame_store.lock().unwrap();
         let mut max_k_distance = 0;
         let mut victim_frame_id = None;
 
-        for (id, frame) in &self.frame_store {
+        for (id, frame) in frame_store.iter() {
             if !frame.is_evictable {
                 continue;
             }
@@ -71,19 +51,16 @@ impl LRUKReplacer {
             let k_distance = if frame.access_times.len() < self.k {
                 u64::MAX
             } else {
-                // Calculate backward k-distance
                 let len = frame.access_times.len();
-                frame.access_times[len - self.k] // k-th last access time
+                frame.access_times[len - self.k]
             };
 
-            // Determine the frame to evict
             if k_distance > max_k_distance {
                 max_k_distance = k_distance;
                 victim_frame_id = Some(*id);
             } else if k_distance == max_k_distance {
-                // If k_distance is the same, choose the frame with the earliest access time
                 if let Some(current_victim_id) = victim_frame_id {
-                    let current_victim_frame = &self.frame_store[&current_victim_id];
+                    let current_victim_frame = &frame_store[&current_victim_id];
                     if frame.access_times.first() < current_victim_frame.access_times.first() {
                         victim_frame_id = Some(*id);
                     }
@@ -91,67 +68,52 @@ impl LRUKReplacer {
             }
         }
 
-        // Evict the selected frame
         if let Some(victim_id) = victim_frame_id {
-            self.frame_store.remove(&victim_id);
+            frame_store.remove(&victim_id);
             Some(victim_id)
         } else {
             None
         }
     }
 
-    pub fn record_access(&mut self, frame_id: FrameId, access_type: AccessType) {
+    pub fn record_access(&self, frame_id: FrameId, _access_type: AccessType) {
         let now = Self::current_time();
-        self.frame_store
+        let mut frame_store = self.frame_store.lock().unwrap();
+
+        frame_store
             .entry(frame_id)
             .and_modify(|frame| frame.access_times.push(now))
             .or_insert(Frame {
                 is_evictable: true,
                 access_times: vec![now],
-                k: 0,
-                fid: 0,
+                k: self.k,
+                fid: frame_id,
             });
     }
 
-    pub fn set_evictable(&mut self, frame_id: FrameId, set_evictable: bool) {
-        if let Some(frame) = self.frame_store.get_mut(&frame_id) {
+    pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
+        let mut frame_store = self.frame_store.lock().unwrap();
+        if let Some(frame) = frame_store.get_mut(&frame_id) {
             frame.is_evictable = set_evictable;
         }
     }
 
     pub fn remove(&self, frame_id: FrameId) {
-        /**
-         * TODO(P1): Add implementation
-         *
-         * @brief Remove an evictable frame from replacer, along with its access history.
-         * This function should also decrement replacer's size if removal is successful.
-         *
-         * Note that this is different from evicting a frame, which always remove the frame
-         * with largest backward k-distance. This function removes specified frame id,
-         * no matter what its backward k-distance is.
-         *
-         * If Remove is called on a non-evictable frame, throw an exception or abort the
-         * process.
-         *
-         * If specified frame is not found, directly return from this function.
-         *
-         * @param frame_id id of frame to be removed
-         */
-        unimplemented!()
+        let mut frame_store = self.frame_store.lock().unwrap();
+        if let Some(frame) = frame_store.get(&frame_id) {
+            if frame.is_evictable {
+                frame_store.remove(&frame_id);
+            } else {
+                panic!("Attempt to remove a non-evictable frame");
+            }
+        }
     }
 
-    pub fn size(self) -> usize {
-        /**
-         * TODO(P1): Add implementation
-         *
-         * @brief Return replacer's size, which tracks the number of evictable frames.
-         *
-         * @return size_t
-         */
-        unimplemented!()
+    pub fn size(&self) -> usize {
+        let frame_store = self.frame_store.lock().unwrap();
+        frame_store.iter().filter(|&frame| frame.1.is_evictable ).count()
     }
 
-    // Helper function to get current time in milliseconds since epoch
     fn current_time() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
