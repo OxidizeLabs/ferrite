@@ -3,14 +3,12 @@ name = "tkdb"
 description = "DBMS inspired by CMU 15-415/445 - Introduction to DBMS Course"
 version = "0.1.0"
 authors = ["Thomas Korrison <ferrite.db@gmail.com>"]
-
-
-# Exclude specific files or directories
-#exclude = [
-#    "types/**",
-#
-#]
+edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
+rand = "0.9.0-alpha.1"
+time = "0.3.36"
+futures = { version = "0.3.30", features = ["thread-pool"] }
+tokio = { version = "1", features = ["full"] }

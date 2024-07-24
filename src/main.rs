@@ -1,17 +1,17 @@
-extern crate tkdb;
+use std::sync::{Arc, Mutex};
+use tkdb::types_db::boolean_type::BooleanType;
+use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+use tkdb::catalogue::column::Column;
+use tkdb::disk::disk_manager::DiskManager;
+use tkdb::types_db::integer_type::IntegerType;
+use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalogue::schema::Schema;
+use tkdb::table::tuple::Tuple;
+use tkdb::types_db::type_id::TypeId;
+use tkdb::types_db::types::Type;
+use tkdb::types_db::value::Value;
 
-use std::sync::Arc;
-use tkdb::boolean_type::BooleanType;
-use tkdb::buffer_pool_manager::BufferPoolManager;
-use tkdb::column::Column;
-use tkdb::disk_manager::DiskManager;
-use tkdb::integer_type::IntegerType;
-use tkdb::lru_k_replacer::LRUKReplacer;
-use tkdb::schema::Schema;
-use tkdb::tuple::Tuple;
-use tkdb::type_id::TypeId;
-use tkdb::types::Type;
-use tkdb::value::Value;
+
 
 fn main() {
     let boolean_type = BooleanType::new();
@@ -64,8 +64,8 @@ fn main() {
     println!("Copied Schema: {:?}", copied_schema);
 
     let disk_manager = Arc::new(DiskManager::new("db_file", "db.log"));
-    let replacer = LRUKReplacer::new(10, 10);
-    let mut buffer_pool_manager = BufferPoolManager::new(100, disk_manager, replacer);
+    let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 10)));
+    let buffer_pool_manager = BufferPoolManager::new(100, disk_manager, replacer.clone());
     println!(
         "Buffer Pool Size: {:?}",
         buffer_pool_manager.get_pool_size()
@@ -84,4 +84,8 @@ fn main() {
     }
 
     println!("Buffer Pool Pages 2: {:?}", buffer_pool_manager.get_pages());
+    println!(
+        "Number of frames in replacer: {:?}",
+        replacer.lock().unwrap().size()
+    );
 }

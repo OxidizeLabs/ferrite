@@ -1,36 +1,36 @@
-use type_id::TypeId;
-use types::Type;
-use value::{Val, Value};
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
+use crate::types_db::value::{Val, Value};
 
-// Implementation for DecimalType
-pub struct DecimalType;
+// Implementation for TimestampType
+pub struct TimestampType;
 
-impl DecimalType {
+impl TimestampType {
     pub fn new() -> Self {
-        DecimalType
+        TimestampType
     }
 }
 
-impl Type for DecimalType {
+impl Type for TimestampType {
     fn get_type_id(&self) -> TypeId {
-        TypeId::Decimal
+        TypeId::Timestamp
     }
 
     fn is_coercible_from(&self, type_id: TypeId) -> bool {
-        matches!(type_id, TypeId::Decimal)
+        matches!(type_id, TypeId::Timestamp)
     }
 
     fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
-        if let Val::Decimal(d) = val.get_value() {
-            let bytes = d.to_le_bytes();
+        if let Val::Timestamp(t) = val.get_value() {
+            let bytes = t.to_le_bytes();
             storage[..8].copy_from_slice(&bytes);
         } else {
-            panic!("Expected a Decimal value");
+            panic!("Expected a Timestamp value");
         }
     }
 
     fn deserialize_from(&self, storage: &mut [u8]) -> Value {
-        let val = f64::from_le_bytes([
+        let val = u64::from_le_bytes([
             storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
             storage[7],
         ]);
@@ -41,15 +41,15 @@ impl Type for DecimalType {
 // Test main function to demonstrate usage
 // fn main() {
 //     // Example usage
-//     let decimal_type = DecimalType::new();
+//     let timestamp_type = TimestampType::new();
 //
 //     // Test serialization
-//     let val = Value::new(12345.6789_f64);
+//     let val = Value::new(1627842123_u64);
 //     let mut storage = [0u8; 8];
-//     decimal_type.serialize_to(&val, &mut storage);
+//     timestamp_type.serialize_to(&val, &mut storage);
 //     println!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
-//     let deserialized_val = decimal_type.deserialize_from(&mut storage);
+//     let deserialized_val = timestamp_type.deserialize_from(&mut storage);
 //     println!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

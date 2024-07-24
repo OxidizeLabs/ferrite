@@ -1,14 +1,15 @@
-use bigint_type::BigIntType;
-use boolean_type::BooleanType;
-use decimal_type::DecimalType;
-use integer_type::IntegerType;
-use smallint_type::SmallIntType;
-use timestamp_type::TimestampType;
-use tinyint_type::TinyIntType;
-use type_id::TypeId;
-use value::{ToValue, Value};
-use varlen_type::VarCharType;
-use vector_type::VectorType;
+use crate::types_db::bigint_type::BigIntType;
+use crate::types_db::boolean_type::BooleanType;
+use crate::types_db::decimal_type::DecimalType;
+use crate::types_db::integer_type::IntegerType;
+use crate::types_db::smallint_type::SmallIntType;
+use crate::types_db::timestamp_type::TimestampType;
+use crate::types_db::tinyint_type::TinyIntType;
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::{ToValue, Value};
+use crate::types_db::varlen_type::VarCharType;
+use crate::types_db::vector_type::VectorType;
+
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CmpBool {

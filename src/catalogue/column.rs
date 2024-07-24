@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use type_id::TypeId;
+use crate::types_db::type_id::TypeId;
 
 #[derive(Clone, Debug)]
 pub struct Column {
