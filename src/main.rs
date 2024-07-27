@@ -4,6 +4,7 @@ use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalogue::column::Column;
 use tkdb::catalogue::schema::Schema;
 use tkdb::disk::disk_manager::DiskManager;
+use tkdb::disk::disk_scheduler::DiskScheduler;
 use tkdb::table::tuple::Tuple;
 use tkdb::types_db::boolean_type::BooleanType;
 use tkdb::types_db::integer_type::IntegerType;
@@ -62,8 +63,9 @@ fn main() {
     println!("Copied Schema: {:?}", copied_schema);
 
     let disk_manager = Arc::new(DiskManager::new("db_file", "db.log"));
+    let disk_scheduler = Arc::new(DiskScheduler::new(disk_manager));
     let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 10)));
-    let buffer_pool_manager = BufferPoolManager::new(100, disk_manager, replacer.clone());
+    let buffer_pool_manager = BufferPoolManager::new(100, disk_scheduler, replacer.clone());
     println!(
         "Buffer Pool Size: {:?}",
         buffer_pool_manager.get_pool_size()
