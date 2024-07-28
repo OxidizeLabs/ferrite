@@ -6,3 +6,4 @@ pub mod page_db;
 pub mod table;
 pub mod tests;
 pub mod types_db;
+pub mod helpers;

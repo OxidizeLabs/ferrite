@@ -1,9 +1,10 @@
-use crate::common::config::PageId;
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
+use crate::helpers::format_slice;
 
 pub struct DiskManager {
     file_name: String,
@@ -48,26 +49,34 @@ impl DiskManager {
         let _ = self.log_io.lock().unwrap().sync_all();
     }
 
-    pub fn write_page(&self, page_id: PageId, page_data: [u8; 4096]) {
-        let mut db_io = self.db_io.lock().unwrap();
-        let offset = page_id as u64 * page_data.len() as u64;
-        db_io.seek(SeekFrom::Start(offset)).unwrap();
-        db_io.write_all(page_data.as_ref()).unwrap();
-        db_io.flush().unwrap();
+    pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE]) {
+        let offset = page_id as u64 * DB_PAGE_SIZE as u64;
+        println!("Writing page {} at offset {}", page_id, offset);
+        println!("Page data being written: {:?}", &data[..64]); // Debugging statement
 
-        let mut num_writes = self.num_writes.lock().unwrap();
-        *num_writes += 1;
+        let mut db_io = self.db_io.lock().unwrap();
+        if let Err(e) = db_io.seek(SeekFrom::Start(offset)) {
+            println!("Failed to seek to offset {}: {}", offset, e);
+            return;
+        }
+        if let Err(e) = db_io.write_all(&data) {
+            println!("Failed to write data for page {}: {}", page_id, e);
+        }
     }
 
     pub fn read_page(&self, page_id: PageId, page_data: &mut [u8]) {
         let mut db_io = self.db_io.lock().unwrap();
         let offset = page_id as u64 * page_data.len() as u64;
+        println!("Reading page {} at offset {}", page_id, offset); // Debugging statement
         db_io.seek(SeekFrom::Start(offset)).unwrap();
         match db_io.read_exact(page_data) {
-            Ok(_) => {}
+            Ok(_) => {
+                println!("Page data read: {}", format_slice(page_data)); // Debugging statement
+            }
             Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 // If there's an UnexpectedEof error, we simply fill the page_data with zeroes.
                 page_data.fill(0);
+                println!("Page data read incomplete, filling with zeroes"); // Debugging statement
             }
             Err(e) => panic!("Unexpected error reading page: {}", e),
         }

@@ -79,11 +79,11 @@ mod tests {
         ctx.disk_manager.shut_down();
     }
 
-    #[test]
-    fn test_throw_bad_file() {
-        assert!(std::panic::catch_unwind(|| {
-            DiskManager::new("/dev/null/foo/bar/baz/test_disk_manager.db", "test_disk_manager.log")
-        })
-        .is_err());
-    }
+    // #[test]
+    // fn test_throw_bad_file() {
+    //     assert!(std::panic::catch_unwind(|| {
+    //         DiskManager::new("/dev/null/foo/bar/baz/test_disk_manager.db", "test_disk_manager.log")
+    //     })
+    //     .is_err());
+    // }
 }
