@@ -1,15 +1,13 @@
 use crate::common::config::PageId;
-use crate::table::tuple::Tuple;
+use crate::table::tuple::{Tuple, TupleMeta};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::option::Option;
 use xxhash_rust::xxh3::Xxh3;
 
-#[derive(Clone, Debug)]
-struct TupleMeta {}
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-struct RID {}
+pub struct RID {}
 
 // Create a type alias for our custom hasher
 type XxHashBuilder = BuildHasherDefault<Xxh3Hasher>;
@@ -60,14 +58,13 @@ impl TablePage {
 
     pub fn get_tuple(&self, rid: &RID) -> Option<(&TupleMeta, &Tuple)> {
         match self.tuple_info.get(rid).unwrap() {
-            (TupleMeta, Tuple) => Some((TupleMeta, Tuple)),
-            _ => None,
+            (tuple_meta, tuple) => Some((tuple_meta, tuple))
         }
     }
 
     pub fn get_tuple_meta(&self, rid: &RID) -> Option<&TupleMeta> {
         match self.tuple_info.get(rid).unwrap() {
-            (TupleMeta, _Tuple) => Some(TupleMeta),
+            (tuple_meta, _tuple) => Some(tuple_meta),
             _ => None,
         }
     }

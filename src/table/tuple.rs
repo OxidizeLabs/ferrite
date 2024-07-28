@@ -4,11 +4,26 @@ use crate::catalogue::schema::Schema;
 use crate::common::limits::DB_VALUE_NULL;
 use crate::types_db::value::Value;
 
+#[derive(Clone, Debug)]
+pub struct TupleMeta {
+    timestamp: u64,
+    is_deleted: bool
+}
+
 pub struct Tuple {
     values: Vec<Value>,
     schema: Schema,
     rid: u32,
     data: Vec<u8>,
+}
+
+impl TupleMeta {
+    pub fn new(timestamp: u64, is_deleted: bool) -> Self {
+        Self {
+            timestamp,
+            is_deleted
+        }
+    }
 }
 
 impl Tuple {
