@@ -43,42 +43,6 @@ mod tests {
     }
 
     #[test]
-    fn test_page_operations() {
-        let ctx = TestContext::new();
-        let buffer_pool_size = 10;
-        let disk_manager = &ctx.disk_manager;
-        let disk_scheduler = &ctx.disk_scheduler;
-        let replacer = &ctx.replacer;
-        let bpm = BufferPoolManager::new(buffer_pool_size, disk_scheduler.clone(), disk_manager.clone(), replacer.clone());
-
-        println!("Creating page 0...");
-        let mut page0 = bpm.new_page().expect("Failed to create a new page");
-
-        let mut rng = rand::thread_rng();
-        let mut random_binary_data = [0u8; DB_PAGE_SIZE];
-        rng.fill(&mut random_binary_data);
-
-        random_binary_data[DB_PAGE_SIZE / 2] = 0;
-        random_binary_data[DB_PAGE_SIZE - 1] = 0;
-
-        bpm.write_page(page0.get_page_id(), random_binary_data.clone());
-
-        let fetched_page = bpm.fetch_page(page0.get_page_id()).expect("Failed to fetch page 0");
-        let binding = fetched_page.read().unwrap();
-        let fetched_data = binding.get_data();
-        println!("Data fetched from buffer pool: {:?}", &fetched_data[..64]);
-        assert_eq!(&random_binary_data, fetched_data, "Data mismatch after fetching from bpm");
-
-        bpm.unpin_page(page0.get_page_id(), true, AccessType::Lookup);
-        bpm.flush_page(page0.get_page_id()).expect("Failed to flush page 0");
-
-        let mut read_back_data = [0u8; DB_PAGE_SIZE];
-        disk_manager.read_page(page0.get_page_id(), &mut read_back_data);
-        println!("Data after reading from disk: {:?}", &read_back_data[..64]);
-        assert_eq!(&random_binary_data, &read_back_data, "Data mismatch after reading directly from disk");
-    }
-
-    #[test]
     fn binary_data_test() {
         let ctx = TestContext::new();
         let buffer_pool_size = 10;
@@ -142,8 +106,8 @@ mod tests {
             let fetched_data = page0.get_data();
 
             // Print the fetched data for debugging
-            println!("Fetched Data:    {}", format_slice(fetched_data));
-            println!("Expected Data:   {}", format_slice(&random_binary_data));
+            // println!("Fetched Data:    {}", format_slice(fetched_data));
+            // println!("Expected Data:   {}", format_slice(&random_binary_data));
             assert_eq!(&random_binary_data, fetched_data, "Data mismatch after fetching");
         } else {
             panic!("Failed to fetch page 0");
