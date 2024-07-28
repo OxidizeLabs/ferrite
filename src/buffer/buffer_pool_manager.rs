@@ -7,7 +7,6 @@ use crate::disk::disk_scheduler::DiskScheduler;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use crate::helpers::format_slice;
 
 const INVALID_PAGE_ID: PageId = -1;
 
@@ -58,7 +57,7 @@ impl BufferPoolManager {
             if let Some(frame_id) = free_list.pop() {
                 frame_id
             } else {
-                let mut replacer = self.replacer.lock().unwrap();
+                let replacer = self.replacer.lock().unwrap();
                 replacer.evict().unwrap_or(-1)
             }
         };
@@ -96,7 +95,7 @@ impl BufferPoolManager {
         page_table.insert(new_page_id, frame_id);
 
         {
-            let mut replacer = self.replacer.lock().unwrap();
+            let replacer = self.replacer.lock().unwrap();
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, Lookup);
         }
@@ -129,7 +128,7 @@ impl BufferPoolManager {
             let pages = self.pages.read().unwrap();
             let page = pages[frame_id as usize].as_ref().unwrap();
 
-            let mut replacer = self.replacer.lock().unwrap();
+            let replacer = self.replacer.lock().unwrap();
             replacer.record_access(frame_id, AccessType::Lookup);
             replacer.set_evictable(frame_id, false);
 
@@ -142,7 +141,7 @@ impl BufferPoolManager {
             if let Some(frame_id) = free_list.pop() {
                 frame_id
             } else {
-                let mut replacer = self.replacer.lock().unwrap();
+                let replacer = self.replacer.lock().unwrap();
                 replacer.evict().unwrap_or(-1)
             }
         };
@@ -180,7 +179,7 @@ impl BufferPoolManager {
         page_table.insert(page_id, frame_id);
 
         {
-            let mut replacer = self.replacer.lock().unwrap();
+            let replacer = self.replacer.lock().unwrap();
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, Lookup);
         }
@@ -189,7 +188,7 @@ impl BufferPoolManager {
     }
 
     pub fn unpin_page(&self, page_id: PageId, is_dirty: bool, access_type: AccessType) -> bool {
-        let mut page_table = self.page_table.lock().unwrap();
+        let page_table = self.page_table.lock().unwrap();
         if let Some(&frame_id) = page_table.get(&page_id) {
             let mut pages = self.pages.write().unwrap();
             if let Some(page) = pages[frame_id as usize].as_mut() {
@@ -200,7 +199,7 @@ impl BufferPoolManager {
                     }
 
                     if page.get_pin_count() == 0 {
-                        let mut replacer = self.replacer.lock().unwrap();
+                        let replacer = self.replacer.lock().unwrap();
                         replacer.set_evictable(frame_id, true);
                         replacer.record_access(frame_id, access_type);
                     }
@@ -246,7 +245,7 @@ impl BufferPoolManager {
             if let Some(page) = &pages[frame_id as usize] {
                 if page.is_dirty() {
                     self.disk_manager.write_page(page_id, *page.get_data());
-                    &page.clone().set_dirty(false);
+                    let _ = &page.clone().set_dirty(false);
                 }
             }
         }
@@ -257,7 +256,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write().unwrap();
             if let Some(page) = pages.get_mut(*frame_id as usize).and_then(Option::as_mut) {
                 page.reset_memory();
-                let mut replacer = self.replacer.lock().unwrap();
+                let replacer = self.replacer.lock().unwrap();
                 replacer.remove(*frame_id);
                 self.free_list.lock().unwrap().push(*frame_id);
                 return true;
