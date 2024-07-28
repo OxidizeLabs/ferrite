@@ -45,6 +45,7 @@ impl LRUKReplacer {
 
         for (id, frame) in frame_store.iter() {
             if !frame.is_evictable {
+                println!("Frame {} is not evictable", id); // Debugging statement
                 continue;
             }
 
@@ -69,9 +70,11 @@ impl LRUKReplacer {
         }
 
         if let Some(victim_id) = victim_frame_id {
+            println!("Evicting frame {}", victim_id); // Debugging statement
             frame_store.remove(&victim_id);
             Some(victim_id)
         } else {
+            println!("No frames available for eviction"); // Debugging statement
             None
         }
     }
@@ -89,23 +92,36 @@ impl LRUKReplacer {
                 k: self.k,
                 fid: frame_id,
             });
+
+        println!("Recorded access for frame {} at {}", frame_id, now); // Debugging statement
     }
 
     pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
         let mut frame_store = self.frame_store.lock().unwrap();
         if let Some(frame) = frame_store.get_mut(&frame_id) {
             frame.is_evictable = set_evictable;
+            println!("Set frame {} evictable: {}", frame_id, set_evictable); // Debugging statement
+        } else {
+            println!("Frame {} not found in frame_store", frame_id); // Debugging statement
+            frame_store.insert(frame_id, Frame {
+                is_evictable: set_evictable,
+                access_times: vec![],
+                k: self.k,
+                fid: frame_id,
+            });
         }
     }
-
     pub fn remove(&self, frame_id: FrameId) {
         let mut frame_store = self.frame_store.lock().unwrap();
         if let Some(frame) = frame_store.get(&frame_id) {
             if frame.is_evictable {
                 frame_store.remove(&frame_id);
+                println!("Removed frame {}", frame_id); // Debugging statement
             } else {
-                panic!("Attempt to remove a non-evictable frame");
+                panic!("Attempt to remove a non-evictable frame {}", frame_id);
             }
+        } else {
+            println!("Attempt to remove a non-existing frame {}", frame_id); // Debugging statement
         }
     }
 

@@ -91,7 +91,7 @@ impl DiskScheduler {
                     }
                     let _ = request.sender.send(());
 
-                    queue = lock.lock().unwrap();
+                    // queue = lock.lock().unwrap();
                 }
             }
 
@@ -106,7 +106,7 @@ impl DiskScheduler {
         stop_cvar.notify_all();
 
         // Notify the request queue to unblock worker thread
-        let (lock, cvar) = &*self.request_queue;
+        let (_lock, cvar) = &*self.request_queue;
         let _ = cvar.notify_all();
     }
 }

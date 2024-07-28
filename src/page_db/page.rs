@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-
 use crate::common::config::*;
 
 // Constants
@@ -27,7 +26,7 @@ impl Page {
         let mut page = Page {
             data: Box::new([0; DB_PAGE_SIZE]),
             page_id,
-            pin_count: 0,
+            pin_count: 1,
             is_dirty: false,
         };
         page.reset_memory();
@@ -35,8 +34,13 @@ impl Page {
     }
 
     /// Returns the actual data contained within this page.
-    pub fn get_data(&self) -> [u8; DB_PAGE_SIZE] {
-        *self.data
+    pub fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+        &self.data
+    }
+
+    /// Returns a mutable reference to the actual data contained within this page.
+    pub fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+        &mut self.data
     }
 
     /// Returns the page id of this page.
@@ -49,9 +53,31 @@ impl Page {
         self.pin_count
     }
 
-    /// Returns true if the page in memory has been modified from the page on disk, false otherwise.
+    /// Sets the pin count of this page.
+    pub fn set_pin_count(&mut self, pin_count: i32) {
+        self.pin_count = pin_count;
+    }
+
+    /// Increments the pin count of this page.
+    pub fn increment_pin_count(&mut self) {
+        self.pin_count += 1;
+    }
+
+    /// Decrements the pin count of this page.
+    pub fn decrement_pin_count(&mut self) {
+        if self.pin_count > 0 {
+            self.pin_count -= 1;
+        }
+    }
+
+    /// Returns true if the page is dirty.
     pub fn is_dirty(&self) -> bool {
         self.is_dirty
+    }
+
+    /// Sets the dirty flag of this page.
+    pub fn set_dirty(&mut self, is_dirty: bool) {
+        self.is_dirty = is_dirty;
     }
 
     /// Returns the page LSN.
@@ -68,6 +94,6 @@ impl Page {
 
     /// Zeroes out the data that is held within the page.
     pub fn reset_memory(&mut self) {
-        self.data.fill(OFFSET_PAGE_START as u8);
+        self.data.fill(0);
     }
 }
