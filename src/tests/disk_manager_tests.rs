@@ -8,25 +8,32 @@ mod tests {
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,
+        db_file: String,
+        db_log: String,
     }
 
     impl TestContext {
         fn new() -> Self {
-            let db_file = "test.db";
-            let log_file = "test.log";
+            let db_file = "test_disk_manager.db";
+            let log_file = "test_disk_manager.log";
             let disk_manager = Arc::new(DiskManager::new(db_file, log_file));
-            TestContext { disk_manager }
+
+            Self {
+                disk_manager,
+                db_file: db_file.to_string(),
+                db_log: log_file.to_string(),
+            }
         }
 
-        fn cleanup() {
-            let _ = remove_file("test.db");
-            let _ = remove_file("test.log");
+        fn cleanup(&self) {
+            let _ = remove_file(&self.db_file);
+            let _ = remove_file(&self.db_log);
         }
     }
 
     impl Drop for TestContext {
         fn drop(&mut self) {
-            Self::cleanup();
+            self.cleanup();
         }
     }
 
@@ -37,12 +44,15 @@ mod tests {
         let mut data = [0u8; BUSTUB_PAGE_SIZE];
         data[..14].copy_from_slice(b"A test string.");
 
-        ctx.disk_manager.read_page(0, &mut buf); // tolerate empty read
+        // Tolerate empty read
+        ctx.disk_manager.read_page(0, &mut buf);
 
+        // Write and read page 0
         ctx.disk_manager.write_page(0, data);
         ctx.disk_manager.read_page(0, &mut buf);
         assert_eq!(buf, data);
 
+        // Write and read page 5
         buf.fill(0);
         ctx.disk_manager.write_page(5, data);
         ctx.disk_manager.read_page(5, &mut buf);
@@ -58,8 +68,10 @@ mod tests {
         let mut data = [0u8; 16];
         data[..14].copy_from_slice(b"A test string.");
 
-        ctx.disk_manager.read_log(&mut buf, 0); // tolerate empty read
+        // Tolerate empty read
+        ctx.disk_manager.read_log(&mut buf, 0);
 
+        // Write and read log
         ctx.disk_manager.write_log(&data);
         ctx.disk_manager.read_log(&mut buf, 0);
         assert_eq!(buf, data);
@@ -70,7 +82,7 @@ mod tests {
     #[test]
     fn test_throw_bad_file() {
         assert!(std::panic::catch_unwind(|| {
-            DiskManager::new("dev/null\\/foo/bar/baz/test.db", "test.log")
+            DiskManager::new("/dev/null/foo/bar/baz/test_disk_manager.db", "test_disk_manager.log")
         })
         .is_err());
     }
