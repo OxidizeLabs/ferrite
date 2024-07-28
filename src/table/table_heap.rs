@@ -2,49 +2,46 @@ use std::option::Option;
 use std::sync::{Arc, Mutex};
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::common::rwlatch::ReaderWriterLatch;
 use crate::page_db::table_page::TablePage;
-use crate::table::tuple::Tuple;
+use crate::table::tuple::{Tuple, TupleMeta};
 
 type PageId = i32;
 type TableOid = i32;
 const INVALID_PAGE_ID: PageId = -1;
 
-#[derive(Clone, Debug)]
-struct TupleMeta {}
+
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-struct RID {}
+pub struct RID {}
 
 struct LockManager {}
-
 struct Transaction {}
-
 struct TableIterator {}
-
 struct PageGuard {}
-
 struct ReadPageGuard {}
-
 struct WritePageGuard {}
 
-struct TableHeap {
+pub struct TableHeap {
     bpm: Arc<Mutex<BufferPoolManager>>,
     first_page_id: PageId,
     last_page_id: Mutex<PageId>,
+    reader_writer_latch: ReaderWriterLatch
 }
 
 impl TableHeap {
-    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>) -> Self {
+    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>, reader_writer_latch: ReaderWriterLatch) -> Self {
         Self {
             bpm,
             first_page_id: INVALID_PAGE_ID,
             last_page_id: Mutex::new(INVALID_PAGE_ID),
+            reader_writer_latch,
         }
     }
 
     pub fn insert_tuple(
         &self,
-        meta: &TupleMeta,
+        meta: TupleMeta,
         tuple: &Tuple,
         lock_mgr: Option<&LockManager>,
         txn: Option<&Transaction>,
