@@ -1,31 +1,23 @@
 use std::sync::{Arc, Mutex};
-use std::optional::Option;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::hash::Hash;
-use std::cmp::Eq;
-use std::fmt::Debug;
+use std::sync::atomic::AtomicI64;
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::config::INVALID_PAGE_ID;
+use crate::common::config::{INVALID_PAGE_ID, PageId, TableOidT};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
-use crate::recovery::log_manager::LogManager;
 use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
 use crate::storage::page::table_page::TablePage;
-use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::common::rid::RID;
-use crate::common::config::PageId;
-use crate::common::config::table_oid_t;
+
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
 pub struct TableHeap {
     bpm: Arc<Mutex<BufferPoolManager>>,
-    first_page_id: page_id_t,
+    first_page_id: PageId,
     latch: Mutex<()>,
-    last_page_id: AtomicI32,
+    last_page_id: AtomicI64,
 }
 
 impl TableHeap {
@@ -38,12 +30,12 @@ impl TableHeap {
     /// # Returns
     ///
     /// A new `TableHeap` instance.
-    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>) -> Self {
         TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
             latch: Mutex::new(()),
-            last_page_id: AtomicI32::new(INVALID_PAGE_ID),
+            last_page_id: AtomicI64::new(INVALID_PAGE_ID),
         }
     }
 
@@ -66,7 +58,7 @@ impl TableHeap {
         tuple: &Tuple,
         lock_mgr: Option<&LockManager>,
         txn: Option<&Transaction>,
-        oid: table_oid_t,
+        oid: TableOidT,
     ) -> Option<RID> {
         // Implementation of insert tuple logic here
         unimplemented!()
@@ -119,10 +111,10 @@ impl TableHeap {
     /// # Returns
     ///
     /// A `TableIterator`.
-    pub fn make_iterator(&self) -> TableIterator {
-        // Implementation of make iterator logic here
-        unimplemented!()
-    }
+    // pub fn make_iterator(&self) -> TableIterator {
+    //     // Implementation of make iterator logic here
+    //     unimplemented!()
+    // }
 
     /// Returns an eager iterator of this table. The iterator will stop at the last tuple
     /// at the time of iterating.
@@ -130,17 +122,17 @@ impl TableHeap {
     /// # Returns
     ///
     /// A `TableIterator`.
-    pub fn make_eager_iterator(&self) -> TableIterator {
-        // Implementation of make eager iterator logic here
-        unimplemented!()
-    }
+    // pub fn make_eager_iterator(&self) -> TableIterator {
+    //     // Implementation of make eager iterator logic here
+    //     unimplemented!()
+    // }
 
     /// Returns the ID of the first page of this table.
     ///
     /// # Returns
     ///
     /// The page ID of the first page.
-    pub fn get_first_page_id(&self) -> page_id_t {
+    pub fn get_first_page_id(&self) -> PageId {
         self.first_page_id
     }
 
@@ -180,7 +172,8 @@ impl TableHeap {
     pub fn create_empty_heap(create_table_heap: bool) -> Option<Box<Self>> {
         // The input parameter should be false in order to generate an empty heap
         assert!(!create_table_heap);
-        Some(Box::new(TableHeap::new(Arc::new(Mutex::new(BufferPoolManager::new())))))
+        unimplemented!()
+        // Some(Box::new(TableHeap::new(Arc::new(Mutex::new(BufferPoolManager::new(0, Arc::new(()), Arc::new(()), Arc::new(Mutex::new(()))))))))
     }
 
     /// Acquires a read lock on a table page.
@@ -270,6 +263,6 @@ impl TableHeap {
     ///
     /// A new `TableHeap` instance.
     pub fn new_for_binder(create_table_heap: bool) -> Self {
-        TableHeap::new(Arc::new(Mutex::new(BufferPoolManager::new())))
+        unimplemented!()
     }
 }

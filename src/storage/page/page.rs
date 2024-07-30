@@ -83,7 +83,7 @@ impl Page {
     /// Returns the page LSN.
     pub fn get_lsn(&self) -> Lsn {
         let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 4];
-        i32::from_ne_bytes(bytes.try_into().unwrap())
+        i32::from_ne_bytes(bytes.try_into().unwrap()).into()
     }
 
     /// Sets the page LSN.

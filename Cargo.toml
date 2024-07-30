@@ -13,3 +13,4 @@ time = "0.3.36"
 futures = { version = "0.3.30", features = ["thread-pool"] }
 tokio = { version = "1", features = ["full"] }
 xxhash-rust = { version = "0.8.11", features = ["xxh3"] }
+static_assertions = "1.1.0"

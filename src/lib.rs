@@ -1,7 +1,6 @@
 pub mod buffer;
 pub mod catalogue;
 pub mod common;
-pub mod tests;
 pub mod types_db;
 pub mod storage;
 pub mod container;
