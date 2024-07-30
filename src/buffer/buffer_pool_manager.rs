@@ -1,9 +1,9 @@
 use crate::buffer::lru_k_replacer::AccessType::Lookup;
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
-use crate::page_db::page::Page;
-use crate::disk::disk_manager::DiskManager;
-use crate::disk::disk_scheduler::DiskScheduler;
+use crate::storage::page::page::Page;
+use crate::storage::disk::disk_manager::DiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -84,7 +84,7 @@ impl BufferPoolManager {
 
         // Create new page
         let new_page_id = self.next_page_id.fetch_add(1, Ordering::SeqCst);
-        let new_page = Page::new(new_page_id);
+        let new_page = Page::new(new_page_id.into());
 
         {
             let mut pages = self.pages.write().unwrap();
@@ -92,7 +92,7 @@ impl BufferPoolManager {
         }
 
         let mut page_table = self.page_table.lock().unwrap();
-        page_table.insert(new_page_id, frame_id);
+        page_table.insert(new_page_id as PageId, frame_id);
 
         {
             let replacer = self.replacer.lock().unwrap();
@@ -266,7 +266,7 @@ impl BufferPoolManager {
     }
 
     pub fn allocate_page(&self) -> PageId {
-        self.next_page_id.fetch_add(1, Ordering::SeqCst)
+        self.next_page_id.fetch_add(1, Ordering::SeqCst).into()
     }
 
     pub fn deallocate_page(&mut self, page_id: PageId) {

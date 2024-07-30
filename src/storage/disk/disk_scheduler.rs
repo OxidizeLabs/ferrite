@@ -1,5 +1,5 @@
 use crate::common::config::PageId;
-use crate::disk::disk_manager::DiskManager;
+use crate::storage::disk::disk_manager::DiskManager;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;

@@ -303,11 +303,11 @@ impl Type for InvalidType {
         unimplemented!()
     }
 
-    fn serialize_to(&self, val: &Value, storage: &mut [u8]) {
+    fn serialize_to(&self, _val: &Value, _storage: &mut [u8]) {
         unimplemented!()
     }
 
-    fn deserialize_from(&self, storage: &mut [u8]) -> Value {
+    fn deserialize_from(&self, _storage: &mut [u8]) -> Value {
         unimplemented!()
     }
 

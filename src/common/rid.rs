@@ -2,7 +2,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 
-#[derive(Debug, Default, Clone, Copy, Eq)]
+#[derive(Debug, Clone, Copy, Eq)]
 pub struct RID {
     page_id: PageId,
     slot_num: u32,

@@ -1,5 +1,5 @@
 use crate::common::config::PageId;
-use crate::table::tuple::{Tuple, TupleMeta};
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::option::Option;
