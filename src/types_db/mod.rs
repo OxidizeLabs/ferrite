@@ -10,3 +10,8 @@ pub mod types;
 pub mod value;
 pub mod varlen_type;
 pub mod vector_type;
+pub mod abstract_pool;
+pub mod integer_parent_type;
+pub mod limits;
+pub mod type_util;
+pub mod value_factory;
