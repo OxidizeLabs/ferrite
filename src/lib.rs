@@ -1,9 +1,13 @@
 pub mod buffer;
 pub mod catalogue;
 pub mod common;
-pub mod disk;
-pub mod page_db;
-pub mod table;
 pub mod tests;
 pub mod types_db;
-pub mod helpers;
+pub mod storage;
+pub mod container;
+pub mod concurrency;
+pub mod execution;
+pub mod optimizer;
+pub mod planner;
+pub mod primer;
+pub mod recovery;
