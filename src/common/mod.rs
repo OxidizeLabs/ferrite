@@ -7,3 +7,4 @@ pub mod db_instance;
 pub mod exception;
 pub mod hash_util;
 pub mod macros;
+pub mod spinlock;

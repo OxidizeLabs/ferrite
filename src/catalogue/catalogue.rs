@@ -217,52 +217,52 @@ impl Catalog {
     ///
     /// # Returns
     /// A (non-owning) pointer to the metadata of the new table.
-    pub fn create_index<KeyType: Eq + Hash + Clone, ValueType, KeyComparator>(
-        &mut self,
-        txn: &Transaction,
-        index_name: &str,
-        table_name: &str,
-        schema: Schema,
-        key_schema: Schema,
-        key_attrs: Vec<u32>,
-        key_size: usize,
-        hash_function: HashFunction<KeyType>,
-        is_primary_key: bool,
-        index_type: IndexType,
-    ) -> Option<&IndexInfo> {
-        if !self.table_names.contains_key(table_name) {
-            return None;
-        }
-
-        let table_indexes = self.index_names.entry(table_name.to_string()).or_default();
-        if table_indexes.contains_key(index_name) {
-            return None;
-        }
-
-        let meta = Box::new(IndexMetadata::new(index_name.to_string(), table_name.to_string(), &schema, key_attrs, is_primary_key));
-        let index: Box<dyn Index> = match index_type {
-            IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
-            IndexType::BPlusTreeIndex => Box::new(BPlusTreeIndex::new(meta, self.bpm.clone(), ())),
-            IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
-            IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
-        };
-
-        let table_meta = self.get_table(table_name)?;
-        let mut iter = table_meta.table.make_iterator();
-        while !iter.is_end() {
-            let (meta, tuple) = iter.get_tuple();
-            index.insert_entry(tuple.key_from_tuple(&schema, &key_schema, &key_attrs), tuple.get_rid(), txn);
-            iter.next();
-        }
-
-        let index_oid = self.next_index_oid.fetch_add(1, Ordering::SeqCst);
-        let index_info = Box::new(IndexInfo::new(key_schema, index_name.to_string(), index, index_oid, table_name.to_string(), key_size, is_primary_key, index_type));
-
-        self.indexes.insert(index_oid, index_info);
-        table_indexes.insert(index_name.to_string(), index_oid);
-
-        self.indexes.get(&index_oid).map(|i| &**i)
-    }
+    // pub fn create_index<KeyType: Eq + Hash + Clone, ValueType, KeyComparator>(
+    //     &mut self,
+    //     txn: &Transaction,
+    //     index_name: &str,
+    //     table_name: &str,
+    //     schema: Schema,
+    //     key_schema: Schema,
+    //     key_attrs: Vec<u32>,
+    //     key_size: usize,
+    //     hash_function: HashFunction<KeyType>,
+    //     is_primary_key: bool,
+    //     index_type: IndexType,
+    // ) -> Option<&IndexInfo> {
+    //     if !self.table_names.contains_key(table_name) {
+    //         return None;
+    //     }
+    //
+    //     let table_indexes = self.index_names.entry(table_name.to_string()).or_default();
+    //     if table_indexes.contains_key(index_name) {
+    //         return None;
+    //     }
+    //
+    //     let meta = Box::new(IndexMetadata::new(index_name.to_string(), table_name.to_string(), &schema, key_attrs, is_primary_key));
+    //     let index: Box<dyn Index> = match index_type {
+    //         IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
+    //         IndexType::BPlusTreeIndex => Box::new(BPlusTreeIndex::new(meta, self.bpm.clone(), ())),
+    //         IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
+    //         IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
+    //     };
+    //
+    //     let table_meta = self.get_table(table_name)?;
+    //     let mut iter = table_meta.table.make_iterator();
+    //     while !iter.is_end() {
+    //         let (meta, tuple) = iter.get_tuple();
+    //         index.insert_entry(tuple.key_from_tuple(&schema, &key_schema, &key_attrs), tuple.get_rid(), txn);
+    //         iter.next();
+    //     }
+    //
+    //     let index_oid = self.next_index_oid.fetch_add(1, Ordering::SeqCst);
+    //     let index_info = Box::new(IndexInfo::new(key_schema, index_name.to_string(), index, index_oid, table_name.to_string(), key_size, is_primary_key, index_type));
+    //
+    //     self.indexes.insert(index_oid, index_info);
+    //     table_indexes.insert(index_name.to_string(), index_oid);
+    //
+    //     self.indexes.get(&index_oid).map(|i| &**i)
+    // }
 
     /// Gets the index `index_name` for table `table_name`.
     ///

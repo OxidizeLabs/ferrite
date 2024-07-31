@@ -1,6 +1,29 @@
 use std::sync::Arc;
 use crate::common::spinlock::Spinlock;
 
+/// # Summary:
+/// * NodeType: Enum indicating whether a node is an internal node or a leaf node.
+/// * BPlusTreeNode: Struct representing a node in the B+ tree, which can be an internal node or a leaf node.
+/// * BPlusTree: Struct representing the B+ tree itself, containing methods for searching, inserting, and deleting key-value pairs.
+///
+/// ## Methods:
+/// * new: Creates a new B+ tree.
+/// * search: Searches for a key in the B+ tree and returns the associated value if found.
+/// * insert: Inserts a key-value pair into the B+ tree.
+/// * delete: Deletes a key-value pair from the B+ tree.
+///
+/// ## Internal Methods:
+/// * search_node: Recursively searches for a key in the specified node.
+/// * insert_non_full: Inserts a key-value pair into a node that is not full.
+/// * split_child: Splits a full child node into two nodes.
+/// * delete_from_node: Deletes a key-value pair from a specified node.
+/// * delete_from_internal_node: Deletes a key from an internal node.
+/// * get_predecessor_node: Gets the predecessor node for a given node and index.
+/// * balance_after_deletion: Balances the tree after deletion.
+/// * borrow_from_left_sibling: Borrows a key from the left sibling node.
+/// * borrow_from_right_sibling: Borrows a key from the right sibling node.
+/// * merge_nodes: Merges two nodes.
+
 /// The type of a node in the B+ tree.
 #[derive(Debug, Clone, PartialEq)]
 enum NodeType {

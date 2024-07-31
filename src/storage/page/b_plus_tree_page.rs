@@ -69,6 +69,11 @@ impl<KeyType, ValueType, KeyComparator> BPlusTreePage<KeyType, ValueType, KeyCom
     pub fn get_min_size(&self) -> usize {
         self.max_size / 2
     }
+
+    /// Sets the size of this page.
+    pub fn set_max_size(&mut self, size: usize) {
+        self.max_size = size;
+    }
 }
 
 // Usage of PhantomData to associate generic types with struct is common in Rust

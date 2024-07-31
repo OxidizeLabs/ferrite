@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::disk::disk_manager::DiskManager;
+    extern crate tkdb;
+
+    use tkdb::storage::disk::disk_manager::DiskManager;
     use std::fs::remove_file;
     use std::sync::Arc;
 

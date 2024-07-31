@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
@@ -9,14 +9,14 @@ use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
 use crate::storage::page::table_page::TablePage;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::common::rid::RID;
-
+use crate::common::rwlatch::ReaderWriterLatch;
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
 pub struct TableHeap {
-    bpm: Arc<Mutex<BufferPoolManager>>,
+    bpm: Arc<BufferPoolManager>,
     first_page_id: PageId,
-    latch: Mutex<()>,
+    latch: ReaderWriterLatch,
     last_page_id: AtomicI64,
 }
 
@@ -34,7 +34,7 @@ impl TableHeap {
         TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
-            latch: Mutex::new(()),
+            latch: ReaderWriterLatch::new(),
             last_page_id: AtomicI64::new(INVALID_PAGE_ID),
         }
     }

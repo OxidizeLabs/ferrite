@@ -9,7 +9,7 @@ use crate::storage::table::tuple::Tuple;
 pub struct IndexMetadata {
     name: String,
     table_name: String,
-    key_attrs: Vec<u32>,
+    key_attrs: Vec<usize>,
     key_schema: Arc<Schema>,
     is_primary_key: bool,
 }
@@ -23,7 +23,7 @@ impl IndexMetadata {
     /// - `tuple_schema`: The schema of the indexed key.
     /// - `key_attrs`: The mapping from indexed columns to base table columns.
     /// - `is_primary_key`: Whether this index is a primary key.
-    pub fn new(index_name: String, table_name: String, tuple_schema: &Schema, key_attrs: Vec<u32>, is_primary_key: bool) -> Self {
+    pub fn new(index_name: String, table_name: String, tuple_schema: &Schema, key_attrs: Vec<usize>, is_primary_key: bool) -> Self {
         let key_schema = Arc::new(Schema::copy_schema(tuple_schema, &key_attrs));
         Self {
             name: index_name,
@@ -55,7 +55,7 @@ impl IndexMetadata {
     }
 
     /// Returns the mapping relation between indexed columns and base table columns.
-    pub fn get_key_attrs(&self) -> &Vec<u32> {
+    pub fn get_key_attrs(&self) -> &Vec<usize> {
         &self.key_attrs
     }
 
@@ -102,7 +102,7 @@ pub trait Index {
     }
 
     /// Returns the index key attributes.
-    fn get_key_attrs(&self) -> &Vec<u32> {
+    fn get_key_attrs(&self) -> &Vec<usize> {
         self.get_metadata().get_key_attrs()
     }
 

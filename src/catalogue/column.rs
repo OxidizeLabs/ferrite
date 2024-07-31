@@ -23,11 +23,7 @@ impl Column {
         }
     }
     pub fn new(column_name: String, column_type: TypeId) -> Self {
-        assert!(
-            column_type != TypeId::VarChar,
-            "Wrong constructor for VARCHAR type."
-        );
-        // assert!(column_type != TypeId::Vector, "Wrong constructor for VECTOR type.");
+        assert_ne!(column_type, TypeId::VarChar, "Wrong constructor for VARCHAR type.");
         Column {
             column_name,
             column_type,
@@ -36,7 +32,7 @@ impl Column {
         }
     }
     pub fn new_varlen(column_name: String, column_type: TypeId, length: u32) -> Self {
-        // assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
+        assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
         Column {
             column_name,
             column_type,
