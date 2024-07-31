@@ -6,11 +6,11 @@ mod tests {
 
     use rand::{Rng, SeedableRng};
     use rand::prelude::StdRng;
+    use spin::RwLock;
     use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
     use tkdb::buffer::lru_k_replacer::LRUKReplacer;
     use tkdb::catalogue::column::Column;
     use tkdb::catalogue::schema::Schema;
-    use tkdb::common::rwlatch::ReaderWriterLatch;
     use tkdb::storage::disk::disk_manager::DiskManager;
     use tkdb::storage::disk::disk_scheduler::DiskScheduler;
     use tkdb::storage::table::table_heap::TableHeap;
@@ -69,7 +69,7 @@ mod tests {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 10)));
         let buffer_pool_manager = BufferPoolManager::new(100, disk_scheduler, disk_manager, replacer.clone());
 
-        let table_latch = ReaderWriterLatch::new();
+        let table_latch = RwLock::new(0);
         let table = TableHeap::new(Arc::new(buffer_pool_manager));
 
         let mut rid_v = vec![];

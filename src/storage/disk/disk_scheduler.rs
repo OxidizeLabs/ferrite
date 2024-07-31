@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::thread;
-
+use spin::Mutex;
 use tokio::sync::oneshot;
+use crossbeam::channel::{unbounded, Receiver, Sender};
 
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::DiskManager;
@@ -16,22 +17,25 @@ pub struct DiskRequest {
 
 pub struct DiskScheduler {
     disk_manager: Arc<DiskManager>,
-    request_queue: Arc<(Mutex<VecDeque<DiskRequest>>, Condvar)>,
-    stop_flag: Arc<(Mutex<bool>, Condvar)>,
+    request_queue: Arc<Mutex<VecDeque<DiskRequest>>>,
+    stop_flag: Arc<Mutex<bool>>,
+    notifier: Sender<()>,
     worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
     pub fn new(disk_manager: Arc<DiskManager>) -> Self {
-        let request_queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
-        let stop_flag = Arc::new((Mutex::new(false), Condvar::new()));
+        let request_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let stop_flag = Arc::new(Mutex::new(false));
+        let (notifier, receiver) = unbounded();
         let mut scheduler = DiskScheduler {
             disk_manager,
             request_queue: Arc::clone(&request_queue),
             stop_flag: Arc::clone(&stop_flag),
+            notifier,
             worker_thread: None,
         };
-        scheduler.start_worker_thread();
+        scheduler.start_worker_thread(receiver);
         scheduler
     }
 
@@ -49,67 +53,62 @@ impl DiskScheduler {
             sender,
         };
 
-        let (lock, cvar) = &*self.request_queue;
-        let mut queue = lock.lock().unwrap();
-        queue.push_back(request);
-        cvar.notify_one();
+        {
+            let mut queue = self.request_queue.lock();
+            queue.push_back(request);
+        }
+
+        // If the send fails, the receiver is probably already dropped, which is fine.
+        let _ = self.notifier.send(());
 
         receiver
     }
 
-    fn start_worker_thread(&mut self) {
+    fn start_worker_thread(&mut self, receiver: Receiver<()>) {
         let request_queue = Arc::clone(&self.request_queue);
         let disk_manager = Arc::clone(&self.disk_manager);
         let stop_flag = Arc::clone(&self.stop_flag);
 
         self.worker_thread = Some(thread::spawn(move || {
-            let (lock, cvar) = &*request_queue;
-            let (stop_lock, stop_cvar) = &*stop_flag;
             loop {
-                let mut queue = lock.lock().unwrap();
-
-                // Check for stop condition
-                if *stop_lock.lock().unwrap() && queue.is_empty() {
+                // Wait for notification
+                if receiver.recv().is_err() {
                     break;
                 }
 
-                while queue.is_empty() {
-                    queue = cvar.wait(queue).unwrap();
-
-                    // Re-check for stop condition after waking up
-                    if *stop_lock.lock().unwrap() && queue.is_empty() {
-                        return;
+                // Check for stop condition
+                if *stop_flag.lock() {
+                    let queue = request_queue.lock();
+                    if queue.is_empty() {
+                        break;
                     }
                 }
 
-                if let Some(request) = queue.pop_front() {
-                    drop(queue);
+                let request = {
+                    let mut queue = request_queue.lock();
+                    queue.pop_front()
+                };
 
-                    let mut data = request.data.lock().unwrap();
+                if let Some(request) = request {
+                    let mut data = request.data.lock();
                     if request.is_write {
                         disk_manager.write_page(request.page_id, *data);
                     } else {
                         disk_manager.read_page(request.page_id, &mut *data);
                     }
                     let _ = request.sender.send(());
-
-                    // queue = lock.lock().unwrap();
                 }
             }
-
-            stop_cvar.notify_all();
         }));
     }
 
     pub fn shut_down(&self) {
-        let (stop_lock, stop_cvar) = &*self.stop_flag;
-        let mut stop = stop_lock.lock().unwrap();
-        *stop = true;
-        stop_cvar.notify_all();
-
-        // Notify the request queue to unblock worker thread
-        let (_lock, cvar) = &*self.request_queue;
-        let _ = cvar.notify_all();
+        {
+            let mut stop = self.stop_flag.lock();
+            *stop = true;
+        }
+        // If the send fails, the receiver is probably already dropped, which is fine.
+        let _ = self.notifier.send(()); // Notify the worker thread to exit
     }
 }
 
@@ -117,7 +116,9 @@ impl Drop for DiskScheduler {
     fn drop(&mut self) {
         self.shut_down();
         if let Some(handle) = self.worker_thread.take() {
-            handle.join().unwrap();
+            if let Err(e) = handle.join() {
+                eprintln!("Failed to join worker thread: {:?}", e);
+            }
         }
     }
 }

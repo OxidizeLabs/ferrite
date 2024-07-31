@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_file;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
+    use spin::Mutex;
+    use tokio::test;
+    use tokio::fs::remove_file;
 
     use tkdb::common::config::DB_PAGE_SIZE;
     use tkdb::storage::disk::disk_manager::DiskManager;
@@ -37,14 +40,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[test]
     async fn schedule_write_read_page_test() {
         let ctx = TestContext::new();
         let buf = Arc::new(Mutex::new([0u8; DB_PAGE_SIZE]));
         let data = Arc::new(Mutex::new([0u8; DB_PAGE_SIZE]));
 
         {
-            let mut data_guard = data.lock().unwrap();
+            let mut data_guard = data.lock();
             let test_string = b"A test string.";
             data_guard[..test_string.len()].copy_from_slice(test_string);
         }
@@ -55,8 +58,8 @@ mod tests {
         write_promise.await.unwrap();
         read_promise.await.unwrap();
 
-        let buf_guard = buf.lock().unwrap();
-        let data_guard = data.lock().unwrap();
+        let buf_guard = buf.lock();
+        let data_guard = data.lock();
 
         assert_eq!(&*buf_guard, &*data_guard);
 

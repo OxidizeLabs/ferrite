@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use std::fs::remove_file;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
+    use spin::Mutex;
     use rand::Rng;
 
     use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
@@ -105,7 +106,7 @@ mod tests {
 
         // Scenario: We should be able to fetch the data we wrote a while ago.
         if let Some(page0) = bpm.fetch_page(0) {
-            let page0 = page0.read().unwrap();
+            let page0 = page0.read();
             let fetched_data = page0.get_data();
 
             // Print the fetched data for debugging
