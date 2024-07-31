@@ -3,11 +3,9 @@ mod tests {
     use std::fs;
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
-    use rand::prelude::StdRng;
+
     use rand::{Rng, SeedableRng};
-
-    extern crate tkdb;
-
+    use rand::prelude::StdRng;
     use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
     use tkdb::buffer::lru_k_replacer::LRUKReplacer;
     use tkdb::catalogue::column::Column;
@@ -15,10 +13,12 @@ mod tests {
     use tkdb::common::rwlatch::ReaderWriterLatch;
     use tkdb::storage::disk::disk_manager::DiskManager;
     use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+    use tkdb::storage::table::table_heap::TableHeap;
     use tkdb::storage::table::tuple::{Tuple, TupleMeta};
     use tkdb::types_db::type_id::TypeId;
-    use tkdb::storage::table::table_heap::TableHeap;
     use tkdb::types_db::value::Value;
+
+    extern crate tkdb;
 
     fn construct_tuple(schema: &Schema) -> Tuple {
         let mut values = Vec::new();
@@ -42,7 +42,7 @@ mod tests {
                         alphanum[idx] as char
                     }).collect();
                     Value::new(s)
-                },
+                }
                 _ => continue,
             };
             values.push(value);

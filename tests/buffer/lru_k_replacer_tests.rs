@@ -1,10 +1,11 @@
 #[cfg(test)]
 mod tests {
     extern crate tkdb;
-    use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
     use std::time;
+
+    use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 
     #[test]
     fn basic_tests() {

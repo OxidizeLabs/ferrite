@@ -2,9 +2,10 @@
 mod tests {
     extern crate tkdb;
 
-    use tkdb::storage::disk::disk_manager::DiskManager;
     use std::fs::remove_file;
     use std::sync::Arc;
+
+    use tkdb::storage::disk::disk_manager::DiskManager;
 
     const BUSTUB_PAGE_SIZE: usize = 4096;
 

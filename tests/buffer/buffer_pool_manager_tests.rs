@@ -1,31 +1,31 @@
 #[cfg(test)]
 mod tests {
     use std::fs::remove_file;
+    use std::sync::{Arc, Mutex};
 
-    extern crate tkdb;
+    use rand::Rng;
 
     use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
     use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
     use tkdb::common::config::DB_PAGE_SIZE;
     use tkdb::storage::disk::disk_manager::DiskManager;
     use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-    use rand::Rng;
-    use std::sync::{Arc, Mutex};
-    use tkdb::common::util::helpers::format_slice;
+
+    extern crate tkdb;
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,
         disk_scheduler: Arc<DiskScheduler>,
         replacer: Arc<Mutex<LRUKReplacer>>,
         db_file: String,
-        db_log: String
+        db_log: String,
     }
 
     impl TestContext {
         fn new() -> Self {
             let db_file = "test_bpm.db";
             let log_file = "test_bpm.log";
-            let buffer_pool_size= 10;
+            let buffer_pool_size = 10;
             let disk_manager = Arc::new(DiskManager::new(db_file, log_file));
             let disk_scheduler = Arc::new(DiskScheduler::new(Arc::clone(&disk_manager)));
             let replacer = Arc::new(Mutex::new(LRUKReplacer::new(7, 2)));
