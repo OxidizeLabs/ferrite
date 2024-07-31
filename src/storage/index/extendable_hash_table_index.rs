@@ -1,15 +1,4 @@
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
-
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::storage::index::index::{Index, IndexMetadata};
-use crate::storage::table::tuple::Tuple;
-use crate::common::rid::RID;
-use crate::concurrency::transaction::Transaction;
-use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
-use crate::container::hash_function::HashFunction;
-use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
-
 
 pub struct ExtendableHashTableIndex;
 

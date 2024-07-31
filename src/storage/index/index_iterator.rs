@@ -1,8 +1,9 @@
+use std::fmt::Debug;
 /// For range scan of B+ tree
 ///
 use std::marker::PhantomData;
-use std::fmt::Debug;
 use std::ptr::NonNull;
+
 use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 
@@ -69,8 +70,7 @@ where
     K: KeyType,
     V: ValueType,
     C: KeyComparator<K>,
-{
-}
+{}
 
 impl<K, V, C> Debug for IndexIterator<K, V, C>
 where

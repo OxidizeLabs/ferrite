@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::AtomicU64;
+
 use crate::catalogue::catalogue::Catalog;
-use crate::common::config::TxnId;
 use crate::common::rid::RID;
-use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog};
+use crate::concurrency::transaction::{Transaction, UndoLink};
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 

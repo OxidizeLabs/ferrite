@@ -1,10 +1,11 @@
-use crate::common::config::PageId;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::option::Option;
+
 use xxhash_rust::xxh3::Xxh3;
 
+use crate::common::config::PageId;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct RID {}

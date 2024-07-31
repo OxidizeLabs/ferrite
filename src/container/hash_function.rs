@@ -1,5 +1,6 @@
 use std::hash::Hasher;
 use std::marker::PhantomData;
+
 use xxhash_rust::xxh3;
 
 /// Represents a hash function for a given key type.

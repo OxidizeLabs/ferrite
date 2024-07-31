@@ -1,4 +1,4 @@
-use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::common::config::PageId;
 
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
 pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;

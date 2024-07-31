@@ -1,12 +1,13 @@
-use crate::buffer::lru_k_replacer::AccessType::Lookup;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicI32, Ordering};
+
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::buffer::lru_k_replacer::AccessType::Lookup;
 use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
-use crate::storage::page::page::Page;
 use crate::storage::disk::disk_manager::DiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use crate::storage::page::page::Page;
 
 const INVALID_PAGE_ID: PageId = -1;
 

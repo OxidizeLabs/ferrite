@@ -1,9 +1,8 @@
 use std::sync::{Arc, Mutex};
+
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::buffer::lru_k_replacer::AccessType;
 use crate::common::config::PageId;
 use crate::storage::page::page::Page;
-
 
 /// BasicPageGuard is a structure that helps manage access to a page in the buffer pool.
 pub struct BasicPageGuard {

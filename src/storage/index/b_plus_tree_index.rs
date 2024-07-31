@@ -2,15 +2,7 @@ use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
-use crate::storage::index::index::IndexMetadata;
 use crate::storage::index::b_plus_tree::BPlusTree;
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::rid::RID;
-use crate::concurrency::transaction::Transaction;
-use crate::container::hash_function::HashFunction;
-// use crate::storage::index::generic_key::{GenericComparator, GenericKey};
-use crate::storage::index::index_iterator::IndexIterator;
-use crate::storage::table::tuple::Tuple;
 
 // Traits for KeyType and ValueType
 pub trait KeyType: Clone + Ord {}

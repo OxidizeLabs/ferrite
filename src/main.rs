@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalogue::column::Column;
@@ -14,7 +15,7 @@ use tkdb::types_db::value::Value;
 
 fn main() {
     let boolean_type = BooleanType::new();
-    let val = Value::new(true, );
+    let val = Value::new(true);
     println!("{:?}", val);
 
     let col1 = Column::new("id".to_string(), TypeId::Integer);
@@ -42,7 +43,7 @@ fn main() {
     println!("{}", schema.to_string(true));
 
     let integer_type = IntegerType::new();
-    let value = Value::new(123456, );
+    let value = Value::new(123456);
     let mut storage = [0u8; 4];
     integer_type.serialize_to(&value, &mut storage);
     println!("Serialized integer storage: {:?}", storage);
@@ -50,8 +51,8 @@ fn main() {
     let deserialized_val = integer_type.deserialize_from(&mut storage);
     println!("Deserialized integer value: {:?}", deserialized_val);
 
-    let v1 = Value::new(true, );
-    let v2 = Value::new(111, );
+    let v1 = Value::new(true);
+    let v2 = Value::new(111);
     let values = vec![v1, v2];
 
     let tuple_schema = schema.clone(); // Clone the schema before passing it to Tuple::new

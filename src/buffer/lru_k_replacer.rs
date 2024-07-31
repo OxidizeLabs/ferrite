@@ -1,7 +1,8 @@
-use crate::common::config::FrameId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::common::config::FrameId;
 
 #[derive(Clone, Copy)]
 pub enum AccessType {

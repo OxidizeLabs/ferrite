@@ -1,14 +1,4 @@
-use crate::storage::page::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::config::{INVALID_PAGE_ID, PageId};
-use crate::concurrency::transaction::Transaction;
-use crate::container::hash_function::HashFunction;
-use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
-use crate::storage::page::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
-use crate::storage::page::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use std::hash::Hash;
 
 const HTABLE_HEADER_MAX_DEPTH: u32 = 32;
 const HTABLE_DIRECTORY_MAX_DEPTH: u32 = 32;

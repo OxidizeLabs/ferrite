@@ -1,4 +1,5 @@
 use std::sync::Arc;
+
 use crate::common::spinlock::Spinlock;
 
 /// # Summary:
@@ -365,5 +366,4 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
 
         node.children.remove(right_index);
     }
-
 }

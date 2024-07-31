@@ -1,5 +1,6 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 
 #[derive(Debug, Clone, Copy, Eq)]

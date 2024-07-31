@@ -93,14 +93,13 @@
 /// # Bookkeeping
 /// After a resource is unlocked, the lock manager should update the transaction's lock sets appropriately (check `transaction.rs`).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 
 use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
 use crate::common::rid::RID;
-use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
