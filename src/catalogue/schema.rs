@@ -1,5 +1,6 @@
-use crate::catalogue::column::Column;
 use std::mem::size_of;
+
+use crate::catalogue::column::Column;
 
 #[derive(Debug, Clone)]
 pub struct Schema {

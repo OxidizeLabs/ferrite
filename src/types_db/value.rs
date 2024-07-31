@@ -1,8 +1,10 @@
-use crate::types_db::type_id::TypeId;
-use crate::types_db::types::get_type_size;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::get_type_size;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Value {

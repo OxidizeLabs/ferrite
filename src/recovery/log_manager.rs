@@ -1,8 +1,7 @@
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 use std::thread;
-use crate::common::config::{INVALID_LSN, Lsn};
-use crate::recovery::log_record::LogRecord;
+
 use crate::storage::disk::disk_manager::DiskManager;
 
 const LOG_BUFFER_SIZE: usize = 4096;  // Adjust as necessary

@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::cell::UnsafeCell;
-use std::ops::{Deref, DerefMut};
 use std::hint;
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A simple spinlock for synchronizing access to shared data.
 pub struct Spinlock<T: ?Sized> {
@@ -26,7 +26,7 @@ impl<T: ?Sized> Spinlock<T> {
     /// ```
     pub fn new(data: T) -> Spinlock<T>
     where
-        T: Sized
+        T: Sized,
     {
         Spinlock {
             lock: AtomicBool::new(false),

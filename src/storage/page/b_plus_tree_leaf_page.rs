@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
-use crate::common::config::{INVALID_PAGE_ID, PageId};
+
+use crate::common::config::PageId;
 use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
-use crate::storage::page::b_plus_tree_page::{BPlusTreePage, IndexPageType};
+use crate::storage::page::b_plus_tree_page::BPlusTreePage;
 
 pub type MappingType<K, V> = (K, V);
 

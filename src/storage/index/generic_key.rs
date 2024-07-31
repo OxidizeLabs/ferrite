@@ -1,10 +1,3 @@
-use std::fmt;
-use std::mem;
-
-use crate::catalogue::schema::Schema;
-use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Value;
-
 /// A generic key used for indexing with opaque data.
 #[derive(Clone)]
 pub struct GenericKey<const KEY_SIZE: usize> {

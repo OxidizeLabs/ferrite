@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+
 use crate::common::config::DB_PAGE_SIZE;
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;

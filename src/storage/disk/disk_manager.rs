@@ -1,9 +1,10 @@
-use crate::common::config::{DB_PAGE_SIZE, PageId};
 use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
+
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::util::helpers::format_slice;
 
 pub struct DiskManager {
@@ -14,7 +15,7 @@ pub struct DiskManager {
     num_flushes: Mutex<i32>,
     num_writes: Mutex<i32>,
     flush_log: Mutex<bool>,
-    flush_log_f: Mutex<Option<Box<dyn Future<Output = ()> + Send>>>,
+    flush_log_f: Mutex<Option<Box<dyn Future<Output=()> + Send>>>,
 }
 
 impl DiskManager {
@@ -109,7 +110,7 @@ impl DiskManager {
         *self.num_writes.lock().unwrap()
     }
 
-    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output = ()> + Send>) {
+    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output=()> + Send>) {
         let mut flush_log_f = self.flush_log_f.lock().unwrap();
         *flush_log_f = Some(f);
     }

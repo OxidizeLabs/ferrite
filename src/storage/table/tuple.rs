@@ -7,7 +7,7 @@ use crate::types_db::value::Value;
 #[derive(Clone, Debug)]
 pub struct TupleMeta {
     timestamp: u64,
-    is_deleted: bool
+    is_deleted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -22,7 +22,7 @@ impl TupleMeta {
     pub fn new(timestamp: u64, is_deleted: bool) -> Self {
         Self {
             timestamp,
-            is_deleted
+            is_deleted,
         }
     }
 }

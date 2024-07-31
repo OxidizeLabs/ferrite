@@ -1,6 +1,6 @@
+use std::{fmt, thread};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::{fmt, thread};
 
 use crate::common::config::{INVALID_TS, INVALID_TXN_ID, TimeStampOidT, TxnId};
 use crate::common::rid::RID;

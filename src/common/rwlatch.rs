@@ -1,5 +1,6 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::hint;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::common::spinlock::{Spinlock, SpinlockGuard};
 
 /// A reader-writer latch implemented using spinlocks for thread synchronization.

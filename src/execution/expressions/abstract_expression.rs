@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::storage::table::tuple::Tuple;
