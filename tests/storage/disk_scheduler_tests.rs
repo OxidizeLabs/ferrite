@@ -3,17 +3,17 @@ mod tests {
     use std::fs::remove_file;
     use std::sync::{Arc, Mutex};
 
-    extern crate tkdb;
-
     use tkdb::common::config::DB_PAGE_SIZE;
     use tkdb::storage::disk::disk_manager::DiskManager;
     use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+
+    extern crate tkdb;
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,
         disk_scheduler: Arc<DiskScheduler>,
         db_file: String,
-        db_log: String
+        db_log: String,
     }
 
     impl TestContext {
