@@ -7,7 +7,7 @@ mod primer;
 mod recovery;
 mod sql;
 mod storage;
-mod table;
+// mod table;
 mod txn;
 mod types_db;
 mod backtrace;

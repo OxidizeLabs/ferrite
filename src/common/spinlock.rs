@@ -65,7 +65,7 @@ impl<T: ?Sized> Spinlock<T> {
     ///     // lock acquired
     /// } else {
     ///     // lock not acquired
-    /// }
+    /// };
     /// ```
     pub fn try_lock(&self) -> Option<SpinlockGuard<T>> {
         if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {

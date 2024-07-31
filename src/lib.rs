@@ -10,3 +10,23 @@ pub mod optimizer;
 pub mod planner;
 pub mod primer;
 pub mod recovery;
+
+// src/lib.rs
+// pub mod buffer {
+//     pub mod buffer_pool_manager;
+//     pub mod lru_k_replacer;
+// }
+//
+// pub mod common {
+//     pub mod config;
+//     pub mod util {
+//         pub mod helpers;
+//     }
+// }
+
+// pub mod storage {
+//     pub mod disk {
+//         pub mod disk_manager;
+//         pub mod disk_scheduler;
+//     }
+// }

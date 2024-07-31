@@ -3,9 +3,11 @@ mod tests {
     use std::fs::remove_file;
     use std::sync::{Arc, Mutex};
 
-    use crate::common::config::DB_PAGE_SIZE;
-    use crate::disk::disk_manager::DiskManager;
-    use crate::disk::disk_scheduler::DiskScheduler;
+    extern crate tkdb;
+
+    use tkdb::common::config::DB_PAGE_SIZE;
+    use tkdb::storage::disk::disk_manager::DiskManager;
+    use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,

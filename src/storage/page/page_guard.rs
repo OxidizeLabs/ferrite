@@ -37,18 +37,7 @@ impl BasicPageGuard {
     /// For example, it should not be possible to call `.drop()` on both page
     /// guards and have the pin count decrease by 2.
     pub fn from(other: BasicPageGuard) -> Self {
-        let bpm = other.bpm;
-        let page = other.page;
-        let is_dirty = other.is_dirty;
-
-        // Invalidate the other guard
-        std::mem::forget(other);
-
-        Self {
-            bpm,
-            page,
-            is_dirty,
-        }
+        unimplemented!()
     }
 
     /// Drops a `BasicPageGuard`.
@@ -58,16 +47,7 @@ impl BasicPageGuard {
     /// it should tell the BPM that we are done using this page,
     /// per the specification in the writeup.
     pub fn drop(&mut self) {
-        if let Some(page) = &self.page {
-            let page = page.lock().unwrap();
-            if self.is_dirty {
-                self.bpm.as_ref().unwrap().lock().unwrap().flush_page(page.get_page_id());
-            }
-            self.bpm.as_ref().unwrap().lock().unwrap().unpin_page(page.get_page_id(), self.is_dirty, AccessType::Unknown);
-        }
-        self.page = None;
-        self.bpm = None;
-        self.is_dirty = false;
+        unimplemented!()
     }
 
     /// Move assignment for `BasicPageGuard`.
@@ -78,20 +58,7 @@ impl BasicPageGuard {
     /// a guard replaces its held page with a different one, given
     /// the purpose of a page guard.
     pub fn assign(&mut self, mut other: BasicPageGuard) -> &Self {
-        if let Some(page) = &self.page {
-            let page = page.lock().unwrap();
-            self.bpm.as_ref().unwrap().lock().unwrap().unpin_page(page.get_page_id(), self.is_dirty, AccessType::Unknown);
-        }
-        self.bpm = other.bpm;
-        self.page = other.page;
-        self.is_dirty = other.is_dirty;
-
-        // Invalidate the other guard
-        other.page = None;
-        other.bpm = None;
-        other.is_dirty = false;
-
-        self
+        unimplemented!()
     }
 
     /// Destructor for `BasicPageGuard`.
@@ -110,9 +77,7 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `ReadPageGuard`.
     pub fn upgrade_read(self) -> ReadPageGuard {
-        let guard = ReadPageGuard::new(self.bpm.clone().unwrap(), self.page.clone().unwrap());
-        std::mem::forget(self);
-        guard
+        unimplemented!()
     }
 
     /// Upgrades a `BasicPageGuard` to a `WritePageGuard`.
@@ -123,9 +88,7 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `WritePageGuard`.
     pub fn upgrade_write(self) -> WritePageGuard {
-        let guard = WritePageGuard::new(self.bpm.clone().unwrap(), self.page.clone().unwrap());
-        std::mem::forget(self);
-        guard
+        unimplemented!()
     }
 
     /// Returns the page ID.
@@ -135,13 +98,12 @@ impl BasicPageGuard {
 
     /// Returns a reference to the data.
     pub fn get_data(&self) -> &[u8] {
-        self.page.as_ref().unwrap().lock().unwrap().get_data()
+        unimplemented!()
     }
 
     /// Returns a mutable reference to the data and marks the page as dirty.
     pub fn get_data_mut(&mut self) -> &mut [u8] {
-        self.is_dirty = true;
-        self.page.as_mut().unwrap().lock().unwrap().get_data_mut()
+        unimplemented!()
     }
 }
 

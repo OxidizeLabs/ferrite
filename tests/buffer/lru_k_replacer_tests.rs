@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+    extern crate tkdb;
+    use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
     use std::time;

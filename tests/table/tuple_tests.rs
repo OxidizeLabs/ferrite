@@ -5,17 +5,20 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use rand::prelude::StdRng;
     use rand::{Rng, SeedableRng};
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
-    use crate::common::rwlatch::ReaderWriterLatch;
-    use crate::disk::disk_manager::DiskManager;
-    use crate::disk::disk_scheduler::DiskScheduler;
-    use crate::table::tuple::{Tuple, TupleMeta};
-    use crate::types_db::type_id::TypeId;
-    use crate::table::table_heap::TableHeap;
-    use crate::types_db::value::Value;
+
+    extern crate tkdb;
+
+    use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+    use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+    use tkdb::catalogue::column::Column;
+    use tkdb::catalogue::schema::Schema;
+    use tkdb::common::rwlatch::ReaderWriterLatch;
+    use tkdb::storage::disk::disk_manager::DiskManager;
+    use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+    use tkdb::storage::table::tuple::{Tuple, TupleMeta};
+    use tkdb::types_db::type_id::TypeId;
+    use tkdb::storage::table::table_heap::TableHeap;
+    use tkdb::types_db::value::Value;
 
     fn construct_tuple(schema: &Schema) -> Tuple {
         let mut values = Vec::new();
@@ -51,11 +54,11 @@ mod tests {
     fn disabled_table_heap_test() {
         // Test 1: Parse create SQL statement
         let create_stmt = "a varchar(20), b smallint, c bigint, d bool, e varchar(16)";
-        let col1 = Column::new("a".parse().unwrap(), TypeId::VarChar);
+        let col1 = Column::new_varlen("a".parse().unwrap(), TypeId::VarChar, 4);
         let col2 = Column::new("b".parse().unwrap(), TypeId::SmallInt);
         let col3 = Column::new("c".parse().unwrap(), TypeId::BigInt);
         let col4 = Column::new("d".parse().unwrap(), TypeId::Boolean);
-        let col5 = Column::new("e".parse().unwrap(), TypeId::VarChar);
+        let col5 = Column::new_varlen("e".parse().unwrap(), TypeId::VarChar, 8);
         let cols = vec![col1, col2, col3, col4, col5];
         let schema = Schema::new(cols);
         let tuple = construct_tuple(&schema);
@@ -67,11 +70,11 @@ mod tests {
         let buffer_pool_manager = BufferPoolManager::new(100, disk_scheduler, disk_manager, replacer.clone());
 
         let table_latch = ReaderWriterLatch::new();
-        let mut table = TableHeap::new(Arc::new(Mutex::new(buffer_pool_manager)), table_latch);
+        let table = TableHeap::new(Arc::new(buffer_pool_manager));
 
         let mut rid_v = vec![];
         for _ in 0..5000 {
-            let rid = table.insert_tuple(TupleMeta::new(0, false), &tuple, None, None, 0);
+            let rid = table.insert_tuple(&TupleMeta::new(0, false), &tuple, None, None, 0);
             rid_v.push(rid);
         }
 

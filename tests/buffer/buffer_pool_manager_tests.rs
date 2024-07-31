@@ -1,14 +1,17 @@
 #[cfg(test)]
 mod tests {
     use std::fs::remove_file;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-    use crate::common::config::DB_PAGE_SIZE;
-    use crate::disk::disk_manager::DiskManager;
-    use crate::disk::disk_scheduler::DiskScheduler;
+
+    extern crate tkdb;
+
+    use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+    use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+    use tkdb::common::config::DB_PAGE_SIZE;
+    use tkdb::storage::disk::disk_manager::DiskManager;
+    use tkdb::storage::disk::disk_scheduler::DiskScheduler;
     use rand::Rng;
     use std::sync::{Arc, Mutex};
-    use crate::common::util::helpers::format_slice;
+    use tkdb::common::util::helpers::format_slice;
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,
