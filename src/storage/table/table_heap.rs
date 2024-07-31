@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
-
+use spin::RwLock;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::{INVALID_PAGE_ID, PageId, TableOidT};
 use crate::common::rid::RID;
-use crate::common::rwlatch::ReaderWriterLatch;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
@@ -16,7 +15,7 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 pub struct TableHeap {
     bpm: Arc<BufferPoolManager>,
     first_page_id: PageId,
-    latch: ReaderWriterLatch,
+    latch: RwLock<()>,
     last_page_id: AtomicI64,
 }
 
@@ -34,7 +33,7 @@ impl TableHeap {
         TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
-            latch: ReaderWriterLatch::new(),
+            latch: RwLock::new(()),
             last_page_id: AtomicI64::new(INVALID_PAGE_ID),
         }
     }

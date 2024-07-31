@@ -14,3 +14,7 @@ futures = { version = "0.3.30", features = ["thread-pool"] }
 tokio = { version = "1", features = ["full"] }
 xxhash-rust = { version = "0.8.11", features = ["xxh3"] }
 static_assertions = "1.1.0"
+spin = "0.9"
+crossbeam = "0.8.4"
+log = "0.4"
+env_logger = "0.11.5"

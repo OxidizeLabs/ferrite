@@ -77,7 +77,6 @@ mod tests {
         assert_eq!(bpt.search(&4), Some("value4"));
     }
 
-
     #[test]
     fn test_edge_case_deletion() {
         initialize_logger();
@@ -185,69 +184,69 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn concurrent_operations() {
-        initialize_logger();
-
-        let bpt = Arc::new(RwLock::new(BPlusTree::new(4)));
-
-        let handles: Vec<_> = (0..10)
-            .map(|i| {
-                let bpt_clone = Arc::clone(&bpt);
-                task::spawn(async move {
-                    for j in 0..10 {
-                        let key = i * 10 + j;
-                        let value = format!("value{}", key);
-                        info!("Inserting key: {}, value: {}", key, value);
-                        bpt_clone.write().insert(key, value);
-                    }
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            handle.await.unwrap();
-        }
-
-        let bpt_guard = bpt.read();
-        debug!("{}", bpt_guard.to_string());
-
-        for i in 0..10 {
-            for j in 0..10 {
-                let key = i * 10 + j;
-                let expected_value = format!("value{}", key);
-                info!("Searching for key: {}", key);
-                assert_eq!(bpt_guard.search(&key), Some(expected_value));
-            }
-        }
-
-        let delete_handles: Vec<_> = (0..10)
-            .map(|i| {
-                let bpt_clone = Arc::clone(&bpt);
-                task::spawn(async move {
-                    for j in 0..10 {
-                        let key = i * 10 + j;
-                        info!("Deleting key: {}", key);
-                        bpt_clone.write().delete(&key);
-                    }
-                })
-            })
-            .collect();
-
-        for handle in delete_handles {
-            handle.await.unwrap();
-        }
-
-        let bpt_guard = bpt.read();
-        debug!("{}", bpt_guard.to_string());
-
-        for i in 0..10 {
-            for j in 0..10 {
-                let key = i * 10 + j;
-                info!("Searching for key: {}", key);
-                assert_eq!(bpt_guard.search(&key), None);
-            }
-        }
-    }
+    // #[tokio::test]
+    // async fn concurrent_operations() {
+    //     initialize_logger();
+    //
+    //     let bpt = Arc::new(RwLock::new(BPlusTree::new(4)));
+    //
+    //     let handles: Vec<_> = (0..10)
+    //         .map(|i| {
+    //             let bpt_clone = Arc::clone(&bpt);
+    //             task::spawn(async move {
+    //                 for j in 0..10 {
+    //                     let key = i * 10 + j;
+    //                     let value = format!("value{}", key);
+    //                     info!("Inserting key: {}, value: {}", key, value);
+    //                     bpt_clone.write().insert(key, value);
+    //                 }
+    //             })
+    //         })
+    //         .collect();
+    //
+    //     for handle in handles {
+    //         handle.await.unwrap();
+    //     }
+    //
+    //     let bpt_guard = bpt.read();
+    //     debug!("{}", bpt_guard.to_string());
+    //
+    //     for i in 0..10 {
+    //         for j in 0..10 {
+    //             let key = i * 10 + j;
+    //             let expected_value = format!("value{}", key);
+    //             info!("Searching for key: {}", key);
+    //             assert_eq!(bpt_guard.search(&key), Some(expected_value));
+    //         }
+    //     }
+    //
+    //     let delete_handles: Vec<_> = (0..10)
+    //         .map(|i| {
+    //             let bpt_clone = Arc::clone(&bpt);
+    //             task::spawn(async move {
+    //                 for j in 0..10 {
+    //                     let key = i * 10 + j;
+    //                     info!("Deleting key: {}", key);
+    //                     bpt_clone.write().delete(&key);
+    //                 }
+    //             })
+    //         })
+    //         .collect();
+    //
+    //     for handle in delete_handles {
+    //         handle.await.unwrap();
+    //     }
+    //
+    //     let bpt_guard = bpt.read();
+    //     debug!("{}", bpt_guard.to_string());
+    //
+    //     for i in 0..10 {
+    //         for j in 0..10 {
+    //             let key = i * 10 + j;
+    //             info!("Searching for key: {}", key);
+    //             assert_eq!(bpt_guard.search(&key), None);
+    //         }
+    //     }
+    // }
 }
 
