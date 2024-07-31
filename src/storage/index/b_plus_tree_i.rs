@@ -1,48 +1,22 @@
 use std::sync::Arc;
+use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use log::{debug, info};
 
-use crate::common::spinlock::Spinlock;
-
-/// # Summary:
-/// * NodeType: Enum indicating whether a node is an internal node or a leaf node.
-/// * BPlusTreeNode: Struct representing a node in the B+ tree, which can be an internal node or a leaf node.
-/// * BPlusTree: Struct representing the B+ tree itself, containing methods for searching, inserting, and deleting key-value pairs.
-///
-/// ## Methods:
-/// * new: Creates a new B+ tree.
-/// * search: Searches for a key in the B+ tree and returns the associated value if found.
-/// * insert: Inserts a key-value pair into the B+ tree.
-/// * delete: Deletes a key-value pair from the B+ tree.
-///
-/// ## Internal Methods:
-/// * search_node: Recursively searches for a key in the specified node.
-/// * insert_non_full: Inserts a key-value pair into a node that is not full.
-/// * split_child: Splits a full child node into two nodes.
-/// * delete_from_node: Deletes a key-value pair from a specified node.
-/// * delete_from_internal_node: Deletes a key from an internal node.
-/// * get_predecessor_node: Gets the predecessor node for a given node and index.
-/// * balance_after_deletion: Balances the tree after deletion.
-/// * borrow_from_left_sibling: Borrows a key from the left sibling node.
-/// * borrow_from_right_sibling: Borrows a key from the right sibling node.
-/// * merge_nodes: Merges two nodes.
-
-/// The type of a node in the B+ tree.
 #[derive(Debug, Clone, PartialEq)]
 enum NodeType {
     Internal,
     Leaf,
 }
 
-/// A node in the B+ tree.
 #[derive(Clone)]
 pub struct BPlusTreeNode<K: Ord + Clone, V: Clone> {
     node_type: NodeType,
     keys: Vec<K>,
-    children: Vec<Arc<Spinlock<BPlusTreeNode<K, V>>>>, // for internal nodes
+    children: Vec<Arc<RwLock<BPlusTreeNode<K, V>>>>, // for internal nodes
     values: Vec<V>, // for leaf nodes
 }
 
 impl<K: Ord + Clone, V: Clone> BPlusTreeNode<K, V> {
-    /// Creates a new `BPlusTreeNode`.
     fn new(node_type: NodeType) -> Self {
         BPlusTreeNode {
             node_type,
@@ -53,80 +27,54 @@ impl<K: Ord + Clone, V: Clone> BPlusTreeNode<K, V> {
     }
 }
 
-/// A B+ tree.
 pub struct BPlusTree<K: Ord + Clone, V: Clone> {
-    root: Arc<Spinlock<BPlusTreeNode<K, V>>>,
+    root: Arc<RwLock<BPlusTreeNode<K, V>>>,
     order: usize, // Max number of children per node
 }
 
-impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
-    /// Creates a new `BPlusTree` with the given order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-    /// let bpt: BPlusTree<i32, String> = BPlusTree::new(4);
-    /// ```
+impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, V> {
+    /// Creates a new B+Tree with the given order.
     pub fn new(order: usize) -> Self {
         BPlusTree {
-            root: Arc::new(Spinlock::new(BPlusTreeNode::new(NodeType::Leaf))),
+            root: Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf))),
             order,
         }
     }
 
-    /// Searches for a key in the B+ tree and returns the associated value if found.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-    /// let bpt = BPlusTree::new(4);
-    /// bpt.insert(1, "value".to_string());
-    /// let result = bpt.search(&1);
-    /// assert_eq!(result, Some("value".to_string()));
-    /// ```
+    /// Searches for the value associated with the given key.
     pub fn search(&self, key: &K) -> Option<V> {
-        let root = self.root.lock();
+        let root = self.root.read();
         self.search_node(&root, key)
     }
 
     fn search_node(&self, node: &BPlusTreeNode<K, V>, key: &K) -> Option<V> {
         match node.node_type {
             NodeType::Internal => {
-                let mut i = 0;
-                while i < node.keys.len() && key >= &node.keys[i] {
-                    i += 1;
-                }
-                let child = node.children[i].lock();
+                let i = node.keys.iter().position(|k| key < k).unwrap_or(node.keys.len());
+                let child = node.children[i].read();
                 self.search_node(&child, key)
             }
             NodeType::Leaf => {
-                for (i, k) in node.keys.iter().enumerate() {
-                    if key == k {
-                        return Some(node.values[i].clone());
-                    }
+                if let Some(index) = node.keys.iter().position(|k| k == key) {
+                    Some(node.values[index].clone())
+                } else {
+                    None
                 }
-                None
             }
         }
     }
 
-    /// Inserts a key-value pair into the B+ tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-    /// let bpt = BPlusTree::new(4);
-    /// bpt.insert(1, "value".to_string());
-    /// ```
+    fn find_key_index(&self, node: &BPlusTreeNode<K, V>, key: &K) -> usize {
+        node.keys.iter().position(|k| key < k).unwrap_or(node.keys.len())
+    }
+
+    /// Inserts a key-value pair into the B+Tree.
     pub fn insert(&self, key: K, value: V) {
-        let mut root_guard = self.root.lock();
+        let mut root_guard = self.root.write();
         let root_clone = (*root_guard).clone();
         if root_guard.keys.len() == self.order - 1 {
             let mut new_root = BPlusTreeNode::new(NodeType::Internal);
-            new_root.children.push(Arc::new(Spinlock::new(root_clone)));
+            new_root.children.push(Arc::new(RwLock::new(root_clone)));
             self.split_child(&mut new_root, 0);
             *root_guard = new_root;
         }
@@ -136,26 +84,20 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
     fn insert_non_full(&self, node: &mut BPlusTreeNode<K, V>, key: K, value: V) {
         match node.node_type {
             NodeType::Leaf => {
-                let mut i = 0;
-                while i < node.keys.len() && key > node.keys[i] {
-                    i += 1;
-                }
+                let i = node.keys.iter().position(|k| k > &key).unwrap_or(node.keys.len());
+                info!("Inserting key: {:?} at position: {}", key, i);
                 node.keys.insert(i, key);
                 node.values.insert(i, value);
             }
             NodeType::Internal => {
-                let mut i = 0;
-                while i < node.keys.len() && key > node.keys[i] {
-                    i += 1;
+                let i = node.keys.iter().position(|k| k > &key).unwrap_or(node.keys.len());
+                info!("Traversing to child index: {}", i);
+
+                if node.children[i].read().keys.len() == self.order - 1 {
+                    self.split_child(node, i);
                 }
-                {
-                    let child = node.children[i].lock();
-                    if child.keys.len() == self.order - 1 {
-                        drop(child); // Unlock before borrowing node mutably
-                        self.split_child(node, i);
-                    }
-                }
-                let mut child = node.children[i].lock();
+
+                let mut child = node.children[i].write();
                 self.insert_non_full(&mut child, key, value);
             }
         }
@@ -165,136 +107,177 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
         let order = self.order;
         let mut new_child;
         {
-            let mut full_child = parent.children[index].lock();
+            let mut full_child = parent.children[index].write();
+            let mid_index = order / 2;
+            let mid_key = full_child.keys[mid_index].clone();
+            info!("Splitting node at index: {}, mid_key: {:?}", index, mid_key);
+
             new_child = BPlusTreeNode::new(full_child.node_type.clone());
 
-            new_child.keys = full_child.keys.split_off(order / 2);
+            new_child.keys = full_child.keys.split_off(mid_index);
             if let NodeType::Leaf = full_child.node_type {
-                new_child.values = full_child.values.split_off(order / 2);
+                new_child.values = full_child.values.split_off(mid_index);
             } else {
-                new_child.children = full_child.children.split_off(order / 2);
+                new_child.children = full_child.children.split_off(mid_index + 1);
             }
 
-            parent.keys.insert(index, full_child.keys.pop().unwrap());
+            full_child.keys.truncate(mid_index);
+            if let NodeType::Leaf = full_child.node_type {
+                full_child.values.truncate(mid_index);
+            }
+
+            parent.keys.insert(index, mid_key);
         } // `full_child` is dropped here
 
-        parent.children.insert(index + 1, Arc::new(Spinlock::new(new_child)));
+        parent.children.insert(index + 1, Arc::new(RwLock::new(new_child)));
+
+        info!("Parent node after split: {:?}", parent.keys);
+        info!("Left child keys after split: {:?}", parent.children[index].read().keys);
+        info!("Right child keys after split: {:?}", parent.children[index + 1].read().keys);
     }
 
-    /// Deletes a key-value pair from the B+ tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-    /// let mut bpt = BPlusTree::new(4);
-    /// bpt.insert(1, "value".to_string());
-    /// bpt.delete(&1);
-    /// let result = bpt.search(&1);
-    /// assert_eq!(result, None);
-    /// ```
+    /// Deletes a key-value pair from the B+Tree.
     pub fn delete(&mut self, key: &K) {
-        let new_root;
-        {
-            let mut root_guard = self.root.lock();
-            self.delete_from_node(&mut root_guard, key);
-            if root_guard.keys.is_empty() && root_guard.node_type == NodeType::Internal {
-                new_root = Some(root_guard.children[0].clone());
-            } else {
-                new_root = None;
+        info!("Starting deletion of key: {:?}", key);
+        if let Some((node, index)) = self.find_node_for_key(key) {
+            let mut node_guard = node.write();
+            if self.delete_from_node(&mut node_guard, key, index) && node_guard.keys.is_empty() {
+                if node_guard.node_type == NodeType::Internal && !node_guard.children.is_empty() {
+                    self.root = node_guard.children.remove(0);
+                } else {
+                    self.root = Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf)));
+                }
             }
-        } // `root_guard` is dropped here
-
-        if let Some(new_root) = new_root {
-            self.root = new_root;
+        } else {
+            info!("Key not found: {:?}", key);
         }
     }
 
-    fn delete_from_node(&self, node: &mut BPlusTreeNode<K, V>, key: &K) {
-        match node.node_type {
+    fn find_node_for_key(&self, key: &K) -> Option<(Arc<RwLock<BPlusTreeNode<K, V>>>, usize)> {
+        self.find_node_for_key_recursive(self.root.clone(), key)
+    }
+
+    fn find_node_for_key_recursive(
+        &self,
+        node: Arc<RwLock<BPlusTreeNode<K, V>>>,
+        key: &K,
+    ) -> Option<(Arc<RwLock<BPlusTreeNode<K, V>>>, usize)> {
+        let current_guard = node.read();
+        info!("Searching node with keys: {:?}", current_guard.keys);
+        match current_guard.node_type {
             NodeType::Leaf => {
-                if let Some(index) = node.keys.iter().position(|k| k == key) {
-                    node.keys.remove(index);
-                    node.values.remove(index);
+                if let Some(index) = current_guard.keys.iter().position(|k| k == key) {
+                    info!("Found key in leaf node: {:?} at index: {:?}", current_guard.keys, index);
+                    Some((node.clone(), index))
+                } else {
+                    info!("Key not found in leaf node with keys: {:?}", current_guard.keys);
+                    None
                 }
             }
             NodeType::Internal => {
-                let mut i = 0;
-                while i < node.keys.len() && key > &node.keys[i] {
-                    i += 1;
-                }
-                if i < node.keys.len() && key == &node.keys[i] {
-                    self.delete_from_internal_node(node, i);
-                } else {
-                    {
-                        let mut child = node.children[i].lock();
-                        self.delete_from_node(&mut child, key);
-                    }
-                    self.balance_after_deletion(node, i);
-                }
+                let i = self.find_key_index(&current_guard, key);
+                info!("Traversing internal node: {:?}, going to child index: {}", current_guard.keys, i);
+                drop(current_guard); // Drop the read lock before recursing
+                let child = node.read().children[i].clone();
+                self.find_node_for_key_recursive(child, key)
             }
         }
     }
 
     fn delete_from_internal_node(&self, node: &mut BPlusTreeNode<K, V>, index: usize) {
-        let predecessor_node = self.get_predecessor_node(node, index);
-        let predecessor_key;
-        let predecessor_value;
+        info!("Deleting from internal node: {:?}", node.keys);
 
-        {
-            let predecessor_node_guard = predecessor_node.lock();
-            predecessor_key = predecessor_node_guard.keys.last().unwrap().clone();
-            predecessor_value = predecessor_node_guard.values.last().unwrap().clone();
-        } // `predecessor_node_guard` is dropped here
+        // Find the predecessor key and value
+        let (predecessor_key, predecessor_value) = {
+            let mut current = node.children[index].clone();
+            loop {
+                let current_guard = current.read();
+                match current_guard.node_type {
+                    NodeType::Leaf => {
+                        let key = current_guard.keys.last().unwrap().clone();
+                        let value = current_guard.values.last().unwrap().clone();
+                        break (key, value);
+                    }
+                    NodeType::Internal => {
+                        let next = current_guard.children.last().unwrap().clone();
+                        drop(current_guard); // Release the lock before reassigning
+                        current = next;
+                    }
+                }
+            }
+        };
 
+        // Replace the key in the internal node with the predecessor key
         node.keys[index] = predecessor_key.clone();
-        node.values[index] = predecessor_value.clone();
 
+        // Delete the predecessor key from the child node
         {
-            let mut child = node.children[index].lock();
-            self.delete_from_node(&mut child, &predecessor_key);
-        } // `child` is dropped here
+            let child_len;
+            {
+                let mut child = node.children[index].write();
+                child_len = child.keys.len();
+                self.delete_from_node(&mut child, &predecessor_key, child_len - 1);
+            }
 
-        self.balance_after_deletion(node, index);
+            // Balance the tree after deletion
+            self.balance_after_deletion(node, index);
+        }
     }
 
-
-    fn get_predecessor_node(&self, node: &BPlusTreeNode<K, V>, index: usize) -> Arc<Spinlock<BPlusTreeNode<K, V>>> {
-        let mut child = node.children[index].clone();
-        loop {
-            let next_child = child.clone();
-            let next_child_guard = next_child.lock();
-            if next_child_guard.node_type == NodeType::Leaf {
-                return child;
-            } else {
-                child = next_child_guard.children.last().unwrap().clone();
+    fn delete_from_node(&self, node: &mut BPlusTreeNode<K, V>, key: &K, index: usize) -> bool {
+        match node.node_type {
+            NodeType::Leaf => {
+                if let Some(index) = node.keys.iter().position(|k| k == key) {
+                    node.keys.remove(index);
+                    node.values.remove(index);
+                    true
+                } else {
+                    false
+                }
+            }
+            NodeType::Internal => {
+                let i = self.find_key_index(node, key);
+                if i < node.keys.len() && key == &node.keys[i] {
+                    self.delete_from_internal_node(node, i);
+                    true
+                } else {
+                    let delete_successful;
+                    {
+                        let mut child = node.children[i].write();
+                        delete_successful = self.delete_from_node(&mut child, key, i);
+                    }
+                    if delete_successful {
+                        self.balance_after_deletion(node, i);
+                    }
+                    delete_successful
+                }
             }
         }
     }
 
-
     fn balance_after_deletion(&self, node: &mut BPlusTreeNode<K, V>, index: usize) {
         let order = self.order;
 
-        // Ensure the child_guard is dropped before making any mutable borrow on node.
         let underfull;
         {
-            let child_guard = node.children[index].lock();
+            let child_guard = node.children[index].read();
             underfull = child_guard.keys.len() < (order - 1) / 2;
         }
 
         if underfull {
+            debug!("Node is underfull: {:?}", node.keys);
             let left_sibling_index = if index > 0 { Some(index - 1) } else { None };
             let right_sibling_index = if index < node.children.len() - 1 { Some(index + 1) } else { None };
 
             if let Some(left_index) = left_sibling_index {
                 let borrow_needed;
                 {
-                    let left_sibling = node.children[left_index].lock();
+                    let left_sibling = node.children[left_index].read();
                     borrow_needed = left_sibling.keys.len() > (self.order - 1) / 2;
-                } // left_sibling is dropped here
+                }
 
                 if borrow_needed {
+                    debug!("Borrowing from left sibling: {:?}", node.keys);
                     self.borrow_from_left_sibling(node, index, left_index);
                     return;
                 }
@@ -303,27 +286,30 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
             if let Some(right_index) = right_sibling_index {
                 let borrow_needed;
                 {
-                    let right_sibling = node.children[right_index].lock();
+                    let right_sibling = node.children[right_index].read();
                     borrow_needed = right_sibling.keys.len() > (self.order - 1) / 2;
-                } // right_sibling is dropped here
+                }
 
                 if borrow_needed {
+                    debug!("Borrowing from right sibling: {:?}", node.keys);
                     self.borrow_from_right_sibling(node, index, right_index);
                     return;
                 }
             }
 
             if let Some(left_index) = left_sibling_index {
+                debug!("Merging with left sibling: {:?}", node.keys);
                 self.merge_nodes(node, left_index, index);
             } else if let Some(right_index) = right_sibling_index {
+                debug!("Merging with right sibling: {:?}", node.keys);
                 self.merge_nodes(node, index, right_index);
             }
         }
     }
 
     fn borrow_from_left_sibling(&self, node: &mut BPlusTreeNode<K, V>, index: usize, left_index: usize) {
-        let mut left_sibling = node.children[left_index].lock();
-        let mut child = node.children[index].lock();
+        let mut left_sibling = node.children[left_index].write();
+        let mut child = node.children[index].write();
 
         child.keys.insert(0, node.keys[left_index].clone());
         node.keys[left_index] = left_sibling.keys.pop().unwrap();
@@ -336,8 +322,8 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
     }
 
     fn borrow_from_right_sibling(&self, node: &mut BPlusTreeNode<K, V>, index: usize, right_index: usize) {
-        let mut right_sibling = node.children[right_index].lock();
-        let mut child = node.children[index].lock();
+        let mut right_sibling = node.children[right_index].write();
+        let mut child = node.children[index].write();
 
         child.keys.push(node.keys[index].clone());
         node.keys[index] = right_sibling.keys.remove(0);
@@ -350,20 +336,86 @@ impl<K: Ord + Clone, V: Clone> BPlusTree<K, V> {
     }
 
     fn merge_nodes(&self, node: &mut BPlusTreeNode<K, V>, left_index: usize, right_index: usize) {
-        {
-            let mut left_child = node.children[left_index].lock();
-            let mut right_child = node.children[right_index].lock();
+        let (left_keys, left_values, right_keys, right_values) = {
+            let mut left_child_guard = node.children[left_index].write();
+            let mut right_child_guard = node.children[right_index].write();
 
-            left_child.keys.push(node.keys.remove(left_index));
-            left_child.keys.append(&mut right_child.keys);
-
-            if let NodeType::Internal = left_child.node_type {
-                left_child.children.append(&mut right_child.children);
+            // Perform the merge
+            let (left_keys, left_values, right_keys, right_values) = if let NodeType::Leaf = left_child_guard.node_type {
+                (
+                    std::mem::take(&mut left_child_guard.keys),
+                    std::mem::take(&mut left_child_guard.values),
+                    std::mem::take(&mut right_child_guard.keys),
+                    std::mem::take(&mut right_child_guard.values),
+                )
             } else {
-                left_child.values.append(&mut right_child.values);
+                left_child_guard.keys.push(node.keys[left_index].clone());
+                (
+                    std::mem::take(&mut left_child_guard.keys),
+                    vec![],
+                    std::mem::take(&mut right_child_guard.keys),
+                    vec![],
+                )
+            };
+
+            info!("Merging nodes: left = {:?}, right = {:?}", left_keys, right_keys);
+
+            (left_keys, left_values, right_keys, right_values)
+        }; // Drop child guards here
+
+        if left_values.is_empty() {
+            node.keys.remove(left_index);
+        }
+
+        {
+            let mut left_child_guard = node.children[left_index].write();
+            let mut right_child_guard = node.children[right_index].write();
+
+            left_child_guard.keys.extend(right_keys);
+            left_child_guard.values.extend(right_values);
+
+            if !left_values.is_empty() {
+                left_child_guard.values.extend(left_values);
+            } else {
+                left_child_guard.children.extend(right_child_guard.children.drain(..));
             }
-        } // left_child and right_child are dropped here
+        } // Drop child guards here
 
         node.children.remove(right_index);
+
+        // Step 2: Update root if necessary
+        if node.keys.is_empty() {
+            info!("Parent node is empty after merge, updating root");
+            if !node.children.is_empty() {
+                let new_root_guard = node.children.remove(0);
+                let new_root = new_root_guard.write();
+                self.root.write().clone_from(&*new_root);
+            } else {
+                // If there are no children left, set root to None
+                *self.root.write() = BPlusTreeNode::new(NodeType::Leaf);
+            }
+        }
+    }
+
+    /// Returns a string representation of the B+Tree.
+    pub fn to_string(&self) -> String {
+        let root = self.root.read();
+        self.node_to_string(&root, 0)
+    }
+
+    fn node_to_string(&self, node: &BPlusTreeNode<K, V>, level: usize) -> String {
+        let mut result = String::new();
+        if node.node_type == NodeType::Internal {
+            result.push_str(&format!("{}Internal Node: {:?}\n", "  ".repeat(level), node.keys));
+            for child in &node.children {
+                result.push_str(&self.node_to_string(&child.read(), level + 1));
+            }
+        } else {
+            result.push_str(&format!("{}Leaf Node: {:?}\n", "  ".repeat(level), node.keys));
+            for value in &node.values {
+                result.push_str(&format!("{}  Value: {:?}\n", "  ".repeat(level + 1), value));
+            }
+        }
+        result
     }
 }
