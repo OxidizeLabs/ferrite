@@ -1,5 +1,4 @@
 pub mod config;
-pub mod rwlatch;
 pub mod rid;
 pub mod util;
 pub mod logger;
@@ -7,4 +6,3 @@ pub mod db_instance;
 pub mod exception;
 pub mod hash_util;
 pub mod macros;
-pub mod spinlock;
