@@ -1,13 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::PageId;
 use crate::storage::page::page::Page;
 
 /// BasicPageGuard is a structure that helps manage access to a page in the buffer pool.
+#[derive(Clone)]
 pub struct BasicPageGuard {
-    bpm: Option<Arc<Mutex<BufferPoolManager>>>,
-    page: Option<Arc<Mutex<Page>>>,
+    bpm: Option<Arc<BufferPoolManager>>,
+    page: Option<Arc<Page>>,
     is_dirty: bool,
 }
 
@@ -20,7 +21,7 @@ impl BasicPageGuard {
     ///
     /// # Returns
     /// A new `BasicPageGuard` instance.
-    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>, page: Arc<Mutex<Page>>) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Page>) -> Self {
         Self {
             bpm: Some(bpm),
             page: Some(page),
@@ -36,7 +37,7 @@ impl BasicPageGuard {
     /// For example, it should not be possible to call `.drop()` on both page
     /// guards and have the pin count decrease by 2.
     pub fn from(other: BasicPageGuard) -> Self {
-        unimplemented!()
+        other.clone()
     }
 
     /// Drops a `BasicPageGuard`.
@@ -92,7 +93,7 @@ impl BasicPageGuard {
 
     /// Returns the page ID.
     pub fn page_id(&self) -> PageId {
-        self.page.as_ref().unwrap().lock().unwrap().get_page_id()
+        unimplemented!()
     }
 
     /// Returns a reference to the data.
@@ -120,7 +121,7 @@ impl ReadPageGuard {
     ///
     /// # Returns
     /// A new `ReadPageGuard` instance.
-    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>, page: Arc<Mutex<Page>>) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Page>) -> Self {
         Self {
             guard: BasicPageGuard::new(bpm, page),
         }
@@ -189,7 +190,7 @@ impl WritePageGuard {
     ///
     /// # Returns
     /// A new `WritePageGuard` instance.
-    pub fn new(bpm: Arc<Mutex<BufferPoolManager>>, page: Arc<Mutex<Page>>) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Page>) -> Self {
         Self {
             guard: BasicPageGuard::new(bpm, page),
         }
