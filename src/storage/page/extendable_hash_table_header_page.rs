@@ -1,5 +1,6 @@
-use crate::common::config::PageId;
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 
+pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
 pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;
 
@@ -66,7 +67,3 @@ impl ExtendableHTableHeaderPage {
         }
     }
 }
-
-// Ensure that the size of ExtendableHTableHeaderPage is within the limit.
-// static_assertions::const_assert!(size_of::<PageId>() == 4);
-// static_assertions::const_assert!(size_of::<ExtendableHTableHeaderPage>() <= DB_PAGE_SIZE);
