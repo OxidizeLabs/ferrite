@@ -217,7 +217,3 @@ impl ExtendableHTableDirectoryPage {
         }
     }
 }
-
-// Ensure that the size of ExtendableHTableDirectoryPage is within the limit.
-// static_assertions::const_assert!(size_of::<PageId>() == 4);
-// static_assertions::const_assert!(size_of::<ExtendableHTableDirectoryPage>() <= DB_PAGE_SIZE);
