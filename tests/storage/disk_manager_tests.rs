@@ -4,7 +4,7 @@ mod tests {
 
     use std::fs::remove_file;
     use std::sync::Arc;
-
+    use tkdb::common::config::DB_PAGE_SIZE;
     use tkdb::storage::disk::disk_manager::DiskManager;
 
     const BUSTUB_PAGE_SIZE: usize = 4096;
@@ -43,8 +43,8 @@ mod tests {
     #[test]
     fn test_read_write_page() {
         let ctx = TestContext::new();
-        let mut buf = [0u8; BUSTUB_PAGE_SIZE];
-        let mut data = [0u8; BUSTUB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE];
         data[..14].copy_from_slice(b"A test string.");
 
         // Tolerate empty read
