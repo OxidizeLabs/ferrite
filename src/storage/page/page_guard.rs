@@ -53,6 +53,8 @@ impl BasicPageGuard {
             page_guard.decrement_pin_count();
             bpm.unpin_page(page_guard.get_page_id(), self.is_dirty, AccessType::Unknown);
         }
+        self.bpm = None;
+        self.page = None;
     }
 
     /// Move assignment for `BasicPageGuard`.
@@ -138,6 +140,25 @@ impl BasicPageGuard {
         self.is_dirty = true;
         let mut page = self.page.as_mut().unwrap().lock();
         Box::new(*page.get_data_mut())
+    }
+
+    /// Returns a reference to the data casted to a specific type.
+    ///
+    /// # Returns
+    /// A reference to the data as a specific type.
+    pub fn as_type<T>(&self) -> &T {
+        let data = self.get_data();
+        unsafe { &*(data.as_ptr() as *const T) }
+    }
+
+    /// Returns a mutable reference to the data casted to a specific type and marks the page as dirty.
+    ///
+    /// # Returns
+    /// A mutable reference to the data as a specific type.
+    pub fn as_type_mut<T>(&mut self) -> &mut T {
+        self.is_dirty = true;
+        let mut data = self.get_data_mut();
+        unsafe { &mut *(data.as_mut_ptr() as *mut T) }
     }
 }
 
