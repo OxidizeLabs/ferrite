@@ -4,6 +4,7 @@ use crate::types_db::value::Val;
 use crate::types_db::value::Value;
 
 // Implementation for IntegerType
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
 pub struct IntegerType;
 
 impl IntegerType {
