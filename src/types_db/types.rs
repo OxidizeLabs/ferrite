@@ -6,7 +6,8 @@ use crate::types_db::smallint_type::SmallIntType;
 use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{ToValue, Value};
+use crate::types_db::value::{Value};
+use crate::types_db::value::Val::Boolean;
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
 
@@ -89,13 +90,13 @@ pub trait Type {
     fn compare_not_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn compare_less_than(&self, _left: &Value, _right: &Value) -> CmpBool {
+    fn compare_less_than(&self, _right: &Value) -> CmpBool {
         unimplemented!()
     }
     fn compare_less_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn compare_greater_than(&self, _left: &Value, _right: &Value) -> CmpBool {
+    fn compare_greater_than(&self, _right: &Value) -> CmpBool {
         unimplemented!()
     }
     fn compare_greater_than_equals(&self, _left: &Value, _right: &Value) -> CmpBool {
@@ -223,7 +224,7 @@ impl Type for InvalidType {
         unimplemented!()
     }
 
-    fn compare_less_than(&self, _left: &Value, _right: &Value) -> CmpBool {
+    fn compare_less_than(&self,_right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
@@ -233,7 +234,7 @@ impl Type for InvalidType {
         unimplemented!()
     }
 
-    fn compare_greater_than(&self, _left: &Value, _right: &Value) -> CmpBool {
+    fn compare_greater_than(&self, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }
