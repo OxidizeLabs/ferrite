@@ -7,19 +7,19 @@ use crate::types_db::type_id::TypeId;
 pub struct Column {
     column_name: String,
     column_type: TypeId,
-    length: u32,
-    column_offset: u32,
+    length: usize,
+    column_offset: usize,
 }
 
 impl Column {
-    pub fn type_size(type_id: TypeId, length: u32) -> u8 {
+    pub fn type_size(type_id: TypeId, length: usize) -> u8 {
         match type_id {
             TypeId::Boolean | TypeId::TinyInt => 1,
             TypeId::SmallInt => 2,
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar => length as u8,
-            // TypeId::Vector => (length * size_of::<f64>() as u32) as u8,
+            // TypeId::Vector => (length * size_of::<f64>() as usize) as u8,
             _ => panic!("Cannot get size of invalid type"),
         }
     }
@@ -28,16 +28,16 @@ impl Column {
         Column {
             column_name,
             column_type,
-            length: Self::type_size(column_type, 0) as u32,
+            length: Self::type_size(column_type, 0) as usize,
             column_offset: 0,
         }
     }
-    pub fn new_varlen(column_name: String, column_type: TypeId, length: u32) -> Self {
+    pub fn new_varlen(column_name: String, column_type: TypeId, length: usize) -> Self {
         assert!(column_type == TypeId::VarChar || column_type == TypeId::Vector, "Wrong constructor for fixed-size type.");
         Column {
             column_name,
             column_type,
-            length: Self::type_size(column_type, length) as u32,
+            length: Self::type_size(column_type, length) as usize,
             column_offset: 0,
         }
     }
@@ -61,15 +61,15 @@ impl Column {
         &self.column_name
     }
 
-    pub fn get_storage_size(&self) -> u32 {
+    pub fn get_storage_size(&self) -> usize {
         self.length
     }
 
-    pub fn get_offset(&self) -> u32 {
+    pub fn get_offset(&self) -> usize {
         self.column_offset
     }
 
-    pub fn set_offset(&mut self, value: u32) {
+    pub fn set_offset(&mut self, value: usize) {
         self.column_offset = value
     }
 

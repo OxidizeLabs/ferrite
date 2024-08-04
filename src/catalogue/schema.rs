@@ -26,7 +26,7 @@ impl Schema {
             if column.is_inlined() {
                 curr_offset += column.get_storage_size();
             } else {
-                curr_offset += size_of::<u32>() as u32;
+                curr_offset += size_of::<usize>();
             }
 
             columns_processed.push(column);
@@ -35,7 +35,7 @@ impl Schema {
         Schema {
             tuple_is_inlined,
             columns: columns_processed,
-            length: curr_offset,
+            length: curr_offset as u32,
             unlined_columns: uninlined_columns,
         }
     }
