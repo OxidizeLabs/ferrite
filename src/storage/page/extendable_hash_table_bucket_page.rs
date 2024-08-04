@@ -1,6 +1,9 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::mem::size_of;
 
 use crate::common::config::DB_PAGE_SIZE;
+use crate::storage::index::generic_key::{Comparator, GenericComparator};
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;
 
@@ -11,7 +14,12 @@ pub fn htable_bucket_array_size(mapping_type_size: usize) -> usize {
 pub type MappingType<K, V> = (K, V);
 
 /// Bucket page for extendable hash table.
-pub struct ExtendableHTableBucketPage<K, V, C> {
+pub struct ExtendableHTableBucketPage<K, V, C>
+where
+    K: Clone + Debug,
+    V: Clone + Debug,
+    C: Comparator<K> + Clone,
+{
     size: u32,
     max_size: u32,
     array: Vec<MappingType<K, V>>,
@@ -20,9 +28,9 @@ pub struct ExtendableHTableBucketPage<K, V, C> {
 
 impl<K, V, C> ExtendableHTableBucketPage<K, V, C>
 where
-    K: Clone + std::fmt::Debug,
-    V: Clone + std::fmt::Debug,
-    C: Fn(&K, &K) -> std::cmp::Ordering,
+    K: Clone + Debug,
+    V: Clone + Debug,
+    C: Comparator<K> + Clone,
 {
     /// Initializes a new bucket page with the specified maximum size.
     ///
@@ -31,8 +39,7 @@ where
     pub fn init(&mut self, max_size: u32) {
         self.size = 0;
         self.max_size = max_size;
-        self.array.clear();
-        self.array.reserve(max_size as usize);
+        self.array = Vec::with_capacity(max_size as usize);
     }
 
     /// Looks up a key in the bucket.
@@ -44,7 +51,16 @@ where
     /// # Returns
     /// An optional value associated with the key.
     pub fn lookup(&self, key: &K, cmp: &C) -> Option<V> {
-        self.array.iter().find(|(k, _)| cmp(k, key) == std::cmp::Ordering::Equal).map(|(_, v)| v.clone())
+        println!("Looking up key: {:?}", key);
+        for (k, v) in &self.array {
+            println!("Comparing with key: {:?}", k);
+            if cmp.compare(k, key) == std::cmp::Ordering::Equal {
+                println!("Key found: {:?}", k);
+                return Some(v.clone());
+            }
+        }
+        println!("Key not found: {:?}", key);
+        None
     }
 
     /// Attempts to insert a key-value pair into the bucket.
@@ -77,7 +93,7 @@ where
     /// # Returns
     /// True if removed, false if not found.
     pub fn remove(&mut self, key: &K, cmp: &C) -> bool {
-        if let Some(index) = self.array.iter().position(|(k, _)| cmp(k, key) == std::cmp::Ordering::Equal) {
+        if let Some(index) = self.array.iter().position(|(k, _)| cmp.compare(k, key) == std::cmp::Ordering::Equal) {
             self.array.swap_remove(index);
             self.size -= 1;
             true
