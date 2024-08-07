@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use spin::{Mutex, RwLock};
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
-use crate::storage::disk::disk_manager::DiskManager;
+use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::page::page::Page;
 use crate::storage::page::page_guard::{BasicPageGuard, ReadPageGuard, WritePageGuard};
@@ -22,8 +23,8 @@ pub struct BufferPoolManager {
     page_table: Arc<Mutex<HashMap<PageId, FrameId>>>,
     replacer: Arc<Mutex<LRUKReplacer>>,
     free_list: Arc<Mutex<Vec<FrameId>>>,
-    disk_scheduler: Arc<DiskScheduler>,
-    disk_manager: Arc<DiskManager>,
+    disk_scheduler: Arc<TokioMutex<DiskScheduler>>,
+    disk_manager: Arc<FileDiskManager>,
 }
 
 impl BufferPoolManager {
@@ -39,8 +40,8 @@ impl BufferPoolManager {
     /// A new `BufferPoolManager` instance.
     pub fn new(
         pool_size: usize,
-        disk_scheduler: Arc<DiskScheduler>,
-        disk_manager: Arc<DiskManager>,
+        disk_scheduler: Arc<TokioMutex<DiskScheduler>>,
+        disk_manager: Arc<FileDiskManager>,
         replacer: Arc<Mutex<LRUKReplacer>>,
     ) -> Self {
         let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
@@ -70,7 +71,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional new page.
-    pub fn new_page(&self) -> Option<Page> {
+    pub async fn new_page(&self) -> Option<Page> {
         let frame_id = {
             let mut free_list = self.free_list.lock();
             free_list.pop().unwrap_or_else(|| {
@@ -92,7 +93,8 @@ impl BufferPoolManager {
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
                     // Schedule the write but don't match on the result since it's not a Result type
-                    let _receiver = self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    let ds = self.disk_scheduler.lock().await;
+                    let _receiver = ds.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id);
                     page.set_dirty(false);
                 }
             }
@@ -125,7 +127,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional new `BasicPageGuard`.
-    pub fn new_page_guarded(self: &Arc<Self>) -> Option<BasicPageGuard> {
+    pub async fn new_page_guarded(self: &Arc<Self>) -> Option<BasicPageGuard> {
         let frame_id = {
             let mut free_list = self.free_list.lock();
             free_list.pop().unwrap_or_else(|| {
@@ -147,7 +149,8 @@ impl BufferPoolManager {
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
                     // Schedule the write but don't match on the result since it's not a Result type
-                    let _receiver = self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    let ds = self.disk_scheduler.lock().await;
+                    let _receiver = ds.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id);
                     page.set_dirty(false);
                 }
             }
@@ -203,7 +206,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<Page>>`.
-    pub fn fetch_page(&self, page_id: PageId) -> Option<Arc<RwLock<Page>>> {
+    pub async fn fetch_page(&self, page_id: PageId) -> Option<Arc<RwLock<Page>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -243,7 +246,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
                     page.set_dirty(false);
                 }
             }
@@ -253,7 +256,7 @@ impl BufferPoolManager {
 
         // Load new page from disk
         let mut new_page = Page::new(page_id);
-        self.disk_manager.read_page(page_id, new_page.get_data_mut());
+        self.disk_manager.read_page(page_id, new_page.get_data_mut()).await;
 
         {
             let mut pages = self.pages.write();
@@ -279,7 +282,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<BasicPageGuard>>`.
-    pub fn fetch_page_basic(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<BasicPageGuard>>> {
+    pub async fn fetch_page_basic(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<BasicPageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -319,7 +322,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
                     page.set_dirty(false);
                 }
             }
@@ -355,7 +358,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<ReadPageGuard>>`.
-    pub fn fetch_page_read(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<ReadPageGuard>>> {
+    pub async fn fetch_page_read(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<ReadPageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -395,7 +398,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
                     page.set_dirty(false);
                 }
             }
@@ -431,7 +434,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<WritePageGuard>>`.
-    pub fn fetch_page_write(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<WritePageGuard>>> {
+    pub async fn fetch_page_write(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<WritePageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -471,7 +474,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.schedule(false, Arc::new(Mutex::new(page.get_data().clone())), old_page_id);
+                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
                     page.set_dirty(false);
                 }
             }
@@ -555,7 +558,7 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     let data = page.get_data();
                     info!("Page data before flushing: {:?}", &data[..64]); // Debugging statement
-                    self.disk_manager.write_page(page_id, *data);
+                    self.disk_manager.write_page(page_id, &data);
                     info!("Page data written to disk: {:?}", &data[..64]); // Debugging statement
                     page.set_dirty(false); // Reset dirty flag after flushing
                     info!("Page {} flushed successfully", page_id); // Debugging statement
@@ -581,7 +584,7 @@ impl BufferPoolManager {
         for (&page_id, &frame_id) in page_table.iter() {
             if let Some(page) = &pages[frame_id as usize] {
                 if page.is_dirty() {
-                    self.disk_manager.write_page(page_id, *page.get_data());
+                    self.disk_manager.write_page(page_id, &page.get_data());
                     let _ = &page.clone().set_dirty(false);
                 }
             }
