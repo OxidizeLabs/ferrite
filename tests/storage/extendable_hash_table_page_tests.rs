@@ -1,63 +1,82 @@
-use crate::test_setup::initialize_logger;
+use std::mem::size_of;
+use std::sync::Arc;
+use std::thread;
+
 use chrono::Utc;
 use env_logger;
 use spin::Mutex;
-use std::fs::remove_file;
-use std::mem::size_of;
-use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
+
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalogue::column::Column;
-use tkdb::catalogue::schema::Schema;
-use tkdb::common::config::{PageId, INVALID_PAGE_ID};
+use tkdb::common::config::{INVALID_PAGE_ID, PageId};
 use tkdb::common::rid::RID;
-use tkdb::storage::disk::disk_manager::DiskManager;
+use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 use tkdb::storage::index::generic_key::GenericComparator;
 use tkdb::storage::index::generic_key::GenericKey;
 use tkdb::storage::page::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 use tkdb::storage::page::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use tkdb::storage::page::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-use tkdb::types_db::type_id::TypeId;
+
+use crate::test_setup::initialize_logger;
 
 const PAGE_ID_SIZE: usize = size_of::<PageId>();
 
 struct TestContext {
-    disk_manager: Arc<DiskManager>,
-    disk_scheduler: Arc<DiskScheduler>,
-    replacer: Arc<Mutex<LRUKReplacer>>,
+    bpm: Arc<BufferPoolManager>,
     db_file: String,
     db_log_file: String,
+    buffer_pool_size: usize,
 }
 
 impl TestContext {
-    fn new() -> Self {
+    async fn new(test_name: &str) -> Self {
         initialize_logger();
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
-        let db_file = format!("test_bpm_{}.db", timestamp);
-        let db_log_file = format!("test_bpm_{}.log", timestamp);
-        let disk_manager = Arc::new(DiskManager::new(db_file.clone(), db_log_file.clone()));
-        let disk_scheduler = Arc::new(DiskScheduler::new(Arc::clone(&disk_manager)));
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(7, 2)));
-
-        Self {
-            disk_manager,
+        let buffer_pool_size: usize = 5;
+        const K: usize = 2;
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+        let db_file = format!("{}_{}.db", test_name, timestamp);
+        let db_log_file = format!("{}_{}.log", test_name, timestamp);
+        let disk_manager =
+            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
+        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(Arc::clone(
+            &disk_manager,
+        ))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(buffer_pool_size, K)));
+        let bpm = Arc::new(BufferPoolManager::new(
+            buffer_pool_size,
             disk_scheduler,
-            replacer,
+            disk_manager.clone(),
+            replacer.clone(),
+        ));
+        Self {
+            bpm,
             db_file,
             db_log_file,
+            buffer_pool_size,
         }
     }
 
-    fn cleanup(&self) {
-        let _ = remove_file(&self.db_file);
-        let _ = remove_file(&self.db_log_file);
+    async fn cleanup(&self) {
+        let _ = tokio::fs::remove_file(&self.db_file).await;
+        let _ = tokio::fs::remove_file(&self.db_log_file).await;
     }
 }
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        self.cleanup();
+        let db_file = self.db_file.clone();
+        let db_log = self.db_log_file.clone();
+        thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let _ = tokio::fs::remove_file(db_file).await;
+                let _ = tokio::fs::remove_file(db_log).await;
+            });
+        })
+            .join()
+            .unwrap();
     }
 }
 
@@ -72,14 +91,8 @@ mod basic_tests {
 
     #[tokio::test]
     async fn header_directory_page_integrity() {
-        let ctx = TestContext::new();
-        let buffer_pool_size = 5;
-        let bpm = Arc::new(BufferPoolManager::new(
-            buffer_pool_size,
-            ctx.disk_scheduler.clone(),
-            ctx.disk_manager.clone(),
-            ctx.replacer.clone(),
-        ));
+        let ctx = TestContext::new("header_directory_page_integrity").await;
+        let bpm = &ctx.bpm;
 
         let header_page_id = INVALID_PAGE_ID;
         let directory_page_id = INVALID_PAGE_ID;
@@ -90,7 +103,7 @@ mod basic_tests {
 
         {
             // HEADER PAGE TEST
-            let mut header_guard = bpm.new_page_guarded().unwrap();
+            let mut header_guard = bpm.new_page_guarded().await.unwrap();
             let header_page = header_guard.as_type_mut::<ExtendableHTableHeaderPage>();
             header_page.init(2);
 
@@ -103,11 +116,11 @@ mod basic_tests {
             header_guard.drop();
 
             // DIRECTORY PAGE TEST
-            let mut directory_guard = bpm.new_page_guarded().unwrap();
+            let mut directory_guard = bpm.new_page_guarded().await.unwrap();
             let directory_page = directory_guard.as_type_mut::<ExtendableHTableDirectoryPage>();
             directory_page.init(3);
 
-            let mut bucket_guard_1 = bpm.new_page_guarded().unwrap();
+            let mut bucket_guard_1 = bpm.new_page_guarded().await.unwrap();
             bucket_page_id_1 = bucket_guard_1.page_id();
             let bucket_page_1 = bucket_guard_1.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
@@ -116,7 +129,7 @@ mod basic_tests {
             >>();
             bucket_page_1.init(10);
 
-            let mut bucket_guard_2 = bpm.new_page_guarded().unwrap();
+            let mut bucket_guard_2 = bpm.new_page_guarded().await.unwrap();
             bucket_page_id_2 = bucket_guard_2.page_id();
             let bucket_page_2 = bucket_guard_2.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
@@ -125,7 +138,7 @@ mod basic_tests {
             >>();
             bucket_page_2.init(10);
 
-            let mut bucket_guard_3 = bpm.new_page_guarded().unwrap();
+            let mut bucket_guard_3 = bpm.new_page_guarded().await.unwrap();
             bucket_page_id_3 = bucket_guard_3.page_id();
             let bucket_page_3 = bucket_guard_3.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
@@ -134,7 +147,7 @@ mod basic_tests {
             >>();
             bucket_page_3.init(10);
 
-            let mut bucket_guard_4 = bpm.new_page_guarded().unwrap();
+            let mut bucket_guard_4 = bpm.new_page_guarded().await.unwrap();
             bucket_page_id_4 = bucket_guard_4.page_id();
             let bucket_page_4 = bucket_guard_4.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,

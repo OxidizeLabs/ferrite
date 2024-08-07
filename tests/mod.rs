@@ -1,3 +1,4 @@
+mod backtrace;
 mod binder;
 mod buffer;
 mod common;
@@ -7,8 +8,7 @@ mod primer;
 mod recovery;
 mod sql;
 mod storage;
-// mod table;
+mod table;
+mod test_setup;
 mod txn;
 mod types_db;
-mod backtrace;
-mod test_setup;

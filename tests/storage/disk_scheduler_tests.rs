@@ -1,14 +1,17 @@
 use std::sync::Arc;
+use std::thread;
+
 use chrono::Utc;
+use log::info;
 use tokio;
 use tokio::fs::remove_file;
 use tokio::sync::Mutex;
+
+use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+
 use crate::test_setup::initialize_logger;
-use std::thread;
-use log::info;
-use tkdb::common::config::DB_PAGE_SIZE;
 
 struct TestContext {
     disk_manager: Arc<FileDiskManager>,
@@ -23,9 +26,15 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("{}_{}.db", test_name, timestamp);
         let db_log_file = format!("{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
+        let disk_manager =
+            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
         let disk_scheduler = Arc::new(Mutex::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        Self { disk_manager, disk_scheduler, db_file, db_log: db_log_file }
+        Self {
+            disk_manager,
+            disk_scheduler,
+            db_file,
+            db_log: db_log_file,
+        }
     }
 
     async fn cleanup(&self) {
@@ -38,20 +47,20 @@ impl Drop for TestContext {
     fn drop(&mut self) {
         let db_file = self.db_file.clone();
         let db_log = self.db_log.clone();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let _ = remove_file(db_file).await;
                 let _ = remove_file(db_log).await;
             });
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[tokio::test]
@@ -69,8 +78,15 @@ mod tests {
         let data_arc = Arc::new(tokio::sync::Mutex::new(write_data));
 
         // Schedule a write operation
-        let write_receiver = disk_scheduler.lock().await.schedule(true, Arc::clone(&data_arc), 0).await;
-        info!("Scheduled write operation on thread: {:?}", thread::current().id());
+        let write_receiver = disk_scheduler
+            .lock()
+            .await
+            .schedule(true, Arc::clone(&data_arc), 0)
+            .await;
+        info!(
+            "Scheduled write operation on thread: {:?}",
+            thread::current().id()
+        );
 
         // Wait for the write operation to complete
         write_receiver.await.expect("Write operation failed");
@@ -80,8 +96,15 @@ mod tests {
         let read_data_arc = Arc::new(tokio::sync::Mutex::new(read_data));
 
         // Schedule a read operation
-        let read_receiver = disk_scheduler.lock().await.schedule(false, Arc::clone(&read_data_arc), 0).await;
-        info!("Scheduled read operation on thread: {:?}", thread::current().id());
+        let read_receiver = disk_scheduler
+            .lock()
+            .await
+            .schedule(false, Arc::clone(&read_data_arc), 0)
+            .await;
+        info!(
+            "Scheduled read operation on thread: {:?}",
+            thread::current().id()
+        );
 
         // Wait for the read operation to complete
         read_receiver.await.expect("Read operation failed");
@@ -112,8 +135,16 @@ mod tests {
             data_guard[..test_string.len()].copy_from_slice(test_string);
         }
 
-        let write_promise = disk_scheduler.lock().await.schedule(true, Arc::clone(&data), 0).await;
-        let read_promise = disk_scheduler.lock().await.schedule(false, Arc::clone(&buf), 0).await;
+        let write_promise = disk_scheduler
+            .lock()
+            .await
+            .schedule(true, Arc::clone(&data), 0)
+            .await;
+        let read_promise = disk_scheduler
+            .lock()
+            .await
+            .schedule(false, Arc::clone(&buf), 0)
+            .await;
 
         write_promise.await;
         read_promise.await;

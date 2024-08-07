@@ -1,28 +1,36 @@
+extern crate tkdb;
+use std::fs;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rand::{Rng, SeedableRng};
+use rand::prelude::StdRng;
+use spin::Mutex;
+use spin::RwLock;
+use tokio::sync::Mutex as TokioMutex;
+
+use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalogue::column::Column;
+use tkdb::catalogue::schema::Schema;
+use tkdb::storage::disk::disk_manager::FileDiskManager;
+use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+use tkdb::storage::table::table_heap::TableHeap;
+use tkdb::storage::table::tuple::{Tuple, TupleMeta};
+use tkdb::types_db::type_id::TypeId;
+use tkdb::types_db::value::Value;
+
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::sync::{Arc, Mutex};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    use rand::{Rng, SeedableRng};
-    use rand::prelude::StdRng;
-    use spin::RwLock;
-    use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
-    use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-    use tkdb::catalogue::column::Column;
-    use tkdb::catalogue::schema::Schema;
-    use tkdb::storage::disk::disk_manager::DiskManager;
-    use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-    use tkdb::storage::table::table_heap::TableHeap;
-    use tkdb::storage::table::tuple::{Tuple, TupleMeta};
-    use tkdb::types_db::type_id::TypeId;
-    use tkdb::types_db::value::Value;
-
-    extern crate tkdb;
+    use super::*;
 
     fn construct_tuple(schema: &Schema) -> Tuple {
         let mut values = Vec::new();
-        let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let mut rng = StdRng::seed_from_u64(seed);
 
         for i in 0..schema.get_column_count() {
@@ -35,12 +43,15 @@ mod tests {
                 TypeId::Integer => Value::new(rng.gen::<i32>() % 1000),
                 TypeId::BigInt => Value::new(rng.gen::<i64>() % 1000),
                 TypeId::VarChar => {
-                    let alphanum = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+                    let alphanum =
+                        b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
                     let len = 1 + rng.gen::<usize>() % 9;
-                    let s: String = (0..len).map(|_| {
-                        let idx = rng.gen::<usize>() % alphanum.len();
-                        alphanum[idx] as char
-                    }).collect();
+                    let s: String = (0..len)
+                        .map(|_| {
+                            let idx = rng.gen::<usize>() % alphanum.len();
+                            alphanum[idx] as char
+                        })
+                        .collect();
                     Value::new(s)
                 }
                 _ => continue,
@@ -50,8 +61,8 @@ mod tests {
         Tuple::new(values, schema.clone(), 0)
     }
 
-    #[test]
-    fn disabled_table_heap_test() {
+    #[tokio::test]
+    async fn disabled_table_heap_test() {
         // Test 1: Parse create SQL statement
         let create_stmt = "a varchar(20), b smallint, c bigint, d bool, e varchar(16)";
         let col1 = Column::new_varlen("a".parse().unwrap(), TypeId::VarChar, 4);
@@ -64,10 +75,13 @@ mod tests {
         let tuple = construct_tuple(&schema);
 
         // Create transaction
-        let disk_manager = Arc::new(DiskManager::new("tuple_test.db", "tuple_test.log"));
-        let disk_scheduler = Arc::new(DiskScheduler::new(disk_manager.clone()));
+        let disk_manager = Arc::new(
+            FileDiskManager::new("tuple_test.db".to_string(), "tuple_test.log".to_string()).await,
+        );
+        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(disk_manager.clone())));
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 10)));
-        let buffer_pool_manager = BufferPoolManager::new(100, disk_scheduler, disk_manager, replacer.clone());
+        let buffer_pool_manager =
+            BufferPoolManager::new(100, disk_scheduler, disk_manager, replacer.clone());
 
         let table_latch = RwLock::new(0);
         let table = TableHeap::new(Arc::new(buffer_pool_manager));
