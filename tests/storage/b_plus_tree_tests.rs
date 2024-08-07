@@ -1,12 +1,12 @@
-use std::sync::Arc;
+use log::{debug, info};
 use spin::RwLock;
+use std::sync::Arc;
 use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-use log::{info, debug};
 
 #[cfg(test)]
 mod tests {
-    use crate::test_setup::initialize_logger;
     use super::*;
+    use crate::test_setup::initialize_logger;
 
     // #[test]
     // fn test_insert_and_search() {
@@ -239,4 +239,3 @@ mod tests {
     //     }
     // }
 }
-

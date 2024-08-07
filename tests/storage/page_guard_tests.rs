@@ -1,12 +1,12 @@
+use crate::test_setup::initialize_logger;
+use chrono::Utc;
 use spin::Mutex;
 use std::sync::Arc;
-use chrono::Utc;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
-use tkdb::storage::page::page_guard::{BasicPageGuard, ReadPageGuard, WritePageGuard};
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-use crate::test_setup::initialize_logger;
+use tkdb::storage::page::page_guard::{BasicPageGuard, ReadPageGuard, WritePageGuard};
 use tokio::sync::Mutex as TokioMutex;
 
 struct TestContext {
@@ -23,8 +23,11 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("{}_{}.db", test_name, timestamp);
         let db_log_file = format!("{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
-        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+        let disk_manager =
+            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
+        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(Arc::clone(
+            &disk_manager,
+        ))));
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
         let bpm = Arc::new(BufferPoolManager::new(
             BUFFER_POOL_SIZE,
@@ -32,7 +35,11 @@ impl TestContext {
             disk_manager.clone(),
             replacer.clone(),
         ));
-        Self { bpm, db_file, db_log_file }
+        Self {
+            bpm,
+            db_file,
+            db_log_file,
+        }
     }
 
     async fn cleanup(&self) {
@@ -51,7 +58,9 @@ impl Drop for TestContext {
                 let _ = tokio::fs::remove_file(db_file).await;
                 let _ = tokio::fs::remove_file(db_log).await;
             });
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
     }
 }
 
@@ -96,7 +105,6 @@ mod tests {
             let page_guard3 = WritePageGuard::new(bpm.clone(), page3_arc.clone());
             // Pin count should increase to 1
             assert_eq!(1, page3_arc.lock().get_pin_count());
-
         } // _guard3 goes out of scope and should decrease pin count
     }
 }

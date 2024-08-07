@@ -9,7 +9,8 @@ pub const fn index_template_arguments<KeyType, ValueType, KeyComparator>() {}
 /**
  * Linear Probe Hashing Definitions
  */
-pub type HashTableBlockType<KeyType, ValueType, KeyComparator> = HashTableBlockPage<KeyType, ValueType, KeyComparator>;
+pub type HashTableBlockType<KeyType, ValueType, KeyComparator> =
+    HashTableBlockPage<KeyType, ValueType, KeyComparator>;
 
 /**
  * BLOCK_ARRAY_SIZE is the number of (key, value) pairs that can be stored in a linear probe hash block page. It is an
@@ -26,13 +27,14 @@ pub type HashTableBlockType<KeyType, ValueType, KeyComparator> = HashTableBlockP
  * to maintain the occupied and readable flags for a key value pair.
  */
 pub const fn block_array_size<KeyType, ValueType>() -> usize {
-    (4 * DB_PAGE_SIZE) / (4 *size_of::<MappingType<KeyType, ValueType>>() + 1)
+    (4 * DB_PAGE_SIZE) / (4 * size_of::<MappingType<KeyType, ValueType>>() + 1)
 }
 
 /**
  * Extendible Hashing Definitions
  */
-pub type HashTableBucketType<KeyType, ValueType, KeyComparator> = HashTableBucketPage<KeyType, ValueType, KeyComparator>;
+pub type HashTableBucketType<KeyType, ValueType, KeyComparator> =
+    HashTableBucketPage<KeyType, ValueType, KeyComparator>;
 
 /**
  * BUCKET_ARRAY_SIZE is the number of (key, value) pairs that can be stored in an extendible hash index bucket page.

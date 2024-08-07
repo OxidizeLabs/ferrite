@@ -1,6 +1,5 @@
-use std::vec::Vec;
 use crate::concurrency::transaction::Transaction;
-
+use std::vec::Vec;
 
 pub trait DiskHashTable<KeyType, ValueType, KeyComparator> {
     /// Inserts a key-value pair into the hash table.
@@ -40,5 +39,10 @@ pub trait DiskHashTable<KeyType, ValueType, KeyComparator> {
     /// # Returns
     ///
     /// `true` if the lookup succeeded, `false` otherwise.
-    fn get_value(&self, transaction: &Transaction, key: &KeyType, result: &mut Vec<ValueType>) -> bool;
+    fn get_value(
+        &self,
+        transaction: &Transaction,
+        key: &KeyType,
+        result: &mut Vec<ValueType>,
+    ) -> bool;
 }

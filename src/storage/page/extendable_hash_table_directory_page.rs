@@ -1,5 +1,5 @@
+use crate::common::config::{PageId, INVALID_PAGE_ID};
 use log::{debug, info};
-use crate::common::config::{INVALID_PAGE_ID, PageId};
 
 pub const HTABLE_DIRECTORY_MAX_DEPTH: u64 = 9;
 pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
@@ -191,8 +191,17 @@ impl ExtendableHTableDirectoryPage {
         debug!("Ensure all local depths are less than or equal to the global depth:");
         for bucket_idx in 0..size {
             let local_depth = self.get_local_depth(bucket_idx);
-            debug!("Bucket idx: {}, Local depth: {}, Global depth: {}", bucket_idx, local_depth, self.global_depth);
-            assert!(local_depth <= self.global_depth, "Local depth {} exceeds global depth {} at bucket_idx: {}", local_depth, self.global_depth, bucket_idx);
+            debug!(
+                "Bucket idx: {}, Local depth: {}, Global depth: {}",
+                bucket_idx, local_depth, self.global_depth
+            );
+            assert!(
+                local_depth <= self.global_depth,
+                "Local depth {} exceeds global depth {} at bucket_idx: {}",
+                local_depth,
+                self.global_depth,
+                bucket_idx
+            );
         }
 
         // Ensure each bucket has the correct number of pointers
@@ -209,15 +218,14 @@ impl ExtendableHTableDirectoryPage {
             let page_id = self.get_bucket_page_id(bucket_idx);
             if page_id != INVALID_PAGE_ID {
                 let expected_count = 1 << (self.global_depth - self.get_local_depth(bucket_idx));
-                debug!("Bucket idx: {}, Page ID: {}, Expected count: {}, Actual count: {}", bucket_idx, page_id, expected_count, count[page_id as usize]);
+                debug!(
+                    "Bucket idx: {}, Page ID: {}, Expected count: {}, Actual count: {}",
+                    bucket_idx, page_id, expected_count, count[page_id as usize]
+                );
                 assert_eq!(
-                    count[page_id as usize],
-                    expected_count,
+                    count[page_id as usize], expected_count,
                     "Count mismatch at bucket_idx: {} for page_id: {}. Expected: {}, Found: {}",
-                    bucket_idx,
-                    page_id,
-                    expected_count,
-                    count[page_id as usize]
+                    bucket_idx, page_id, expected_count, count[page_id as usize]
                 );
             }
         }

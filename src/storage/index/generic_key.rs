@@ -1,10 +1,10 @@
-use std::{fmt, mem};
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Value;
 use crate::types_db::types::{CmpBool, Type};
+use crate::types_db::value::Value;
 use std::cmp::Ordering;
+use std::sync::Arc;
+use std::{fmt, mem};
 
 /// A generic key used for indexing with opaque data.
 #[derive(Clone)]
@@ -57,7 +57,11 @@ impl<const KEY_SIZE: usize> GenericKey<KEY_SIZE> {
         let data_ptr = if col.is_inlined() {
             &self.data[col.get_offset()..]
         } else {
-            let offset = i32::from_le_bytes(self.data[col.get_offset()..col.get_offset() + 4].try_into().unwrap());
+            let offset = i32::from_le_bytes(
+                self.data[col.get_offset()..col.get_offset() + 4]
+                    .try_into()
+                    .unwrap(),
+            );
             &self.data[offset as usize..]
         };
         Value::deserialize_from(data_ptr, column_type)
@@ -101,7 +105,11 @@ impl GenericComparator {
         Self { key_schema }
     }
 
-    pub fn compare<const KEY_SIZE: usize>(&self, lhs: &GenericKey<KEY_SIZE>, rhs: &GenericKey<KEY_SIZE>) -> std::cmp::Ordering {
+    pub fn compare<const KEY_SIZE: usize>(
+        &self,
+        lhs: &GenericKey<KEY_SIZE>,
+        rhs: &GenericKey<KEY_SIZE>,
+    ) -> std::cmp::Ordering {
         let column_count = self.key_schema.get_column_count();
 
         for i in 0..column_count {
@@ -116,7 +124,8 @@ impl GenericComparator {
             }
         }
         Ordering::Equal
-    }}
+    }
+}
 
 impl<const KEY_SIZE: usize> Comparator<GenericKey<KEY_SIZE>> for GenericComparator {
     fn compare(&self, lhs: &GenericKey<KEY_SIZE>, rhs: &GenericKey<KEY_SIZE>) -> Ordering {

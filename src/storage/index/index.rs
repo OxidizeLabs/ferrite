@@ -23,7 +23,13 @@ impl IndexMetadata {
     /// - `tuple_schema`: The schema of the indexed key.
     /// - `key_attrs`: The mapping from indexed columns to base table columns.
     /// - `is_primary_key`: Whether this index is a primary key.
-    pub fn new(index_name: String, table_name: String, tuple_schema: &Schema, key_attrs: Vec<usize>, is_primary_key: bool) -> Self {
+    pub fn new(
+        index_name: String,
+        table_name: String,
+        tuple_schema: &Schema,
+        key_attrs: Vec<usize>,
+        is_primary_key: bool,
+    ) -> Self {
         let key_schema = Arc::new(Schema::copy_schema(tuple_schema, &key_attrs));
         Self {
             name: index_name,
@@ -68,7 +74,9 @@ impl IndexMetadata {
     pub fn to_string(&self) -> String {
         format!(
             "IndexMetadata[Name = {}, Type = B+Tree, Table name = {}] :: {}",
-            self.name, self.table_name, self.key_schema.to_string(false)
+            self.name,
+            self.table_name,
+            self.key_schema.to_string(false)
         )
     }
 }
@@ -108,7 +116,11 @@ pub trait Index {
 
     /// Returns a string representation for debugging.
     fn to_string(&self) -> String {
-        format!("INDEX: ({}){}", self.get_name(), self.get_metadata().to_string())
+        format!(
+            "INDEX: ({}){}",
+            self.get_name(),
+            self.get_metadata().to_string()
+        )
     }
 
     /// Inserts an entry into the index.

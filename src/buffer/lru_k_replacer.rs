@@ -105,12 +105,15 @@ impl LRUKReplacer {
             info!("Set frame {} evictable: {}", frame_id, set_evictable); // Debugging statement
         } else {
             info!("Frame {} not found in frame_store", frame_id); // Debugging statement
-            frame_store.insert(frame_id, Frame {
-                is_evictable: set_evictable,
-                access_times: vec![],
-                k: self.k,
-                fid: frame_id,
-            });
+            frame_store.insert(
+                frame_id,
+                Frame {
+                    is_evictable: set_evictable,
+                    access_times: vec![],
+                    k: self.k,
+                    fid: frame_id,
+                },
+            );
         }
     }
     pub fn remove(&self, frame_id: FrameId) {

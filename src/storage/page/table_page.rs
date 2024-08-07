@@ -59,7 +59,7 @@ impl TablePage {
 
     pub fn get_tuple(&self, rid: &RID) -> Option<(&TupleMeta, &Tuple)> {
         match self.tuple_info.get(rid).unwrap() {
-            (tuple_meta, tuple) => Some((tuple_meta, tuple))
+            (tuple_meta, tuple) => Some((tuple_meta, tuple)),
         }
     }
 

@@ -1,13 +1,14 @@
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::vec::Vec;
-use std::string::String;
-use spin::RwLock;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::transaction::Transaction;
 use crate::container::hash_function::HashFunction;
-use crate::storage::page::{hash_table_block_page::HashTableBlockPage,
-                           hash_table_header_page::HashTableHeaderPage};
+use crate::storage::page::{
+    hash_table_block_page::HashTableBlockPage, hash_table_header_page::HashTableHeaderPage,
+};
+use spin::RwLock;
+use std::marker::PhantomData;
+use std::string::String;
+use std::sync::Arc;
+use std::vec::Vec;
 
 pub struct LinearProbeHashTable<KeyType, ValueType, KeyComparator> {
     header_page_id: u32,
@@ -15,7 +16,7 @@ pub struct LinearProbeHashTable<KeyType, ValueType, KeyComparator> {
     comparator: KeyComparator,
     table_latch: RwLock<()>,
     hash_fn: HashFunction<KeyType>,
-    _marker: PhantomData<ValueType>
+    _marker: PhantomData<ValueType>,
 }
 
 impl<KeyType, ValueType, KeyComparator> LinearProbeHashTable<KeyType, ValueType, KeyComparator>
@@ -93,7 +94,12 @@ where
     /// # Returns
     ///
     /// `true` if lookup succeeded, `false` otherwise.
-    pub fn get_value(&self, transaction: &Transaction, key: &KeyType, result: &mut Vec<ValueType>) -> bool {
+    pub fn get_value(
+        &self,
+        transaction: &Transaction,
+        key: &KeyType,
+        result: &mut Vec<ValueType>,
+    ) -> bool {
         // TODO: Add implementation
         unimplemented!()
     }
@@ -123,7 +129,10 @@ where
         unimplemented!()
     }
 
-    fn get_block_page(&self, block_page_id: u32) -> &HashTableBlockPage<KeyType, ValueType, KeyComparator> {
+    fn get_block_page(
+        &self,
+        block_page_id: u32,
+    ) -> &HashTableBlockPage<KeyType, ValueType, KeyComparator> {
         // TODO: Add implementation
         unimplemented!()
     }
@@ -143,7 +152,12 @@ where
         unimplemented!()
     }
 
-    fn get_value_latch_free(&self, transaction: &Transaction, key: &KeyType, result: &mut Vec<ValueType>) -> bool {
+    fn get_value_latch_free(
+        &self,
+        transaction: &Transaction,
+        key: &KeyType,
+        result: &mut Vec<ValueType>,
+    ) -> bool {
         // TODO: Add implementation
         unimplemented!()
     }

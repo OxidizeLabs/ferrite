@@ -1,8 +1,8 @@
+use crate::storage::page::hash_table_page_defs::bucket_array_size;
 use log::info;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::marker::PhantomData;
-use crate::storage::page::hash_table_page_defs::bucket_array_size;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
@@ -37,8 +37,12 @@ where
     pub fn new() -> Self {
         let array_size = bucket_array_size::<KeyType, ValueType>();
         Self {
-            occupied: (0..(array_size - 1) / 8 + 1).map(|_| AtomicU8::new(0)).collect(),
-            readable: (0..(array_size - 1) / 8 + 1).map(|_| AtomicU8::new(0)).collect(),
+            occupied: (0..(array_size - 1) / 8 + 1)
+                .map(|_| AtomicU8::new(0))
+                .collect(),
+            readable: (0..(array_size - 1) / 8 + 1)
+                .map(|_| AtomicU8::new(0))
+                .collect(),
             array: Mutex::new(vec![(Default::default(), Default::default()); array_size]),
             _marker: PhantomData,
         }

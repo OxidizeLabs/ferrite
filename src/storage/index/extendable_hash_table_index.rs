@@ -2,7 +2,6 @@ use std::hash::Hash;
 
 pub struct ExtendableHashTableIndex;
 
-
 // impl<K, V, C> ExtendableHashTableIndex<K, V, C>
 // where
 //     K: KeyType + for<'a> From<&'a Tuple> + for<'a> From<&'a Tuple> + for<'a> From<&'a Tuple>,

@@ -1,15 +1,15 @@
 pub mod buffer;
 pub mod catalogue;
 pub mod common;
-pub mod types_db;
-pub mod storage;
-pub mod container;
 pub mod concurrency;
+pub mod container;
 pub mod execution;
 pub mod optimizer;
 pub mod planner;
 pub mod primer;
 pub mod recovery;
+pub mod storage;
+pub mod types_db;
 
 // src/lib.rs
 // pub mod buffer {

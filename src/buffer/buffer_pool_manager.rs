@@ -1,12 +1,12 @@
 use log::info;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
 use spin::{Mutex, RwLock};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
+use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::page::page::Page;
@@ -87,14 +87,20 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
                     // Schedule the write but don't match on the result since it's not a Result type
                     let ds = self.disk_scheduler.lock().await;
-                    let _receiver = ds.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id);
+                    let _receiver = ds.schedule(
+                        false,
+                        Arc::new(TokioMutex::new(page.get_data().clone())),
+                        old_page_id,
+                    );
                     page.set_dirty(false);
                 }
             }
@@ -143,14 +149,20 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
                     // Schedule the write but don't match on the result since it's not a Result type
                     let ds = self.disk_scheduler.lock().await;
-                    let _receiver = ds.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id);
+                    let _receiver = ds.schedule(
+                        false,
+                        Arc::new(TokioMutex::new(page.get_data().clone())),
+                        old_page_id,
+                    );
                     page.set_dirty(false);
                 }
             }
@@ -176,7 +188,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
         }
 
-        Some(BasicPageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(new_page))))
+        Some(BasicPageGuard::new(
+            Arc::clone(&self),
+            Arc::new(Mutex::new(new_page)),
+        ))
     }
 
     /// Writes data to the page with the given page ID.
@@ -241,12 +256,22 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
+                    self.disk_scheduler
+                        .lock()
+                        .await
+                        .schedule(
+                            false,
+                            Arc::new(TokioMutex::new(page.get_data().clone())),
+                            old_page_id,
+                        )
+                        .await;
                     page.set_dirty(false);
                 }
             }
@@ -256,7 +281,9 @@ impl BufferPoolManager {
 
         // Load new page from disk
         let mut new_page = Page::new(page_id);
-        self.disk_manager.read_page(page_id, new_page.get_data_mut()).await;
+        self.disk_manager
+            .read_page(page_id, new_page.get_data_mut())
+            .await;
 
         {
             let mut pages = self.pages.write();
@@ -282,7 +309,10 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<BasicPageGuard>>`.
-    pub async fn fetch_page_basic(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<BasicPageGuard>>> {
+    pub async fn fetch_page_basic(
+        self: &Arc<Self>,
+        page_id: PageId,
+    ) -> Option<Arc<RwLock<BasicPageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -296,7 +326,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
             replacer.set_evictable(frame_id, false);
 
-            return Some(Arc::new(RwLock::new(BasicPageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(page.clone().unwrap().clone()))))));
+            return Some(Arc::new(RwLock::new(BasicPageGuard::new(
+                Arc::clone(&self),
+                Arc::new(Mutex::new(page.clone().unwrap().clone())),
+            ))));
         }
 
         // If page is not in memory, load it from disk
@@ -317,12 +350,22 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
+                    self.disk_scheduler
+                        .lock()
+                        .await
+                        .schedule(
+                            false,
+                            Arc::new(TokioMutex::new(page.get_data().clone())),
+                            old_page_id,
+                        )
+                        .await;
                     page.set_dirty(false);
                 }
             }
@@ -332,7 +375,8 @@ impl BufferPoolManager {
 
         // Load new page from disk
         let mut new_page = Page::new(page_id);
-        self.disk_manager.read_page(page_id, new_page.get_data_mut());
+        self.disk_manager
+            .read_page(page_id, new_page.get_data_mut());
 
         {
             let mut pages = self.pages.write();
@@ -348,7 +392,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
         }
 
-        Some(Arc::new(RwLock::new(BasicPageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(new_page))))))
+        Some(Arc::new(RwLock::new(BasicPageGuard::new(
+            Arc::clone(&self),
+            Arc::new(Mutex::new(new_page)),
+        ))))
     }
 
     /// Fetches a read page guard for the given page ID.
@@ -358,7 +405,10 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<ReadPageGuard>>`.
-    pub async fn fetch_page_read(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<ReadPageGuard>>> {
+    pub async fn fetch_page_read(
+        self: &Arc<Self>,
+        page_id: PageId,
+    ) -> Option<Arc<RwLock<ReadPageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -372,7 +422,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
             replacer.set_evictable(frame_id, false);
 
-            return Some(Arc::new(RwLock::new(ReadPageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(page.clone().unwrap().clone()))))));
+            return Some(Arc::new(RwLock::new(ReadPageGuard::new(
+                Arc::clone(&self),
+                Arc::new(Mutex::new(page.clone().unwrap().clone())),
+            ))));
         }
 
         // If page is not in memory, load it from disk
@@ -393,12 +446,22 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
+                    self.disk_scheduler
+                        .lock()
+                        .await
+                        .schedule(
+                            false,
+                            Arc::new(TokioMutex::new(page.get_data().clone())),
+                            old_page_id,
+                        )
+                        .await;
                     page.set_dirty(false);
                 }
             }
@@ -408,7 +471,8 @@ impl BufferPoolManager {
 
         // Load new page from disk
         let mut new_page = Page::new(page_id);
-        self.disk_manager.read_page(page_id, new_page.get_data_mut());
+        self.disk_manager
+            .read_page(page_id, new_page.get_data_mut());
 
         {
             let mut pages = self.pages.write();
@@ -424,7 +488,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
         }
 
-        Some(Arc::new(RwLock::new(ReadPageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(new_page))))))
+        Some(Arc::new(RwLock::new(ReadPageGuard::new(
+            Arc::clone(&self),
+            Arc::new(Mutex::new(new_page)),
+        ))))
     }
 
     /// Fetches a write page guard for the given page ID.
@@ -434,7 +501,10 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<WritePageGuard>>`.
-    pub async fn fetch_page_write(self: &Arc<Self>, page_id: PageId) -> Option<Arc<RwLock<WritePageGuard>>> {
+    pub async fn fetch_page_write(
+        self: &Arc<Self>,
+        page_id: PageId,
+    ) -> Option<Arc<RwLock<WritePageGuard>>> {
         let frame_id = {
             let page_table = self.page_table.lock();
             page_table.get(&page_id).copied()
@@ -448,7 +518,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
             replacer.set_evictable(frame_id, false);
 
-            return Some(Arc::new(RwLock::new(WritePageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(page.clone().unwrap().clone()))))));
+            return Some(Arc::new(RwLock::new(WritePageGuard::new(
+                Arc::clone(&self),
+                Arc::new(Mutex::new(page.clone().unwrap().clone())),
+            ))));
         }
 
         // If page is not in memory, load it from disk
@@ -469,12 +542,22 @@ impl BufferPoolManager {
         // Handle eviction of old page if necessary
         if let Some(old_page_id) = {
             let page_table = self.page_table.lock();
-            page_table.iter().find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
+            page_table
+                .iter()
+                .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
-                    self.disk_scheduler.lock().await.schedule(false, Arc::new(TokioMutex::new(page.get_data().clone())), old_page_id).await;
+                    self.disk_scheduler
+                        .lock()
+                        .await
+                        .schedule(
+                            false,
+                            Arc::new(TokioMutex::new(page.get_data().clone())),
+                            old_page_id,
+                        )
+                        .await;
                     page.set_dirty(false);
                 }
             }
@@ -484,7 +567,8 @@ impl BufferPoolManager {
 
         // Load new page from disk
         let mut new_page = Page::new(page_id);
-        self.disk_manager.read_page(page_id, new_page.get_data_mut());
+        self.disk_manager
+            .read_page(page_id, new_page.get_data_mut());
 
         {
             let mut pages = self.pages.write();
@@ -500,7 +584,10 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
         }
 
-        Some(Arc::new(RwLock::new(WritePageGuard::new(Arc::clone(&self), Arc::new(Mutex::new(new_page))))))
+        Some(Arc::new(RwLock::new(WritePageGuard::new(
+            Arc::clone(&self),
+            Arc::new(Mutex::new(new_page)),
+        ))))
     }
 
     /// Unpins a page with the given page ID.
@@ -517,7 +604,11 @@ impl BufferPoolManager {
         if let Some(&frame_id) = page_table.get(&page_id) {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
-                info!("Unpinning page {} with current pin count {}", page_id, page.get_pin_count()); // Debug logging
+                info!(
+                    "Unpinning page {} with current pin count {}",
+                    page_id,
+                    page.get_pin_count()
+                ); // Debug logging
                 if page.get_pin_count() > 0 {
                     page.decrement_pin_count();
                     if is_dirty {
@@ -649,5 +740,4 @@ impl BufferPoolManager {
         // (In this implementation, we simply do nothing. Depending on the use case,
         // you might want to track deallocated page IDs separately.)
     }
-
 }

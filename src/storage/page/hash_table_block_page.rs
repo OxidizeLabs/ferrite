@@ -1,8 +1,8 @@
+use crate::storage::page::hash_table_page_defs::{block_array_size, MappingType};
 use log::info;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
-use std::marker::PhantomData;
-use crate::storage::page::hash_table_page_defs::{block_array_size, MappingType};
 
 /**
  * Store indexed key and value together within block page. Supports
@@ -33,8 +33,12 @@ where
     pub fn new() -> Self {
         let array_size = block_array_size::<KeyType, ValueType>();
         Self {
-            occupied: (0..(array_size - 1) / 8 + 1).map(|_| AtomicU8::new(0)).collect(),
-            readable: (0..(array_size - 1) / 8 + 1).map(|_| AtomicU8::new(0)).collect(),
+            occupied: (0..(array_size - 1) / 8 + 1)
+                .map(|_| AtomicU8::new(0))
+                .collect(),
+            readable: (0..(array_size - 1) / 8 + 1)
+                .map(|_| AtomicU8::new(0))
+                .collect(),
             array: Mutex::new(vec![(Default::default(), Default::default()); array_size]),
             _marker: PhantomData,
         }
@@ -144,12 +148,7 @@ where
     /// # Returns
     ///
     /// `true` if at least one key matched, `false` otherwise.
-    pub fn get_value(
-        &self,
-        key: KeyType,
-        cmp: KeyComparator,
-        result: &mut Vec<ValueType>,
-    ) -> bool {
+    pub fn get_value(&self, key: KeyType, cmp: KeyComparator, result: &mut Vec<ValueType>) -> bool {
         let mut found = false;
         for i in 0..block_array_size::<KeyType, ValueType>() {
             if self.is_readable(i as u32) && cmp(&self.key_at(i as u32), &key) {

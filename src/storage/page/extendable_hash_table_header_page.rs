@@ -1,5 +1,5 @@
-use log::info;
 use crate::common::config::PageId;
+use log::info;
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;

@@ -71,7 +71,10 @@ pub trait AbstractExpression: fmt::Debug + Send + Sync {
     ///
     /// # Returns
     /// A new expression with the specified children.
-    fn clone_with_children(&self, children: Vec<Arc<dyn AbstractExpression>>) -> Arc<dyn AbstractExpression>;
+    fn clone_with_children(
+        &self,
+        children: Vec<Arc<dyn AbstractExpression>>,
+    ) -> Arc<dyn AbstractExpression>;
 }
 
 /// A macro to define the clone_with_children method for implementing structs.
@@ -90,4 +93,3 @@ macro_rules! impl_clone_with_children {
         }
     };
 }
-

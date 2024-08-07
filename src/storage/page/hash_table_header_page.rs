@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use crate::common::config::PageId;
+use std::sync::Mutex;
 
 pub type LsnT = u32;
 pub type PageIdT = u32;

@@ -253,7 +253,14 @@ impl PrintableBPlusTree {
             let mut new_queue = vec![];
             for node in &queue {
                 let padding = (node.size - node.keys.len()) / 2;
-                write!(out_buf, "{}{}{}", " ".repeat(padding), node.keys, " ".repeat(padding)).unwrap();
+                write!(
+                    out_buf,
+                    "{}{}{}",
+                    " ".repeat(padding),
+                    node.keys,
+                    " ".repeat(padding)
+                )
+                .unwrap();
                 for child in &node.children {
                     new_queue.push(child);
                 }

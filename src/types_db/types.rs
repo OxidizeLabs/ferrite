@@ -6,8 +6,8 @@ use crate::types_db::smallint_type::SmallIntType;
 use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{ToValue, Value};
 use crate::types_db::value::Val::Boolean;
+use crate::types_db::value::{ToValue, Value};
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
 
@@ -224,7 +224,7 @@ impl Type for InvalidType {
         unimplemented!()
     }
 
-    fn compare_less_than(&self,_right: &Value) -> CmpBool {
+    fn compare_less_than(&self, _right: &Value) -> CmpBool {
         // Implement comparison logic
         unimplemented!()
     }

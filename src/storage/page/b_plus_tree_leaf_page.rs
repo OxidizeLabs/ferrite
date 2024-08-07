@@ -8,7 +8,8 @@ pub type MappingType<K, V> = (K, V);
 
 pub const LEAF_PAGE_HEADER_SIZE: usize = 16;
 pub const DB_PAGE_SIZE: usize = 4096;
-pub const LEAF_PAGE_SIZE: usize = (DB_PAGE_SIZE - LEAF_PAGE_HEADER_SIZE) / std::mem::size_of::<MappingType<i32, i32>>(); // Using i32 for simplicity
+pub const LEAF_PAGE_SIZE: usize =
+    (DB_PAGE_SIZE - LEAF_PAGE_HEADER_SIZE) / std::mem::size_of::<MappingType<i32, i32>>(); // Using i32 for simplicity
 
 /// B+ tree leaf page that stores indexed keys and record ids.
 ///
