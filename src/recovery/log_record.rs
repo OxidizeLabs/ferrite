@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::mem::size_of;
 
-use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
+use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 
@@ -73,7 +73,11 @@ impl LogRecord {
     ///
     /// # Returns
     /// A new `LogRecord` instance.
-    pub fn new_transaction_record(txn_id: TxnId, prev_lsn: Lsn, log_record_type: LogRecordType) -> Self {
+    pub fn new_transaction_record(
+        txn_id: TxnId,
+        prev_lsn: Lsn,
+        log_record_type: LogRecordType,
+    ) -> Self {
         Self {
             size: Self::HEADER_SIZE as i32,
             lsn: INVALID_LSN,
@@ -103,8 +107,17 @@ impl LogRecord {
     ///
     /// # Returns
     /// A new `LogRecord` instance.
-    pub fn new_insert_delete_record(txn_id: TxnId, prev_lsn: Lsn, log_record_type: LogRecordType, rid: RID, tuple: Tuple) -> Self {
-        let size = Self::HEADER_SIZE as i32 + size_of::<RID>() as i32 + size_of::<i32>() as i32 + tuple.get_length() as i32;
+    pub fn new_insert_delete_record(
+        txn_id: TxnId,
+        prev_lsn: Lsn,
+        log_record_type: LogRecordType,
+        rid: RID,
+        tuple: Tuple,
+    ) -> Self {
+        let size = Self::HEADER_SIZE as i32
+            + size_of::<RID>() as i32
+            + size_of::<i32>() as i32
+            + tuple.get_length() as i32;
         if log_record_type == LogRecordType::Insert {
             Self {
                 size,
@@ -159,7 +172,14 @@ impl LogRecord {
     ///
     /// # Returns
     /// A new `LogRecord` instance.
-    pub fn new_update_record(txn_id: TxnId, prev_lsn: Lsn, log_record_type: LogRecordType, update_rid: RID, old_tuple: Tuple, new_tuple: Tuple) -> Self {
+    pub fn new_update_record(
+        txn_id: TxnId,
+        prev_lsn: Lsn,
+        log_record_type: LogRecordType,
+        update_rid: RID,
+        old_tuple: Tuple,
+        new_tuple: Tuple,
+    ) -> Self {
         let size = Self::HEADER_SIZE as i32
             + size_of::<RID>() as i32
             + old_tuple.get_length() as i32
@@ -194,7 +214,13 @@ impl LogRecord {
     ///
     /// # Returns
     /// A new `LogRecord` instance.
-    pub fn new_newpage_record(txn_id: TxnId, prev_lsn: Lsn, log_record_type: LogRecordType, prev_page_id: PageId, page_id: PageId) -> Self {
+    pub fn new_newpage_record(
+        txn_id: TxnId,
+        prev_lsn: Lsn,
+        log_record_type: LogRecordType,
+        prev_page_id: PageId,
+        page_id: PageId,
+    ) -> Self {
         let size = Self::HEADER_SIZE as i32 + 2 * size_of::<PageId>() as i32;
         Self {
             size,
@@ -283,11 +309,7 @@ impl LogRecord {
     pub fn to_string(&self) -> String {
         format!(
             "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size,
-            self.lsn,
-            self.txn_id,
-            self.prev_lsn,
-            self.log_record_type as i32,
+            self.size, self.lsn, self.txn_id, self.prev_lsn, self.log_record_type as i32,
         )
     }
 }

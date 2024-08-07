@@ -1,7 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use crate::common::config::{INVALID_PAGE_ID, PageId};
+use crate::common::config::{PageId, INVALID_PAGE_ID};
 
 #[derive(Debug, Clone, Copy, Eq)]
 pub struct RID {

@@ -1,8 +1,8 @@
-use std::{fmt, thread};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::{fmt, thread};
 
-use crate::common::config::{INVALID_TS, INVALID_TXN_ID, TimeStampOidT, TxnId};
+use crate::common::config::{TimeStampOidT, TxnId, INVALID_TS, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::execution::expressions::abstract_expression::AbstractExpression;
 use crate::storage::table::tuple::Tuple;
@@ -182,7 +182,10 @@ impl Transaction {
     /// - `predicate`: The scan predicate expression.
     pub fn append_scan_predicate(&self, t: u32, predicate: Arc<dyn AbstractExpression>) {
         let mut scan_predicates = self.scan_predicates.lock().unwrap();
-        scan_predicates.entry(t).or_insert_with(Vec::new).push(predicate);
+        scan_predicates
+            .entry(t)
+            .or_insert_with(Vec::new)
+            .push(predicate);
     }
 
     /// Returns the scan predicates.

@@ -56,7 +56,10 @@ impl<KeyType, ValueType, KeyComparator> BPlusTreePage<KeyType, ValueType, KeyCom
 
     /// Increases the size of this page by a specified amount.
     pub fn increase_size(&mut self, amount: usize) {
-        assert!(self.size + amount <= self.max_size, "Exceeding max size of the page.");
+        assert!(
+            self.size + amount <= self.max_size,
+            "Exceeding max size of the page."
+        );
         self.size += amount;
     }
 

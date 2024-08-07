@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use log::{debug, info};
+use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 enum NodeType {
@@ -13,7 +13,7 @@ pub struct BPlusTreeNode<K: Ord + Clone, V: Clone> {
     node_type: NodeType,
     keys: Vec<K>,
     children: Vec<Arc<RwLock<BPlusTreeNode<K, V>>>>, // for internal nodes
-    values: Vec<V>, // for leaf nodes
+    values: Vec<V>,                                  // for leaf nodes
 }
 
 impl<K: Ord + Clone, V: Clone> BPlusTreeNode<K, V> {
@@ -50,7 +50,11 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     fn search_node(&self, node: &BPlusTreeNode<K, V>, key: &K) -> Option<V> {
         match node.node_type {
             NodeType::Internal => {
-                let i = node.keys.iter().position(|k| key < k).unwrap_or(node.keys.len());
+                let i = node
+                    .keys
+                    .iter()
+                    .position(|k| key < k)
+                    .unwrap_or(node.keys.len());
                 let child = node.children[i].read();
                 self.search_node(&child, key)
             }
@@ -65,7 +69,10 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     }
 
     fn find_key_index(&self, node: &BPlusTreeNode<K, V>, key: &K) -> usize {
-        node.keys.iter().position(|k| key < k).unwrap_or(node.keys.len())
+        node.keys
+            .iter()
+            .position(|k| key < k)
+            .unwrap_or(node.keys.len())
     }
 
     /// Inserts a key-value pair into the B+Tree.
@@ -84,13 +91,21 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     fn insert_non_full(&self, node: &mut BPlusTreeNode<K, V>, key: K, value: V) {
         match node.node_type {
             NodeType::Leaf => {
-                let i = node.keys.iter().position(|k| k > &key).unwrap_or(node.keys.len());
+                let i = node
+                    .keys
+                    .iter()
+                    .position(|k| k > &key)
+                    .unwrap_or(node.keys.len());
                 info!("Inserting key: {:?} at position: {}", key, i);
                 node.keys.insert(i, key);
                 node.values.insert(i, value);
             }
             NodeType::Internal => {
-                let i = node.keys.iter().position(|k| k > &key).unwrap_or(node.keys.len());
+                let i = node
+                    .keys
+                    .iter()
+                    .position(|k| k > &key)
+                    .unwrap_or(node.keys.len());
                 info!("Traversing to child index: {}", i);
 
                 if node.children[i].read().keys.len() == self.order - 1 {
@@ -129,11 +144,19 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
             parent.keys.insert(index, mid_key);
         } // `full_child` is dropped here
 
-        parent.children.insert(index + 1, Arc::new(RwLock::new(new_child)));
+        parent
+            .children
+            .insert(index + 1, Arc::new(RwLock::new(new_child)));
 
         info!("Parent node after split: {:?}", parent.keys);
-        info!("Left child keys after split: {:?}", parent.children[index].read().keys);
-        info!("Right child keys after split: {:?}", parent.children[index + 1].read().keys);
+        info!(
+            "Left child keys after split: {:?}",
+            parent.children[index].read().keys
+        );
+        info!(
+            "Right child keys after split: {:?}",
+            parent.children[index + 1].read().keys
+        );
     }
 
     /// Deletes a key-value pair from the B+Tree.
@@ -167,16 +190,25 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         match current_guard.node_type {
             NodeType::Leaf => {
                 if let Some(index) = current_guard.keys.iter().position(|k| k == key) {
-                    info!("Found key in leaf node: {:?} at index: {:?}", current_guard.keys, index);
+                    info!(
+                        "Found key in leaf node: {:?} at index: {:?}",
+                        current_guard.keys, index
+                    );
                     Some((node.clone(), index))
                 } else {
-                    info!("Key not found in leaf node with keys: {:?}", current_guard.keys);
+                    info!(
+                        "Key not found in leaf node with keys: {:?}",
+                        current_guard.keys
+                    );
                     None
                 }
             }
             NodeType::Internal => {
                 let i = self.find_key_index(&current_guard, key);
-                info!("Traversing internal node: {:?}, going to child index: {}", current_guard.keys, i);
+                info!(
+                    "Traversing internal node: {:?}, going to child index: {}",
+                    current_guard.keys, i
+                );
                 drop(current_guard); // Drop the read lock before recursing
                 let child = node.read().children[i].clone();
                 self.find_node_for_key_recursive(child, key)
@@ -267,7 +299,11 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         if underfull {
             debug!("Node is underfull: {:?}", node.keys);
             let left_sibling_index = if index > 0 { Some(index - 1) } else { None };
-            let right_sibling_index = if index < node.children.len() - 1 { Some(index + 1) } else { None };
+            let right_sibling_index = if index < node.children.len() - 1 {
+                Some(index + 1)
+            } else {
+                None
+            };
 
             if let Some(left_index) = left_sibling_index {
                 let borrow_needed;
@@ -307,7 +343,12 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         }
     }
 
-    fn borrow_from_left_sibling(&self, node: &mut BPlusTreeNode<K, V>, index: usize, left_index: usize) {
+    fn borrow_from_left_sibling(
+        &self,
+        node: &mut BPlusTreeNode<K, V>,
+        index: usize,
+        left_index: usize,
+    ) {
         let mut left_sibling = node.children[left_index].write();
         let mut child = node.children[index].write();
 
@@ -315,13 +356,20 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         node.keys[left_index] = left_sibling.keys.pop().unwrap();
 
         if let NodeType::Internal = child.node_type {
-            child.children.insert(0, left_sibling.children.pop().unwrap());
+            child
+                .children
+                .insert(0, left_sibling.children.pop().unwrap());
         } else {
             child.values.insert(0, left_sibling.values.pop().unwrap());
         }
     }
 
-    fn borrow_from_right_sibling(&self, node: &mut BPlusTreeNode<K, V>, index: usize, right_index: usize) {
+    fn borrow_from_right_sibling(
+        &self,
+        node: &mut BPlusTreeNode<K, V>,
+        index: usize,
+        right_index: usize,
+    ) {
         let mut right_sibling = node.children[right_index].write();
         let mut child = node.children[index].write();
 
@@ -341,24 +389,28 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
             let mut right_child_guard = node.children[right_index].write();
 
             // Perform the merge
-            let (left_keys, left_values, right_keys, right_values) = if let NodeType::Leaf = left_child_guard.node_type {
-                (
-                    std::mem::take(&mut left_child_guard.keys),
-                    std::mem::take(&mut left_child_guard.values),
-                    std::mem::take(&mut right_child_guard.keys),
-                    std::mem::take(&mut right_child_guard.values),
-                )
-            } else {
-                left_child_guard.keys.push(node.keys[left_index].clone());
-                (
-                    std::mem::take(&mut left_child_guard.keys),
-                    vec![],
-                    std::mem::take(&mut right_child_guard.keys),
-                    vec![],
-                )
-            };
+            let (left_keys, left_values, right_keys, right_values) =
+                if let NodeType::Leaf = left_child_guard.node_type {
+                    (
+                        std::mem::take(&mut left_child_guard.keys),
+                        std::mem::take(&mut left_child_guard.values),
+                        std::mem::take(&mut right_child_guard.keys),
+                        std::mem::take(&mut right_child_guard.values),
+                    )
+                } else {
+                    left_child_guard.keys.push(node.keys[left_index].clone());
+                    (
+                        std::mem::take(&mut left_child_guard.keys),
+                        vec![],
+                        std::mem::take(&mut right_child_guard.keys),
+                        vec![],
+                    )
+                };
 
-            info!("Merging nodes: left = {:?}, right = {:?}", left_keys, right_keys);
+            info!(
+                "Merging nodes: left = {:?}, right = {:?}",
+                left_keys, right_keys
+            );
 
             (left_keys, left_values, right_keys, right_values)
         }; // Drop child guards here
@@ -377,7 +429,9 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
             if !left_values.is_empty() {
                 left_child_guard.values.extend(left_values);
             } else {
-                left_child_guard.children.extend(right_child_guard.children.drain(..));
+                left_child_guard
+                    .children
+                    .extend(right_child_guard.children.drain(..));
             }
         } // Drop child guards here
 
@@ -406,12 +460,20 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     fn node_to_string(&self, node: &BPlusTreeNode<K, V>, level: usize) -> String {
         let mut result = String::new();
         if node.node_type == NodeType::Internal {
-            result.push_str(&format!("{}Internal Node: {:?}\n", "  ".repeat(level), node.keys));
+            result.push_str(&format!(
+                "{}Internal Node: {:?}\n",
+                "  ".repeat(level),
+                node.keys
+            ));
             for child in &node.children {
                 result.push_str(&self.node_to_string(&child.read(), level + 1));
             }
         } else {
-            result.push_str(&format!("{}Leaf Node: {:?}\n", "  ".repeat(level), node.keys));
+            result.push_str(&format!(
+                "{}Leaf Node: {:?}\n",
+                "  ".repeat(level),
+                node.keys
+            ));
             for value in &node.values {
                 result.push_str(&format!("{}  Value: {:?}\n", "  ".repeat(level + 1), value));
             }

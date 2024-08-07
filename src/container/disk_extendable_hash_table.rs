@@ -1,19 +1,19 @@
-use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::vec::Vec;
-use std::string::String;
-use std::hash::Hash;
-use std::marker::PhantomData;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::transaction::Transaction;
 use crate::container::hash_function::HashFunction;
 use crate::storage::index::generic_key::Comparator;
+use crate::storage::page::page_guard::ReadPageGuard;
 use crate::storage::page::{
     extendable_hash_table_bucket_page::ExtendableHTableBucketPage,
+    extendable_hash_table_directory_page::ExtendableHTableDirectoryPage,
     extendable_hash_table_header_page::ExtendableHTableHeaderPage,
-    extendable_hash_table_directory_page::ExtendableHTableDirectoryPage
 };
-use crate::storage::page::page_guard::ReadPageGuard;
+use std::cmp::Ordering;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::marker::PhantomData;
+use std::string::String;
+use std::vec::Vec;
 
 pub struct DiskExtendableHashTable<K, V, C> {
     index_name: String,
@@ -24,7 +24,7 @@ pub struct DiskExtendableHashTable<K, V, C> {
     directory_max_depth: u32,
     bucket_max_size: usize,
     header_page_id: u32,
-    _marker: PhantomData<V>
+    _marker: PhantomData<V>,
 }
 
 impl<K, V, C> DiskExtendableHashTable<K, V, C>
@@ -108,7 +108,12 @@ where
     /// # Returns
     ///
     /// `true` if the lookup succeeded, `false` otherwise.
-    pub fn get_value(&self, key: &K, result: &mut Vec<V>, transaction: Option<&Transaction>) -> bool {
+    pub fn get_value(
+        &self,
+        key: &K,
+        result: &mut Vec<V>,
+        transaction: Option<&Transaction>,
+    ) -> bool {
         // TODO(P2): Add implementation
         unimplemented!()
     }

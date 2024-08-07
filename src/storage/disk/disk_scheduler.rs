@@ -1,12 +1,12 @@
-use tokio::sync::Mutex;
-use std::collections::VecDeque;
-use std::sync::Arc;
-use std::thread;
-use crossbeam::channel::{unbounded, Receiver, Sender};
-use log::{info, debug};
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::DiskIO;
 use crate::storage::disk::disk_manager::FileDiskManager;
+use crossbeam::channel::{unbounded, Receiver, Sender};
+use log::{debug, info};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::thread;
+use tokio::sync::Mutex;
 
 pub struct DiskRequest {
     is_write: bool,
@@ -56,7 +56,10 @@ impl DiskScheduler {
         {
             let mut queue = self.request_queue.lock().await;
             queue.push_back(request);
-            info!("Request added to queue: is_write={}, page_id={}", is_write, page_id);
+            info!(
+                "Request added to queue: is_write={}, page_id={}",
+                is_write, page_id
+            );
         }
 
         // Notify the worker thread
@@ -77,19 +80,36 @@ impl DiskScheduler {
         self.worker_thread = Some(std::thread::spawn(move || {
             let runtime = tokio::runtime::Runtime::new().unwrap();
             runtime.block_on(async move {
-                info!("Worker thread started on thread: {:?}", std::thread::current().id());
+                info!(
+                    "Worker thread started on thread: {:?}",
+                    std::thread::current().id()
+                );
                 while !*stop_flag.lock().await {
                     // Wait for notification
-                    info!("Worker thread waiting for notification on thread: {:?}", std::thread::current().id());
+                    info!(
+                        "Worker thread waiting for notification on thread: {:?}",
+                        std::thread::current().id()
+                    );
                     if receiver.recv().is_err() {
-                        info!("Worker thread notification receiver closed on thread: {:?}", std::thread::current().id());
+                        info!(
+                            "Worker thread notification receiver closed on thread: {:?}",
+                            std::thread::current().id()
+                        );
                         break;
                     }
-                    info!("Worker thread received notification on thread: {:?}", std::thread::current().id());
+                    info!(
+                        "Worker thread received notification on thread: {:?}",
+                        std::thread::current().id()
+                    );
 
                     // Process request
                     if let Some(request) = request_queue.lock().await.pop_front() {
-                        info!("Processing request: is_write={}, page_id={} on thread: {:?}", request.is_write, request.page_id, std::thread::current().id());
+                        info!(
+                            "Processing request: is_write={}, page_id={} on thread: {:?}",
+                            request.is_write,
+                            request.page_id,
+                            std::thread::current().id()
+                        );
                         let mut data = request.data.lock().await;
                         if request.is_write {
                             info!("Writing to disk: page_id={}", request.page_id);
@@ -99,7 +119,10 @@ impl DiskScheduler {
                             disk_manager.read_page(request.page_id, &mut *data).await;
                         }
                         let _ = request.sender.send(());
-                        info!("Request processed and response sent on thread: {:?}", std::thread::current().id());
+                        info!(
+                            "Request processed and response sent on thread: {:?}",
+                            std::thread::current().id()
+                        );
                     }
                 }
 

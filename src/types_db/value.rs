@@ -4,8 +4,8 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::{CmpBool, get_type_size, Type};
 use crate::types_db::types::CmpBool::{CmpFalse, CmpTrue};
+use crate::types_db::types::{get_type_size, CmpBool, Type};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Value {
@@ -109,7 +109,6 @@ impl Type for Value {
         }
     }
 
-
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Boolean(l), Val::Boolean(r)) => (l > r).into(),
@@ -125,7 +124,7 @@ impl Type for Value {
         }
     }
 
-    fn serialize_to(&self, _val:&Value, storage: &mut [u8]) {
+    fn serialize_to(&self, _val: &Value, storage: &mut [u8]) {
         self.serialize_to(storage);
     }
 

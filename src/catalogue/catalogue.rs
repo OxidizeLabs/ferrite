@@ -2,8 +2,8 @@ use core::fmt;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
@@ -42,7 +42,12 @@ impl TableInfo {
     /// - `table`: An owning pointer to the table heap.
     /// - `oid`: The unique OID for the table.
     pub fn new(schema: Schema, name: String, table: Box<TableHeap>, oid: TableOidT) -> Self {
-        TableInfo { schema, name, table, oid }
+        TableInfo {
+            schema,
+            name,
+            table,
+            oid,
+        }
     }
 }
 
@@ -169,7 +174,12 @@ impl Catalog {
         };
 
         let table_oid = self.next_table_oid.fetch_add(1, Ordering::SeqCst);
-        let table_info = Box::new(TableInfo::new(schema, table_name.to_string(), table, table_oid));
+        let table_info = Box::new(TableInfo::new(
+            schema,
+            table_name.to_string(),
+            table,
+            table_oid,
+        ));
 
         self.table_names.insert(table_name.to_string(), table_oid);
         self.tables.insert(table_oid, table_info);
@@ -185,7 +195,10 @@ impl Catalog {
     /// # Returns
     /// A (non-owning) pointer to the metadata for the table.
     pub fn get_table(&self, table_name: &str) -> Option<&TableInfo> {
-        self.table_names.get(table_name).and_then(|&table_oid| self.tables.get(&table_oid)).map(|t| &**t)
+        self.table_names
+            .get(table_name)
+            .and_then(|&table_oid| self.tables.get(&table_oid))
+            .map(|t| &**t)
     }
 
     /// Queries table metadata by OID.
@@ -269,9 +282,14 @@ impl Catalog {
     /// # Returns
     /// A (non-owning) pointer to the metadata for the index.
     pub fn get_index(&self, index_name: &str, table_name: &str) -> Option<&IndexInfo> {
-        self.index_names.get(table_name).and_then(|table_indexes| {
-            table_indexes.get(index_name).and_then(|&index_oid| self.indexes.get(&index_oid))
-        }).map(|i| &**i)
+        self.index_names
+            .get(table_name)
+            .and_then(|table_indexes| {
+                table_indexes
+                    .get(index_name)
+                    .and_then(|&index_oid| self.indexes.get(&index_oid))
+            })
+            .map(|i| &**i)
     }
 
     /// Gets the index `index_name` for table identified by `table_oid`.
@@ -307,11 +325,18 @@ impl Catalog {
     /// A vector of `IndexInfo` for each index on the given table. Returns an empty vector
     /// if the table exists but no indexes have been created for it.
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&IndexInfo> {
-        self.table_names.get(table_name).and_then(|&table_oid| {
-            self.index_names.get(table_name).map(|table_indexes| {
-                table_indexes.values().filter_map(|&index_oid| self.indexes.get(&index_oid)).map(|i| &**i).collect()
+        self.table_names
+            .get(table_name)
+            .and_then(|&table_oid| {
+                self.index_names.get(table_name).map(|table_indexes| {
+                    table_indexes
+                        .values()
+                        .filter_map(|&index_oid| self.indexes.get(&index_oid))
+                        .map(|i| &**i)
+                        .collect()
+                })
             })
-        }).unwrap_or_default()
+            .unwrap_or_default()
     }
 
     /// Gets the names of all tables.

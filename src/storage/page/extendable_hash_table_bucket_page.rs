@@ -1,9 +1,9 @@
+use crate::common::config::DB_PAGE_SIZE;
+use crate::storage::index::generic_key::{Comparator, GenericComparator};
+use log::info;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::size_of;
-use log::info;
-use crate::common::config::DB_PAGE_SIZE;
-use crate::storage::index::generic_key::{Comparator, GenericComparator};
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;
 
@@ -89,7 +89,11 @@ where
     /// # Returns
     /// True if removed, false if not found.
     pub fn remove(&mut self, key: &K, cmp: &C) -> bool {
-        if let Some(index) = self.array.iter().position(|(k, _)| cmp.compare(k, key) == std::cmp::Ordering::Equal) {
+        if let Some(index) = self
+            .array
+            .iter()
+            .position(|(k, _)| cmp.compare(k, key) == std::cmp::Ordering::Equal)
+        {
             self.array.swap_remove(index);
             self.size -= 1;
             true
