@@ -7,7 +7,7 @@ use rand::Rng;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use tkdb::common::config::DB_PAGE_SIZE;
-use tkdb::storage::disk::disk_manager::DiskManager;
+use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 use crate::test_setup::initialize_logger;
 
@@ -27,7 +27,7 @@ impl TestContext {
         let db_file = format!("test_bpm_{}.db", timestamp);
         let db_log_file = format!("test_bpm_{}.log", timestamp);
         let buffer_pool_size = 10;
-        let disk_manager = Arc::new(DiskManager::new(db_file.clone(), db_log_file.clone()));
+        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()));
         let disk_scheduler = Arc::new((DiskScheduler::new(Arc::clone(&disk_manager))));
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(7, 2)));
         let bpm = Arc::new(BufferPoolManager::new(buffer_pool_size, disk_scheduler.clone(), disk_manager.clone(), replacer.clone()));
