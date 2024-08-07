@@ -17,5 +17,5 @@ pub enum TypeId {
 
 // fn main() {
 //     let type_id = TypeId::Integer;
-//     println!("{:?}", type_id);
+//     info!("{:?}", type_id);
 // }

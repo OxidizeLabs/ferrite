@@ -107,7 +107,7 @@ impl Display for Column {
 //     let col2 = Column::new_varlen("name".to_string(), TypeId::VarChar, 100);
 //     let col3 = Column::replicate("id_copy".to_string(), &col1);
 //
-//     println!("Column 1: {}", col1);
-//     println!("Column 2: {}", col2);
-//     println!("Column 3: {}", col3);
+//     info!("Column 1: {}", col1);
+//     info!("Column 2: {}", col2);
+//     info!("Column 3: {}", col3);
 // }

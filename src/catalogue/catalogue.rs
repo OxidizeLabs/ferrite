@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
@@ -110,10 +110,10 @@ pub struct Catalog {
     log_manager: Arc<Mutex<LogManager>>,
     tables: HashMap<TableOidT, Box<TableInfo>>,
     table_names: HashMap<String, TableOidT>,
-    next_table_oid: AtomicI64,
+    next_table_oid: AtomicI32,
     indexes: HashMap<IndexOidT, Box<IndexInfo>>,
     index_names: HashMap<String, HashMap<String, IndexOidT>>,
-    next_index_oid: AtomicI64,
+    next_index_oid: AtomicI32,
 }
 
 impl Catalog {
@@ -134,10 +134,10 @@ impl Catalog {
             log_manager,
             tables: HashMap::new(),
             table_names: HashMap::new(),
-            next_table_oid: AtomicI64::new(0),
+            next_table_oid: AtomicI32::new(0),
             indexes: HashMap::new(),
             index_names: HashMap::new(),
-            next_index_oid: AtomicI64::new(0),
+            next_index_oid: AtomicI32::new(0),
         }
     }
 

@@ -1,62 +1,72 @@
+use std::fs::remove_file;
+use std::sync::Arc;
+use chrono::Utc;
+use spin::Mutex;
+use rand::Rng;
+
+use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use tkdb::common::config::DB_PAGE_SIZE;
+use tkdb::storage::disk::disk_manager::DiskManager;
+use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+use crate::test_setup::initialize_logger;
+
+extern crate tkdb;
+
+struct TestContext {
+    bpm: Arc<BufferPoolManager>,
+    buffer_pool_size: usize,
+    db_file: String,
+    db_log_file: String,
+}
+
+impl TestContext {
+    fn new() -> Self {
+        initialize_logger();
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let db_file = format!("test_bpm_{}.db", timestamp);
+        let db_log_file = format!("test_bpm_{}.log", timestamp);
+        let buffer_pool_size = 10;
+        let disk_manager = Arc::new(DiskManager::new(db_file.clone(), db_log_file.clone()));
+        let disk_scheduler = Arc::new((DiskScheduler::new(Arc::clone(&disk_manager))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(7, 2)));
+        let bpm = Arc::new(BufferPoolManager::new(buffer_pool_size, disk_scheduler.clone(), disk_manager.clone(), replacer.clone()));
+
+        Self {
+            bpm,
+            buffer_pool_size,
+            db_file,
+            db_log_file
+        }
+    }
+
+    fn cleanup(&self) {
+        let _ = remove_file(&self.db_file);
+        let _ = remove_file(&self.db_log_file);
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_file;
-    use std::sync::Arc;
+    use log::info;
+    use super::*;
 
-    use spin::Mutex;
-    use rand::Rng;
-
-    use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
-    use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-    use tkdb::common::config::DB_PAGE_SIZE;
-    use tkdb::storage::disk::disk_manager::DiskManager;
-    use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-
-    extern crate tkdb;
-
-    struct TestContext {
-        disk_manager: Arc<DiskManager>,
-        disk_scheduler: Arc<DiskScheduler>,
-        replacer: Arc<Mutex<LRUKReplacer>>,
-        db_file: String,
-        db_log: String,
-    }
-
-    impl TestContext {
-        fn new() -> Self {
-            let db_file = "test_bpm.db";
-            let log_file = "test_bpm.log";
-            let buffer_pool_size = 10;
-            let disk_manager = Arc::new(DiskManager::new(db_file, log_file));
-            let disk_scheduler = Arc::new(DiskScheduler::new(Arc::clone(&disk_manager)));
-            let replacer = Arc::new(Mutex::new(LRUKReplacer::new(7, 2)));
-
-            Self { disk_manager, disk_scheduler, replacer, db_file: db_file.to_string(), db_log: log_file.to_string() }
-        }
-
-        fn cleanup(&self) {
-            let _ = remove_file(&self.db_file);
-            let _ = remove_file(&self.db_log);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
 
     #[test]
     fn binary_data_test() {
         let ctx = TestContext::new();
-        let buffer_pool_size = 10;
-        let disk_manager = &ctx.disk_manager;
-        let disk_scheduler = &ctx.disk_scheduler;
-        let replacer = &ctx.replacer;
-        let bpm = BufferPoolManager::new(buffer_pool_size, disk_scheduler.clone(), disk_manager.clone(), replacer.clone());
+        let bpm = &ctx.bpm;
+
 
         // Scenario: The buffer pool is empty. We should be able to create a new page.
-        println!("Creating page 0...");
+        info!("Creating page 0...");
         let mut page0 = bpm.new_page().expect("Failed to create a new page");
 
         // Generate and fill random binary data
@@ -77,29 +87,29 @@ mod tests {
         bpm.write_page(page0.get_page_id(), random_binary_data.clone());
 
         // Scenario: We should be able to create new pages until we fill up the buffer pool.
-        for i in 1..buffer_pool_size {
-            println!("Creating page {}...", i + 1);
+        for i in 1..ctx.buffer_pool_size {
+            info!("Creating page {}...", i + 1);
             assert!(bpm.new_page().is_some());
         }
 
         // Scenario: Once the buffer pool is full, we should not be able to create any new pages.
-        for i in buffer_pool_size..(buffer_pool_size * 2) {
-            println!("Attempting to create page {}...", i + 1);
+        for i in ctx.buffer_pool_size..(ctx.buffer_pool_size * 2) {
+            info!("Attempting to create page {}...", i + 1);
             let new_page_result = bpm.new_page();
             if let Some(ref page) = new_page_result {
-                println!("Unexpectedly created page {}", page.get_page_id());
+                info!("Unexpectedly created page {}", page.get_page_id());
             }
             assert!(new_page_result.is_none());
         }
 
         // Scenario: After unpinning pages {0, 1, 2, 3, 4}, we should be able to create 5 new pages.
         for i in 0..5 {
-            println!("Unpinning page {}...", i);
+            info!("Unpinning page {}...", i);
             assert!(bpm.unpin_page(i, true, AccessType::Lookup));
             bpm.flush_page(i).expect("Failed to flush page");
         }
         for i in 0..5 {
-            println!("Creating new page after unpinning: {}...", i + 1);
+            info!("Creating new page after unpinning: {}...", i + 1);
             let new_page = bpm.new_page().expect("Failed to create a new page after unpinning");
             bpm.unpin_page(new_page.get_page_id(), false, AccessType::Lookup);
         }
@@ -110,17 +120,13 @@ mod tests {
             let fetched_data = page0.get_data();
 
             // Print the fetched data for debugging
-            // println!("Fetched Data:    {}", format_slice(fetched_data));
-            // println!("Expected Data:   {}", format_slice(&random_binary_data));
+            // info!("Fetched Data:    {}", format_slice(fetched_data));
+            // info!("Expected Data:   {}", format_slice(&random_binary_data));
             assert_eq!(&random_binary_data, fetched_data, "Data mismatch after fetching");
         } else {
             panic!("Failed to fetch page 0");
         }
 
         bpm.unpin_page(0, true, AccessType::Lookup);
-
-        // Shutdown the disk manager and remove the temporary file we created.
-        ctx.disk_scheduler.shut_down();
-        ctx.disk_manager.shut_down();
     }
 }

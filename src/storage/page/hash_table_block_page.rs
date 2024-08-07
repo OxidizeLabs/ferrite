@@ -1,3 +1,4 @@
+use log::info;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::marker::PhantomData;
@@ -249,7 +250,7 @@ where
     /// Prints the block's occupancy information.
     pub fn print_bucket(&self) {
         for i in 0..block_array_size::<KeyType, ValueType>() {
-            println!(
+            info!(
                 "Index {}: occupied = {}, readable = {}",
                 i,
                 self.is_occupied(i as u32),

@@ -1,21 +1,12 @@
+use std::sync::Arc;
+use spin::RwLock;
+use tkdb::storage::index::b_plus_tree_i::BPlusTree;
+use log::{info, debug};
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use tokio::task;
-    use spin::RwLock;
-    use tkdb::storage::index::b_plus_tree_i::BPlusTree;
-    use std::sync::Once;
-    use env_logger;
-    use log::{info, debug};
-
-    static INIT: Once = Once::new();
-
-    fn initialize_logger() {
-        INIT.call_once(|| {
-            let env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "debug");
-            env_logger::init_from_env(env);
-        });
-    }
+    use crate::test_setup::initialize_logger;
+    use super::*;
 
     // #[test]
     // fn test_insert_and_search() {
@@ -133,7 +124,6 @@ mod tests {
     #[test]
     fn basic_operations() {
         initialize_logger();
-
         let bpt = Arc::new(RwLock::new(BPlusTree::new(4)));
 
         {

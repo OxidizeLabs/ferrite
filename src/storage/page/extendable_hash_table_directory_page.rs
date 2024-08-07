@@ -1,13 +1,15 @@
-use crate::common::config::PageId;
+use log::{debug, info};
+use crate::common::config::{INVALID_PAGE_ID, PageId};
 
-pub const HTABLE_DIRECTORY_MAX_DEPTH: u32 = 9;
-pub const HTABLE_DIRECTORY_ARRAY_SIZE: usize = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
+pub const HTABLE_DIRECTORY_MAX_DEPTH: u64 = 9;
+pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
 
+#[derive(Clone)]
 pub struct ExtendableHTableDirectoryPage {
     max_depth: u32,
     global_depth: u32,
-    local_depths: [u8; HTABLE_DIRECTORY_ARRAY_SIZE],
-    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE],
+    local_depths: [u32; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
+    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
 }
 
 impl ExtendableHTableDirectoryPage {
@@ -149,7 +151,7 @@ impl ExtendableHTableDirectoryPage {
     /// # Parameters
     /// - `bucket_idx`: The bucket index to update.
     /// - `local_depth`: The new local depth.
-    pub fn set_local_depth(&mut self, bucket_idx: u32, local_depth: u8) {
+    pub fn set_local_depth(&mut self, bucket_idx: u32, local_depth: u32) {
         self.local_depths[bucket_idx as usize] = local_depth;
     }
 
@@ -175,29 +177,67 @@ impl ExtendableHTableDirectoryPage {
     /// 1. All local depths are less than or equal to the global depth.
     /// 2. Each bucket has precisely 2^(global depth - local depth) pointers pointing to it.
     /// 3. The local depth is the same at each index with the same bucket page ID.
+    /// Verifies the integrity of the directory.
+    ///
+    /// Ensures that:
+    /// 1. All local depths are less than or equal to the global depth.
+    /// 2. Each bucket has precisely 2^(global depth - local depth) pointers pointing to it.
+    /// 3. The local depth is the same at each index with the same bucket page ID.
     pub fn verify_integrity(&self) {
-        for bucket_idx in 0..self.size() {
-            assert!(self.get_local_depth(bucket_idx) <= self.global_depth);
+        let size = self.size();
+        debug!("Verifying integrity of directory with size: {}", size);
+
+        // Ensure all local depths are less than or equal to the global depth
+        debug!("Ensure all local depths are less than or equal to the global depth:");
+        for bucket_idx in 0..size {
+            let local_depth = self.get_local_depth(bucket_idx);
+            debug!("Bucket idx: {}, Local depth: {}, Global depth: {}", bucket_idx, local_depth, self.global_depth);
+            assert!(local_depth <= self.global_depth, "Local depth {} exceeds global depth {} at bucket_idx: {}", local_depth, self.global_depth, bucket_idx);
         }
 
-        let mut count = vec![0; HTABLE_DIRECTORY_ARRAY_SIZE];
-        for bucket_idx in 0..self.size() {
-            count[self.get_bucket_page_id(bucket_idx) as usize] += 1;
+        // Ensure each bucket has the correct number of pointers
+        debug!("Ensure each bucket has the correct number of pointers:");
+        let mut count = vec![0; HTABLE_DIRECTORY_ARRAY_SIZE as usize];
+        for bucket_idx in 0..size {
+            let page_id = self.get_bucket_page_id(bucket_idx);
+            if page_id != INVALID_PAGE_ID {
+                count[page_id as usize] += 1;
+            }
         }
 
-        for bucket_idx in 0..self.size() {
-            assert_eq!(
-                count[self.get_bucket_page_id(bucket_idx) as usize],
-                1 << (self.global_depth - self.get_local_depth(bucket_idx))
-            );
+        for bucket_idx in 0..size {
+            let page_id = self.get_bucket_page_id(bucket_idx);
+            if page_id != INVALID_PAGE_ID {
+                let expected_count = 1 << (self.global_depth - self.get_local_depth(bucket_idx));
+                debug!("Bucket idx: {}, Page ID: {}, Expected count: {}, Actual count: {}", bucket_idx, page_id, expected_count, count[page_id as usize]);
+                assert_eq!(
+                    count[page_id as usize],
+                    expected_count,
+                    "Count mismatch at bucket_idx: {} for page_id: {}. Expected: {}, Found: {}",
+                    bucket_idx,
+                    page_id,
+                    expected_count,
+                    count[page_id as usize]
+                );
+            }
         }
 
-        for bucket_idx in 0..self.size() {
-            for other_idx in 0..self.size() {
-                if self.get_bucket_page_id(bucket_idx) == self.get_bucket_page_id(other_idx) {
+        // Ensure the local depth is the same for all indices pointing to the same bucket
+        debug!("Ensure the local depth is the same for all indices pointing to the same bucket:");
+        for bucket_idx in 0..size {
+            let page_id = self.get_bucket_page_id(bucket_idx);
+            for other_idx in 0..size {
+                if self.get_bucket_page_id(other_idx) == page_id {
+                    let local_depth_bucket = self.get_local_depth(bucket_idx);
+                    let local_depth_other = self.get_local_depth(other_idx);
+                    debug!("Bucket idx: {}, Other idx: {}, Page ID: {}, Local depth bucket: {}, Local depth other: {}", bucket_idx, other_idx, page_id, local_depth_bucket, local_depth_other);
                     assert_eq!(
-                        self.get_local_depth(bucket_idx),
-                        self.get_local_depth(other_idx)
+                        local_depth_bucket,
+                        local_depth_other,
+                        "Local depth mismatch between bucket_idx: {} and other_idx: {} for page_id: {}",
+                        bucket_idx,
+                        other_idx,
+                        page_id
                     );
                 }
             }
@@ -206,11 +246,11 @@ impl ExtendableHTableDirectoryPage {
 
     /// Prints the current directory.
     pub fn print_directory(&self) {
-        println!("ExtendableHTableDirectoryPage:");
-        println!("Max depth: {}", self.max_depth);
-        println!("Global depth: {}", self.global_depth);
+        info!("ExtendableHTableDirectoryPage:");
+        info!("Max depth: {}", self.max_depth);
+        info!("Global depth: {}", self.global_depth);
         for (i, &page_id) in self.bucket_page_ids.iter().enumerate() {
-            println!(
+            info!(
                 "Bucket {}: Page ID {} (Local depth {})",
                 i, page_id, self.local_depths[i]
             );

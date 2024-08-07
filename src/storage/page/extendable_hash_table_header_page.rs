@@ -1,4 +1,5 @@
-use crate::common::config::{DB_PAGE_SIZE, PageId};
+use log::info;
+use crate::common::config::PageId;
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
@@ -27,7 +28,12 @@ impl ExtendableHTableHeaderPage {
     /// # Returns
     /// The directory index the key is hashed to.
     pub fn hash_to_directory_index(&self, hash: u32) -> u32 {
-        hash & ((1 << self.max_depth) - 1)
+        // Number of bits to shift right to get the upper bits
+        let shift_amount = 32 - self.max_depth;
+        // Shift right to get the upper bits
+        let upper_bits = hash >> shift_amount;
+        // Apply mask to keep only max_depth bits
+        upper_bits & ((1 << self.max_depth) - 1)
     }
 
     /// Returns the directory page ID at an index.
@@ -60,10 +66,10 @@ impl ExtendableHTableHeaderPage {
 
     /// Prints the header's occupancy information.
     pub fn print_header(&self) {
-        println!("ExtendibleHTableHeaderPage:");
-        println!("Max depth: {}", self.max_depth);
+        info!("ExtendableHTableHeaderPage:");
+        info!("Max depth: {}", self.max_depth);
         for (i, &page_id) in self.directory_page_ids.iter().enumerate() {
-            println!("Index {}: Page ID {}", i, page_id);
+            info!("Index {}: Page ID {}", i, page_id);
         }
     }
 }

@@ -55,9 +55,9 @@ impl Type for VarCharType {
 //     let val = Value::new("Hello, world!".to_string());
 //     let mut storage = vec![0u8; 4 + "Hello, world!".len()];
 //     varchar_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = varchar_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

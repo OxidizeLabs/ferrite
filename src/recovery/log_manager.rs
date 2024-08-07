@@ -1,5 +1,5 @@
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicI32;
 use std::thread;
 
 use crate::storage::disk::disk_manager::DiskManager;
@@ -9,8 +9,8 @@ const LOG_BUFFER_SIZE: usize = 4096;  // Adjust as necessary
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
 pub struct LogManager {
-    next_lsn: AtomicI64,
-    persistent_lsn: AtomicI64,
+    next_lsn: AtomicI32,
+    persistent_lsn: AtomicI32,
     log_buffer: Vec<u8>,
     flush_buffer: Vec<u8>,
     latch: Mutex<()>,
@@ -29,8 +29,8 @@ pub struct LogManager {
 //     /// A new `LogManager` instance.
 //     pub fn new(disk_manager: Arc<Mutex<DiskManager>>) -> Self {
 //         Self {
-//             next_lsn: AtomicI64::new(0),
-//             persistent_lsn: AtomicI64::new(INVALID_LSN),
+//             next_lsn: AtomicI32::new(0),
+//             persistent_lsn: AtomicI32::new(INVALID_LSN),
 //             log_buffer: vec![0; LOG_BUFFER_SIZE],
 //             flush_buffer: vec![0; LOG_BUFFER_SIZE],
 //             latch: Mutex::new(()),

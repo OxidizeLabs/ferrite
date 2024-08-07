@@ -43,9 +43,9 @@ impl Type for TinyIntType {
 //     let val = Value::new(123_i8);
 //     let mut storage = [0u8; 1];
 //     tinyint_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = tinyint_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

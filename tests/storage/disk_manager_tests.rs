@@ -4,33 +4,37 @@ mod tests {
 
     use std::fs::remove_file;
     use std::sync::Arc;
+    use chrono::Utc;
     use tkdb::common::config::DB_PAGE_SIZE;
     use tkdb::storage::disk::disk_manager::DiskManager;
+    use crate::test_setup::initialize_logger;
 
     const BUSTUB_PAGE_SIZE: usize = 4096;
 
     struct TestContext {
         disk_manager: Arc<DiskManager>,
         db_file: String,
-        db_log: String,
+        db_log_file: String,
     }
 
     impl TestContext {
         fn new() -> Self {
-            let db_file = "test_disk_manager.db";
-            let log_file = "test_disk_manager.log";
-            let disk_manager = Arc::new(DiskManager::new(db_file, log_file));
+            initialize_logger();
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
+            let db_file = format!("test_disk_manager_{}.db", timestamp);
+            let db_log_file = format!("test_disk_manager_{}.log", timestamp);
+            let disk_manager = Arc::new(DiskManager::new(db_file.clone(), db_log_file.clone()));
 
             Self {
                 disk_manager,
-                db_file: db_file.to_string(),
-                db_log: log_file.to_string(),
+                db_file,
+                db_log_file,
             }
         }
 
         fn cleanup(&self) {
             let _ = remove_file(&self.db_file);
-            let _ = remove_file(&self.db_log);
+            let _ = remove_file(&self.db_log_file);
         }
     }
 
@@ -39,6 +43,7 @@ mod tests {
             self.cleanup();
         }
     }
+
 
     #[test]
     fn test_read_write_page() {

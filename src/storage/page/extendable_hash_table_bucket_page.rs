@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::size_of;
-
+use log::info;
 use crate::common::config::DB_PAGE_SIZE;
 use crate::storage::index::generic_key::{Comparator, GenericComparator};
 
@@ -51,15 +51,11 @@ where
     /// # Returns
     /// An optional value associated with the key.
     pub fn lookup(&self, key: &K, cmp: &C) -> Option<V> {
-        println!("Looking up key: {:?}", key);
         for (k, v) in &self.array {
-            println!("Comparing with key: {:?}", k);
             if cmp.compare(k, key) == std::cmp::Ordering::Equal {
-                println!("Key found: {:?}", k);
                 return Some(v.clone());
             }
         }
-        println!("Key not found: {:?}", key);
         None
     }
 
@@ -163,11 +159,11 @@ where
 
     /// Prints the bucket's occupancy information.
     pub fn print_bucket(&self) {
-        println!("ExtendableHTableBucketPage:");
-        println!("Size: {}", self.size);
-        println!("Max size: {}", self.max_size);
+        info!("ExtendableHTableBucketPage:");
+        info!("Size: {}", self.size);
+        info!("Max size: {}", self.max_size);
         for (i, (key, value)) in self.array.iter().enumerate() {
-            println!("Entry {}: Key: {:?}, Value: {:?}", i, key, value);
+            info!("Entry {}: Key: {:?}, Value: {:?}", i, key, value);
         }
     }
 }
