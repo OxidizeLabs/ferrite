@@ -38,5 +38,5 @@ impl Type for IntegerType {
 // fn main() {
 //     // Example usage
 //     let integer_type = IntegerType::new();
-//     println!("{:?}", integer_type);
+//     info!("{:?}", integer_type);
 // }

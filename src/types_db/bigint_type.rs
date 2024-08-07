@@ -47,9 +47,9 @@ impl Type for BigIntType {
 //     let val = Value::new(1234567890123456789_i64);
 //     let mut storage = [0u8; 8];
 //     bigint_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = bigint_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

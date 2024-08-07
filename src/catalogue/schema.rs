@@ -114,15 +114,15 @@ impl Schema {
 //     let col2 = Column::new_varlen("name".to_string(), 100);
 //     let col3 = Column::replicate("id_copy".to_string(), &col1);
 //
-//     println!("Column 1: {}", col1.to_string(false));
-//     println!("Column 2: {}", col2.to_string(false));
-//     println!("Column 3: {}", col3.to_string(false));
+//     info!("Column 1: {}", col1.to_string(false));
+//     info!("Column 2: {}", col2.to_string(false));
+//     info!("Column 3: {}", col3.to_string(false));
 //
 //     let columns = vec![col1, col2, col3];
 //     let schema = Schema::new(columns);
-//     println!("{}", schema.to_string(false));
-//     println!("{}", schema.to_string(true));
+//     info!("{}", schema.to_string(false));
+//     info!("{}", schema.to_string(true));
 //
 //     let copied_schema = Schema::copy_schema(&schema, vec![0, 2]);
-//     println!("Copied Schema: {}", copied_schema.to_string(false));
+//     info!("Copied Schema: {}", copied_schema.to_string(false));
 // }

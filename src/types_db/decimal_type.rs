@@ -47,9 +47,9 @@ impl Type for DecimalType {
 //     let val = Value::new(12345.6789_f64);
 //     let mut storage = [0u8; 8];
 //     decimal_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = decimal_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

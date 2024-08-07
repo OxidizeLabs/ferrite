@@ -1,3 +1,4 @@
+use log::info;
 use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -19,23 +20,23 @@ pub struct DiskManager {
 }
 
 impl DiskManager {
-    pub fn new(db_file: &str, log_file: &str) -> Self {
+    pub fn new(db_file: String, log_file: String) -> Self {
         let db_io = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(db_file)
+            .open(db_file.clone())
             .unwrap();
         let log_io = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(log_file)
+            .open(log_file.clone())
             .unwrap();
 
         Self {
-            file_name: db_file.to_string(),
-            log_name: log_file.to_string(),
+            file_name: db_file,
+            log_name: log_file,
             db_io: Mutex::new(db_io),
             log_io: Mutex::new(log_io),
             num_flushes: Mutex::new(0),
@@ -52,32 +53,32 @@ impl DiskManager {
 
     pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE]) {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
-        println!("Writing page {} at offset {}", page_id, offset);
-        println!("Page data being written: {:?}", &data[..64]); // Debugging statement
+        info!("Writing page {} at offset {}", page_id, offset);
+        info!("Page data being written: {:?}", &data[..64]); // Debugging statement
 
         let mut db_io = self.db_io.lock().unwrap();
         if let Err(e) = db_io.seek(SeekFrom::Start(offset)) {
-            println!("Failed to seek to offset {}: {}", offset, e);
+            info!("Failed to seek to offset {}: {}", offset, e);
             return;
         }
         if let Err(e) = db_io.write_all(&data) {
-            println!("Failed to write data for page {}: {}", page_id, e);
+            info!("Failed to write data for page {}: {}", page_id, e);
         }
     }
 
     pub fn read_page(&self, page_id: PageId, page_data: &mut [u8]) {
         let mut db_io = self.db_io.lock().unwrap();
         let offset = page_id as u64 * page_data.len() as u64;
-        println!("Reading page {} at offset {}", page_id, offset); // Debugging statement
+        info!("Reading page {} at offset {}", page_id, offset); // Debugging statement
         db_io.seek(SeekFrom::Start(offset)).unwrap();
         match db_io.read_exact(page_data) {
             Ok(_) => {
-                println!("Page data read: {}", format_slice(page_data)); // Debugging statement
+                info!("Page data read: {}", format_slice(page_data)); // Debugging statement
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 // If there's an UnexpectedEof error, we simply fill the page_data with zeroes.
                 page_data.fill(0);
-                println!("Page data read incomplete, filling with zeroes"); // Debugging statement
+                info!("Page data read incomplete, filling with zeroes"); // Debugging statement
             }
             Err(e) => panic!("Unexpected error reading page: {}", e),
         }

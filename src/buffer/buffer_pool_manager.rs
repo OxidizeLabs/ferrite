@@ -1,3 +1,4 @@
+use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -513,7 +514,7 @@ impl BufferPoolManager {
         if let Some(&frame_id) = page_table.get(&page_id) {
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
-                println!("Unpinning page {} with current pin count {}", page_id, page.get_pin_count()); // Debug logging
+                info!("Unpinning page {} with current pin count {}", page_id, page.get_pin_count()); // Debug logging
                 if page.get_pin_count() > 0 {
                     page.decrement_pin_count();
                     if is_dirty {
@@ -527,13 +528,13 @@ impl BufferPoolManager {
                     }
                     return true;
                 } else {
-                    println!("Page {} has pin count 0, cannot unpin", page_id); // Debug logging
+                    info!("Page {} has pin count 0, cannot unpin", page_id); // Debug logging
                 }
             } else {
-                println!("Page {} is not in the pages array", page_id); // Debug logging
+                info!("Page {} is not in the pages array", page_id); // Debug logging
             }
         } else {
-            println!("Page {} is not in the page table", page_id); // Debug logging
+            info!("Page {} is not in the page table", page_id); // Debug logging
         }
         false
     }
@@ -548,26 +549,26 @@ impl BufferPoolManager {
     pub fn flush_page(&self, page_id: PageId) -> Option<bool> {
         let page_table = self.page_table.lock();
         if let Some(&frame_id) = page_table.get(&page_id) {
-            println!("Flushing page {} from frame {}", page_id, frame_id); // Debugging statement
+            info!("Flushing page {} from frame {}", page_id, frame_id); // Debugging statement
             let mut pages = self.pages.write();
             if let Some(page) = pages[frame_id as usize].as_mut() {
                 if page.is_dirty() {
                     let data = page.get_data();
-                    println!("Page data before flushing: {:?}", &data[..64]); // Debugging statement
+                    info!("Page data before flushing: {:?}", &data[..64]); // Debugging statement
                     self.disk_manager.write_page(page_id, *data);
-                    println!("Page data written to disk: {:?}", &data[..64]); // Debugging statement
+                    info!("Page data written to disk: {:?}", &data[..64]); // Debugging statement
                     page.set_dirty(false); // Reset dirty flag after flushing
-                    println!("Page {} flushed successfully", page_id); // Debugging statement
+                    info!("Page {} flushed successfully", page_id); // Debugging statement
                 } else {
-                    println!("Page {} is not dirty, no need to flush", page_id); // Debugging statement
+                    info!("Page {} is not dirty, no need to flush", page_id); // Debugging statement
                 }
                 return Some(true);
             } else {
-                println!("Failed to find page in frame {}", frame_id); // Debugging statement
+                info!("Failed to find page in frame {}", frame_id); // Debugging statement
                 return None;
             }
         } else {
-            println!("Page ID {} not found in page table", page_id); // Debugging statement
+            info!("Page ID {} not found in page table", page_id); // Debugging statement
             return None;
         }
     }

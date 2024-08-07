@@ -4,7 +4,7 @@ use std::thread;
 use spin::Mutex;
 use tokio::sync::oneshot;
 use crossbeam::channel::{unbounded, Receiver, Sender};
-
+use log::info;
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::DiskManager;
 
@@ -117,7 +117,7 @@ impl Drop for DiskScheduler {
         self.shut_down();
         if let Some(handle) = self.worker_thread.take() {
             if let Err(e) = handle.join() {
-                eprintln!("Failed to join worker thread: {:?}", e);
+                info!("Failed to join worker thread: {:?}", e);
             }
         }
     }

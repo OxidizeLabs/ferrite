@@ -32,5 +32,5 @@ impl Type for SmallIntType {
 // fn main() {
 //     // Example usage
 //     let smallint_type = SmallIntType::new();
-//     println!("{:?}", smallint_type);
+//     info!("{:?}", smallint_type);
 // }

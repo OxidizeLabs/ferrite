@@ -37,5 +37,5 @@ impl Type for BooleanType {
 // fn main() {
 //     // Example usage
 //     let boolean_type = BooleanType::new();
-//     println!("{:?}", boolean_type);
+//     info!("{:?}", boolean_type);
 // }

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicI32;
 use spin::RwLock;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::{INVALID_PAGE_ID, PageId, TableOidT};
@@ -16,7 +16,7 @@ pub struct TableHeap {
     bpm: Arc<BufferPoolManager>,
     first_page_id: PageId,
     latch: RwLock<()>,
-    last_page_id: AtomicI64,
+    last_page_id: AtomicI32,
 }
 
 impl TableHeap {
@@ -34,7 +34,7 @@ impl TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
             latch: RwLock::new(()),
-            last_page_id: AtomicI64::new(INVALID_PAGE_ID),
+            last_page_id: AtomicI32::new(INVALID_PAGE_ID.into()),
         }
     }
 

@@ -47,9 +47,9 @@ impl Type for TimestampType {
 //     let val = Value::new(1627842123_u64);
 //     let mut storage = [0u8; 8];
 //     timestamp_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = timestamp_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }

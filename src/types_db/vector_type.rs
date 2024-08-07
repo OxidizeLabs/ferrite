@@ -69,9 +69,9 @@ impl Type for VectorType {
 //     let val = Value::new(vec![1, 2, 3, 4, 5]);
 //     let mut storage = vec![0u8; 4 + 5 * 4];
 //     vector_type.serialize_to(&val, &mut storage);
-//     println!("Serialized storage: {:?}", storage);
+//     info!("Serialized storage: {:?}", storage);
 //
 //     // Test deserialization
 //     let deserialized_val = vector_type.deserialize_from(&mut storage);
-//     println!("Deserialized value: {:?}", deserialized_val.get_value());
+//     info!("Deserialized value: {:?}", deserialized_val.get_value());
 // }
