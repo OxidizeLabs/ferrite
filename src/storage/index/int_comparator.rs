@@ -1,9 +1,21 @@
-/// Function object that returns > 0 if lhs > rhs, < 0 if lhs < rhs,
-/// = 0 if lhs == rhs.
-#[derive(Debug, Clone, Copy)]
-pub struct GenericComparator;
+use std::cmp::Ordering;
+use std::marker::PhantomData;
+use crate::storage::index::generic_key::Comparator;
 
-impl GenericComparator {
+#[derive(Debug, Clone, Copy)]
+pub struct IntComparator {
+    _marker: PhantomData<()>,
+}
+
+impl IntComparator {
+    pub fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl Comparator<i32> for IntComparator {
     /// Compares two integers.
     ///
     /// # Parameters
@@ -14,11 +26,7 @@ impl GenericComparator {
     /// - `1` if `lhs` > `rhs`
     /// - `-1` if `lhs` < `rhs`
     /// - `0` if `lhs` == `rhs`
-    pub fn compare(&self, lhs: i32, rhs: i32) -> i32 {
-        match lhs.cmp(&rhs) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Greater => 1,
-            std::cmp::Ordering::Equal => 0,
-        }
+    fn compare(&self, lhs: &i32, rhs: &i32) -> Ordering {
+        lhs.cmp(rhs)
     }
 }
