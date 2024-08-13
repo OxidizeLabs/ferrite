@@ -1,5 +1,5 @@
 use std::convert::TryInto;
-
+use log::{debug, info, warn};
 use crate::common::config::*;
 
 // Constants
@@ -31,70 +31,86 @@ impl Page {
             is_dirty: false,
         };
         page.reset_memory();
+        info!("Created new Page with ID {}", page_id);
         page
     }
 
     /// Returns the actual data contained within this page.
     pub fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+        debug!("Accessing data for Page ID {}", self.page_id);
         &self.data
     }
 
     /// Returns a mutable reference to the actual data contained within this page.
     pub fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+        debug!("Accessing mutable data for Page ID {}", self.page_id);
         &mut self.data
     }
 
     /// Returns the page id of this page.
     pub fn get_page_id(&self) -> PageId {
+        debug!("Fetching Page ID {}", self.page_id);
         self.page_id
     }
 
     /// Returns the pin count of this page.
     pub fn get_pin_count(&self) -> i32 {
+        debug!("Fetching pin count for Page ID {}: {}", self.page_id, self.pin_count);
         self.pin_count
     }
 
     /// Sets the pin count of this page.
     pub fn set_pin_count(&mut self, pin_count: i32) {
+        debug!("Setting pin count for Page ID {}: {}", self.page_id, pin_count);
         self.pin_count = pin_count;
     }
 
     /// Increments the pin count of this page.
     pub fn increment_pin_count(&mut self) {
         self.pin_count += 1;
+        debug!("Incremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
     }
 
     /// Decrements the pin count of this page.
     pub fn decrement_pin_count(&mut self) {
         if self.pin_count > 0 {
             self.pin_count -= 1;
+            debug!("Decremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
+        } else {
+            warn!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
         }
     }
 
     /// Returns true if the page is dirty.
     pub fn is_dirty(&self) -> bool {
+        debug!("Checking if Page ID {} is dirty: {}", self.page_id, self.is_dirty);
         self.is_dirty
     }
 
     /// Sets the dirty flag of this page.
     pub fn set_dirty(&mut self, is_dirty: bool) {
         self.is_dirty = is_dirty;
+        info!("Set dirty flag for Page ID {}: {}", self.page_id, is_dirty);
     }
 
     /// Returns the page LSN.
     pub fn get_lsn(&self) -> Lsn {
         let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 4];
-        i32::from_ne_bytes(bytes.try_into().unwrap()).into()
+        let lsn = i32::from_ne_bytes(bytes.try_into().unwrap()).into();
+        debug!("Fetching LSN for Page ID {}: {}", self.page_id, lsn);
+        lsn
     }
 
     /// Sets the page LSN.
     pub fn set_lsn(&mut self, lsn: Lsn) {
         let lsn_bytes = lsn.to_ne_bytes();
         self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
+        info!("Set LSN for Page ID {}: {}", self.page_id, lsn);
     }
 
     /// Zeroes out the data that is held within the page.
     pub fn reset_memory(&mut self) {
         self.data.fill(0);
+        debug!("Reset memory for Page ID {}", self.page_id);
     }
 }
