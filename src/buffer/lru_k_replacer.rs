@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::common::config::FrameId;
+use crate::common::time::TimeSource;
 
 #[derive(Clone, Copy)]
 pub enum AccessType {
@@ -21,21 +22,30 @@ pub struct Frame {
     is_evictable: bool,
 }
 
+pub struct SystemTimeSource;
+
+impl TimeSource for SystemTimeSource {
+    fn now(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+}
+
 pub struct LRUKReplacer {
     frame_store: Arc<Mutex<HashMap<FrameId, Frame>>>,
-    current_timestamp: Mutex<usize>,
-    curr_size_: Mutex<usize>,
+    time_source: Box<dyn TimeSource>,
     replacer_size: usize,
     k: usize,
 }
 
 impl LRUKReplacer {
-    pub fn new(num_frames: usize, k: usize) -> Self {
+    pub fn new(num_frames: usize, k: usize, time_source: Box<dyn TimeSource>) -> Self {
         info!("Initializing LRUKReplacer with size {} and k {}", num_frames, k);
         Self {
             frame_store: Arc::new(Mutex::new(HashMap::new())),
-            current_timestamp: Mutex::new(0),
-            curr_size_: Mutex::new(0),
+            time_source,
             replacer_size: num_frames,
             k,
         }
@@ -86,7 +96,7 @@ impl LRUKReplacer {
     }
 
     pub fn record_access(&self, frame_id: FrameId, _access_type: AccessType) {
-        let now = Self::current_time();
+        let now = self.time_source.now();
         let mut frame_store = self.frame_store.lock().unwrap();
 
         frame_store
@@ -142,6 +152,13 @@ impl LRUKReplacer {
         }
     }
 
+    pub fn total_frames(&self) -> usize {
+        let frame_store = self.frame_store.lock().unwrap();
+        let total = frame_store.len(); // Count all frames
+        debug!("Current total frames: {}", total);
+        total
+    }
+
     pub fn size(&self) -> usize {
         let frame_store = self.frame_store.lock().unwrap();
         let size = frame_store
@@ -150,12 +167,5 @@ impl LRUKReplacer {
             .count();
         debug!("Current size of evictable frames: {}", size);
         size
-    }
-
-    fn current_time() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
     }
 }
