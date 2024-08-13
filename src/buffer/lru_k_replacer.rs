@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, error, info};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,6 +31,7 @@ pub struct LRUKReplacer {
 
 impl LRUKReplacer {
     pub fn new(num_frames: usize, k: usize) -> Self {
+        info!("Initializing LRUKReplacer with size {} and k {}", num_frames, k);
         Self {
             frame_store: Arc::new(Mutex::new(HashMap::new())),
             current_timestamp: Mutex::new(0),
@@ -45,9 +46,10 @@ impl LRUKReplacer {
         let mut max_k_distance = 0;
         let mut victim_frame_id = None;
 
+        debug!("Starting eviction process");
         for (id, frame) in frame_store.iter() {
             if !frame.is_evictable {
-                info!("Frame {} is not evictable", id); // Debugging statement
+                debug!("Frame {} is not evictable, skipping", id);
                 continue;
             }
 
@@ -61,22 +63,24 @@ impl LRUKReplacer {
             if k_distance > max_k_distance {
                 max_k_distance = k_distance;
                 victim_frame_id = Some(*id);
+                debug!("Frame {} is a new eviction candidate with k-distance {}", id, k_distance);
             } else if k_distance == max_k_distance {
                 if let Some(current_victim_id) = victim_frame_id {
                     let current_victim_frame = &frame_store[&current_victim_id];
                     if frame.access_times.first() < current_victim_frame.access_times.first() {
                         victim_frame_id = Some(*id);
+                        debug!("Frame {} is a better candidate than {}", id, current_victim_id);
                     }
                 }
             }
         }
 
         if let Some(victim_id) = victim_frame_id {
-            info!("Evicting frame {}", victim_id); // Debugging statement
+            info!("Evicting frame {}", victim_id);
             frame_store.remove(&victim_id);
             Some(victim_id)
         } else {
-            info!("No frames available for eviction"); // Debugging statement
+            error!("No frames available for eviction");
             None
         }
     }
@@ -87,24 +91,30 @@ impl LRUKReplacer {
 
         frame_store
             .entry(frame_id)
-            .and_modify(|frame| frame.access_times.push(now))
-            .or_insert(Frame {
-                is_evictable: true,
-                access_times: vec![now],
-                k: self.k,
-                fid: frame_id,
+            .and_modify(|frame| {
+                frame.access_times.push(now);
+                debug!("Updated access times for frame {}: {:?}", frame_id, frame.access_times);
+            })
+            .or_insert_with(|| {
+                debug!("Inserting new frame {} with initial access time {}", frame_id, now);
+                Frame {
+                    is_evictable: true,
+                    access_times: vec![now],
+                    k: self.k,
+                    fid: frame_id,
+                }
             });
 
-        info!("Recorded access for frame {} at {}", frame_id, now); // Debugging statement
+        info!("Recorded access for frame {} at {}", frame_id, now);
     }
 
     pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
         let mut frame_store = self.frame_store.lock().unwrap();
         if let Some(frame) = frame_store.get_mut(&frame_id) {
             frame.is_evictable = set_evictable;
-            info!("Set frame {} evictable: {}", frame_id, set_evictable); // Debugging statement
+            debug!("Set frame {} evictable: {}", frame_id, set_evictable);
         } else {
-            info!("Frame {} not found in frame_store", frame_id); // Debugging statement
+            info!("Frame {} not found in frame_store, adding with evictable status {}", frame_id, set_evictable);
             frame_store.insert(
                 frame_id,
                 Frame {
@@ -116,26 +126,30 @@ impl LRUKReplacer {
             );
         }
     }
+
     pub fn remove(&self, frame_id: FrameId) {
         let mut frame_store = self.frame_store.lock().unwrap();
         if let Some(frame) = frame_store.get(&frame_id) {
             if frame.is_evictable {
+                info!("Removing frame {}", frame_id);
                 frame_store.remove(&frame_id);
-                info!("Removed frame {}", frame_id); // Debugging statement
             } else {
+                error!("Attempt to remove a non-evictable frame {}", frame_id);
                 panic!("Attempt to remove a non-evictable frame {}", frame_id);
             }
         } else {
-            info!("Attempt to remove a non-existing frame {}", frame_id); // Debugging statement
+            info!("Attempt to remove a non-existing frame {}", frame_id);
         }
     }
 
     pub fn size(&self) -> usize {
         let frame_store = self.frame_store.lock().unwrap();
-        frame_store
+        let size = frame_store
             .iter()
             .filter(|&frame| frame.1.is_evictable)
-            .count()
+            .count();
+        debug!("Current size of evictable frames: {}", size);
+        size
     }
 
     fn current_time() -> u64 {
