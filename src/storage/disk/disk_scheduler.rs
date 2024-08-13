@@ -20,7 +20,7 @@ pub struct DiskScheduler {
     request_queue: Arc<Mutex<VecDeque<DiskRequest>>>,
     stop_flag: Arc<Mutex<bool>>,
     notifier: Sender<()>,
-    worker_thread: Option<std::thread::JoinHandle<()>>,
+    worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
@@ -82,24 +82,24 @@ impl DiskScheduler {
             runtime.block_on(async move {
                 info!(
                     "Worker thread started on thread: {:?}",
-                    std::thread::current().id()
+                    thread::current().id()
                 );
                 while !*stop_flag.lock().await {
                     // Wait for notification
                     info!(
                         "Worker thread waiting for notification on thread: {:?}",
-                        std::thread::current().id()
+                        thread::current().id()
                     );
                     if receiver.recv().is_err() {
                         info!(
                             "Worker thread notification receiver closed on thread: {:?}",
-                            std::thread::current().id()
+                            thread::current().id()
                         );
                         break;
                     }
                     info!(
                         "Worker thread received notification on thread: {:?}",
-                        std::thread::current().id()
+                        thread::current().id()
                     );
 
                     // Process request
@@ -108,7 +108,7 @@ impl DiskScheduler {
                             "Processing request: is_write={}, page_id={} on thread: {:?}",
                             request.is_write,
                             request.page_id,
-                            std::thread::current().id()
+                            thread::current().id()
                         );
                         let mut data = request.data.lock().await;
                         if request.is_write {
@@ -121,7 +121,7 @@ impl DiskScheduler {
                         let _ = request.sender.send(());
                         info!(
                             "Request processed and response sent on thread: {:?}",
-                            std::thread::current().id()
+                            thread::current().id()
                         );
                     }
                 }
