@@ -4,6 +4,7 @@ use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::storage::page::page::Page;
 use spin::Mutex;
 use std::sync::Arc;
+use log::{debug, info};
 
 /// BasicPageGuard is a structure that helps manage access to a page in the buffer pool.
 #[derive(Clone)]
@@ -23,6 +24,7 @@ impl BasicPageGuard {
     /// # Returns
     /// A new `BasicPageGuard` instance.
     pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Mutex<Page>>) -> Self {
+        info!("Creating new BasicPageGuard for page ID {}", page.lock().get_page_id());
         Self {
             bpm: Some(bpm),
             page: Some(page),
@@ -38,6 +40,7 @@ impl BasicPageGuard {
     /// For example, it should not be possible to call `.drop()` on both page
     /// guards and have the pin count decrease by 2.
     pub fn from(other: BasicPageGuard) -> Self {
+        info!("Moving BasicPageGuard for page ID {}", other.page_id());
         other.clone()
     }
 
@@ -50,8 +53,10 @@ impl BasicPageGuard {
     pub fn drop(&mut self) {
         if let (Some(bpm), Some(page)) = (&self.bpm, &self.page) {
             let mut page_guard = page.lock();
+            let page_id = page_guard.get_page_id();
             page_guard.decrement_pin_count();
-            bpm.unpin_page(page_guard.get_page_id(), self.is_dirty, AccessType::Unknown);
+            bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
+            info!("Dropped BasicPageGuard for page ID {}", page_id);
         }
         self.bpm = None;
         self.page = None;
@@ -67,8 +72,10 @@ impl BasicPageGuard {
     pub fn assign(&mut self, mut other: BasicPageGuard) -> &Self {
         if let (Some(bpm), Some(page)) = (&self.bpm, &self.page) {
             let mut page_guard = page.lock();
-            bpm.unpin_page(page_guard.get_page_id(), self.is_dirty, AccessType::Unknown);
+            let page_id = page_guard.get_page_id();
+            bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
             page_guard.decrement_pin_count();
+            info!("Reassigned BasicPageGuard from page ID {} to page ID {}", page_id, other.page_id());
         }
 
         self.bpm = other.bpm.take();
@@ -94,14 +101,15 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `ReadPageGuard`.
     pub fn upgrade_read(self) -> ReadPageGuard {
+        let page_id = self.page_id();
         let bpm = self.bpm.clone().unwrap();
         let page = self.page.clone().unwrap();
 
-        // Invalidate the BasicPageGuard by setting its fields to None
         let mut invalidated_guard = self;
         invalidated_guard.bpm = None;
         invalidated_guard.page = None;
 
+        info!("Upgraded BasicPageGuard to ReadPageGuard for page ID {}", page_id);
         ReadPageGuard::new(bpm, page)
     }
 
@@ -113,14 +121,15 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `WritePageGuard`.
     pub fn upgrade_write(self) -> WritePageGuard {
+        let page_id = self.page_id();
         let bpm = self.bpm.clone().unwrap();
         let page = self.page.clone().unwrap();
 
-        // Invalidate the BasicPageGuard by setting its fields to None
         let mut invalidated_guard = self;
         invalidated_guard.bpm = None;
         invalidated_guard.page = None;
 
+        info!("Upgraded BasicPageGuard to WritePageGuard for page ID {}", page_id);
         WritePageGuard::new(bpm, page)
     }
 
@@ -131,12 +140,14 @@ impl BasicPageGuard {
 
     /// Returns a reference to the data.
     pub fn get_data(&self) -> Box<[u8; DB_PAGE_SIZE]> {
+        debug!("Fetching data for page ID {}", self.page_id());
         let page = self.page.as_ref().unwrap().lock();
         Box::new(*page.get_data())
     }
 
     /// Returns a mutable reference to the data and marks the page as dirty.
     pub fn get_data_mut(&mut self) -> Box<[u8; DB_PAGE_SIZE]> {
+        debug!("Fetching mutable data for page ID {}", self.page_id());
         self.is_dirty = true;
         let mut page = self.page.as_mut().unwrap().lock();
         Box::new(*page.get_data_mut())
@@ -177,6 +188,7 @@ impl ReadPageGuard {
     /// # Returns
     /// A new `ReadPageGuard` instance.
     pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Mutex<Page>>) -> Self {
+        info!("Creating new ReadPageGuard for page ID {}", page.lock().get_page_id());
         Self {
             guard: BasicPageGuard::new(bpm, page),
         }
@@ -188,6 +200,7 @@ impl ReadPageGuard {
     /// a `ReadPageGuard` using another `ReadPageGuard`. Think
     /// about if there's any way you can make this easier for yourself...
     pub fn from(other: ReadPageGuard) -> Self {
+        info!("Moving ReadPageGuard for page ID {}", other.page_id());
         Self {
             guard: BasicPageGuard::from(other.guard),
         }
@@ -198,6 +211,7 @@ impl ReadPageGuard {
     /// Very similar to `BasicPageGuard`. Given another `ReadPageGuard`,
     /// replace the contents of this one with that one.
     pub fn assign(&mut self, other: ReadPageGuard) -> &Self {
+        info!("Assigning ReadPageGuard for page ID {}", other.page_id());
         self.guard.assign(other.guard);
         self
     }
@@ -209,6 +223,7 @@ impl ReadPageGuard {
     /// However, you should think VERY carefully about in which order you
     /// want to release these resources.
     pub fn drop_guard(&mut self) {
+        info!("Dropping ReadPageGuard for page ID {}", self.page_id());
         self.guard.drop();
     }
 
@@ -229,6 +244,17 @@ impl ReadPageGuard {
     pub fn get_data(&self) -> Box<[u8; DB_PAGE_SIZE]> {
         self.guard.get_data()
     }
+
+
+    /// Returns a mutable reference to the data casted to a specific type and marks the page as dirty.
+    ///
+    /// # Returns
+    /// A mutable reference to the data as a specific type.
+    pub fn as_type_mut<T>(&mut self) -> &mut T {
+        self.guard.is_dirty = true;
+        let mut data = self.guard.get_data_mut();
+        unsafe { &mut *(data.as_mut_ptr() as *mut T) }
+    }
 }
 
 /// WritePageGuard is a structure that helps manage read-write access to a page in the buffer pool.
@@ -246,6 +272,7 @@ impl WritePageGuard {
     /// # Returns
     /// A new `WritePageGuard` instance.
     pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<Mutex<Page>>) -> Self {
+        info!("Creating new WritePageGuard for page ID {}", page.lock().get_page_id());
         Self {
             guard: BasicPageGuard::new(bpm, page),
         }
@@ -257,6 +284,7 @@ impl WritePageGuard {
     /// a `WritePageGuard` using another `WritePageGuard`. Think
     /// about if there's any way you can make this easier for yourself...
     pub fn from(other: WritePageGuard) -> Self {
+        info!("Moving WritePageGuard for page ID {}", other.page_id());
         Self {
             guard: BasicPageGuard::from(other.guard),
         }
@@ -267,6 +295,7 @@ impl WritePageGuard {
     /// Very similar to `BasicPageGuard`. Given another `WritePageGuard`,
     /// replace the contents of this one with that one.
     pub fn assign(&mut self, other: WritePageGuard) -> &Self {
+        info!("Assigning WritePageGuard for page ID {}", other.page_id());
         self.guard.assign(other.guard);
         self
     }
@@ -278,6 +307,7 @@ impl WritePageGuard {
     /// However, you should think VERY carefully about in which order you
     /// want to release these resources.
     pub fn drop_guard(&mut self) {
+        info!("Dropping WritePageGuard for page ID {}", self.page_id());
         self.guard.drop();
     }
 
@@ -302,5 +332,16 @@ impl WritePageGuard {
     /// Returns a mutable reference to the data.
     pub fn get_data_mut(&mut self) -> Box<[u8; DB_PAGE_SIZE]> {
         self.guard.get_data_mut()
+    }
+
+
+    /// Returns a mutable reference to the data casted to a specific type and marks the page as dirty.
+    ///
+    /// # Returns
+    /// A mutable reference to the data as a specific type.
+    pub fn as_type_mut<T>(&mut self) -> &mut T {
+        self.guard.is_dirty = true;
+        let mut data = self.get_data_mut();
+        unsafe { &mut *(data.as_mut_ptr() as *mut T) }
     }
 }
