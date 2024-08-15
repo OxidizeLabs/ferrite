@@ -72,7 +72,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore]
     fn test_write_page_deadlock() {
         // Initialize the test context
         let ctx = TestContext::new("test_write_page_deadlock");
@@ -131,31 +130,39 @@ mod extended_tests {
     use super::*;
 
     #[test]
-    #[ignore]
     fn concurrent_page_access_test() {
         let ctx = TestContext::new("concurrent_page_access_test");
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
-        let page = bpm.read().new_page().expect("Failed to create a new page");
+        let page = bpm.write().new_page().unwrap();
 
         let page_id = page.read().get_page_id();
         let bpm_clone = bpm.clone();
-        let done = Arc::new(Mutex::new(false));
         let mut handles = vec![];
 
         // Spawn multiple threads to simulate concurrent access to the same page
         for i in 0..10 {
             let bpm = bpm_clone.clone();
             let page_id = page_id;
-            let done_clone = done.clone();
 
             let handle = thread::spawn(move || {
-                let mut bpm = bpm.write();
-                let binding = bpm.fetch_page_write(page_id).expect("Failed to fetch page for writing");
-                let mut page_guard = binding.write();
-                let mut data = page_guard.get_data_mut();
-                data[0] = i as u8;
-                bpm.unpin_page(page_id, true, AccessType::Lookup);
-                *done_clone.lock().unwrap() = true;
+                {
+                    // First, fetch the page with a short-lived lock on the BPM
+                    let page = {
+                        let bpm = bpm.read(); // Use a read lock on the BPM
+                        bpm.fetch_page(page_id).unwrap() // Fetch the page
+                    };
+
+                    // Then, modify the page with a write lock on the page itself
+                    {
+                        let mut page_guard = page.write(); // Acquire write lock on the Page
+                        let data = page_guard.get_data_mut();
+                        data[0] = i as u8; // Each thread writes its index as the first byte
+                    }
+
+                    // Finally, unpin the page
+                    let mut bpm = bpm.write();
+                    bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
+                }
             });
 
             handles.push(handle);
@@ -167,11 +174,19 @@ mod extended_tests {
         }
 
         // Verify the final state of the page
-        let final_page = bpm.read().fetch_page(page_id).expect("Failed to fetch page");
-        let binding = final_page.read();
-        let final_data = binding.get_data();
-        assert!(final_data[0] < 10, "Final modification resulted in incorrect data");
+        {
+            let bpm = bpm.read();
+            let final_page = bpm.fetch_page(page_id).unwrap();
+            let binding = final_page.read();
+            let final_data = binding.get_data();
+            assert!(
+                final_data[0] < 10,
+                "Final modification resulted in incorrect data: expected value < 10, got {}",
+                final_data[0]
+            );
+        }
 
+        // Clean up by unpinning the page
         bpm.write().unpin_page(page_id, false, AccessType::Lookup);
     }
 
@@ -219,7 +234,6 @@ mod extended_tests {
     }
 
     #[test]
-    #[ignore]
     fn repeated_fetch_and_modify_test() {
         let ctx = TestContext::new("repeated_fetch_and_modify_test");
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
@@ -230,31 +244,41 @@ mod extended_tests {
 
         for i in 0..100 {
             {
-                // Fetch the page and get a mutable reference to it
-                let mut bpm_write = bpm.write();
-                let page_write = bpm_write.fetch_page_write(page_id).expect("Failed to fetch page for writing");
-                let mut page_guard = page_write.write(); // Get a mutable reference to the page
-                let mut data = page_guard.get_data_mut(); // Get a mutable reference to the data
-                data[0] = i as u8; // Modify the data
-                bpm_write.unpin_page(page_id, true, AccessType::Lookup);
-            } // Explicitly drop the guard here to ensure the lock is released
+                // Fetch the page with a short-lived lock on the BufferPoolManager
+                let page = {
+                    let bpm = bpm.read(); // Use a read lock on the BPM to fetch the page
+                    bpm.fetch_page(page_id).expect("Failed to fetch page")
+                };
+
+                // Modify the page with a write lock on the page itself
+                {
+                    let mut page_guard = page.write(); // Acquire write lock on the page
+                    let data = page_guard.get_data_mut(); // Get a mutable reference to the data
+                    data[0] = i as u8; // Modify the data
+                }
+
+                // Unpin the page
+                let mut bpm = bpm.write(); // Acquire write lock to unpin the page
+                bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
+            } // The locks are dropped here to prevent deadlocks
         }
 
         // Verify the final modification
-        let bpm_read = bpm.read();
-        if let Some(page_guard) = bpm_read.fetch_page(page_id) {
-            let page_guard = page_guard.read(); // Acquire read lock on the page
-            let data = page_guard.get_data(); // Get a reference to the data
-            assert_eq!(data[0], 99, "Final modification did not persist");
-        } else {
-            panic!("Failed to fetch page");
-        }
+        {
+            let bpm = bpm.read(); // Acquire read lock on BPM
+            if let Some(page_guard) = bpm.fetch_page(page_id) {
+                let page_guard = page_guard.read(); // Acquire read lock on the page
+                let data = page_guard.get_data(); // Get a reference to the data
+                assert_eq!(data[0], 99, "Final modification did not persist");
+            } else {
+                panic!("Failed to fetch page");
+            }
 
-        bpm_read.unpin_page(page_id, false, AccessType::Lookup);
+            bpm.unpin_page(page_id, false, AccessType::Lookup); // Clean up by unpinning the page
+        }
     }
 
     #[test]
-    #[ignore]
     fn boundary_conditions_test() {
         let ctx = TestContext::new("boundary_conditions_test");
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
