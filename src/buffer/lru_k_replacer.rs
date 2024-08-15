@@ -30,7 +30,7 @@ impl TimeSource for SystemTimeSource {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis() as u64
+            .as_micros() as u64
     }
 }
 
