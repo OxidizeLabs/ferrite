@@ -51,7 +51,7 @@ mod tests {
     fn basic_tests() {
         let ten_millis = time::Duration::from_millis(10);
         let mock_time = MockTimeSource::new();
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Box::new(mock_time.clone()))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Arc::new(mock_time.clone()))));
 
         {
             let mut replacer = replacer.lock().unwrap();
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let mock_time_source = MockTimeSource::new();
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Box::new(mock_time_source))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Arc::new(mock_time_source))));
 
         // Edge case: try to evict from an empty replacer
         assert!(replacer.lock().unwrap().evict().is_none(), "Eviction from an empty replacer should return None");
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn test_concurrent_access() {
         let mock_time_source = MockTimeSource::new();
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 2, Box::new(mock_time_source))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 2, Arc::new(mock_time_source))));
 
         let mut handles = vec![];
 
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn test_removal() {
         let mock_time_source = MockTimeSource::new();
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Box::new(mock_time_source))));
+        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2, Arc::new(mock_time_source))));
 
         // Add elements to the replacer
         for i in 1..=5 {
