@@ -1,7 +1,8 @@
 use log::{debug, error, info};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use spin::Mutex; // Use spin lock instead of standard Mutex
 
 use crate::common::config::FrameId;
 use crate::common::time::TimeSource;
@@ -52,7 +53,7 @@ impl LRUKReplacer {
     }
 
     pub fn evict(&self) -> Option<FrameId> {
-        let mut frame_store = self.frame_store.lock().unwrap();
+        let mut frame_store = self.frame_store.lock(); // Acquire spin lock
         let mut max_k_distance = 0;
         let mut victim_frame_id = None;
 
@@ -97,7 +98,7 @@ impl LRUKReplacer {
 
     pub fn record_access(&self, frame_id: FrameId, _access_type: AccessType) {
         let now = self.time_source.now();
-        let mut frame_store = self.frame_store.lock().unwrap();
+        let mut frame_store = self.frame_store.lock(); // Acquire spin lock
 
         frame_store
             .entry(frame_id)
@@ -119,7 +120,7 @@ impl LRUKReplacer {
     }
 
     pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
-        let mut frame_store = self.frame_store.lock().unwrap();
+        let mut frame_store = self.frame_store.lock(); // Acquire spin lock
         if let Some(frame) = frame_store.get_mut(&frame_id) {
             frame.is_evictable = set_evictable;
             debug!("Set frame {} evictable: {}", frame_id, set_evictable);
@@ -138,7 +139,7 @@ impl LRUKReplacer {
     }
 
     pub fn remove(&self, frame_id: FrameId) {
-        let mut frame_store = self.frame_store.lock().unwrap();
+        let mut frame_store = self.frame_store.lock(); // Acquire spin lock
         if let Some(frame) = frame_store.get(&frame_id) {
             if frame.is_evictable {
                 info!("Removing frame {}", frame_id);
@@ -153,14 +154,14 @@ impl LRUKReplacer {
     }
 
     pub fn total_frames(&self) -> usize {
-        let frame_store = self.frame_store.lock().unwrap();
+        let frame_store = self.frame_store.lock(); // Acquire spin lock
         let total = frame_store.len(); // Count all frames
         debug!("Current total frames: {}", total);
         total
     }
 
     pub fn size(&self) -> usize {
-        let frame_store = self.frame_store.lock().unwrap();
+        let frame_store = self.frame_store.lock(); // Acquire spin lock
         let size = frame_store
             .iter()
             .filter(|&frame| frame.1.is_evictable)
