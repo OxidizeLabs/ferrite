@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub trait TimeSource: Send {
+pub trait TimeSource: Send + Sync {
     fn now(&self) -> u64;
 }
 

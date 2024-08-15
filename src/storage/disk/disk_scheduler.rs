@@ -2,31 +2,33 @@ use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::DiskIO;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use log::{debug, info};
+use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::sync::Arc;
+use spin::RwLock;
 use std::thread;
-use tokio::sync::Mutex;
 
+// Define DiskRequest struct
 pub struct DiskRequest {
     is_write: bool,
-    data: Arc<Mutex<[u8; 4096]>>,
+    data: Arc<RwLock<[u8; 4096]>>,
     page_id: PageId,
     sender: tokio::sync::oneshot::Sender<()>,
 }
 
+// Define DiskScheduler struct
 pub struct DiskScheduler {
     disk_manager: Arc<FileDiskManager>,
-    request_queue: Arc<Mutex<VecDeque<DiskRequest>>>,
-    stop_flag: Arc<Mutex<bool>>,
+    request_queue: Arc<RwLock<VecDeque<DiskRequest>>>,
+    stop_flag: Arc<RwLock<bool>>,
     notifier: Sender<()>,
     worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
     pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
-        let request_queue = Arc::new(Mutex::new(VecDeque::new()));
-        let stop_flag = Arc::new(Mutex::new(false));
+        let request_queue = Arc::new(RwLock::new(VecDeque::new()));
+        let stop_flag = Arc::new(RwLock::new(false));
         let (notifier, receiver) = unbounded();
         let mut scheduler = DiskScheduler {
             disk_manager,
@@ -39,10 +41,10 @@ impl DiskScheduler {
         scheduler
     }
 
-    pub async fn schedule(
+    pub fn schedule(
         &self,
         is_write: bool,
-        data: Arc<Mutex<[u8; 4096]>>,
+        data: Arc<RwLock<[u8; 4096]>>,
         page_id: PageId,
     ) -> tokio::sync::oneshot::Receiver<()> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -53,8 +55,9 @@ impl DiskScheduler {
             sender,
         };
 
+        // Lock the queue to add a request
         {
-            let mut queue = self.request_queue.lock().await;
+            let mut queue = self.request_queue.write();
             queue.push_back(request);
             info!(
                 "Request added to queue: is_write={}, page_id={}",
@@ -77,84 +80,93 @@ impl DiskScheduler {
         let disk_manager = Arc::clone(&self.disk_manager);
         let stop_flag = Arc::clone(&self.stop_flag);
 
-        self.worker_thread = Some(std::thread::spawn(move || {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            runtime.block_on(async move {
+        self.worker_thread = Some(thread::spawn(move || {
+            info!(
+                "Worker thread started on thread: {:?}",
+                thread::current().id()
+            );
+
+            while {
+                let stop_flag = stop_flag.read();
+                !*stop_flag
+            } {
+                // Wait for notification
                 info!(
-                    "Worker thread started on thread: {:?}",
+                    "Worker thread waiting for notification on thread: {:?}",
                     thread::current().id()
                 );
-                while !*stop_flag.lock().await {
-                    // Wait for notification
+                if receiver.recv().is_err() {
                     info!(
-                        "Worker thread waiting for notification on thread: {:?}",
+                        "Worker thread notification receiver closed on thread: {:?}",
                         thread::current().id()
                     );
-                    if receiver.recv().is_err() {
-                        info!(
-                            "Worker thread notification receiver closed on thread: {:?}",
-                            thread::current().id()
-                        );
-                        break;
-                    }
-                    info!(
-                        "Worker thread received notification on thread: {:?}",
-                        thread::current().id()
-                    );
-
-                    // Process request
-                    if let Some(request) = request_queue.lock().await.pop_front() {
-                        info!(
-                            "Processing request: is_write={}, page_id={} on thread: {:?}",
-                            request.is_write,
-                            request.page_id,
-                            thread::current().id()
-                        );
-                        let mut data = request.data.lock().await;
-                        if request.is_write {
-                            info!("Writing to disk: page_id={}", request.page_id);
-                            disk_manager.write_page(request.page_id, &data).await;
-                        } else {
-                            info!("Reading from disk: page_id={}", request.page_id);
-                            disk_manager.read_page(request.page_id, &mut *data).await;
-                        }
-                        let _ = request.sender.send(());
-                        info!(
-                            "Request processed and response sent on thread: {:?}",
-                            thread::current().id()
-                        );
-                    }
+                    break;
                 }
+                info!(
+                    "Worker thread received notification on thread: {:?}",
+                    thread::current().id()
+                );
 
-                // Process remaining requests before exiting
-                while let Some(request) = request_queue.lock().await.pop_front() {
-                    let mut data = request.data.lock().await;
+                // Process request
+                if let Some(request) = request_queue.write().pop_front() {
+                    info!(
+                        "Processing request: is_write={}, page_id={} on thread: {:?}",
+                        request.is_write,
+                        request.page_id,
+                        thread::current().id()
+                    );
+                    let mut data = request.data.write();
                     if request.is_write {
                         info!("Writing to disk: page_id={}", request.page_id);
-                        disk_manager.write_page(request.page_id, &data).await;
+                        disk_manager.write_page(request.page_id, &data);
                     } else {
                         info!("Reading from disk: page_id={}", request.page_id);
-                        disk_manager.read_page(request.page_id, &mut *data).await;
+                        disk_manager.read_page(request.page_id, &mut *data);
                     }
                     let _ = request.sender.send(());
-                    info!("Request processed and response sent");
+                    info!(
+                        "Request processed and response sent on thread: {:?}",
+                        thread::current().id()
+                    );
                 }
-            });
+            }
+
+            // Process remaining requests before exiting
+            while let Some(request) = request_queue.write().pop_front() {
+                let mut data = request.data.write();
+                if request.is_write {
+                    info!("Writing to disk: page_id={}", request.page_id);
+                    disk_manager.write_page(request.page_id, &data);
+                } else {
+                    info!("Reading from disk: page_id={}", request.page_id);
+                    disk_manager.read_page(request.page_id, &mut *data);
+                }
+                let _ = request.sender.send(());
+                info!("Request processed and response sent");
+            }
         }));
     }
 
-    pub async fn shut_down(&mut self) {
+    pub fn shut_down(&mut self) {
+        // Set the stop flag to indicate that the worker thread should stop
         {
-            let mut stop = self.stop_flag.lock().await;
-            *stop = true;
+            let mut stop_flag = self.stop_flag.write(); // Assuming stop_flag is an async lock
+            *stop_flag = true; // Set the flag to true
         }
-        // If the send fails, the receiver is probably already dropped, which is fine.
-        let _ = self.notifier.send(()); // Notify the worker thread to exit
-        info!("Shutdown signal sent");
+
+        // Notify the worker thread to exit
+        if let Err(e) = self.notifier.send(()) {
+            error!("Failed to send shutdown signal: {}", e);
+        } else {
+            info!("Shutdown signal sent");
+        }
 
         // Wait for the worker thread to finish
         if let Some(handle) = self.worker_thread.take() {
-            handle.join().unwrap();
+            if let Err(e) = handle.join() {
+                // Handle potential panics from the worker thread
+                error!("Worker thread panicked during shutdown: {:?}", e);
+            }
         }
     }
 }

@@ -35,13 +35,13 @@ impl TimeSource for SystemTimeSource {
 
 pub struct LRUKReplacer {
     frame_store: Arc<Mutex<HashMap<FrameId, Frame>>>,
-    time_source: Box<dyn TimeSource>,
+    time_source: Arc<dyn TimeSource>,
     replacer_size: usize,
     k: usize,
 }
 
 impl LRUKReplacer {
-    pub fn new(num_frames: usize, k: usize, time_source: Box<dyn TimeSource>) -> Self {
+    pub fn new(num_frames: usize, k: usize, time_source: Arc<dyn TimeSource>) -> Self {
         info!("Initializing LRUKReplacer with size {} and k {}", num_frames, k);
         Self {
             frame_store: Arc::new(Mutex::new(HashMap::new())),

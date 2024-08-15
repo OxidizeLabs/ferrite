@@ -27,7 +27,7 @@ impl DiskManagerMemory {
 
 #[async_trait]
 impl DiskIO for DiskManagerMemory {
-    async fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
         let offset = page_id as usize * DB_PAGE_SIZE;
         info!("Writing page {} at offset {}", page_id, offset);
         info!("Page data being written: {:?}", &page_data[..64]); // Debugging statement
@@ -36,7 +36,7 @@ impl DiskIO for DiskManagerMemory {
         memory[offset..offset + DB_PAGE_SIZE].copy_from_slice(page_data);
     }
 
-    async fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
         let offset = page_id as usize * DB_PAGE_SIZE;
         info!("Reading page {} at offset {}", page_id, offset); // Debugging statement
 
@@ -57,7 +57,7 @@ pub struct DiskManagerUnlimitedMemory {
     latency_simulator_enabled: AtomicBool,
     recent_access: Mutex<Vec<PageId>>,
     access_ptr: AtomicUsize,
-    thread_id: Mutex<Option<thread::ThreadId>>,
+    thread_id: Mutex<Option<ThreadId>>,
 }
 
 impl DiskManagerUnlimitedMemory {
@@ -105,7 +105,7 @@ impl DiskManagerUnlimitedMemory {
             .store(enabled, Ordering::Relaxed);
     }
 
-    pub fn get_last_read_thread_and_clear(&self) -> Option<thread::ThreadId> {
+    pub fn get_last_read_thread_and_clear(&self) -> Option<ThreadId> {
         let mut thread_id = self.thread_id.lock().unwrap();
         let t = *thread_id;
         *thread_id = None;
@@ -115,7 +115,7 @@ impl DiskManagerUnlimitedMemory {
 
 #[async_trait]
 impl DiskIO for DiskManagerUnlimitedMemory {
-    async fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
         self.process_latency(page_id);
 
         let mut data = self.data.write().unwrap();
@@ -132,12 +132,12 @@ impl DiskIO for DiskManagerUnlimitedMemory {
         drop(data);
 
         let mut page_lock = page.page.lock().unwrap();
-        page_lock.copy_from_slice(&*page_data);
+        page_lock.copy_from_slice(page_data);
 
         self.post_process_latency(page_id);
     }
 
-    async fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
         self.process_latency(page_id);
 
         let data = self.data.read().unwrap();

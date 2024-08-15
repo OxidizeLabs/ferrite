@@ -1,125 +1,130 @@
 use async_trait::async_trait;
 use log::{debug, error, info, trace, warn};
-use std::future::Future;
-use std::io::SeekFrom;
+use std::fs::OpenOptions;
+use std::io::{SeekFrom, Read, Write, Seek};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use tokio::fs::OpenOptions;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::Mutex as AsyncMutex;
-
+use spin::Mutex;
+use std::sync::Arc;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::fs::File;
+use std::future::Future;
+use futures::AsyncReadExt;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
-use crate::common::util::helpers::format_slice;
 
-#[async_trait]
 pub trait DiskIO: Send + Sync {
-    async fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]);
-    async fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]);
+    fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]);
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]);
 }
 
 pub struct FileDiskManager {
     file_name: String,
     log_name: String,
-    db_io: AsyncMutex<tokio::fs::File>,
-    log_io: AsyncMutex<tokio::fs::File>,
-    num_flushes: Mutex<i32>,
-    num_writes: Mutex<i32>,
-    flush_log: Mutex<bool>,
-    flush_log_f: Mutex<Option<Box<dyn Future<Output = ()> + Send>>>,
+    db_io: Arc<Mutex<BufWriter<File>>>,
+    log_io: Arc<Mutex<BufReader<File>>>,
+    num_flushes: Arc<Mutex<i32>>,
+    num_writes: Arc<Mutex<i32>>,
+    flush_log: Arc<Mutex<bool>>,
+    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output = ()> + Send>>>>,
 }
 
 impl FileDiskManager {
-    pub async fn new(db_file: String, log_file: String) -> Self {
+    pub fn new(db_file: String, log_file: String) -> Self {
         let db_io = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(db_file.clone())
-            .await
             .unwrap();
         let log_io = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(log_file.clone())
-            .await
             .unwrap();
 
         Self {
             file_name: db_file,
             log_name: log_file,
-            db_io: AsyncMutex::new(db_io),
-            log_io: AsyncMutex::new(log_io),
-            num_flushes: Mutex::new(0),
-            num_writes: Mutex::new(0),
-            flush_log: Mutex::new(false),
-            flush_log_f: Mutex::new(None),
+            db_io: Arc::new(Mutex::new(BufWriter::new(db_io))),
+            log_io: Arc::new(Mutex::new(BufReader::new(log_io))),
+            num_flushes: Arc::new(Mutex::new(0)),
+            num_writes: Arc::new(Mutex::new(0)),
+            flush_log: Arc::new(Mutex::new(false)),
+            flush_log_f: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub async fn shut_down(&self) {
-        if let Err(e) = self.db_io.lock().await.sync_all().await {
-            warn!("Failed to sync db file during shutdown: {}", e);
+    pub fn shut_down(&self) {
+        let mut db_io = self.db_io.lock();
+        if let Err(e) = db_io.flush() {
+            warn!("Failed to flush db file during shutdown: {}", e);
         }
-        if let Err(e) = self.log_io.lock().await.sync_all().await {
-            warn!("Failed to sync log file during shutdown: {}", e);
-        }
+        let mut log_io = self.log_io.lock();
+        // BufReader does not need to be explicitly flushed
         info!("Shutdown complete");
     }
 
-    pub async fn write_log(&self, log_data: &[u8]) {
-        let mut log_io = self.log_io.lock().await;
-        if let Err(e) = log_io.write_all(log_data).await {
+    pub fn write_log(&self, log_data: &[u8]) {
+        let mut log_io = self.log_io.lock();
+        let mut log_io_writer = log_io.get_mut(); // Access the underlying writer
+        if let Err(e) = log_io_writer.write_all(log_data) {
             error!("Failed to write log data: {}", e);
             return;
         }
-        if let Err(e) = log_io.flush().await {
+        if let Err(e) = log_io_writer.flush() {
             error!("Failed to flush log data: {}", e);
             return;
         }
 
-        let mut num_flushes = self.num_flushes.lock().unwrap();
+        let mut num_flushes = self.num_flushes.lock();
         *num_flushes += 1;
         debug!("Log data written and flushed");
     }
 
-    pub async fn read_log(&self, log_data: &mut [u8], offset: u64) -> bool {
-        let mut log_io = self.log_io.lock().await;
-        if let Err(e) = log_io.seek(SeekFrom::Start(offset)).await {
+    pub fn read_log(&self, log_data: &mut [u8], offset: u64) -> bool {
+        let mut log_io = self.log_io.lock();
+        let mut log_io_reader = log_io.get_mut(); // Access the underlying reader
+        if let Err(e) = log_io_reader.seek(SeekFrom::Start(offset)) {
             error!("Failed to seek log file to offset {}: {}", offset, e);
             return false;
         }
-        match log_io.read_exact(log_data).await {
+        match log_io_reader.read_exact(log_data) {
             Ok(_) => {
                 debug!("Log data read from offset {}", offset);
                 true
             }
             Err(e) => {
-                warn!("Failed to read log data from offset {}: {}", offset, e);
+                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    log_data.fill(0);
+                    warn!("Log data read incomplete (EOF reached), filling with zeroes");
+                } else {
+                    error!("Failed to read log data from offset {}: {}", offset, e);
+                }
                 false
             }
         }
     }
 
     pub fn get_num_flushes(&self) -> i32 {
-        *self.num_flushes.lock().unwrap()
+        *self.num_flushes.lock()
     }
 
     pub fn get_flush_state(&self) -> bool {
-        *self.flush_log.lock().unwrap()
+        *self.flush_log.lock()
     }
 
     pub fn get_num_writes(&self) -> i32 {
-        *self.num_writes.lock().unwrap()
+        *self.num_writes.lock()
     }
 
     pub fn set_flush_log_future(&self, f: Box<dyn Future<Output = ()> + Send>) {
-        let mut flush_log_f = self.flush_log_f.lock().unwrap();
+        let mut flush_log_f = self.flush_log_f.lock();
         *flush_log_f = Some(f);
     }
 
     pub fn has_flush_log_future(&self) -> bool {
-        self.flush_log_f.lock().unwrap().is_some()
+        self.flush_log_f.lock().is_some()
     }
 
     fn get_file_size(file_name: &str) -> u64 {
@@ -128,35 +133,37 @@ impl FileDiskManager {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DiskIO for FileDiskManager {
-    async fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; 4096]) {
         let offset = page_id as u64 * 4096;
         trace!("Writing page {} at offset {}", page_id, offset);
         trace!("Page data being written: {:?}", &page_data[..64]);
 
-        let mut db_io = self.db_io.lock().await;
-        if let Err(e) = db_io.seek(SeekFrom::Start(offset)).await {
+        let mut db_io = self.db_io.lock();
+        let mut db_io_writer = db_io.get_mut(); // Access the underlying writer
+        if let Err(e) = db_io_writer.seek(SeekFrom::Start(offset)) {
             error!("Failed to seek to offset {}: {}", offset, e);
             return;
         }
-        if let Err(e) = db_io.write_all(page_data).await {
+        if let Err(e) = db_io_writer.write_all(page_data) {
             error!("Failed to write data for page {}: {}", page_id, e);
         } else {
             debug!("Successfully wrote data for page {}", page_id);
         }
     }
 
-    async fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; 4096]) {
         let offset = page_id as u64 * 4096;
         trace!("Reading page {} at offset {}", page_id, offset);
 
-        let mut db_io = self.db_io.lock().await;
-        if let Err(e) = db_io.seek(SeekFrom::Start(offset)).await {
+        let mut db_io = self.db_io.lock();
+        let mut db_io_reader = db_io.get_mut(); // Access the underlying reader
+        if let Err(e) = db_io_reader.seek(SeekFrom::Start(offset)) {
             error!("Failed to seek to offset {}: {}", offset, e);
             return;
         }
-        match db_io.read_exact(page_data).await {
+        match db_io_reader.read_exact(page_data) {
             Ok(_) => {
                 trace!("Page data read: {:?}", &page_data[..64]);
                 debug!("Successfully read data for page {}", page_id);
