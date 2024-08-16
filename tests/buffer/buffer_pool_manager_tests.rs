@@ -25,17 +25,17 @@ struct TestContext {
 impl TestContext {
     fn new(test_name: &str) -> Self {
         initialize_logger();
-        let buffer_pool_size: usize = 10;
-        let time_source: Arc<dyn TimeSource> = Arc::new(SystemTimeSource); // Wrap in Arc<dyn TimeSource>
+        const BUFFER_POOL_SIZE: usize = 10;
+        let time_source: Arc<dyn TimeSource> = Arc::new(SystemTimeSource);
         const K: usize = 2;
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
         let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K, time_source))); // Use Arc
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K, time_source)));
         let bpm = Arc::new(BufferPoolManager::new(
-            buffer_pool_size,
+            BUFFER_POOL_SIZE,
             disk_scheduler,
             disk_manager.clone(),
             replacer.clone(),
@@ -44,7 +44,7 @@ impl TestContext {
             bpm,
             db_file,
             db_log_file,
-            buffer_pool_size,
+            buffer_pool_size: BUFFER_POOL_SIZE,
         }
     }
 
