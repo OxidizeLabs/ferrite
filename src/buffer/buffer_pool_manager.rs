@@ -78,23 +78,18 @@ impl BufferPoolManager {
     pub fn new_page(&self) -> Option<Arc<RwLock<Page>>> {
         debug!("Attempting to create a new page...");
 
-        let mut replacer = self.replacer.write(); // Acquire lock for the replacer
-        let mut page_table = self.page_table.write(); // Acquire lock for the page table
-        let mut pages = self.pages.write(); // Acquire write lock for the pages
-        let mut free_list = self.free_list.write(); // Acquire lock for the free list
-
-
         // Step 1: Acquire a frame ID from the free list or evict a page if necessary.
         let frame_id = {
+            let mut free_list = self.free_list.write();
             if let Some(id) = free_list.pop() {
                 id
             } else {
                 // No frames available in the free list; need to evict one.
+                let mut replacer = self.replacer.write();
                 replacer.evict().unwrap_or(-1)
             }
         };
 
-        // Check if we have a valid frame ID.
         if frame_id == -1 {
             warn!("Failed to create a new page: no available frame");
             return None;
@@ -102,53 +97,33 @@ impl BufferPoolManager {
 
         debug!("Selected frame ID: {}", frame_id);
 
-        // Step 2: If a page exists in the frame, evict it if necessary.
+        // Step 2: Evict old page if necessary before locking `pages`
         if let Some(old_page_id) = {
-            page_table.iter()
-                .find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
+            let page_table = self.page_table.read();  // Acquire page_table read lock
+            page_table.iter().find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
         } {
             debug!("Evicting old page with ID: {}", old_page_id);
-            if let Some(page_rwlock) = pages[frame_id as usize].as_mut() {
-                let mut page = page_rwlock.write(); // Acquire write lock on the page
-                if page.is_dirty() {
-                    info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
-                    // Create a synchronous channel for communication
-                    let (tx, rx) = mpsc::channel();
-
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
-
-                    // Schedule the write-back operation synchronously
-                    ds.schedule(
-                        true, // Write operation
-                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
-                        old_page_id, // Page ID
-                        tx, // Sender for the completion signal
-                    );
-
-                    // Wait for the write-back operation to complete
-                    rx.recv().expect("Failed to complete the write-back operation");
-
-                    // Mark the page as not dirty
-                    page.set_dirty(false);
-                }
-
-            }
-            page_table.remove(&old_page_id);
+            // Step 2a: Evict the old page without holding the other locks
+            self.evict_old_page(frame_id, old_page_id);
         }
 
-        // Step 3: Create a new page wrapped in an `Arc`.
+        // Step 3: Create a new page.
         let new_page_id = self.next_page_id.fetch_add(1, Ordering::SeqCst);
         let new_page = Arc::new(RwLock::new(Page::new(new_page_id)));
         debug!("Created new page with ID: {}", new_page_id);
 
         {
-            pages[frame_id as usize] = Some(new_page.clone()); // Clone the `Arc`
+            let mut pages = self.pages.write();
+            pages[frame_id as usize] = Some(new_page.clone());
         }
 
-        page_table.insert(new_page_id as PageId, frame_id);
-        debug!("Inserted new page with ID: {} into page table", new_page_id);
+        {
+            let mut page_table = self.page_table.write();
+            page_table.insert(new_page_id as PageId, frame_id);
+        }
 
+        let mut replacer = self.replacer.write();
         replacer.set_evictable(frame_id, false);
         replacer.record_access(frame_id, AccessType::Lookup);
 
@@ -162,14 +137,17 @@ impl BufferPoolManager {
     pub fn new_page_guarded(self: &Arc<BufferPoolManager>) -> Option<BasicPageGuard> {
         debug!("Creating a new page guard...");
 
-        let mut free_list = self.free_list.write();  // Use spin::RwLock for free_list
-        let mut replacer = self.replacer.write();  // Use spin::RwLock for replacer
-        let mut pages = self.pages.write();  // Use spin::RwLock for pages
-
-        // Acquire frame ID from the free list or evict a page if necessary
-        let frame_id = free_list.pop().unwrap_or_else(|| {
-            replacer.evict().unwrap_or(-1)
-        });
+        // Step 1: Acquire the frame ID without holding locks for too long
+        let frame_id = {
+            let mut free_list = self.free_list.write();  // Lock free_list
+            if let Some(id) = free_list.pop() {
+                id
+            } else {
+                // No frames available in the free list; need to evict one.
+                let mut replacer = self.replacer.write();  // Lock replacer
+                replacer.evict().unwrap_or(-1)
+            }
+        };
 
         if frame_id == -1 {
             warn!("Failed to create a new page guard: no available frame");
@@ -178,66 +156,42 @@ impl BufferPoolManager {
 
         debug!("Selected frame ID: {}", frame_id);
 
-        // Acquire the page table lock to check and modify the page table
-        let mut page_table = self.page_table.write();  // Use spin::RwLock for page_table
-
-        // Evict the old page if necessary
-        if let Some(old_page_id) = page_table
-            .iter()
-            .find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
-        {
+        // Step 2: Evict old page if necessary before locking `pages`
+        if let Some(old_page_id) = {
+            let page_table = self.page_table.read();  // Acquire page_table read lock
+            page_table.iter().find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
+        } {
             debug!("Evicting old page with ID: {}", old_page_id);
 
-            // Handle page eviction
-            if let Some(page_rwlock) = pages[frame_id as usize].as_mut() {
-                let mut page = page_rwlock.write(); // Acquire write lock on the page
-                if page.is_dirty() {
-                    info!("Page {} is dirty, scheduling a write-back", old_page_id);
-
-                    // Create a synchronous channel for communication
-                    let (tx, rx) = mpsc::channel();
-
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
-
-                    // Schedule the write-back operation synchronously
-                    ds.schedule(
-                        true, // Write operation
-                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
-                        old_page_id, // Page ID
-                        tx, // Sender for the completion signal
-                    );
-
-                    // Wait for the write-back operation to complete
-                    rx.recv().expect("Failed to complete the write-back operation");
-
-                    // Mark the page as not dirty
-                    page.set_dirty(false);
-                }
-
-            }
-
-            // Remove the old page from the page table
-            page_table.remove(&old_page_id);
+            // Step 2a: Evict the old page without holding the other locks
+            self.evict_old_page(frame_id, old_page_id);
         }
 
-        // Create a new page
+        // Step 3: Create the new page
         let new_page_id = self.next_page_id.fetch_add(1, Ordering::SeqCst);
-        let new_page = Arc::new(RwLock::new(Page::new(new_page_id))); // Wrap the new page in an Arc
+        let new_page = Arc::new(RwLock::new(Page::new(new_page_id)));
         debug!("Created new page with ID: {}", new_page_id);
 
-        // Insert the new page into pages and page_table
-        pages[frame_id as usize] = Some(Arc::clone(&new_page));
-        page_table.insert(new_page_id as PageId, frame_id);
-        debug!("Inserted new page with ID: {} into page table", new_page_id);
+        // Step 4: Insert the new page into `pages` and `page_table`
+        {
+            let mut pages = self.pages.write(); // Acquire lock on pages
+            pages[frame_id as usize] = Some(Arc::clone(&new_page));
+        }
 
-        // Update the replacer
-        replacer.set_evictable(frame_id, false);
-        replacer.record_access(frame_id, AccessType::Lookup);
+        {
+            let mut page_table = self.page_table.write(); // Acquire lock on page_table
+            page_table.insert(new_page_id as PageId, frame_id);
+        }
 
-        Some(BasicPageGuard::new(
-            Arc::clone(self),
-            new_page,
-        ))
+        // Step 5: Update the replacer
+        {
+            let mut replacer = self.replacer.write();
+            replacer.set_evictable(frame_id, false);
+            replacer.record_access(frame_id, AccessType::Lookup);
+        }
+
+        // Step 6: Create and return the page guard without holding any locks
+        Some(BasicPageGuard::new(Arc::clone(self), new_page))
     }
 
     /// Writes data to the page with the given page ID.
@@ -760,6 +714,35 @@ impl BufferPoolManager {
         ))))
     }
 
+    fn evict_old_page(&self, frame_id: FrameId, old_page_id: PageId) {
+        // Step 1: Acquire the necessary lock for the pages vector
+        let page_to_evict = {
+            let pages = self.pages.read(); // Lock `pages` just for reading
+            pages[frame_id as usize].as_ref().cloned() // Clone the Arc<RwLock<Page>> so that we can drop the lock on `pages`
+        };
+
+        // Step 2: If there is a page to evict, handle it
+        if let Some(page_rwlock) = page_to_evict {
+            let mut page = page_rwlock.write(); // Acquire a write lock on the individual page
+            if page.is_dirty() {
+                info!("Page {} is dirty, scheduling a write-back", old_page_id);
+
+                // Perform disk write operation outside the main locks
+                drop(page); // Drop the lock before performing I/O
+                self.flush_page(old_page_id); // Perform the flush without holding any locks
+
+                // Re-acquire the write lock to modify the page's state after flushing
+                let mut page = page_rwlock.write();
+                page.set_dirty(false); // Mark the page as not dirty
+            }
+        }
+
+        // Step 3: Remove the old page from `page_table`
+        let mut page_table = self.page_table.write(); // Lock `page_table` only when modifying it
+        page_table.remove(&old_page_id);
+    }
+
+
     /// Unpins a page with the given page ID.
     ///
     /// # Parameters
@@ -772,7 +755,7 @@ impl BufferPoolManager {
     pub fn unpin_page(&self, page_id: PageId, is_dirty: bool, access_type: AccessType) -> bool {
         debug!("Unpinning page with ID: {}", page_id);
 
-        // Acquire a read lock on the page table to get the frame ID
+        // Step 1: Determine the frame ID without holding any lock too long
         let frame_id = {
             let page_table = self.page_table.read();
             if let Some(&frame_id) = page_table.get(&page_id) {
@@ -783,50 +766,63 @@ impl BufferPoolManager {
             }
         };
 
-        // Acquire a write lock on the pages array to access the page
-        let mut pages = self.pages.write();
-        if let Some(page_arc) = pages.get_mut(frame_id as usize).and_then(Option::as_mut) {
-            // Lock the RwLock to access the inner Page object
-            let mut page = page_arc.write();
-            info!(
+        debug!("Step 2: Update the page's pin count and state");
+        // Step 2: Update the page's pin count and state
+        let should_make_evictable = {
+            debug!("Step 2a: Acquire pages list write lock");
+            let mut pages = self.pages.write();
+
+            debug!("Step 2c: Get mutable reference to page in pages list");
+            if let Some(page_arc) = pages.get_mut(frame_id as usize).and_then(Option::as_mut) {
+                // Temporarily release the `pages` lock after getting the page reference.
+                let page_arc = Arc::clone(page_arc);
+                drop(pages); // Drop the `pages` lock before acquiring the page lock
+
+                debug!("Step 2ci: Acquire page write lock");
+                let mut page = page_arc.write();
+
+                info!(
             "Unpinning page {} with current pin count {}",
             page_id,
             page.get_pin_count()
         );
 
-            // Decrement the pin count and update the page state if necessary
-            if page.get_pin_count() > 0 {
-                page.decrement_pin_count();
+                if page.get_pin_count() > 0 {
+                    page.decrement_pin_count();
 
-                // Mark as dirty if needed
-                if is_dirty {
-                    page.set_dirty(true);
-                }
+                    // Mark as dirty if needed
+                    if is_dirty {
+                        page.set_dirty(true);
+                    }
 
-                // If pin count is 0, make the page evictable
-                if page.get_pin_count() == 0 {
-                    // Release the page lock before updating the replacer
-                    drop(page);
-
-                    // Acquire the write lock on the replacer to update the replacer
-                    let mut replacer = self.replacer.write();
-                    replacer.set_evictable(frame_id, true);
-                    replacer.record_access(frame_id, access_type);
-
-                    info!("Page {} is now evictable", page_id);
+                    // If the pin count reaches 0, the page should become evictable
+                    if page.get_pin_count() == 0 {
+                        info!("Page {} is now evictable", page_id);
+                        true
+                    } else {
+                        info!("Page {} unpinned but still in use", page_id);
+                        false
+                    }
                 } else {
-                    info!("Page {} unpinned but still in use", page_id);
+                    info!("Page {} has pin count 0, cannot unpin further", page_id);
+                    return false;
                 }
-
-                return true;
             } else {
-                info!("Page {} has pin count 0, cannot unpin further", page_id);
+                info!("Page {} was not found in the pages array", page_id);
+                return false;
             }
-        } else {
-            info!("Page {} was not found in the pages array", page_id);
+        };
+
+
+        debug!("Step 3: Make the page evictable if needed, outside of the main locks");
+        // Step 3: Make the page evictable if needed, outside of the main locks
+        if should_make_evictable {
+            let mut replacer = self.replacer.write();
+            replacer.set_evictable(frame_id, true);
+            replacer.record_access(frame_id, access_type);
         }
 
-        false
+        true
     }
 
     /// Flushes a page with the given page ID to disk.
@@ -837,41 +833,55 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional `bool` indicating whether the page was successfully flushed.
     pub fn flush_page(&self, page_id: PageId) -> Option<bool> {
-        // Acquire read lock on the page table
+        // Step 1: Determine the frame ID associated with the page ID
         let frame_id = {
-            let page_table = self.page_table.read(); // Acquire read lock
+            let page_table = self.page_table.read(); // Acquire read lock on the page table
             page_table.get(&page_id).copied()
         };
 
         if let Some(frame_id) = frame_id {
-            info!("Flushing page {} from frame {}", page_id, frame_id); // Debugging statement
+            info!("Flushing page {} from frame {}", page_id, frame_id);
 
-            // Acquire write lock on the pages
-            let mut pages = self.pages.write(); // Acquire write lock
-            if let Some(page) = pages[frame_id as usize].as_mut() {
-                let mut page = page.write(); // Acquire write lock on the page
+            // Step 2: Get a clone of the page Arc to release the pages lock early
+            let page_to_flush = {
+                let pages = self.pages.read(); // Acquire read lock on pages
+                pages[frame_id as usize].as_ref().cloned() // Clone the Arc to avoid holding the pages lock during I/O
+            };
 
-                if page.is_dirty() {
-                    let data = page.get_data();
-                    info!("Page data before flushing: {:?}", &data[..64]); // Debugging statement
+            if let Some(page_arc) = page_to_flush {
+                // Step 3: Perform the disk I/O operation outside of critical sections
+                let mut flush_successful = false;
+                {
+                    let mut page = page_arc.write(); // Acquire write lock on the page
 
-                    // Perform the asynchronous disk write
-                    self.disk_manager.write_page(page_id, &data);
-                    info!("Page data written to disk: {:?}", &data[..64]); // Debugging statement
+                    if page.is_dirty() {
+                        let data = page.get_data();
+                        info!("Page data before flushing: {:?}", &data[..64]);
 
-                    page.set_dirty(false); // Reset dirty flag after flushing
-                    info!("Page {} flushed successfully", page_id); // Debugging statement
+                        // Perform the disk write
+                        self.disk_manager.write_page(page_id, &data);
+
+                        info!("Page data written to disk: {:?}", &data[..64]);
+
+                        page.set_dirty(false); // Reset dirty flag after flushing
+                        flush_successful = true;
+                    } else {
+                        info!("Page {} is not dirty, no need to flush", page_id);
+                    }
+                } // Release the page lock after the I/O operation is complete
+
+                if flush_successful {
+                    info!("Page {} flushed successfully", page_id);
                     Some(true)
                 } else {
-                    info!("Page {} is not dirty, no need to flush", page_id); // Debugging statement
                     Some(false)
                 }
             } else {
-                info!("Failed to find page in frame {}", frame_id); // Debugging statement
+                info!("Failed to find page in frame {}", frame_id);
                 None
             }
         } else {
-            info!("Page ID {} not found in page table", page_id); // Debugging statement
+            info!("Page ID {} not found in page table", page_id);
             None
         }
     }
