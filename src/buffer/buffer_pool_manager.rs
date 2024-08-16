@@ -2,7 +2,7 @@ use log::{debug, error, info, warn};
 use spin::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use futures::AsyncWriteExt;
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
@@ -113,14 +113,26 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
                     let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
                     ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),
-                        old_page_id,
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
                     );
+
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
             page_table.remove(&old_page_id);
         }
@@ -182,16 +194,26 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
-                    // Lock the disk scheduler and schedule write-back
-                    let mut ds = self.disk_scheduler.write();  // Use spin::RwLock for disk_scheduler
-                    let _receiver = ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),  // Wrap the data in RwLock
-                        old_page_id,
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
+                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
+                    ds.schedule(
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
                     );
 
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
 
             // Remove the old page from the page table
@@ -326,15 +348,26 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
-                    // Schedule a write-back
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
+                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
                     ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),
-                        old_page_id,
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
                     );
+
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
 
             let mut page_table = self.page_table.write(); // Acquire write lock
@@ -433,14 +466,26 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
+                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
                     ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),
-                        old_page_id,
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
                     );
+
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
 
             let mut page_table = self.page_table.write(); // Acquire write lock
@@ -542,15 +587,26 @@ impl BufferPoolManager {
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
 
-                    // Schedule a write-back
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
+                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
                     ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),
-                        old_page_id,
-                    ); // Await the future for the disk operation
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
+                    );
+
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
 
             let mut page_table = self.page_table.write(); // Acquire write lock
@@ -651,14 +707,27 @@ impl BufferPoolManager {
                 let mut page = page.write(); // Acquire write lock on the page
                 if page.is_dirty() {
                     info!("Page {} is dirty, scheduling a write-back", old_page_id);
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock
+
+                    // Create a synchronous channel for communication
+                    let (tx, rx) = mpsc::channel();
+
+                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+
+                    // Schedule the write-back operation synchronously
                     ds.schedule(
-                        false,
-                        Arc::new(RwLock::new(page.get_data().clone())),
-                        old_page_id,
-                    ); // Await the future for the disk operation
+                        true, // Write operation
+                        Arc::new(RwLock::new(page.get_data().clone())), // Data to write
+                        old_page_id, // Page ID
+                        tx, // Sender for the completion signal
+                    );
+
+                    // Wait for the write-back operation to complete
+                    rx.recv().expect("Failed to complete the write-back operation");
+
+                    // Mark the page as not dirty
                     page.set_dirty(false);
                 }
+
             }
 
             let mut page_table = self.page_table.write(); // Acquire write lock

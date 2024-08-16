@@ -1,19 +1,20 @@
 use crate::common::config::PageId;
-use crate::storage::disk::disk_manager::DiskIO;
-use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{debug, error, info};
-use std::collections::VecDeque;
-use std::sync::Arc;
 use spin::RwLock;
+use std::collections::VecDeque;
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
+use std::sync::mpsc::channel;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
     is_write: bool,
     data: Arc<RwLock<[u8; 4096]>>,
     page_id: PageId,
-    sender: tokio::sync::oneshot::Sender<()>,
+    sender: mpsc::Sender<()>,
 }
 
 // Define DiskScheduler struct
@@ -46,13 +47,17 @@ impl DiskScheduler {
         is_write: bool,
         data: Arc<RwLock<[u8; 4096]>>,
         page_id: PageId,
-    ) -> tokio::sync::oneshot::Receiver<()> {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        tx: mpsc::Sender<()>
+    ) {
+
+
+        // Create a simple streaming channel
+
         let request = DiskRequest {
             is_write,
             data,
             page_id,
-            sender,
+            sender: tx,
         };
 
         // Lock the queue to add a request
@@ -71,8 +76,6 @@ impl DiskScheduler {
         } else {
             info!("Notifier sent to worker thread");
         }
-
-        receiver
     }
 
     pub fn start_worker_thread(&mut self, receiver: Receiver<()>) {
@@ -150,7 +153,7 @@ impl DiskScheduler {
     pub fn shut_down(&mut self) {
         // Set the stop flag to indicate that the worker thread should stop
         {
-            let mut stop_flag = self.stop_flag.write(); // Assuming stop_flag is an async lock
+            let mut stop_flag = self.stop_flag.write();
             *stop_flag = true; // Set the flag to true
         }
 

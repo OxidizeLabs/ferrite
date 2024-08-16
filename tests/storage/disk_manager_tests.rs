@@ -1,30 +1,26 @@
 extern crate tkdb;
 
-use std::sync::Arc;
-
 use chrono::Utc;
-
+use spin::Mutex;
+use std::sync::Arc;
 use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::disk::disk_manager::{DiskIO, FileDiskManager};
-
 use crate::test_setup::initialize_logger;
-
-const BUSTUB_PAGE_SIZE: usize = 4096;
+use std::fs;
 
 struct TestContext {
-    disk_manager: Arc<FileDiskManager>,
+    disk_manager: Arc<Mutex<FileDiskManager>>,
     db_file: String,
     db_log: String,
 }
 
 impl TestContext {
-    async fn new(test_name: &str) -> Self {
+    fn new(test_name: &str) -> Self {
         initialize_logger();
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("{}_{}.db", test_name, timestamp);
         let db_log_file = format!("{}_{}.log", test_name, timestamp);
-        let disk_manager =
-            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
+        let disk_manager = Arc::new(Mutex::new(FileDiskManager::new(db_file.clone(), db_log_file.clone())));
         Self {
             disk_manager,
             db_file,
@@ -32,25 +28,15 @@ impl TestContext {
         }
     }
 
-    async fn cleanup(&self) {
-        let _ = tokio::fs::remove_file(&self.db_file).await;
-        let _ = tokio::fs::remove_file(&self.db_log).await;
+    fn cleanup(&self) {
+        let _ = fs::remove_file(&self.db_file);
+        let _ = fs::remove_file(&self.db_log);
     }
 }
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        let db_file = self.db_file.clone();
-        let db_log = self.db_log.clone();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                let _ = tokio::fs::remove_file(db_file).await;
-                let _ = tokio::fs::remove_file(db_log).await;
-            });
-        })
-        .join()
-        .unwrap();
+        self.cleanup();
     }
 }
 
@@ -58,53 +44,45 @@ impl Drop for TestContext {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_read_write_page() {
-        let ctx = TestContext::new("test_read_write_page").await;
+    #[test]
+    fn test_read_write_page() {
+        let ctx = TestContext::new("test_read_write_page");
         let mut buf = [0u8; DB_PAGE_SIZE];
         let mut data = [0u8; DB_PAGE_SIZE];
         data[..14].copy_from_slice(b"A test string.");
 
         // Tolerate empty read
-        ctx.disk_manager.read_page(0, &mut buf).await;
+        ctx.disk_manager.lock().read_page(0, &mut buf);
 
         // Write and read page 0
-        ctx.disk_manager.write_page(0, &data).await;
-        ctx.disk_manager.read_page(0, &mut buf).await;
+        ctx.disk_manager.lock().write_page(0, &data);
+        ctx.disk_manager.lock().read_page(0, &mut buf);
         assert_eq!(buf, data);
 
         // Write and read page 5
         buf.fill(0);
-        ctx.disk_manager.write_page(5, &data).await;
-        ctx.disk_manager.read_page(5, &mut buf).await;
+        ctx.disk_manager.lock().write_page(5, &data);
+        ctx.disk_manager.lock().read_page(5, &mut buf);
         assert_eq!(buf, data);
 
-        ctx.disk_manager.shut_down().await;
+        ctx.disk_manager.lock().shut_down();
     }
 
-    #[tokio::test]
-    async fn test_read_write_log() {
-        let ctx = TestContext::new("test_read_write_log").await;
+    #[test]
+    fn test_read_write_log() {
+        let ctx = TestContext::new("test_read_write_log");
         let mut buf = [0u8; 16];
         let mut data = [0u8; 16];
         data[..14].copy_from_slice(b"A test string.");
 
         // Tolerate empty read
-        ctx.disk_manager.read_log(&mut buf, 0).await;
+        ctx.disk_manager.lock().read_log(&mut buf, 0);
 
         // Write and read log
-        ctx.disk_manager.write_log(&data).await;
-        ctx.disk_manager.read_log(&mut buf, 0).await;
+        ctx.disk_manager.lock().write_log(&data);
+        ctx.disk_manager.lock().read_log(&mut buf, 0);
         assert_eq!(buf, data);
 
-        ctx.disk_manager.shut_down().await;
+        ctx.disk_manager.lock().shut_down();
     }
-
-    // #[test]
-    // fn test_throw_bad_file() {
-    //     assert!(std::panic::catch_unwind(|| {
-    //         FileDiskManager::new("/dev/null/foo/bar/baz/test_disk_manager.db", "test_disk_manager.log")
-    //     })
-    //     .is_err());
-    // }
 }
