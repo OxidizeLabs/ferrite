@@ -22,8 +22,8 @@ pub struct DiskScheduler {
     disk_manager: Arc<FileDiskManager>,
     request_queue: Arc<RwLock<VecDeque<DiskRequest>>>,
     stop_flag: Arc<RwLock<bool>>,
-    notifier: Sender<()>,
-    worker_thread: Option<thread::JoinHandle<()>>,
+    pub notifier: Sender<()>,
+    pub worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
@@ -49,8 +49,6 @@ impl DiskScheduler {
         page_id: PageId,
         tx: mpsc::Sender<()>
     ) {
-
-
         // Create a simple streaming channel
 
         let request = DiskRequest {
@@ -171,5 +169,13 @@ impl DiskScheduler {
                 error!("Worker thread panicked during shutdown: {:?}", e);
             }
         }
+    }
+
+    pub fn get_request_queue_length(&self) -> usize {
+        self.request_queue.read().len()
+    }
+
+    pub fn is_request_queue_empty(&self) -> bool {
+        self.request_queue.read().is_empty()
     }
 }

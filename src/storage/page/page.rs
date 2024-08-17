@@ -1,6 +1,6 @@
 use spin::RwLock;
 use std::convert::TryInto;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use crate::common::config::*;
 
 // Constants
@@ -48,7 +48,9 @@ impl Page {
 
     /// Returns a mutable reference to the actual data contained within this page.
     pub fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
-        let write_guard = self.latch.write();  // Acquire a write lock
+        let _write_guard = self.latch.write();  // Acquire a write lock
+        self.is_dirty = true;
+
         debug!("Accessing mutable data for Page ID {} with write lock", self.page_id);
         // Return the write guard to access the data
         &mut self.data
@@ -57,7 +59,7 @@ impl Page {
 
     // Method to modify the data
     pub fn set_data(&mut self, new_data: &[u8; DB_PAGE_SIZE]) {
-        let mut _write_guard = self.latch.write();  // Acquire a write lock
+        let _write_guard = self.latch.write();  // Acquire a write lock
         self.data.copy_from_slice(new_data);  // Modify the data
     }
 
@@ -92,17 +94,19 @@ impl Page {
 
     /// Increments the pin count of this page.
     pub fn increment_pin_count(&mut self) {
+        let _write_guard = self.latch.write();
         self.pin_count += 1;
         debug!("Incremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
     }
 
     /// Decrements the pin count of this page.
     pub fn decrement_pin_count(&mut self) {
+        let _write_guard = self.latch.write();
         if self.pin_count > 0 {
             self.pin_count -= 1;
             debug!("Decremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
         } else {
-            warn!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
+            error!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
         }
     }
 

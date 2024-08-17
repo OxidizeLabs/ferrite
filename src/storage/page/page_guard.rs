@@ -4,7 +4,7 @@ use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::storage::page::page::Page;
 use spin::RwLock;
 use std::sync::Arc;
-use log::{debug, info};
+use log::{debug, error, info, warn};
 
 /// BasicPageGuard is a structure that helps manage access to a page in the buffer pool.
 pub struct BasicPageGuard {
@@ -51,7 +51,7 @@ impl BasicPageGuard {
             let page_id = page_guard.get_page_id();
             bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
             page_guard.decrement_pin_count();
-            info!("Reassigned BasicPageGuard from page ID {} to page ID {}", page_id, other.page_id());
+            info!("Reassigned BasicPageGuard from page ID {} to page ID {}", page_id, other.get_page_id());
         }
 
         self.bpm = other.bpm.take();
@@ -69,9 +69,13 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `ReadPageGuard`.
     pub fn upgrade_read(self) -> ReadPageGuard {
-        let page_id = self.page_id();
+        let page_id = self.get_page_id();
+
         let bpm = self.bpm.clone().expect("BPM should be present");
         let page = self.page.clone().expect("Page should be present");
+
+        // Invalidate the original guard
+        std::mem::forget(self);
 
         info!("Upgraded BasicPageGuard to ReadPageGuard for page ID {}", page_id);
         ReadPageGuard::new(bpm, page)
@@ -85,18 +89,26 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `WritePageGuard`.
     pub fn upgrade_write(self) -> WritePageGuard {
-        let page_id = self.page_id();
+        let page_id = self.get_page_id();
+
         let bpm = self.bpm.clone().expect("BPM should be present");
         let page = self.page.clone().expect("Page should be present");
+
+        // Invalidate the original guard
+        std::mem::forget(self);
 
         info!("Upgraded BasicPageGuard to WritePageGuard for page ID {}", page_id);
         WritePageGuard::new(bpm, page)
     }
 
-    /// Returns the page ID.
-    pub fn page_id(&self) -> PageId {
-        let page = self.page.as_ref().unwrap().read();
-        page.get_page_id()
+    /// Returns the page ID if available, otherwise returns a placeholder or logs an error.
+    pub fn get_page_id(&self) -> PageId {
+        if let Some(ref page) = self.page {
+            let page_guard = page.read();
+            return page_guard.get_page_id();
+        }
+        error!("Attempted to get page ID, but page is None");
+        -1
     }
 
     /// Returns an owned copy of the data.
@@ -132,31 +144,37 @@ impl BasicPageGuard {
         let mut data = self.get_data_mut();
         unsafe { &mut *(data.as_mut_ptr() as *mut T) }
     }
+
+    fn drop(&mut self) {
+        // Skip if the page or bpm is already None (indicating the guard was moved or upgraded)
+        if self.page.is_none() || self.bpm.is_none() {
+            return;
+        }
+
+        let page_id = self.get_page_id();
+        info!("Dropping BasicPageGuard for page ID: {}", page_id);
+
+        // Perform unpinning and pin count management only if the page and bpm are valid
+        if let (Some(bpm), Some(page)) = (self.bpm.take(), self.page.take()) {
+            {
+                let mut page_guard = page.write();
+                if page_guard.get_pin_count() > 0 {
+                    page_guard.decrement_pin_count();
+                } else {
+                    warn!("Attempted to decrement pin count below 0 for Page ID {}", page_id);
+                }
+            }
+
+            // Unpin the page from the buffer pool manager
+            bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
+            info!("Successfully dropped BasicPageGuard for page ID {}", page_id);
+        }
+    }
 }
 
 impl Drop for BasicPageGuard {
     fn drop(&mut self) {
-        info!("Dropping BasicPageGuard for page ID");
-
-        // Extract references without holding locks
-        if let (Some(bpm), Some(page)) = (self.bpm.take(), self.page.take()) {
-            let page_id = {
-                let page_guard = page.read(); // Only lock the page briefly to get the ID
-                page_guard.get_page_id()
-            };
-
-            // Perform all BufferPoolManager-related operations separately
-            {
-                let mut page_write_guard = page.write();
-                page_write_guard.decrement_pin_count();
-            }
-
-            {
-                bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
-            }
-
-            info!("Dropped BasicPageGuard for page ID {}", page_id);
-        }
+        self.drop()
     }
 }
 
@@ -183,39 +201,35 @@ impl ReadPageGuard {
     }
 
     /// Returns the page ID.
-    pub fn page_id(&self) -> PageId {
-        self.guard.page_id()
+    pub fn get_page_id(&self) -> PageId {
+        self.guard.get_page_id()
     }
 
     /// Returns an owned copy of the data.
     pub fn get_data(&self) -> Box<[u8; DB_PAGE_SIZE]> {
         self.guard.get_data()
     }
+
+    /// Returns a reference to the data casted to a specific type.
+    ///
+    /// # Returns
+    /// A reference to the data as a specific type.
+    pub fn as_type<T>(&self) -> &T {
+        self.guard.as_type()
+    }
+
+    /// Returns a mutable reference to the data casted to a specific type and marks the page as dirty.
+    ///
+    /// # Returns
+    /// A mutable reference to the data as a specific type.
+    pub fn as_type_mut<T>(&mut self) -> &mut T {
+        self.guard.as_type_mut()
+    }
 }
 
 impl Drop for ReadPageGuard {
     fn drop(&mut self) {
-        info!("Dropping ReadPageGuard for page ID");
-
-        // Extract references without holding locks
-        if let (Some(bpm), Some(page)) = (self.guard.bpm.take(), self.guard.page.take()) {
-            let page_id = {
-                let page_guard = page.read(); // Only lock the page briefly to get the ID
-                page_guard.get_page_id()
-            };
-
-            // Perform all BufferPoolManager-related operations separately
-            {
-                let mut page_write_guard = page.write();
-                page_write_guard.decrement_pin_count();
-            }
-
-            {
-                bpm.unpin_page(page_id, self.guard.is_dirty, AccessType::Unknown);
-            }
-
-            info!("Dropped ReadPageGuard for page ID {}", page_id);
-        }
+        self.guard.drop()
     }
 }
 
@@ -242,8 +256,8 @@ impl WritePageGuard {
     }
 
     /// Returns the page ID.
-    pub fn page_id(&self) -> PageId {
-        self.guard.page_id()
+    pub fn get_page_id(&self) -> PageId {
+        self.guard.get_page_id()
     }
 
     /// Returns an owned copy of the data.
@@ -255,30 +269,27 @@ impl WritePageGuard {
     pub fn get_data_mut(&mut self) -> Box<[u8; DB_PAGE_SIZE]> {
         self.guard.get_data_mut()
     }
+
+    /// Returns a reference to the data casted to a specific type.
+    ///
+    /// # Returns
+    /// A reference to the data as a specific type.
+    pub fn as_type<T>(&self) -> &T {
+        self.guard.as_type()
+    }
+
+    /// Returns a mutable reference to the data casted to a specific type and marks the page as dirty.
+    ///
+    /// # Returns
+    /// A mutable reference to the data as a specific type.
+    pub fn as_type_mut<T>(&mut self) -> &mut T {
+        self.guard.is_dirty = true;
+        self.guard.as_type_mut()
+    }
 }
 
 impl Drop for WritePageGuard {
     fn drop(&mut self) {
-        info!("Dropping WritePageGuard for page ID");
-
-        // Extract references without holding locks
-        if let (Some(bpm), Some(page)) = (self.guard.bpm.take(), self.guard.page.take()) {
-            let page_id = {
-                let page_guard = page.read(); // Only lock the page briefly to get the ID
-                page_guard.get_page_id()
-            };
-
-            // Perform all BufferPoolManager-related operations separately
-            {
-                let mut page_write_guard = page.write();
-                page_write_guard.decrement_pin_count();
-            }
-
-            {
-                bpm.unpin_page(page_id, self.guard.is_dirty, AccessType::Unknown);
-            }
-
-            info!("Dropped WritePageGuard for page ID {}", page_id);
-        }
+        self.guard.drop()
     }
 }
