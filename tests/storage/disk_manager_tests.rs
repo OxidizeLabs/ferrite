@@ -7,13 +7,13 @@ use mockall::*;
 use spin::{Barrier, RwLock};
 use std::fs;
 use std::future::Future;
+use std::io::{Seek, Write};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread;
 use tkdb::common::config::PageId;
 use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::disk::disk_manager::{DiskIO as OtherDiskIO, FileDiskManager};
-use std::io::{Seek, Write};
 
 struct TestContext {
     disk_manager: Arc<RwLock<FileDiskManager>>,
@@ -36,9 +36,9 @@ impl TestContext {
     }
 
     fn cleanup(&self) {
-        // let _ = fs::remove_file(&self.db_file);
-        // let _ = fs::remove_file(&self.db_log);
-        self.disk_manager.write().shut_down();
+        let _ = fs::remove_file(&self.db_file);
+        let _ = fs::remove_file(&self.db_log);
+        self.disk_manager.write().shut_down().expect("Failed to shut down disk manager.");
     }
 }
 
@@ -108,7 +108,7 @@ mod unit_tests {
         data[..20].copy_from_slice(b"Test log data entry.");
 
         // Write log data
-        ctx.disk_manager.write().write_log(&data, ).expect("TODO: panic message");
+        ctx.disk_manager.write().write_log(&data).expect("TODO: panic message");
 
         // Read back the log data from offset 0
         ctx.disk_manager.read().read_log(&mut buf, 0).expect("TODO: panic message");
@@ -204,7 +204,7 @@ mod basic_behaviour {
             .expect("Failed to write log data.");
 
         // Manually check the log file content to ensure data is written correctly
-        let log_content = std::fs::read(&ctx.db_log).expect("Failed to read log file");
+        let log_content = fs::read(&ctx.db_log).expect("Failed to read log file");
         assert_eq!(
             &log_content[..LOG_DATA.len()],
             LOG_DATA,
@@ -432,7 +432,7 @@ mod concurrency {
 
     #[test]
     fn concurrent_flush_log_future_handling() {
-        use std::sync::{Arc, Barrier, mpsc::channel};
+        use std::sync::{mpsc::channel, Arc, Barrier};
         use std::thread;
         use futures::future::ready;
 
@@ -453,7 +453,7 @@ mod concurrency {
                 // Wait for all threads to reach this point
                 barrier.wait();
 
-                let future = Box::new(ready(())) as Box<dyn Future<Output = ()> + Send>;
+                let future = Box::new(ready(())) as Box<dyn Future<Output=()> + Send>;
                 disk_manager.write().set_flush_log_future(future);
 
                 // Verify that the flush log future is set
@@ -478,9 +478,10 @@ mod concurrency {
 #[cfg(test)]
 mod edge_cases {
     use super::*;
+    use std::io::{Error, ErrorKind};
 
     #[test]
-    fn reading_non_existent_page() -> Result<(), std::io::Error> {
+    fn reading_non_existent_page() -> Result<(), Error> {
         let ctx = TestContext::new("test_reading_non_existent_page");
         let mut buf = [0u8; DB_PAGE_SIZE];
 
@@ -504,7 +505,7 @@ mod edge_cases {
     }
 
     #[test]
-    fn writing_beyond_file_capacity() -> Result<(), std::io::Error> {
+    fn writing_beyond_file_capacity() -> Result<(), Error> {
         let ctx = TestContext::new("test_writing_beyond_file_capacity");
         let mut data = [0u8; DB_PAGE_SIZE];
         data[..16].copy_from_slice(b"Beyond capacity.");
@@ -525,7 +526,7 @@ mod edge_cases {
     }
 
     #[test]
-    fn reading_with_corrupted_data() -> Result<(), std::io::Error> {
+    fn reading_with_corrupted_data() -> Result<(), Error> {
         let ctx = TestContext::new("test_reading_with_corrupted_data");
         let mut data = [0u8; DB_PAGE_SIZE];
         data[..14].copy_from_slice(b"Original data.");
@@ -567,8 +568,8 @@ mod edge_cases {
         // Simulate a "disk full" error when trying to write a page
         mock_disk_io
             .expect_write_page()
-            .with(predicate::eq(0), predicate::always())
-            .returning(|_, _| Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "Disk full")));
+            .with(eq(0), always())
+            .returning(|_, _| Err(Error::new(ErrorKind::WriteZero, "Disk full")));
 
         // Attempt to write a page and verify the error is returned
         let result = mock_disk_io.write_page(0, &[0u8; 4096]);
@@ -580,7 +581,7 @@ mod edge_cases {
         if let Err(e) = result {
             assert_eq!(
                 e.kind(),
-                std::io::ErrorKind::WriteZero,
+                ErrorKind::WriteZero,
                 "Expected WriteZero error kind but got {:?}.",
                 e.kind()
             );

@@ -7,12 +7,11 @@ use std::fs::OpenOptions;
 use std::future::Future;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::io::Result as IoResult;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use std::io::Result as IoResult;
-
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
@@ -20,7 +19,6 @@ pub trait DiskIO: Send + Sync {
     fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> Result<(), std::io::Error>;
     fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> Result<(), std::io::Error>;
 }
-
 
 /// The `FileDiskManager` is responsible for managing disk I/O operations,
 /// including reading and writing pages and managing log files.
@@ -78,7 +76,7 @@ impl FileDiskManager {
     pub fn shut_down(&self) -> IoResult<()> {
         let mut db_io = self.db_io.write();
         db_io.flush()?;
-        let mut _log_io = self.log_io.write();
+        let _log_io = self.log_io.write();
         info!("Shutdown complete");
         Ok(())
     }
@@ -228,5 +226,4 @@ impl DiskIO for FileDiskManager {
             Err(e) => Err(e),
         }
     }
-
 }
