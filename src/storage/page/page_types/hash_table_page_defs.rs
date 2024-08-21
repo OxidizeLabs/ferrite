@@ -1,6 +1,6 @@
-use crate::storage::page::b_plus_tree_leaf_page::DB_PAGE_SIZE;
-use crate::storage::page::hash_table_block_page::HashTableBlockPage;
-use crate::storage::page::hash_table_bucket_page::HashTableBucketPage;
+use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
+use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
+use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
