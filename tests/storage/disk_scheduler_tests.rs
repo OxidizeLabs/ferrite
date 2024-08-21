@@ -26,7 +26,7 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()));
+        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
         Self {
             disk_manager,

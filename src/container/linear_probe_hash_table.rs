@@ -1,7 +1,7 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::transaction::Transaction;
 use crate::container::hash_function::HashFunction;
-use crate::storage::page::{
+use crate::storage::page::page_types::{
     hash_table_block_page::HashTableBlockPage, hash_table_header_page::HashTableHeaderPage,
 };
 use spin::RwLock;

@@ -7,7 +7,6 @@ use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 use tkdb::storage::page::page_guard::{BasicPageGuard, ReadPageGuard, WritePageGuard};
-use tkdb::common::time::{SystemTimeSource, TimeSource};
 use std::thread;
 
 struct TestContext {
@@ -21,15 +20,14 @@ impl TestContext {
         initialize_logger();
         const BUFFER_POOL_SIZE: usize = 5;
         const K: usize = 2;
-        let time_source: Arc<dyn TimeSource> = Arc::new(SystemTimeSource);
 
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()));
+        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K, time_source)));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
         let bpm = Arc::new(BufferPoolManager::new(
             BUFFER_POOL_SIZE,
             disk_scheduler,
@@ -71,11 +69,11 @@ mod unit_tests {
 
         // Ensure page0 is pinned and the guard works as expected
         assert_eq!(page0.read().get_pin_count(), 1); // Pin count should be 1 after creation
-        assert_eq!(page0.read().get_page_id(), basic_guard.get_page_id());
+        assert_eq!(page0.read().get_page_id(), basic_guard.get_page_id().unwrap());
 
         // Test upgrading to WritePageGuard
         let mut write_guard = basic_guard.upgrade_write();
-        assert_eq!(write_guard.get_page_id(), page0.read().get_page_id());
+        assert_eq!(write_guard.get_page_id().unwrap(), page0.read().get_page_id());
 
         // Ensure dropping the guard decreases the pin count
         drop(write_guard);
@@ -97,7 +95,7 @@ mod unit_tests {
         // Upgrade to ReadPageGuard
         let read_guard = basic_guard.upgrade_read();
         assert_eq!(page.read().get_pin_count(), 1, "Pin count should remain 1 after upgrading to ReadPageGuard");
-        assert_eq!(read_guard.get_page_id(), page.read().get_page_id(), "Page ID should remain consistent after upgrading to ReadPageGuard");
+        assert_eq!(read_guard.get_page_id().unwrap(), page.read().get_page_id(), "Page ID should remain consistent after upgrading to ReadPageGuard");
 
         // Ensure dropping the read guard decreases the pin count
         drop(read_guard);
@@ -119,7 +117,7 @@ mod unit_tests {
         // Upgrade to WritePageGuard
         let write_guard = basic_guard.upgrade_write();
         assert_eq!(page.read().get_pin_count(), 1, "Pin count should remain 1 after upgrading to WritePageGuard");
-        assert_eq!(write_guard.get_page_id(), page.read().get_page_id(), "Page ID should remain consistent after upgrading to WritePageGuard");
+        assert_eq!(write_guard.get_page_id().unwrap(), page.read().get_page_id(), "Page ID should remain consistent after upgrading to WritePageGuard");
 
         // Ensure dropping the write guard decreases the pin count
         drop(write_guard);
@@ -142,7 +140,7 @@ mod basic_behaviour {
 
         // Ensure page0 is pinned and the guard works as expected
         assert_eq!(page0.read().get_pin_count(), 1); // Pin count should be 1 after creation
-        assert_eq!(page0.read().get_page_id(), basic_guarded_page.get_page_id());
+        assert_eq!(page0.read().get_page_id(), basic_guarded_page.get_page_id().unwrap());
 
         // Create another page and guard it with ReadPageGuard
         let page2 = bpm.new_page().unwrap();
@@ -176,11 +174,11 @@ mod basic_behaviour {
 
         // Ensure page0 is pinned and the guard works as expected
         assert_eq!(page0.read().get_pin_count(), 1); // Pin count should be 1 after creation
-        assert_eq!(page0.read().get_page_id(), basic_guard.get_page_id());
+        assert_eq!(page0.read().get_page_id(), basic_guard.get_page_id().unwrap());
 
         // Test upgrading to WritePageGuard
         let mut write_guard = basic_guard.upgrade_write();
-        assert_eq!(write_guard.get_page_id(), page0.read().get_page_id());
+        assert_eq!(write_guard.get_page_id().unwrap(), page0.read().get_page_id());
 
         // Directly modify data in the page
         let mut data_mut = write_guard.get_data_mut();
@@ -226,7 +224,7 @@ mod concurrency {
                     let data = read_guard.get_data();
 
                     // Simulate a read operation by checking if the page ID matches
-                    assert_eq!(read_guard.get_page_id(), page_clone.read().get_page_id());
+                    assert_eq!(read_guard.get_page_id().unwrap(), page_clone.read().get_page_id());
                     assert_eq!(data[0], 0); // Expecting initial byte value
                 } // Lock released here when the guard goes out of scope
 
@@ -343,7 +341,7 @@ mod concurrency {
                 let data = read_guard.get_data();
 
                 // Simulate a read operation by checking if the page ID matches
-                assert_eq!(read_guard.get_page_id(), page_clone.read().get_page_id());
+                assert_eq!(read_guard.get_page_id().unwrap(), page_clone.read().get_page_id());
                 // Reading values written by the writer threads
                 assert_eq!(data[i], (i + 1) as u8, "Unexpected values in the data");
             }));
@@ -387,7 +385,7 @@ mod edge_cases {
             // Keep the first page pinned
             let guard0 = WritePageGuard::new(Arc::clone(&bpm), Arc::clone(&page0));
             // Perform the assertion to ensure the page is accessible
-            assert_eq!(guard0.get_page_id(), page0_id);
+            assert_eq!(guard0.get_page_id().unwrap(), page0_id);
         }
 
         // Now create a new page that should cause an eviction due to the buffer pool size limit

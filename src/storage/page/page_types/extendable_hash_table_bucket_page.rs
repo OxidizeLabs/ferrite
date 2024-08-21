@@ -14,6 +14,7 @@ pub fn htable_bucket_array_size(mapping_type_size: usize) -> usize {
 pub type MappingType<K, V> = (K, V);
 
 /// Bucket page for extendable hash table.
+#[derive(Clone)]
 pub struct ExtendableHTableBucketPage<K, V, C>
 where
     K: Clone + Debug,

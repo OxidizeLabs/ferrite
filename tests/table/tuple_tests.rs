@@ -7,7 +7,6 @@ use rand::{Rng, SeedableRng};
 use rand::prelude::StdRng;
 use spin::Mutex;
 use spin::RwLock;
-use tokio::sync::Mutex as TokioMutex;
 
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
@@ -61,8 +60,8 @@ mod tests {
         Tuple::new(values, schema.clone(), 0)
     }
 
-    #[tokio::test]
-    async fn disabled_table_heap_test() {
+    #[test]
+    fn disabled_table_heap_test() {
         // Test 1: Parse create SQL statement
         let create_stmt = "a varchar(20), b smallint, c bigint, d bool, e varchar(16)";
         let col1 = Column::new_varlen("a".parse().unwrap(), TypeId::VarChar, 4);
@@ -76,10 +75,10 @@ mod tests {
 
         // Create transaction
         let disk_manager = Arc::new(
-            FileDiskManager::new("tuple_test.db".to_string(), "tuple_test.log".to_string()).await,
+            FileDiskManager::new("tuple_test.db".to_string(), "tuple_test.log".to_string(), 100),
         );
-        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(disk_manager.clone())));
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(10, 10)));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 10)));
         let buffer_pool_manager =
             BufferPoolManager::new(100, disk_scheduler, disk_manager, replacer.clone());
 

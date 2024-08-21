@@ -10,7 +10,6 @@ use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::AccessType;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::common::config::{PageId, DB_PAGE_SIZE};
-use tkdb::common::time::TimeSource;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 
