@@ -28,7 +28,10 @@ mod tests {
             let mut page = Page::new(2);
             let mut data = [0u8; DB_PAGE_SIZE];
             data[0] = 42;
-            page.set_data(&data);
+            // Use the set_data method with the offset to update the page data
+            if let Err(e) = page.set_data(0, &data) {
+                panic!("Error setting data: {:?}", e);
+            }
             assert_eq!(page.get_data().get(0), Some(42).as_ref());
         }
 
@@ -68,7 +71,9 @@ mod tests {
             let mut page = Page::new(1);
             let mut data = [0u8; DB_PAGE_SIZE];
             data[0] = 255;
-            page.set_data(&data);
+            if let Err(e) = page.set_data(0, &data) {
+                panic!("Error setting data: {:?}", e);
+            }
 
             // Ensure data is modified before reset
             assert_eq!(page.get_data()[0], 255);
@@ -104,7 +109,9 @@ mod tests {
                         let mut page = page.write(); // Acquire write lock on the entire Page.
                         let mut data = [0u8; DB_PAGE_SIZE];
                         data[0] = (i + 1) as u8;
-                        page.set_data(&data); // Safely update the internal data using `set_data`.
+                        if let Err(e) = page.set_data(0, &data) {
+                            panic!("Error setting data: {:?}", e);
+                        }
                     }
 
                     end_barrier.wait(); // Signal that the writer has finished.
@@ -116,6 +123,7 @@ mod tests {
                 let page = Arc::clone(&page);
                 let start_barrier = Arc::clone(&start_barrier);
                 let end_barrier = Arc::clone(&end_barrier);
+
                 handles.push(thread::spawn(move || {
                     start_barrier.wait(); // Wait until all threads are ready to start.
 
@@ -201,7 +209,9 @@ mod tests {
             let mut page = Page::new(1);
             let mut data = *page.get_data_mut();
             data[0] = 255;
-            page.set_data(&data);
+            if let Err(e) = page.set_data(0, &data) {
+                panic!("Error setting data: {:?}", e);
+            }
             assert!(page.is_dirty());
 
             // Reset memory and verify it's no longer dirty
