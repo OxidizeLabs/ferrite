@@ -6,7 +6,7 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
 use crate::storage::index::index_iterator::IndexIterator;
-use crate::storage::page::b_plus_tree_page::BPlusTreePage;
+use crate::storage::page::page_types::b_plus_tree_page::BPlusTreePage;
 use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
 
 /// Context class to help keep track of pages being modified or accessed.
