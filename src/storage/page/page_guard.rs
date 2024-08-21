@@ -7,6 +7,7 @@ use std::sync::Arc;
 use log::{debug, error, info, warn};
 
 /// BasicPageGuard is a structure that helps manage access to a page in the buffer pool.
+#[derive(Clone)]
 pub struct BasicPageGuard {
     bpm: Option<Arc<BufferPoolManager>>,
     page: Option<Arc<RwLock<Page>>>,
@@ -51,7 +52,7 @@ impl BasicPageGuard {
             let page_id = page_guard.get_page_id();
             bpm.unpin_page(page_id, self.is_dirty, AccessType::Unknown);
             page_guard.decrement_pin_count();
-            info!("Reassigned BasicPageGuard from page ID {} to page ID {}", page_id, other.get_page_id());
+            info!("Reassigned BasicPageGuard from page ID {} to page ID {}", page_id, other.get_page_id().unwrap());
         }
 
         self.bpm = other.bpm.take();
@@ -69,7 +70,7 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `ReadPageGuard`.
     pub fn upgrade_read(self) -> ReadPageGuard {
-        let page_id = self.get_page_id();
+        let page_id = self.get_page_id().unwrap();
 
         let bpm = self.bpm.clone().expect("BPM should be present");
         let page = self.page.clone().expect("Page should be present");
@@ -89,7 +90,7 @@ impl BasicPageGuard {
     /// # Returns
     /// An upgraded `WritePageGuard`.
     pub fn upgrade_write(self) -> WritePageGuard {
-        let page_id = self.get_page_id();
+        let page_id = self.get_page_id().unwrap();
 
         let bpm = self.bpm.clone().expect("BPM should be present");
         let page = self.page.clone().expect("Page should be present");
@@ -102,13 +103,13 @@ impl BasicPageGuard {
     }
 
     /// Returns the page ID if available, otherwise returns a placeholder or logs an error.
-    pub fn get_page_id(&self) -> PageId {
+    pub fn get_page_id(&self) -> Option<PageId> {
         if let Some(ref page) = self.page {
             let page_guard = page.read();
-            return page_guard.get_page_id();
+            return Some(page_guard.get_page_id());
         }
         error!("Attempted to get page ID, but page is None");
-        -1
+        None
     }
 
     /// Returns an owned copy of the data.
@@ -151,7 +152,7 @@ impl BasicPageGuard {
             return;
         }
 
-        let page_id = self.get_page_id();
+        let page_id = self.get_page_id().unwrap();
         info!("Dropping BasicPageGuard for page ID: {}", page_id);
 
         // Perform unpinning and pin count management only if the page and bpm are valid
@@ -201,7 +202,7 @@ impl ReadPageGuard {
     }
 
     /// Returns the page ID.
-    pub fn get_page_id(&self) -> PageId {
+    pub fn get_page_id(&self) -> Option<PageId> {
         self.guard.get_page_id()
     }
 
@@ -256,7 +257,7 @@ impl WritePageGuard {
     }
 
     /// Returns the page ID.
-    pub fn get_page_id(&self) -> PageId {
+    pub fn get_page_id(&self) -> Option<PageId> {
         self.guard.get_page_id()
     }
 

@@ -4,8 +4,7 @@ use std::thread;
 
 use chrono::Utc;
 use env_logger;
-use spin::Mutex;
-use tokio::sync::Mutex as TokioMutex;
+use spin::RwLock;
 
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
@@ -15,9 +14,9 @@ use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 use tkdb::storage::index::generic_key::GenericComparator;
 use tkdb::storage::index::generic_key::GenericKey;
-use tkdb::storage::page::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
-use tkdb::storage::page::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-use tkdb::storage::page::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use tkdb::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
+use tkdb::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use tkdb::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 
 use crate::test_setup::initialize_logger;
 
@@ -31,7 +30,7 @@ struct TestContext {
 }
 
 impl TestContext {
-    async fn new(test_name: &str) -> Self {
+    fn new(test_name: &str) -> Self {
         initialize_logger();
         let buffer_pool_size: usize = 5;
         const K: usize = 2;
@@ -39,11 +38,11 @@ impl TestContext {
         let db_file = format!("{}_{}.db", test_name, timestamp);
         let db_log_file = format!("{}_{}.log", test_name, timestamp);
         let disk_manager =
-            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
-        let disk_scheduler = Arc::new(TokioMutex::new(DiskScheduler::new(Arc::clone(
+            Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
             &disk_manager,
         ))));
-        let replacer = Arc::new(Mutex::new(LRUKReplacer::new(buffer_pool_size, K)));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
         let bpm = Arc::new(BufferPoolManager::new(
             buffer_pool_size,
             disk_scheduler,
@@ -58,25 +57,15 @@ impl TestContext {
         }
     }
 
-    async fn cleanup(&self) {
-        let _ = tokio::fs::remove_file(&self.db_file).await;
-        let _ = tokio::fs::remove_file(&self.db_log_file).await;
+    fn cleanup(&self) {
+        let _ = std::fs::remove_file(&self.db_file);
+        let _ = std::fs::remove_file(&self.db_log_file);
     }
 }
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        let db_file = self.db_file.clone();
-        let db_log = self.db_log_file.clone();
-        thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                let _ = tokio::fs::remove_file(db_file).await;
-                let _ = tokio::fs::remove_file(db_log).await;
-            });
-        })
-            .join()
-            .unwrap();
+        self.cleanup()
     }
 }
 
@@ -89,9 +78,9 @@ mod basic_tests {
         assert_eq!(PAGE_ID_SIZE, 4, "PageId size is not 4 bytes");
     }
 
-    #[tokio::test]
-    async fn header_directory_page_integrity() {
-        let ctx = TestContext::new("header_directory_page_integrity").await;
+    #[test]
+    fn header_directory_page_integrity() {
+        let ctx = TestContext::new("header_directory_page_integrity");
         let bpm = &ctx.bpm;
 
         let header_page_id = INVALID_PAGE_ID;
@@ -103,7 +92,7 @@ mod basic_tests {
 
         {
             // HEADER PAGE TEST
-            let mut header_guard = bpm.new_page_guarded().await.unwrap();
+            let mut header_guard = bpm.new_page_guarded().unwrap();
             let header_page = header_guard.as_type_mut::<ExtendableHTableHeaderPage>();
             header_page.init(2);
 
@@ -113,15 +102,13 @@ mod basic_tests {
                 assert_eq!(header_page.hash_to_directory_index(hashes[i]), i as u32);
             }
 
-            header_guard.drop();
-
             // DIRECTORY PAGE TEST
-            let mut directory_guard = bpm.new_page_guarded().await.unwrap();
+            let mut directory_guard = bpm.new_page_guarded().unwrap();
             let directory_page = directory_guard.as_type_mut::<ExtendableHTableDirectoryPage>();
             directory_page.init(3);
 
-            let mut bucket_guard_1 = bpm.new_page_guarded().await.unwrap();
-            bucket_page_id_1 = bucket_guard_1.page_id();
+            let mut bucket_guard_1 = bpm.new_page_guarded().unwrap();
+            bucket_page_id_1 = bucket_guard_1.get_page_id().unwrap();
             let bucket_page_1 = bucket_guard_1.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
                 RID,
@@ -129,8 +116,8 @@ mod basic_tests {
             >>();
             bucket_page_1.init(10);
 
-            let mut bucket_guard_2 = bpm.new_page_guarded().await.unwrap();
-            bucket_page_id_2 = bucket_guard_2.page_id();
+            let mut bucket_guard_2 = bpm.new_page_guarded().unwrap();
+            bucket_page_id_2 = bucket_guard_2.get_page_id().unwrap();
             let bucket_page_2 = bucket_guard_2.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
                 RID,
@@ -138,8 +125,8 @@ mod basic_tests {
             >>();
             bucket_page_2.init(10);
 
-            let mut bucket_guard_3 = bpm.new_page_guarded().await.unwrap();
-            bucket_page_id_3 = bucket_guard_3.page_id();
+            let mut bucket_guard_3 = bpm.new_page_guarded().unwrap();
+            bucket_page_id_3 = bucket_guard_3.get_page_id().unwrap();
             let bucket_page_3 = bucket_guard_3.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
                 RID,
@@ -147,8 +134,8 @@ mod basic_tests {
             >>();
             bucket_page_3.init(10);
 
-            let mut bucket_guard_4 = bpm.new_page_guarded().await.unwrap();
-            bucket_page_id_4 = bucket_guard_4.page_id();
+            let mut bucket_guard_4 = bpm.new_page_guarded().unwrap();
+            bucket_page_id_4 = bucket_guard_4.get_page_id().unwrap();
             let bucket_page_4 = bucket_guard_4.as_type_mut::<ExtendableHTableBucketPage<
                 GenericKey<8>,
                 RID,
@@ -162,7 +149,7 @@ mod basic_tests {
             directory_page.print_directory();
             directory_page.verify_integrity();
             assert_eq!(directory_page.size(), 1);
-            assert_eq!(directory_page.get_bucket_page_id(0), bucket_page_id_1);
+            assert_eq!(directory_page.get_bucket_page_id(0).unwrap(), bucket_page_id_1);
 
             // Grow the directory
             directory_page.set_local_depth(0, 1);
@@ -173,8 +160,8 @@ mod basic_tests {
             // Verify directory state after growth
             directory_page.verify_integrity();
             assert_eq!(directory_page.size(), 2);
-            assert_eq!(directory_page.get_bucket_page_id(0), bucket_page_id_1);
-            assert_eq!(directory_page.get_bucket_page_id(1), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(0).unwrap(), bucket_page_id_1);
+            assert_eq!(directory_page.get_bucket_page_id(1).unwrap(), bucket_page_id_2);
 
             for i in 0..100 {
                 assert_eq!(directory_page.hash_to_bucket_index(i), i % 2);
@@ -188,10 +175,10 @@ mod basic_tests {
             // Verify directory state after further growth
             directory_page.verify_integrity();
             assert_eq!(directory_page.size(), 4);
-            assert_eq!(directory_page.get_bucket_page_id(0), bucket_page_id_1);
-            assert_eq!(directory_page.get_bucket_page_id(1), bucket_page_id_2);
-            assert_eq!(directory_page.get_bucket_page_id(2), bucket_page_id_3);
-            assert_eq!(directory_page.get_bucket_page_id(3), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(0).unwrap(), bucket_page_id_1);
+            assert_eq!(directory_page.get_bucket_page_id(1).unwrap(), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(2).unwrap(), bucket_page_id_3);
+            assert_eq!(directory_page.get_bucket_page_id(3).unwrap(), bucket_page_id_2);
 
             for i in 0..100 {
                 assert_eq!(directory_page.hash_to_bucket_index(i), i % 4);
@@ -205,14 +192,14 @@ mod basic_tests {
             // Verify final directory state
             directory_page.verify_integrity();
             assert_eq!(directory_page.size(), 8);
-            assert_eq!(directory_page.get_bucket_page_id(0), bucket_page_id_1);
-            assert_eq!(directory_page.get_bucket_page_id(1), bucket_page_id_2);
-            assert_eq!(directory_page.get_bucket_page_id(2), bucket_page_id_3);
-            assert_eq!(directory_page.get_bucket_page_id(3), bucket_page_id_2);
-            assert_eq!(directory_page.get_bucket_page_id(4), bucket_page_id_4);
-            assert_eq!(directory_page.get_bucket_page_id(5), bucket_page_id_2);
-            assert_eq!(directory_page.get_bucket_page_id(6), bucket_page_id_3);
-            assert_eq!(directory_page.get_bucket_page_id(7), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(0).unwrap(), bucket_page_id_1);
+            assert_eq!(directory_page.get_bucket_page_id(1).unwrap(), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(2).unwrap(), bucket_page_id_3);
+            assert_eq!(directory_page.get_bucket_page_id(3).unwrap(), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(4).unwrap(), bucket_page_id_4);
+            assert_eq!(directory_page.get_bucket_page_id(5).unwrap(), bucket_page_id_2);
+            assert_eq!(directory_page.get_bucket_page_id(6).unwrap(), bucket_page_id_3);
+            assert_eq!(directory_page.get_bucket_page_id(7).unwrap(), bucket_page_id_2);
 
             for i in 0..100 {
                 assert_eq!(directory_page.hash_to_bucket_index(i), i % 8);
@@ -233,8 +220,8 @@ mod basic_tests {
         }
     }
 
-    // #[tokio::test]
-    // async fn header_directory_page_sample_test() {
+    // #[test]
+    // fn header_directory_page_sample_test() {
     //     initialize_logger();
     //     let ctx = TestContext::new();
     //     let buffer_pool_size = 5;

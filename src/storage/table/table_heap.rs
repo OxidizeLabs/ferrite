@@ -4,7 +4,7 @@ use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
-use crate::storage::page::table_page::TablePage;
+use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use spin::RwLock;
 use std::sync::atomic::AtomicI32;

@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
-use crate::storage::page::b_plus_tree_leaf_page::BPlusTreeLeafPage;
+use crate::storage::page::page_types::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 
 /// Represents a mapping from key to value
 pub type MappingType<K, V> = (K, V);
