@@ -1,4 +1,4 @@
-use crate::storage::page::hash_table_page_defs::{block_array_size, MappingType};
+use crate::storage::page::page_types::hash_table_page_defs::{block_array_size, MappingType};
 use log::info;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU8, Ordering};
