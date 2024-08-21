@@ -4,6 +4,7 @@ use std::thread;
 use tkdb::common::config::Lsn;
 use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::page::page::Page;
+use tkdb::storage::page::page::PageTrait;
 
 
 #[cfg(test)]

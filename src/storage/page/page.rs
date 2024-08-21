@@ -3,6 +3,8 @@ use log::{debug, error, info, warn};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::convert::TryInto;
 use crate::common::exception::PageError;
+use crate::storage::page::page::PageType::ExtendedHashTableDirectory;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -37,31 +39,6 @@ impl Page {
         page
     }
 
-    /// Returns an immutable reference to the data. The data is protected by an internal read lock.
-    pub fn get_data(&self) -> Box<[u8; DB_PAGE_SIZE]> {
-        debug!("Fetching data for page ID {}", self.page_id);
-        // Return a copy of the data.
-        Box::new(*self.data)
-    }
-
-    /// Returns a mutable reference to the data, marks the page as dirty, and returns a copy.
-    pub fn get_data_mut(&mut self) -> Box<[u8; DB_PAGE_SIZE]> {
-        debug!("Fetching mutable data for page ID {}", self.page_id);
-
-        // Return a copy of the mutable data.
-        Box::new(*self.data)
-    }
-
-    /// Returns the page id of this page.
-    pub fn get_page_id(&self) -> PageId {
-        self.page_id
-    }
-
-    /// Returns the pin count of this page.
-    pub fn get_pin_count(&self) -> i32 {
-        self.pin_count
-    }
-
     /// Returns the page LSN.
     pub fn get_lsn(&self) -> Lsn {
         let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 4];
@@ -70,13 +47,84 @@ impl Page {
         lsn
     }
 
+    /// Sets the page LSN.
+    pub fn set_lsn(&mut self, lsn: Lsn) {
+        let lsn_bytes = lsn.to_ne_bytes();
+        self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
+        info!("Set LSN for Page ID {}", self.page_id);
+    }
+
+}
+
+pub trait PageTrait {
+    fn get_page_id(&self) -> PageId;
+    fn is_dirty(&self) -> bool;
+    fn set_dirty(&mut self, is_dirty: bool);
+    fn get_pin_count(&self) -> i32;
+    fn increment_pin_count(&mut self);
+    fn decrement_pin_count(&mut self);
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE];
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE];
+    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError>;
+    fn set_pin_count(&mut self, pin_count: i32);
+    fn reset_memory(&mut self);
+}
+
+impl PageTrait for Page {
+    /// Returns the page id of this page.
+    fn get_page_id(&self) -> PageId {
+        self.page_id
+    }
+
     /// Returns true if the page is dirty.
-    pub fn is_dirty(&self) -> bool {
+    fn is_dirty(&self) -> bool {
         self.is_dirty
     }
 
+    /// Sets the dirty flag of this page.
+    fn set_dirty(&mut self, is_dirty: bool) {
+        self.is_dirty = is_dirty;
+        info!("Set dirty flag for Page ID {}: {}", self.page_id, is_dirty);
+    }
+
+    /// Returns the pin count of this page.
+    fn get_pin_count(&self) -> i32 {
+        self.pin_count
+    }
+
+    /// Increments the pin count of this page.
+    fn increment_pin_count(&mut self) {
+        self.pin_count += 1;
+        debug!("Incremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
+    }
+
+    /// Decrements the pin count of this page.
+    fn decrement_pin_count(&mut self) {
+        if self.pin_count > 0 {
+            self.pin_count -= 1;
+            debug!("Decremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
+        } else {
+            error!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
+        }
+    }
+
+    /// Returns an immutable reference to the data. The data is protected by an internal read lock.
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+        debug!("Fetching data for page ID {}", self.page_id);
+        // Return a copy of the data.
+        &*self.data
+    }
+
+    /// Returns a mutable reference to the data, marks the page as dirty, and returns a copy.
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+        debug!("Fetching mutable data for page ID {}", self.page_id);
+
+        // Return a copy of the mutable data.
+        &mut *self.data
+    }
+
     /// Method to modify the data
-    pub fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
+    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
         debug!("Attempting to modify data for Page ID {} at offset {}", self.page_id, offset);
 
         if offset >= self.data.len() {
@@ -103,43 +151,47 @@ impl Page {
     }
 
     /// Sets the pin count of this page.
-    pub fn set_pin_count(&mut self, pin_count: i32) {
+    fn set_pin_count(&mut self, pin_count: i32) {
         self.pin_count = pin_count;
         debug!("Setting pin count for Page ID {}: {}", self.page_id, pin_count);
     }
 
-    /// Sets the dirty flag of this page.
-    pub fn set_dirty(&mut self, is_dirty: bool) {
-        self.is_dirty = is_dirty;
-        info!("Set dirty flag for Page ID {}: {}", self.page_id, is_dirty);
+    /// Zeroes out the data that is held within the page.
+    fn reset_memory(&mut self) {
+        self.data.fill(0);
+        debug!("Reset memory for Page ID {}", self.page_id);
+    }
+}
+
+pub enum PageType {
+    Basic(Page),
+    ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
+    // Add other page types as needed
+}
+
+impl PageType {
+
+    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
+        unimplemented!()
     }
 
-    /// Sets the page LSN.
-    pub fn set_lsn(&mut self, lsn: Lsn) {
-        let lsn_bytes = lsn.to_ne_bytes();
-        self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
-        info!("Set LSN for Page ID {}", self.page_id);
+    pub fn deserialize(&mut self, buffer: &[u8; DB_PAGE_SIZE]) {
+        unimplemented!()
     }
 
-    /// Increments the pin count of this page.
-    pub fn increment_pin_count(&mut self) {
-        self.pin_count += 1;
-        debug!("Incremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
-    }
-
-    /// Decrements the pin count of this page.
-    pub fn decrement_pin_count(&mut self) {
-        if self.pin_count > 0 {
-            self.pin_count -= 1;
-            debug!("Decremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
-        } else {
-            error!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
+    pub fn as_page_trait(&self) -> &dyn PageTrait {
+        match self {
+            PageType::Basic(page) => page,
+            ExtendedHashTableDirectory(page) => page,
+            // Add other matches as needed
         }
     }
 
-    /// Zeroes out the data that is held within the page.
-    pub fn reset_memory(&mut self) {
-        self.data.fill(0);
-        debug!("Reset memory for Page ID {}", self.page_id);
+    pub fn as_page_trait_mut(&mut self) -> &mut dyn PageTrait {
+        match self {
+            PageType::Basic(page) => page,
+            PageType::ExtendedHashTableDirectory(page) => page,
+            // Add other matches as needed
+        }
     }
 }

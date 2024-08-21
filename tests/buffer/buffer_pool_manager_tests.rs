@@ -12,6 +12,9 @@ use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::common::config::{PageId, DB_PAGE_SIZE};
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
+use tkdb::buffer::buffer_pool_manager::NewPageType;
+use tkdb::common::exception::DeletePageError;
+use tkdb::storage::page::page::PageType;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,
@@ -66,7 +69,7 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
-    use tkdb::common::exception::DeletePageError;
+
     use super::*;
 
     #[test]
@@ -93,12 +96,13 @@ mod unit_tests {
         let context = TestContext::new("test_new_page_creation");
 
         // Create a new page
-        let new_page = context.bpm.new_page().unwrap();
-        let page_id = new_page.read().get_page_id();
+
+        let new_page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page_id = new_page.read().as_page_trait().get_page_id();
 
         assert!(page_id >= 0, "The new page should have a valid page ID.");
         assert_eq!(
-            new_page.read().get_pin_count(),
+            new_page.read().as_page_trait().get_pin_count(),
             1,
             "The new page should have a pin count of 1."
         );
@@ -117,17 +121,17 @@ mod unit_tests {
 
         // Fill the buffer pool to capacity
         for i in 0..context.buffer_pool_size {
-            let page = context.bpm.new_page().unwrap();
-            info!("Created page with ID: {}", page.read().get_page_id());
+            let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+            info!("Created page with ID: {}", page.read().as_page_trait().get_page_id());
 
             // Explicitly mark the newly created page as evictable
-            let page_id = page.read().get_page_id();
+            let page_id = page.read().as_page_trait().get_page_id();
             context.bpm.unpin_page(page_id, false, AccessType::Unknown);
         }
 
         // The next new page should trigger an eviction
         info!("Creating an additional page to trigger eviction...");
-        let extra_page = context.bpm.new_page();
+        let extra_page = context.bpm.new_page(NewPageType::Basic);
 
         if extra_page.is_none() {
             error!("Failed to create a new page after buffer pool is full. Eviction did not work as expected.");
@@ -152,15 +156,15 @@ mod unit_tests {
         let context = TestContext::new("test_unpin_and_evict_page");
 
         // Create a new page
-        let page = context.bpm.new_page().unwrap();
-        let page_id = page.read().get_page_id();
+        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
 
         // Unpin the page
         let success = context.bpm.unpin_page(page_id, false, AccessType::Lookup);
         assert!(success, "Unpinning should be successful.");
 
         // Now the page should be evictable
-        let evicted = context.bpm.new_page().is_some();
+        let evicted = context.bpm.new_page(NewPageType::Basic).is_some();
         assert!(
             evicted,
             "The buffer pool manager should be able to evict an unpinned page."
@@ -172,25 +176,25 @@ mod unit_tests {
         let context = TestContext::new("test_page_fetching_from_disk");
 
         // Create and write to a page
-        let page = context.bpm.new_page().unwrap();
-        let page_id = page.read().get_page_id();
+        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE];
         rand::thread_rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
 
         // Unpin and evict the page
         context.bpm.unpin_page(page_id, true, AccessType::Lookup);
-        context.bpm.new_page(); // Trigger eviction
+        context.bpm.new_page(NewPageType::Basic); // Trigger eviction
 
         // Fetch the page back from disk
         let fetched_page = context.bpm.fetch_page(page_id).unwrap();
         assert_eq!(
-            fetched_page.read().get_page_id(),
+            fetched_page.read().as_page_trait().get_page_id(),
             page_id,
             "The fetched page should have the same ID as the original page."
         );
         assert_eq!(
-            &fetched_page.read().get_data()[..],
+            &fetched_page.read().as_page_trait().get_data()[..],
             &data[..],
             "The fetched page data should match the written data."
         );
@@ -201,8 +205,8 @@ mod unit_tests {
         let context = TestContext::new("test_delete_page");
 
         // Create a new page
-        let page = context.bpm.new_page().unwrap();
-        let page_id = page.read().get_page_id();
+        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
 
         // Delete the page
         match context.bpm.delete_page(page_id) {
@@ -228,8 +232,8 @@ mod unit_tests {
         let context = TestContext::new("test_flush_page");
 
         // Create and write to a page
-        let page = context.bpm.new_page().unwrap();
-        let page_id = page.read().get_page_id();
+        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE];
         rand::thread_rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
@@ -243,12 +247,12 @@ mod unit_tests {
 
         // Unpin and evict the page
         context.bpm.unpin_page(page_id, true, AccessType::Lookup);
-        context.bpm.new_page(); // Trigger eviction
+        context.bpm.new_page(NewPageType::Basic); // Trigger eviction
 
         // Fetch the page back from disk and verify the data
         let fetched_page = context.bpm.fetch_page(page_id).unwrap();
         assert_eq!(
-            &fetched_page.read().get_data()[..],
+            &fetched_page.read().as_page_trait().get_data()[..],
             &data[..],
             "The fetched page data should match the written and flushed data."
         );
@@ -268,9 +272,9 @@ mod concurrency {
     fn concurrent_page_access() {
         let ctx = TestContext::new("concurrent_page_access_test");
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
-        let page = bpm.write().new_page().unwrap();
+        let page = bpm.write().new_page(NewPageType::Basic).unwrap();
 
-        let page_id = page.read().get_page_id();
+        let page_id = page.read().as_page_trait().get_page_id();
         let bpm_clone = bpm.clone();
         let mut handles = vec![];
 
@@ -290,7 +294,7 @@ mod concurrency {
                     // Then, modify the page with a write lock on the page itself
                     {
                         let mut page_guard = page.write(); // Acquire write lock on the Page
-                        let mut data = page_guard.get_data_mut();
+                        let mut data = page_guard.as_page_trait_mut().get_data_mut();
                         data[0] = i as u8; // Each thread writes its index as the first byte
                     }
 
@@ -313,7 +317,7 @@ mod concurrency {
             let bpm = bpm.read();
             let final_page = bpm.fetch_page(page_id).unwrap();
             let binding = final_page.read();
-            let final_data = binding.get_data();
+            let final_data = binding.as_page_trait().get_data();
             assert!(
                 final_data[0] < 10,
                 "Final modification resulted in incorrect data: expected value < 10, got {}",
@@ -350,7 +354,7 @@ mod concurrency {
             let handle = thread::spawn(move || {
                 // Create a new page
                 let page_id = i as u32;
-                bpm_clone.new_page().expect("Failed to create a new page");
+                bpm_clone.new_page(NewPageType::Basic).expect("Failed to create a new page");
 
                 // Write data to the page
                 bpm_clone.write_page(page_id as PageId, data);
@@ -394,9 +398,9 @@ mod edge_cases {
             // Create a new page within a narrow lock scope
             let page_id = {
                 let mut bpm = bpm.write(); // Acquire write lock
-                let page = bpm.new_page();
+                let page = bpm.new_page(NewPageType::Basic);
 
-                let page_id = page.unwrap().read().get_page_id();
+                let page_id = page.unwrap().read().as_page_trait().get_page_id();
                 last_page_id = page_id;
                 page_id
             }; // Release write lock immediately
@@ -412,7 +416,7 @@ mod edge_cases {
 
         // Create a new page, forcing an eviction
         info!("Creating a new page to trigger eviction");
-        let new_page = bpm.write().new_page();
+        let new_page = bpm.write().new_page(NewPageType::Basic);
 
         // Verify that the last page was evicted
         info!("Verify that the last page was evicted");
@@ -433,8 +437,8 @@ mod edge_cases {
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
 
         // Create and modify a page repeatedly
-        let page = bpm.write().new_page().expect("Failed to create a new page");
-        let page_id = page.read().get_page_id(); // Store page_id for later use
+        let page = bpm.write().new_page(NewPageType::Basic).expect("Failed to create a new page");
+        let page_id = page.read().as_page_trait().get_page_id(); // Store page_id for later use
 
         for i in 0..100 {
             {
@@ -449,7 +453,7 @@ mod edge_cases {
                     let mut page_guard = page.write(); // Acquire write lock on the page
                     let mut data = [0; DB_PAGE_SIZE];
                     data[0] = i as u8; // Modify the data
-                    if let Err(e) = page_guard.set_data(0, &data) {
+                    if let Err(e) = page_guard.as_page_trait_mut().set_data(0, &data) {
                         panic!("Error setting data: {:?}", e);
                     }
                 }
@@ -465,7 +469,7 @@ mod edge_cases {
             let bpm = bpm.read(); // Acquire read lock on BPM
             if let Some(page_guard) = bpm.fetch_page(page_id) {
                 let page_guard = page_guard.read(); // Acquire read lock on the page
-                let data = page_guard.get_data(); // Get a reference to the data
+                let data = page_guard.as_page_trait().get_data(); // Get a reference to the data
                 assert_eq!(data[0], 99, "Final modification did not persist");
             } else {
                 panic!("Failed to fetch page");
@@ -482,15 +486,15 @@ mod edge_cases {
 
         // Create maximum number of pages
         for _ in 0..ctx.buffer_pool_size {
-            bpm.write().new_page().expect("Failed to create a new page");
+            bpm.write().new_page(NewPageType::Basic).expect("Failed to create a new page");
         }
 
         // Attempt to create more pages than the buffer pool can handle
         for _ in 0..10 {
-            let new_page_result = bpm.write().new_page();
+            let new_page_result = bpm.write().new_page(NewPageType::Basic);
             if let Some(ref page) = new_page_result {
-                bpm.write().unpin_page(page.read().get_page_id(), false, AccessType::Lookup);
-                info!("Unexpectedly created page {}", page.read().get_page_id());
+                bpm.write().unpin_page(page.read().as_page_trait().get_page_id(), false, AccessType::Lookup);
+                info!("Unexpectedly created page {}", page.read().as_page_trait().get_page_id());
             }
             assert!(new_page_result.is_none(), "Should not be able to create more pages than the buffer pool size");
         }
