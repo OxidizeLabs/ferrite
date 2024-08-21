@@ -2,10 +2,11 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use log::{debug, info};
+use crate::common::exception::PageError;
 use crate::storage::page::page_types::extendable_hash_table_header_page::HTABLE_HEADER_ARRAY_SIZE;
-use crate::storage::page::page::Page;
+use crate::storage::page::page::{Page, PageTrait};
 
 pub const HTABLE_DIRECTORY_MAX_DEPTH: u64 = 9;
 pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
@@ -14,27 +15,25 @@ pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
 static INSTANCE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ACCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-
+#[derive(Clone)]
 pub struct ExtendableHTableDirectoryPage {
+    base: Page,
     max_depth: u32,
     global_depth: u32,
     local_depths: [u32; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
-    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
-    id: usize,
+    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE as usize]
 }
 
-
 impl ExtendableHTableDirectoryPage {
-    pub fn new() -> Self {
-        let id = INSTANCE_COUNT.fetch_add(1, Ordering::SeqCst);
+    pub fn new(page_id: PageId) -> Self {
         let instance = ExtendableHTableDirectoryPage {
-            id,
+            base: Page::new(page_id),
             max_depth: 0,
             global_depth: 0,
             local_depths: [0; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
             bucket_page_ids: [INVALID_PAGE_ID; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
         };
-        debug!("New ExtendableHTableDirectoryPage created with id: {} at address {:p}", instance.id, &instance);
+        debug!("New ExtendableHTableDirectoryPage created with page id: {} at address {:p}", instance.get_page_id(), &instance);
         instance
     }
 
@@ -47,12 +46,8 @@ impl ExtendableHTableDirectoryPage {
         self.global_depth = 0;
         self.local_depths = [0; HTABLE_DIRECTORY_ARRAY_SIZE as usize];
         self.bucket_page_ids = [INVALID_PAGE_ID; HTABLE_DIRECTORY_ARRAY_SIZE as usize];
-        debug!("ExtendableHTableDirectoryPage initialized with id: {}, max depth: {} at address {:p}", self.id, max_depth, self);
+        debug!("ExtendableHTableDirectoryPage initialized with page id: {}, max depth: {} at address {:p}", self.get_page_id(), max_depth, self);
         assert_eq!(self.max_depth, max_depth, "max_depth should match the initialized value.");
-    }
-
-    pub fn get_id(&self) -> usize {
-        self.id
     }
 
     /// Returns the bucket index that the key is hashed to.
@@ -336,6 +331,18 @@ impl ExtendableHTableDirectoryPage {
         debug!("Bucket at index {} split. New bucket ID {} set at index {}", bucket_idx, new_page_id, split_image_index);
     }
 
+    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
+        let mut buffer = [0u8; DB_PAGE_SIZE];
+        buffer[0..4].copy_from_slice(&self.global_depth.to_le_bytes());
+        buffer[4..].copy_from_slice(self.base.get_data());
+        buffer
+    }
+
+    pub fn deserialize(&mut self, buffer: &[u8]) {
+        self.global_depth = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+        self.base.set_data(0, &buffer[8..]).expect("Failed to set data");
+    }
+
     /// Verifies the integrity of the directory.
     ///
     /// Ensures that:
@@ -425,17 +432,6 @@ impl ExtendableHTableDirectoryPage {
         }
     }
 
-    // Helper method to find the correct bucket index for a given page ID
-    fn find_bucket_index_for_page_id(&self, page_id: PageId) -> usize {
-        for idx in 0..self.size() {
-            if self.get_bucket_page_id(idx.try_into().unwrap()) == Some(page_id) {
-                return idx.try_into().unwrap();
-            }
-        }
-        panic!("Page ID {} not found in directory", page_id);
-    }
-
-
     /// Prints the current directory.
     pub fn print_directory(&self) {
         let size = self.size();
@@ -471,6 +467,63 @@ impl ExtendableHTableDirectoryPage {
         println!("================ END DIRECTORY ================");
     }
 
+    // Helper method to find the correct bucket index for a given page ID
+    fn find_bucket_index_for_page_id(&self, page_id: PageId) -> usize {
+        for idx in 0..self.size() {
+            if self.get_bucket_page_id(idx.try_into().unwrap()) == Some(page_id) {
+                return idx.try_into().unwrap();
+            }
+        }
+        panic!("Page ID {} not found in directory", page_id);
+    }
+}
+
+impl PageTrait for ExtendableHTableDirectoryPage {
+    fn get_page_id(&self) -> PageId {
+        self.base.get_page_id()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.base.is_dirty()
+    }
+
+    fn set_dirty(&mut self, is_dirty: bool) {
+        self.base.set_dirty(is_dirty)
+    }
+
+    fn get_pin_count(&self) -> i32 {
+        self.base.get_pin_count()
+    }
+
+    fn increment_pin_count(&mut self) {
+        self.base.increment_pin_count()
+    }
+
+    fn decrement_pin_count(&mut self) {
+        self.base.decrement_pin_count()
+    }
+
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+        &*self.base.get_data()
+    }
+
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+        &mut *self.base.get_data_mut()
+    }
+
+    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
+        self.base.set_data(offset, new_data)
+    }
+
+    /// Sets the pin count of this page.
+    fn set_pin_count(&mut self, pin_count: i32) {
+        self.base.set_pin_count(pin_count);
+        debug!("Setting pin count for Page ID {}: {}", self.get_page_id(), pin_count);
+    }
+
+    fn reset_memory(&mut self) {
+        self.base.reset_memory()
+    }
 }
 
 impl Debug for ExtendableHTableDirectoryPage {

@@ -3,8 +3,9 @@ use log::{debug, error, info, warn};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::convert::TryInto;
 use crate::common::exception::PageError;
-use crate::storage::page::page::PageType::ExtendedHashTableDirectory;
+use crate::storage::page::page::PageType::{ExtendedHashTableDirectory, ExtendedHashTableHeader};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -13,7 +14,7 @@ const OFFSET_LSN: usize = 4;
 /// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
 /// held in main memory. Page also contains book-keeping information that is used by the buffer pool manager, e.g.
 /// pin count, dirty flag, page id, etc.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Page {
     /// The actual data that is stored within a page.
     data: Box<[u8; DB_PAGE_SIZE]>,
@@ -163,9 +164,11 @@ impl PageTrait for Page {
     }
 }
 
+#[derive(Clone)]
 pub enum PageType {
     Basic(Page),
     ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
+    ExtendedHashTableHeader(ExtendableHTableHeaderPage)
     // Add other page types as needed
 }
 
@@ -183,6 +186,7 @@ impl PageType {
         match self {
             PageType::Basic(page) => page,
             ExtendedHashTableDirectory(page) => page,
+            ExtendedHashTableHeader(page) => page
             // Add other matches as needed
         }
     }
@@ -190,8 +194,9 @@ impl PageType {
     pub fn as_page_trait_mut(&mut self) -> &mut dyn PageTrait {
         match self {
             PageType::Basic(page) => page,
-            PageType::ExtendedHashTableDirectory(page) => page,
-            // Add other matches as needed
+            ExtendedHashTableDirectory(page) => page,
+            ExtendedHashTableHeader(page) => page
+
         }
     }
 }

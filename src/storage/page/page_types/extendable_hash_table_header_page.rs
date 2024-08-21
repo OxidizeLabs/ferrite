@@ -1,13 +1,18 @@
-use crate::common::config::{INVALID_PAGE_ID, PageId};
+use std::fmt::{Debug, Formatter};
+use crate::common::config::{INVALID_PAGE_ID, PageId, DB_PAGE_SIZE};
 use log::{info, debug, warn};
 use std::mem::size_of;
+use crate::common::exception::PageError;
+use crate::storage::page::page::{Page, PageTrait};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
 pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;
 
+#[derive(Clone)]
 pub struct ExtendableHTableHeaderPage {
+    base: Page,
     directory_page_ids: Vec<PageId>,
     max_depth: u32,
 }
@@ -142,5 +147,59 @@ impl ExtendableHTableHeaderPage {
             );
         }
         println!("======== END HEADER ========");
+    }
+}
+
+impl PageTrait for ExtendableHTableHeaderPage {
+    fn get_page_id(&self) -> PageId {
+        self.base.get_page_id()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.base.is_dirty()
+    }
+
+    fn set_dirty(&mut self, is_dirty: bool) {
+        self.base.set_dirty(is_dirty)
+    }
+
+    fn get_pin_count(&self) -> i32 {
+        self.base.get_pin_count()
+    }
+
+    fn increment_pin_count(&mut self) {
+        self.base.increment_pin_count()
+    }
+
+    fn decrement_pin_count(&mut self) {
+        self.base.decrement_pin_count()
+    }
+
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+        &*self.base.get_data()
+    }
+
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+        &mut *self.base.get_data_mut()
+    }
+
+    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
+        self.base.set_data(offset, new_data)
+    }
+
+    /// Sets the pin count of this page.
+    fn set_pin_count(&mut self, pin_count: i32) {
+        self.base.set_pin_count(pin_count);
+        debug!("Setting pin count for Page ID {}: {}", self.get_page_id(), pin_count);
+    }
+
+    fn reset_memory(&mut self) {
+        self.base.reset_memory()
+    }
+}
+
+impl Debug for ExtendableHTableHeaderPage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
