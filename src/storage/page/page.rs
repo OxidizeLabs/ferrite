@@ -2,6 +2,7 @@ use crate::common::config::*;
 use log::{debug, error, info, warn};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::convert::TryInto;
+use crate::common::exception::PageError;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -75,11 +76,30 @@ impl Page {
     }
 
     /// Method to modify the data
-    pub fn set_data(&mut self, new_data: &[u8; DB_PAGE_SIZE]) {
-        debug!("Modifying data for Page ID {}", self.page_id);
+    pub fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
+        debug!("Attempting to modify data for Page ID {} at offset {}", self.page_id, offset);
+
+        if offset >= self.data.len() {
+            return Err(PageError::InvalidOffset {
+                offset,
+                page_size: self.data.len(),
+            });
+        }
+
+        let remaining_space = self.data.len() - offset;
+        if new_data.len() > remaining_space {
+            return Err(PageError::DataTooLarge {
+                data_size: new_data.len(),
+                remaining_space,
+            });
+        }
+
+        // Copy the contents of `new_data` into `self.data` starting at the specified offset
+        self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
         self.is_dirty = true;
-        // Copy the contents of `new_data` into `self.data`
-        self.data.copy_from_slice(new_data);
+
+        debug!("Successfully modified data for Page ID {} at offset {}", self.page_id, offset);
+        Ok(())
     }
 
     /// Sets the pin count of this page.
