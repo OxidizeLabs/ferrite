@@ -1,6 +1,6 @@
 // mod backtrace;
 // mod binder;
-// mod buffer;
+mod buffer;
 // mod common;
 // mod concurrency;
 // mod container;
