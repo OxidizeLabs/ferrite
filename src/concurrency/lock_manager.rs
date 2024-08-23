@@ -92,13 +92,14 @@
 ///
 /// # Bookkeeping
 /// After a resource is unlocked, the lock manager should update the transaction's lock sets appropriately (check `transaction.rs`).
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Condvar, Mutex};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar};
 use std::thread;
-
+use parking_lot::Mutex;
 use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
 use crate::common::rid::RID;
+use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -194,250 +195,250 @@ pub struct LockManager {
     cycle_detection_thread: Option<thread::JoinHandle<()>>,
     waits_for: Mutex<HashMap<TxnId, Vec<TxnId>>>,
 }
-//
-// impl LockManager {
-//     /// Creates a new lock manager configured for the deadlock detection policy.
-//     ///
-//     /// # Parameters
-//     /// - `txn_manager`: A reference to the transaction manager.
-//     ///
-//     /// # Returns
-//     /// A new `LockManager` instance.
-//     pub fn new(txn_manager: Arc<Mutex<TransactionManager>>) -> Self {
-//         Self {
-//             txn_manager,
-//             table_lock_map: Mutex::new(HashMap::new()),
-//             row_lock_map: Mutex::new(HashMap::new()),
-//             enable_cycle_detection: AtomicBool::new(false),
-//             cycle_detection_thread: None,
-//             waits_for: Mutex::new(HashMap::new()),
-//         }
-//     }
-//
-//     /// Starts the deadlock detection process.
-//     pub fn start_deadlock_detection(&mut self) {
-//         // Ensure transaction manager is set
-//         assert!(self.txn_manager.lock().unwrap().is_some(), "txn_manager_ is not set.");
-//         self.enable_cycle_detection.store(true, Ordering::SeqCst);
-//         let lm = self.clone();
-//         self.cycle_detection_thread = Some(thread::spawn(move || lm.run_cycle_detection()));
-//     }
-//
-//     /// Acquires a lock on a table in the given lock mode.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock upgrade.
-//     /// - `lock_mode`: The lock mode for the requested lock.
-//     /// - `oid`: The table OID of the table to be locked.
-//     ///
-//     /// # Returns
-//     /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
-//     ///
-//     /// # Errors
-//     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-//     pub fn lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Releases the lock held on a table by the transaction.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction releasing the lock.
-//     /// - `oid`: The table OID of the table to be unlocked.
-//     ///
-//     /// # Returns
-//     /// `true` if the unlock is successful, `false` otherwise.
-//     ///
-//     /// # Errors
-//     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-//     pub fn unlock_table(&self, txn: &mut Transaction, oid: TableOidT) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Acquires a lock on a row in the given lock mode.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock upgrade.
-//     /// - `lock_mode`: The lock mode for the requested lock.
-//     /// - `oid`: The table OID of the table the row belongs to.
-//     /// - `rid`: The RID of the row to be locked.
-//     ///
-//     /// # Returns
-//     /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
-//     ///
-//     /// # Errors
-//     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-//     pub fn lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Releases the lock held on a row by the transaction.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction releasing the lock.
-//     /// - `oid`: The table OID of the table the row belongs to.
-//     /// - `rid`: The RID of the row to be unlocked.
-//     /// - `force`: Force unlock the tuple regardless of isolation level, not changing the transaction state.
-//     ///
-//     /// # Returns
-//     /// `true` if the unlock is successful, `false` otherwise.
-//     ///
-//     /// # Errors
-//     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-//     pub fn unlock_row(&self, txn: &mut Transaction, oid: TableOidT, rid: RID, force: bool) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Adds an edge from `t1` to `t2` in the waits-for graph.
-//     ///
-//     /// # Parameters
-//     /// - `t1`: Transaction waiting for a lock.
-//     /// - `t2`: Transaction being waited for.
-//     pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
-//         unimplemented!()
-//     }
-//
-//     /// Removes an edge from `t1` to `t2` in the waits-for graph.
-//     ///
-//     /// # Parameters
-//     /// - `t1`: Transaction waiting for a lock.
-//     /// - `t2`: Transaction being waited for.
-//     pub fn remove_edge(&self, t1: TxnId, t2: TxnId) {
-//         unimplemented!()
-//     }
-//
-//     /// Checks if the graph has a cycle, returning the newest transaction ID in the cycle if so.
-//     ///
-//     /// # Parameters
-//     /// - `txn_id`: If the graph has a cycle, will contain the newest transaction ID.
-//     ///
-//     /// # Returns
-//     /// `false` if the graph has no cycle, otherwise stores the newest transaction ID in the cycle to `txn_id`.
-//     pub fn has_cycle(&self, txn_id: &mut TxnId) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Returns all edges in the current waits-for graph.
-//     ///
-//     /// # Returns
-//     /// A vector of all edges in the current waits-for graph.
-//     pub fn get_edge_list(&self) -> Vec<(TxnId, TxnId)> {
-//         unimplemented!()
-//     }
-//
-//     /// Runs cycle detection in the background.
-//     pub fn run_cycle_detection(&self) {
-//         unimplemented!()
-//     }
-//
-//     /// Upgrades a lock on a table.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock upgrade.
-//     /// - `lock_mode`: The lock mode for the requested lock.
-//     /// - `oid`: The table OID of the table to be locked.
-//     ///
-//     /// # Returns
-//     /// `true` if the upgrade is successful, `false` otherwise.
-//     pub fn upgrade_lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Upgrades a lock on a row.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock upgrade.
-//     /// - `lock_mode`: The lock mode for the requested lock.
-//     /// - `oid`: The table OID of the table the row belongs to.
-//     /// - `rid`: The RID of the row to be locked.
-//     ///
-//     /// # Returns
-//     /// `true` if the upgrade is successful, `false` otherwise.
-//     pub fn upgrade_lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Checks if two locks are compatible.
-//     ///
-//     /// # Parameters
-//     /// - `l1`: The first lock mode.
-//     /// - `l2`: The second lock mode.
-//     ///
-//     /// # Returns
-//     /// `true` if the locks are compatible, `false` otherwise.
-//     pub fn are_locks_compatible(&self, l1: LockMode, l2: LockMode) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Checks if a transaction can take a lock.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock.
-//     /// - `lock_mode`: The lock mode for the requested lock.
-//     ///
-//     /// # Returns
-//     /// `true` if the transaction can take the lock, `false` otherwise.
-//     pub fn can_txn_take_lock(&self, txn: &Transaction, lock_mode: LockMode) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Grants new locks if possible.
-//     ///
-//     /// # Parameters
-//     /// - `lock_request_queue`: The lock request queue.
-//     pub fn grant_new_locks_if_possible(&self, lock_request_queue: &mut LockRequestQueue) {
-//         unimplemented!()
-//     }
-//
-//     /// Checks if a lock can be upgraded.
-//     ///
-//     /// # Parameters
-//     /// - `curr_lock_mode`: The current lock mode.
-//     /// - `requested_lock_mode`: The requested lock mode.
-//     ///
-//     /// # Returns
-//     /// `true` if the lock can be upgraded, `false` otherwise.
-//     pub fn can_lock_upgrade(&self, curr_lock_mode: LockMode, requested_lock_mode: LockMode) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Checks if a transaction has an appropriate lock on a table.
-//     ///
-//     /// # Parameters
-//     /// - `txn`: The transaction requesting the lock.
-//     /// - `oid`: The table OID of the table the row belongs to.
-//     /// - `row_lock_mode`: The lock mode for the requested row lock.
-//     ///
-//     /// # Returns
-//     /// `true` if the transaction has an appropriate lock on the table, `false` otherwise.
-//     pub fn check_appropriate_lock_on_table(&self, txn: &Transaction, oid: TableOidT, row_lock_mode: LockMode) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Finds a cycle in the waits-for graph.
-//     ///
-//     /// # Parameters
-//     /// - `source_txn`: The source transaction ID.
-//     /// - `path`: The current path in the search.
-//     /// - `on_path`: The set of transaction IDs currently on the path.
-//     /// - `visited`: The set of visited transaction IDs.
-//     /// - `abort_txn_id`: The transaction ID to be aborted if a cycle is found.
-//     ///
-//     /// # Returns
-//     /// `true` if a cycle is found, `false` otherwise.
-//     pub fn find_cycle(
-//         &self,
-//         source_txn: TxnId,
-//         path: &mut Vec<TxnId>,
-//         on_path: &mut HashSet<TxnId>,
-//         visited: &mut HashSet<TxnId>,
-//         abort_txn_id: &mut TxnId,
-//     ) -> bool {
-//         unimplemented!()
-//     }
-//
-//     /// Unlocks all resources held by the lock manager.
-//     pub fn unlock_all(&self) {
-//         unimplemented!()
-//     }
-// }
+
+impl LockManager {
+    /// Creates a new lock manager configured for the deadlock detection policy.
+    ///
+    /// # Parameters
+    /// - `txn_manager`: A reference to the transaction manager.
+    ///
+    /// # Returns
+    /// A new `LockManager` instance.
+    pub fn new(txn_manager: Arc<Mutex<TransactionManager>>) -> Self {
+        Self {
+            txn_manager,
+            table_lock_map: Mutex::new(HashMap::new()),
+            row_lock_map: Mutex::new(HashMap::new()),
+            enable_cycle_detection: AtomicBool::new(false),
+            cycle_detection_thread: None,
+            waits_for: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Starts the deadlock detection process.
+    pub fn start_deadlock_detection(&mut self) {
+        // Ensure transaction manager is set
+        assert!(self.txn_manager.lock(), "txn_manager_ is not set.");
+        self.enable_cycle_detection.store(true, Ordering::SeqCst);
+        let lm = self.clone();
+        self.cycle_detection_thread = Some(thread::spawn(move || lm.run_cycle_detection()));
+    }
+
+    /// Acquires a lock on a table in the given lock mode.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock upgrade.
+    /// - `lock_mode`: The lock mode for the requested lock.
+    /// - `oid`: The table OID of the table to be locked.
+    ///
+    /// # Returns
+    /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
+    ///
+    /// # Errors
+    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
+    pub fn lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
+        unimplemented!()
+    }
+
+    /// Releases the lock held on a table by the transaction.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction releasing the lock.
+    /// - `oid`: The table OID of the table to be unlocked.
+    ///
+    /// # Returns
+    /// `true` if the unlock is successful, `false` otherwise.
+    ///
+    /// # Errors
+    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
+    pub fn unlock_table(&self, txn: &mut Transaction, oid: TableOidT) -> bool {
+        unimplemented!()
+    }
+
+    /// Acquires a lock on a row in the given lock mode.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock upgrade.
+    /// - `lock_mode`: The lock mode for the requested lock.
+    /// - `oid`: The table OID of the table the row belongs to.
+    /// - `rid`: The RID of the row to be locked.
+    ///
+    /// # Returns
+    /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
+    ///
+    /// # Errors
+    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
+    pub fn lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
+        unimplemented!()
+    }
+
+    /// Releases the lock held on a row by the transaction.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction releasing the lock.
+    /// - `oid`: The table OID of the table the row belongs to.
+    /// - `rid`: The RID of the row to be unlocked.
+    /// - `force`: Force unlock the tuple regardless of isolation level, not changing the transaction state.
+    ///
+    /// # Returns
+    /// `true` if the unlock is successful, `false` otherwise.
+    ///
+    /// # Errors
+    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
+    pub fn unlock_row(&self, txn: &mut Transaction, oid: TableOidT, rid: RID, force: bool) -> bool {
+        unimplemented!()
+    }
+
+    /// Adds an edge from `t1` to `t2` in the waits-for graph.
+    ///
+    /// # Parameters
+    /// - `t1`: Transaction waiting for a lock.
+    /// - `t2`: Transaction being waited for.
+    pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
+        unimplemented!()
+    }
+
+    /// Removes an edge from `t1` to `t2` in the waits-for graph.
+    ///
+    /// # Parameters
+    /// - `t1`: Transaction waiting for a lock.
+    /// - `t2`: Transaction being waited for.
+    pub fn remove_edge(&self, t1: TxnId, t2: TxnId) {
+        unimplemented!()
+    }
+
+    /// Checks if the graph has a cycle, returning the newest transaction ID in the cycle if so.
+    ///
+    /// # Parameters
+    /// - `txn_id`: If the graph has a cycle, will contain the newest transaction ID.
+    ///
+    /// # Returns
+    /// `false` if the graph has no cycle, otherwise stores the newest transaction ID in the cycle to `txn_id`.
+    pub fn has_cycle(&self, txn_id: &mut TxnId) -> bool {
+        unimplemented!()
+    }
+
+    /// Returns all edges in the current waits-for graph.
+    ///
+    /// # Returns
+    /// A vector of all edges in the current waits-for graph.
+    pub fn get_edge_list(&self) -> Vec<(TxnId, TxnId)> {
+        unimplemented!()
+    }
+
+    /// Runs cycle detection in the background.
+    pub fn run_cycle_detection(&self) {
+        unimplemented!()
+    }
+
+    /// Upgrades a lock on a table.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock upgrade.
+    /// - `lock_mode`: The lock mode for the requested lock.
+    /// - `oid`: The table OID of the table to be locked.
+    ///
+    /// # Returns
+    /// `true` if the upgrade is successful, `false` otherwise.
+    pub fn upgrade_lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
+        unimplemented!()
+    }
+
+    /// Upgrades a lock on a row.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock upgrade.
+    /// - `lock_mode`: The lock mode for the requested lock.
+    /// - `oid`: The table OID of the table the row belongs to.
+    /// - `rid`: The RID of the row to be locked.
+    ///
+    /// # Returns
+    /// `true` if the upgrade is successful, `false` otherwise.
+    pub fn upgrade_lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
+        unimplemented!()
+    }
+
+    /// Checks if two locks are compatible.
+    ///
+    /// # Parameters
+    /// - `l1`: The first lock mode.
+    /// - `l2`: The second lock mode.
+    ///
+    /// # Returns
+    /// `true` if the locks are compatible, `false` otherwise.
+    pub fn are_locks_compatible(&self, l1: LockMode, l2: LockMode) -> bool {
+        unimplemented!()
+    }
+
+    /// Checks if a transaction can take a lock.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock.
+    /// - `lock_mode`: The lock mode for the requested lock.
+    ///
+    /// # Returns
+    /// `true` if the transaction can take the lock, `false` otherwise.
+    pub fn can_txn_take_lock(&self, txn: &Transaction, lock_mode: LockMode) -> bool {
+        unimplemented!()
+    }
+
+    /// Grants new locks if possible.
+    ///
+    /// # Parameters
+    /// - `lock_request_queue`: The lock request queue.
+    pub fn grant_new_locks_if_possible(&self, lock_request_queue: &mut LockRequestQueue) {
+        unimplemented!()
+    }
+
+    /// Checks if a lock can be upgraded.
+    ///
+    /// # Parameters
+    /// - `curr_lock_mode`: The current lock mode.
+    /// - `requested_lock_mode`: The requested lock mode.
+    ///
+    /// # Returns
+    /// `true` if the lock can be upgraded, `false` otherwise.
+    pub fn can_lock_upgrade(&self, curr_lock_mode: LockMode, requested_lock_mode: LockMode) -> bool {
+        unimplemented!()
+    }
+
+    /// Checks if a transaction has an appropriate lock on a table.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction requesting the lock.
+    /// - `oid`: The table OID of the table the row belongs to.
+    /// - `row_lock_mode`: The lock mode for the requested row lock.
+    ///
+    /// # Returns
+    /// `true` if the transaction has an appropriate lock on the table, `false` otherwise.
+    pub fn check_appropriate_lock_on_table(&self, txn: &Transaction, oid: TableOidT, row_lock_mode: LockMode) -> bool {
+        unimplemented!()
+    }
+
+    /// Finds a cycle in the waits-for graph.
+    ///
+    /// # Parameters
+    /// - `source_txn`: The source transaction ID.
+    /// - `path`: The current path in the search.
+    /// - `on_path`: The set of transaction IDs currently on the path.
+    /// - `visited`: The set of visited transaction IDs.
+    /// - `abort_txn_id`: The transaction ID to be aborted if a cycle is found.
+    ///
+    /// # Returns
+    /// `true` if a cycle is found, `false` otherwise.
+    pub fn find_cycle(
+        &self,
+        source_txn: TxnId,
+        path: &mut Vec<TxnId>,
+        on_path: &mut HashSet<TxnId>,
+        visited: &mut HashSet<TxnId>,
+        abort_txn_id: &mut TxnId,
+    ) -> bool {
+        unimplemented!()
+    }
+
+    /// Unlocks all resources held by the lock manager.
+    pub fn unlock_all(&self) {
+        unimplemented!()
+    }
+}
