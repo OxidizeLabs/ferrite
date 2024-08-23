@@ -74,13 +74,11 @@ mod basic_behavior {
     use super::*;
 
     #[test]
-    #[ignore]
     fn page_id_size() {
         assert_eq!(PAGE_ID_SIZE, 4, "PageId size is not 4 bytes");
     }
 
     #[test]
-    #[ignore]
     fn header_page_integrity() {
         let ctx = TestContext::new("header_page_integrity");
         let bpm = &ctx.bpm;
@@ -151,7 +149,6 @@ mod basic_behavior {
     }
 
     #[test]
-    #[ignore]
     fn directory_page_integrity() {
         let ctx = TestContext::new("directory_page_integrity");
         let bpm = &ctx.bpm;
@@ -182,7 +179,6 @@ mod basic_behavior {
     }
 
     #[test]
-    #[ignore]
     fn bucket_page_integrity() {
         let ctx = TestContext::new("bucket_page_integrity");
         let bpm = &ctx.bpm;
@@ -213,7 +209,7 @@ mod basic_behavior {
     }
 
     #[test]
-    fn test_basic_behaviour() {
+    fn basic_behaviour() {
         let ctx = TestContext::new("test_basic_behaviour");
         let bpm = &ctx.bpm;
 
@@ -397,115 +393,115 @@ mod basic_behavior {
     }
 }
 
-// #[cfg(test)]
-// mod concurrency {
-//     use super::*;
-//
-//     #[test]
-//     fn concurrent_access() {
-//         let ctx = Arc::new(TestContext::new("test_concurrent_access"));
-//         let bpm = Arc::clone(&ctx.bpm);
-//
-//         info!("Starting concurrent access test");
-//
-//         let num_threads = 4;
-//         let operations_per_thread = 100;
-//
-//         let mut handles = vec![];
-//
-//         for i in 0..num_threads {
-//             let bpm_clone = Arc::clone(&bpm);
-//             let handle = thread::spawn(move || {
-//                 for j in 0..operations_per_thread {
-//                     let bucket_guard = bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket).unwrap();
-//                     let bucket_page_id = bucket_guard.get_page_id();
-//                     info!("Thread {} created bucket page with ID: {} (operation {})", i, bucket_page_id, j);
-//
-//                     if let Some(mut bucket_guard) = bucket_guard.into_specific_type::<ExtendableHTableBucketPage<8>>() {
-//                         bucket_guard.access_mut(|bucket_page| {
-//                             bucket_page.init(10);
-//                             assert_eq!(bucket_page.get_size(), 0, "Initial bucket size should be 0");
-//                             info!("Thread {} initialized bucket page {} (operation {})", i, bucket_page_id, j);
-//                         });
-//                     } else {
-//                         panic!("Thread {} failed to convert to ExtendableHTableBucketPage<8> (operation {})", i, j);
-//                     }
-//                 }
-//             });
-//             handles.push(handle);
-//         }
-//
-//         for handle in handles {
-//             handle.join().unwrap();
-//         }
-//
-//         info!("Concurrent access test completed successfully");
-//     }
-// }
-//
-// #[cfg(test)]
-// mod edge_case {
-//     use super::*;
-//
-//     #[test]
-//     fn test_max_depth() {
-//         let ctx = TestContext::new("test_max_depth");
-//         let bpm = &ctx.bpm;
-//
-//         info!("Starting max depth test");
-//
-//         let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
-//         let directory_page_id = directory_guard.get_page_id();
-//         info!("Created directory page with ID: {}", directory_page_id);
-//
-//         if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage>() {
-//             ext_dir_guard.access_mut(|directory_page| {
-//                 directory_page.init(30); // Start with a high global depth
-//                 assert_eq!(directory_page.get_global_depth(), 30, "Initial global depth should be 30");
-//
-//                 // Try to increment beyond the maximum depth
-//                 directory_page.incr_global_depth();
-//                 assert_eq!(directory_page.get_global_depth(), 31, "Global depth should be 31 after increment");
-//
-//                 // This should not increase the global depth further
-//                 directory_page.incr_global_depth();
-//                 assert_eq!(directory_page.get_global_depth(), 31, "Global depth should remain 31 after attempting to exceed max depth");
-//
-//                 info!("Max depth test completed successfully");
-//             });
-//         } else {
-//             panic!("Failed to convert to ExtendableHTableDirectoryPage");
-//         }
-//     }
-//
-//     #[test]
-//     fn test_empty_directory() {
-//         let ctx = TestContext::new("test_empty_directory");
-//         let bpm = &ctx.bpm;
-//
-//         info!("Starting empty directory test");
-//
-//         let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
-//         let directory_page_id = directory_guard.get_page_id();
-//         info!("Created directory page with ID: {}", directory_page_id);
-//
-//         if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage>() {
-//             ext_dir_guard.access_mut(|directory_page| {
-//                 directory_page.init(0); // Start with global depth 0
-//                 assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
-//                 assert_eq!(directory_page.size(), 1, "Empty directory should have size 1");
-//
-//                 // Try to access a bucket
-//                 assert_eq!(directory_page.get_bucket_page_id(0), Some(INVALID_PAGE_ID), "Empty directory should return INVALID_PAGE_ID");
-//
-//                 // Try to decrement global depth (should not change)
-//                 directory_page.decr_global_depth();
-//                 assert_eq!(directory_page.get_global_depth(), 0, "Global depth should remain 0 after attempted decrement");
-//
-//                 info!("Empty directory test completed successfully");
-//             });
-//         } else {
-//             panic!("Failed to convert to ExtendableHTableDirectoryPage");
-//         }
-//     }
-// }
+#[cfg(test)]
+mod concurrency {
+    use super::*;
+
+    #[test]
+    fn concurrent_access() {
+        let ctx = Arc::new(TestContext::new("test_concurrent_access"));
+        let bpm = Arc::clone(&ctx.bpm);
+
+        info!("Starting concurrent access test");
+
+        let num_threads = 4;
+        let operations_per_thread = 100;
+
+        let mut handles = vec![];
+
+        for i in 0..num_threads {
+            let bpm_clone = Arc::clone(&bpm);
+            let handle = thread::spawn(move || {
+                for j in 0..operations_per_thread {
+                    let bucket_guard = bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket).unwrap();
+                    let bucket_page_id = bucket_guard.get_page_id();
+                    info!("Thread {} created bucket page with ID: {} (operation {})", i, bucket_page_id, j);
+
+                    if let Some(mut bucket_guard) = bucket_guard.into_specific_type::<ExtendableHTableBucketPage<8>>() {
+                        bucket_guard.access_mut(|bucket_page| {
+                            bucket_page.init(10);
+                            assert_eq!(bucket_page.get_size(), 0, "Initial bucket size should be 0");
+                            info!("Thread {} initialized bucket page {} (operation {})", i, bucket_page_id, j);
+                        });
+                    } else {
+                        panic!("Thread {} failed to convert to ExtendableHTableBucketPage<8> (operation {})", i, j);
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        info!("Concurrent access test completed successfully");
+    }
+}
+
+#[cfg(test)]
+mod edge_case {
+    use super::*;
+
+    #[test]
+    fn test_max_depth() {
+        let ctx = TestContext::new("test_max_depth");
+        let bpm = &ctx.bpm;
+
+        info!("Starting max depth test");
+
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_page_id = directory_guard.get_page_id();
+        info!("Created directory page with ID: {}", directory_page_id);
+
+        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage>() {
+            ext_dir_guard.access_mut(|directory_page| {
+                directory_page.init(30); // Start with a high global depth
+                assert_eq!(directory_page.get_global_depth(), 30, "Initial global depth should be 30");
+
+                // Try to increment beyond the maximum depth
+                directory_page.incr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 31, "Global depth should be 31 after increment");
+
+                // This should not increase the global depth further
+                directory_page.incr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 31, "Global depth should remain 31 after attempting to exceed max depth");
+
+                info!("Max depth test completed successfully");
+            });
+        } else {
+            panic!("Failed to convert to ExtendableHTableDirectoryPage");
+        }
+    }
+
+    #[test]
+    fn test_empty_directory() {
+        let ctx = TestContext::new("test_empty_directory");
+        let bpm = &ctx.bpm;
+
+        info!("Starting empty directory test");
+
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_page_id = directory_guard.get_page_id();
+        info!("Created directory page with ID: {}", directory_page_id);
+
+        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage>() {
+            ext_dir_guard.access_mut(|directory_page| {
+                directory_page.init(0); // Start with global depth 0
+                assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
+                assert_eq!(directory_page.size(), 1, "Empty directory should have size 1");
+
+                // Try to access a bucket
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(INVALID_PAGE_ID), "Empty directory should return INVALID_PAGE_ID");
+
+                // Try to decrement global depth (should not change)
+                directory_page.decr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 0, "Global depth should remain 0 after attempted decrement");
+
+                info!("Empty directory test completed successfully");
+            });
+        } else {
+            panic!("Failed to convert to ExtendableHTableDirectoryPage");
+        }
+    }
+}
