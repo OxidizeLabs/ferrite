@@ -1,9 +1,11 @@
+use std::any::Any;
 use crate::common::config::*;
 use log::{debug, error, info, warn};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::convert::TryInto;
 use crate::common::exception::PageError;
-use crate::storage::page::page::PageType::{ExtendedHashTableDirectory, ExtendedHashTableHeader};
+use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader};
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 
@@ -164,12 +166,12 @@ impl PageTrait for Page {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub enum PageType {
     Basic(Page),
     ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
-    ExtendedHashTableHeader(ExtendableHTableHeaderPage)
-    // Add other page types as needed
+    ExtendedHashTableHeader(ExtendableHTableHeaderPage),
+    ExtendedHashTableBucket(TypeErasedBucketPage),
 }
 
 impl PageType {
@@ -184,19 +186,69 @@ impl PageType {
 
     pub fn as_page_trait(&self) -> &dyn PageTrait {
         match self {
-            PageType::Basic(page) => page,
+            Basic(page) => page,
             ExtendedHashTableDirectory(page) => page,
-            ExtendedHashTableHeader(page) => page
-            // Add other matches as needed
+            ExtendedHashTableHeader(page) => page,
+            ExtendedHashTableBucket(page) => page
         }
     }
 
     pub fn as_page_trait_mut(&mut self) -> &mut dyn PageTrait {
         match self {
-            PageType::Basic(page) => page,
+            Basic(page) => page,
             ExtendedHashTableDirectory(page) => page,
-            ExtendedHashTableHeader(page) => page
-
+            ExtendedHashTableHeader(page) => page,
+            ExtendedHashTableBucket(page) => page
         }
+    }
+
+    pub fn as_any(&self) -> &dyn Any {
+        match self {
+            Basic(page) => page as &dyn Any,
+            ExtendedHashTableDirectory(page) => page as &dyn Any,
+            ExtendedHashTableHeader(page) => page as &dyn Any,
+            ExtendedHashTableBucket(page) => page as &dyn Any,
+        }
+    }
+
+    pub fn as_any_mut(&mut self) -> &mut dyn Any {
+        match self {
+            PageType::Basic(ref mut page) => page as &mut dyn Any,
+            PageType::ExtendedHashTableDirectory(ref mut page) => page as &mut dyn Any,
+            PageType::ExtendedHashTableHeader(ref mut page) => page as &mut dyn Any,
+            PageType::ExtendedHashTableBucket(ref mut page) => page as &mut dyn Any,
+        }
+    }
+}
+
+impl From<ExtendableHTableDirectoryPage> for PageType {
+    fn from(page: ExtendableHTableDirectoryPage) -> Self {
+        PageType::ExtendedHashTableDirectory(page)
+    }
+}
+
+impl From<ExtendableHTableHeaderPage> for PageType {
+    fn from(page: ExtendableHTableHeaderPage) -> Self {
+        PageType::ExtendedHashTableHeader(page)
+    }
+}
+
+impl From<TypeErasedBucketPage> for PageType {
+    fn from(page: TypeErasedBucketPage) -> Self {
+        ExtendedHashTableBucket(page)
+    }
+}
+
+pub trait AsAny {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl AsAny for Page {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

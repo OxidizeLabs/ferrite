@@ -28,6 +28,7 @@ pub enum PageError {
     InvalidCast,
     DataTooLarge { data_size: usize, remaining_space: usize },
     InvalidOffset { offset: usize, page_size: usize },
+    InvalidOperation
 }
 
 #[derive(Debug)]
@@ -57,6 +58,9 @@ impl fmt::Display for PageError {
             }
             PageError::InvalidCast => {
                 write!(f, "Invalid Cast")
+            }
+            PageError::InvalidOperation => {
+                write!(f, "Invalid Operation")
             }
         }
     }

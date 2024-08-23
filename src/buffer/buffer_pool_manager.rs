@@ -3,15 +3,22 @@ use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::storage::index::b_plus_tree_index::KeyComparator;
+use crate::storage::index::generic_key::{Comparator, GenericComparator, GenericKey};
+use crate::storage::page::page::PageType::{ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader};
 use crate::storage::page::page::{Page, PageTrait, PageType};
+use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::{ExtendableHTableBucketPage, TypeErasedBucketPage};
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use crate::types_db::integer_type::IntegerType;
 use futures::AsyncWriteExt;
 use log::{debug, error, info, warn};
 use spin::{Mutex, RwLock};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
-use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 
 const INVALID_PAGE_ID: PageId = -1;
 
@@ -20,7 +27,8 @@ const INVALID_PAGE_ID: PageId = -1;
 pub enum NewPageType {
     Basic,
     ExtendedHashTableDirectory,
-    // Add other page types as needed
+    ExtendedHashTableHeader,
+    ExtendedHashTableBucket,
 }
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
@@ -110,63 +118,24 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional new `BasicPageGuard`.
-    pub fn new_page_guarded(self: &Arc<BufferPoolManager>) -> Option<PageGuard> {
-        debug!("Creating a new page guard...");
+    pub fn new_page_guarded(self: &Arc<Self>, new_page_type: NewPageType) -> Option<PageGuard> {
+        debug!("Creating new page of type: {:?}", new_page_type);
 
-        // Step 1: Acquire the frame ID without holding locks for too long
-        let frame_id = {
-            let mut free_list = self.free_list.write();  // Lock free_list
-            if let Some(id) = free_list.pop() {
-                id
-            } else {
-                // No frames available in the free list; need to evict one.
-                let mut replacer = self.replacer.write();  // Lock replacer
-                replacer.evict().unwrap_or(-1)
-            }
-        };
-
-        if frame_id == -1 {
-            warn!("Failed to create a new page guard: no available frame");
-            return None;
-        }
-
+        // Step 1: Acquire a frame ID
+        let frame_id = self.get_available_frame()?;
         debug!("Selected frame ID: {}", frame_id);
 
-        // Step 2: Evict old page if necessary before locking `pages`
-        if let Some(old_page_id) = {
-            let page_table = self.page_table.read();  // Acquire page_table read lock
-            page_table.iter().find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
-        } {
-            debug!("Evicting old page with ID: {}", old_page_id);
+        // Step 2: Evict old page if necessary
+        self.evict_page_if_necessary(frame_id);
 
-            // Step 2a: Evict the old page without holding the other locks
-            self.evict_old_page(frame_id, old_page_id);
-        }
-
-        // Step 3: Create the new page
-        let new_page_id = self.next_page_id.fetch_add(1, Ordering::SeqCst);
-        let new_page = Arc::new(RwLock::new(PageType::Basic(Page::new(new_page_id))));
+        // Step 3: Create a new page
+        let new_page_id = self.allocate_page_id();
+        let new_page = self.create_page_of_type(new_page_type, new_page_id);
         debug!("Created new page with ID: {}", new_page_id);
 
-        // Step 4: Insert the new page into `pages` and `page_table`
-        {
-            let mut pages = self.pages.write(); // Acquire lock on pages
-            pages[frame_id as usize] = Some(Arc::clone(&new_page));
-        }
+        // Step 4: Update internal data structures
+        self.update_page_metadata(frame_id, new_page_id, &new_page);
 
-        {
-            let mut page_table = self.page_table.write(); // Acquire lock on page_table
-            page_table.insert(new_page_id as PageId, frame_id);
-        }
-
-        // Step 5: Update the replacer
-        {
-            let mut replacer = self.replacer.write();
-            replacer.set_evictable(frame_id, false);
-            replacer.record_access(frame_id, AccessType::Lookup);
-        }
-
-        // Step 6: Create and return the page guard without holding any locks
         Some(PageGuard::new(Arc::clone(self), new_page, new_page_id))
     }
 
@@ -440,7 +409,7 @@ impl BufferPoolManager {
         Some(Arc::new(PageGuard::new(
             Arc::clone(&self),
             new_page_arc,
-            page_id
+            page_id,
         )))
     }
 
@@ -780,19 +749,21 @@ impl BufferPoolManager {
     }
 
     fn allocate_page_id(&self) -> PageId {
-        self.next_page_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.next_page_id.fetch_add(1, Ordering::SeqCst)
     }
 
     fn create_page_of_type(&self, new_page_type: NewPageType, page_id: PageId) -> Arc<RwLock<PageType>> {
-        match new_page_type {
-            NewPageType::Basic => {
-                Arc::new(RwLock::new(PageType::Basic(Page::new(page_id))))
+        let new_page = match new_page_type {
+            NewPageType::Basic => PageType::Basic(Page::new(page_id)),
+            NewPageType::ExtendedHashTableDirectory => ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id)),
+            NewPageType::ExtendedHashTableHeader => ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id)),
+            NewPageType::ExtendedHashTableBucket => {
+                let bucket_page = ExtendableHTableBucketPage::<8>::new(page_id);
+                ExtendedHashTableBucket(TypeErasedBucketPage::new(bucket_page))
             },
-            NewPageType::ExtendedHashTableDirectory => {
-                Arc::new(RwLock::new(PageType::ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))))
-            },
-            // Add other page types as needed
-        }
+        };
+
+        Arc::new(RwLock::new(new_page))
     }
 
     fn update_page_metadata(&self, frame_id: FrameId, page_id: PageId, new_page: &Arc<RwLock<PageType>>) {

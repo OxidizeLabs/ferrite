@@ -1,10 +1,13 @@
-use std::fmt::{Debug, Formatter};
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 use crate::common::config::{INVALID_PAGE_ID, PageId, DB_PAGE_SIZE};
 use log::{info, debug, warn};
 use std::mem::size_of;
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait};
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::{ExtendableHTableDirectoryPage, HTABLE_DIRECTORY_ARRAY_SIZE};
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
@@ -14,17 +17,27 @@ pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;
 pub struct ExtendableHTableHeaderPage {
     base: Page,
     directory_page_ids: Vec<PageId>,
-    max_depth: u32,
+    global_depth: u32
 }
 
 impl ExtendableHTableHeaderPage {
+    pub fn new(page_id: PageId) -> Self {
+        let instance = ExtendableHTableHeaderPage {
+            base: Page::new(page_id),
+            directory_page_ids: vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE],
+            global_depth: 0,
+        };
+        debug!("New ExtendableHTableHeaderPage created with page id: {} at address {:p}", instance.get_page_id(), &instance);
+        instance
+    }
+
     /// Initializes a new header page with the specified maximum depth.
     ///
     /// # Parameters
     /// - `max_depth`: The maximum depth in the header page.
-    pub fn init(&mut self, max_depth: u32) {
-        info!("Initializing ExtendableHTableHeaderPage with max depth: {}", max_depth);
-        self.max_depth = max_depth;
+    pub fn init(&mut self, global_depth: u32) {
+        info!("Initializing ExtendableHTableHeaderPage with global depth: {}", global_depth);
+        self.global_depth = global_depth;
         self.directory_page_ids = vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE];
         debug!("All directory page IDs initialized to INVALID_PAGE_ID: -1.");
     }
@@ -38,7 +51,7 @@ impl ExtendableHTableHeaderPage {
     /// The directory index the key is hashed to.
     pub fn hash_to_directory_index(&self, hash: u32) -> u32 {
         // Cap max_depth to a valid range [0, 31]
-        let capped_max_depth = self.max_depth.min(31);
+        let capped_max_depth = self.global_depth.min(31);
 
         // Handle the case where max_depth is 0 explicitly
         if capped_max_depth == 0 {
@@ -53,7 +66,7 @@ impl ExtendableHTableHeaderPage {
         let shift_amount = 32 - capped_max_depth;
         debug!(
         "Calculating directory index: hash={:#034b}, max_depth={}, capped_max_depth={}, shift_amount={}",
-        hash, self.max_depth, capped_max_depth, shift_amount
+        hash, self.global_depth, capped_max_depth, shift_amount
         );
 
         // Shift right to get the upper bits
@@ -108,7 +121,7 @@ impl ExtendableHTableHeaderPage {
     /// # Returns
     /// The maximum size.
     fn max_size(&self) -> u32 {
-        let max_size = 2_u32.pow(self.max_depth);
+        let max_size = 2_u32.pow(self.global_depth);
         debug!("Computed max size of directory page IDs: {}", max_size);
         max_size
     }
@@ -116,9 +129,9 @@ impl ExtendableHTableHeaderPage {
     /// Returns the maximum depth the header page could handle.
     ///
     /// # Returns
-    /// The maximum depth.
-    fn max_depth(&self) -> u32 {
-        self.max_depth
+    /// The global depth.
+    pub fn global_depth(&self) -> u32 {
+        self.global_depth
     }
 
     /// Prints the header's occupancy information.
@@ -131,7 +144,7 @@ impl ExtendableHTableHeaderPage {
         let max_idx_width = std::cmp::max(header_idx.len(), self.directory_page_ids.len().to_string().len());
         let max_page_id_width = std::cmp::max(header_pid.len(), self.directory_page_ids.iter().map(|&page_id| page_id.to_string().len()).max().unwrap_or(0));
 
-        println!("======== HEADER (max_size: {}) (max_depth: {}) ========", self.max_size(),  self.max_depth());
+        println!("======== HEADER (max_size: {}) (max_depth: {}) ========", self.max_size(),  self.global_depth());
         println!(
             "| {:<width_idx$} | {:<width_pid$} |",
             header_idx, header_pid,
@@ -199,7 +212,34 @@ impl PageTrait for ExtendableHTableHeaderPage {
 }
 
 impl Debug for ExtendableHTableHeaderPage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+impl Display for ExtendableHTableHeaderPage {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "ExtendableHTableHeaderPage")
+    }
+}
+
+
+impl TryFrom<PageType> for ExtendableHTableHeaderPage {
+    type Error = ();
+
+    fn try_from(page_type: PageType) -> Result<Self, Self::Error> {
+        match page_type {
+            PageType::ExtendedHashTableHeader(page) => Ok(page),
+            _ => Err(()),
+        }
+    }
+}
+
+impl AsAny for ExtendableHTableHeaderPage {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

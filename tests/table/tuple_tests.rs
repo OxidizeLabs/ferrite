@@ -3,9 +3,8 @@ use std::fs;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::{Rng, SeedableRng};
 use rand::prelude::StdRng;
-use spin::Mutex;
+use rand::{Rng, SeedableRng};
 use spin::RwLock;
 
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
@@ -18,7 +17,6 @@ use tkdb::storage::table::table_heap::TableHeap;
 use tkdb::storage::table::tuple::{Tuple, TupleMeta};
 use tkdb::types_db::type_id::TypeId;
 use tkdb::types_db::value::Value;
-
 
 #[cfg(test)]
 mod tests {

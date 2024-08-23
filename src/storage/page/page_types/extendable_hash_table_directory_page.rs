@@ -1,12 +1,12 @@
+use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
+use crate::common::exception::PageError;
+use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
+use crate::storage::page::page_types::extendable_hash_table_header_page::HTABLE_HEADER_ARRAY_SIZE;
+use log::{debug, info};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
-use log::{debug, info};
-use crate::common::exception::PageError;
-use crate::storage::page::page_types::extendable_hash_table_header_page::HTABLE_HEADER_ARRAY_SIZE;
-use crate::storage::page::page::{Page, PageTrait};
 
 pub const HTABLE_DIRECTORY_MAX_DEPTH: u64 = 9;
 pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
@@ -21,7 +21,7 @@ pub struct ExtendableHTableDirectoryPage {
     max_depth: u32,
     global_depth: u32,
     local_depths: [u32; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
-    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE as usize]
+    bucket_page_ids: [PageId; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
 }
 
 impl ExtendableHTableDirectoryPage {
@@ -231,7 +231,12 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// True if the directory can be shrunk, false otherwise.
     pub fn can_shrink(&self) -> bool {
-        self.global_depth > 0
+        for local_depth in self.local_depths {
+            if local_depth >= self.global_depth {
+                return false;
+            }
+        }
+        true
     }
 
     /// Returns the current directory size.
@@ -529,5 +534,25 @@ impl PageTrait for ExtendableHTableDirectoryPage {
 impl Debug for ExtendableHTableDirectoryPage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
+    }
+}
+
+impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
+    type Error = ();
+
+    fn try_from(page_type: PageType) -> Result<Self, Self::Error> {
+        match page_type {
+            PageType::ExtendedHashTableDirectory(page) => Ok(page),
+            _ => Err(()),
+        }
+    }
+}
+
+impl AsAny for ExtendableHTableDirectoryPage {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

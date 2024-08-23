@@ -40,7 +40,7 @@ impl<const KEY_SIZE: usize> GenericKey<KEY_SIZE> {
     pub fn set_from_integer(&mut self, key: i64) {
         self.data.fill(0);
         let key_bytes = key.to_le_bytes();
-        self.data[..mem::size_of::<i64>()].copy_from_slice(&key_bytes);
+        self.data[..size_of::<i64>()].copy_from_slice(&key_bytes);
     }
 
     /// Converts the key to a value.
@@ -74,7 +74,19 @@ impl<const KEY_SIZE: usize> GenericKey<KEY_SIZE> {
     /// # Returns
     /// The string representation of the key.
     pub fn to_string(&self) -> i64 {
-        i64::from_le_bytes(self.data[..mem::size_of::<i64>()].try_into().unwrap())
+        i64::from_le_bytes(self.data[..size_of::<i64>()].try_into().unwrap())
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut key = Self::new();
+        key.set_from_key_slice(bytes);
+        key
+    }
+
+    pub fn set_from_key_slice(&mut self, key: &[u8]) {
+        self.data.fill(0);
+        let len = key.len().min(KEY_SIZE);
+        self.data[..len].copy_from_slice(&key[..len]);
     }
 }
 
@@ -109,7 +121,7 @@ impl GenericComparator {
         &self,
         lhs: &GenericKey<KEY_SIZE>,
         rhs: &GenericKey<KEY_SIZE>,
-    ) -> std::cmp::Ordering {
+    ) -> Ordering {
         let column_count = self.key_schema.get_column_count();
 
         for i in 0..column_count {
