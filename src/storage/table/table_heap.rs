@@ -3,7 +3,7 @@ use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
-use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
+use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use spin::RwLock;
@@ -184,7 +184,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// A `ReadPageGuard`.
-    pub fn acquire_table_page_read_lock(&self, rid: RID) -> ReadPageGuard {
+    pub fn acquire_table_page_read_lock(&self, rid: RID) -> PageGuard {
         // Implementation of acquire table page read lock logic here
         unimplemented!()
     }
@@ -198,7 +198,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// A `WritePageGuard`.
-    pub fn acquire_table_page_write_lock(&self, rid: RID) -> WritePageGuard {
+    pub fn acquire_table_page_write_lock(&self, rid: RID) -> PageGuard {
         // Implementation of acquire table page write lock logic here
         unimplemented!()
     }

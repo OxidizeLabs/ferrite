@@ -6,22 +6,22 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
 use crate::storage::index::index_iterator::IndexIterator;
+use crate::storage::page::page_guard::{SpecificPageReadGuard, SpecificPageWriteGuard};
 use crate::storage::page::page_types::b_plus_tree_page::BPlusTreePage;
-use crate::storage::page::page_guard::{ReadPageGuard, WritePageGuard};
 
 /// Context class to help keep track of pages being modified or accessed.
-pub struct Context {
+pub struct Context<'a, T: 'static> {
     /// The write guard of the header page during insert/remove operations.
-    pub header_page: Option<WritePageGuard>,
+    pub header_page: Option<SpecificPageWriteGuard<'a, T>>,
     /// The root page ID for easier identification of the root page.
     pub root_page_id: u32,
     /// The write guards of the pages being modified.
-    pub write_set: VecDeque<WritePageGuard>,
+    pub write_set: VecDeque<SpecificPageWriteGuard<'a, T>>,
     /// The read guards of the pages being read.
-    pub read_set: VecDeque<ReadPageGuard>,
+    pub read_set: VecDeque<SpecificPageReadGuard<'a, T>>,
 }
 
-impl Context {
+impl<T> Context<'_, T> {
     /// Checks if the given page ID is the root page.
     ///
     /// # Parameters
@@ -260,7 +260,7 @@ impl PrintableBPlusTree {
                     node.keys,
                     " ".repeat(padding)
                 )
-                .unwrap();
+                    .unwrap();
                 for child in &node.children {
                     new_queue.push(child);
                 }

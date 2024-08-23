@@ -1,13 +1,16 @@
-use std::marker::PhantomData;
+use std::any::TypeId;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::AccessType;
-use crate::common::config::{PageId, DB_PAGE_SIZE};
-use crate::storage::page::page::{Page, PageType};
+use crate::common::config::PageId;
+use crate::storage::page::page::{AsAny, Page};
+use crate::storage::page::page::PageType;
 use spin::RwLock;
+use std::marker::PhantomData;
 use std::sync::Arc;
-use log::{debug, error, info, warn};
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::{BucketPageTrait, ExtendableHTableBucketPage};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+
 
 pub struct PageGuard {
     bpm: Arc<BufferPoolManager>,
@@ -32,27 +35,44 @@ impl PageGuard {
         self.page_id
     }
 
-    // New method to get pin count without locking the entire page
     fn get_pin_count(&self) -> i32 {
         self.page.read().as_page_trait().get_pin_count()
     }
 
-    // New method to set dirty flag without locking the entire page
     fn set_dirty(&self, is_dirty: bool) {
         self.page.write().as_page_trait_mut().set_dirty(is_dirty)
     }
 
-    // Method to convert the guard into a specific page type
-    pub fn into_specific_type<T>(self) -> Option<SpecificPageGuard<T>>
-    where
-        T: TryFrom<PageType>,
-    {
-        match T::try_from((*self.page.clone().read()).clone()) {
-            Ok(_) => Some(SpecificPageGuard {
+    pub fn get_page_type(&self) -> &'static str {
+        let page = self.read();
+        match *page {
+            PageType::Basic(_) => "Basic",
+            PageType::ExtendedHashTableDirectory(_) => "ExtendedHashTableDirectory",
+            PageType::ExtendedHashTableHeader(_) => "ExtendedHashTableHeader",
+            PageType::ExtendedHashTableBucket(_) => "ExtendedHashTableBucket",
+        }
+    }
+
+    pub fn into_specific_type<T: 'static>(self) -> Option<SpecificPageGuard<T>> {
+        let page_type = TypeId::of::<T>();
+        let is_matching_type = match &*self.page.read() {
+            PageType::Basic(_) =>
+                page_type == TypeId::of::<Page>(),
+            PageType::ExtendedHashTableBucket(bucket_page) =>
+                page_type == TypeId::of::<ExtendableHTableBucketPage<8>>() && bucket_page.get_key_size() == 8,
+            PageType::ExtendedHashTableDirectory(_) =>
+                page_type == TypeId::of::<ExtendableHTableDirectoryPage>(),
+            PageType::ExtendedHashTableHeader(_) =>
+                page_type == TypeId::of::<ExtendableHTableHeaderPage>(),
+        };
+
+        if is_matching_type {
+            Some(SpecificPageGuard {
                 inner: self,
                 _phantom: PhantomData,
-            }),
-            Err(_) => None,
+            })
+        } else {
+            None
         }
     }
 }
@@ -65,15 +85,12 @@ impl Drop for PageGuard {
     }
 }
 
-pub struct SpecificPageGuard<T> {
+pub struct SpecificPageGuard<T: 'static> {
     inner: PageGuard,
     _phantom: PhantomData<T>,
 }
 
-impl<T> SpecificPageGuard<T>
-where
-    T: TryFrom<PageType>,
-{
+impl<T: 'static> SpecificPageGuard<T> {
     pub fn read(&self) -> SpecificPageReadGuard<T> {
         SpecificPageReadGuard(self.inner.read(), PhantomData)
     }
@@ -85,81 +102,90 @@ where
     pub fn get_page_id(&self) -> PageId {
         self.inner.get_page_id()
     }
-}
 
-pub struct SpecificPageReadGuard<'a, T>(spin::RwLockReadGuard<'a, PageType>, PhantomData<T>);
-
-impl<'a, T> SpecificPageReadGuard<'a, T>
-where
-    T: TryFrom<PageType>,
-{
     pub fn access<F, R>(&self, f: F) -> Option<R>
     where
         F: FnOnce(&T) -> R,
     {
-        T::try_from((*self.0).clone()).ok().map(|specific_page| f(&specific_page))
+        match &*self.inner.page.read() {
+            PageType::ExtendedHashTableBucket(bucket_page) => {
+                bucket_page.with_downcast::<8, _, _>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                    let typed_page = unsafe { &*(page as *const _ as *const T) };
+                    f(typed_page)
+                })
+            },
+            PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
+            PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
+            PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
+        }
     }
-}
 
-pub struct SpecificPageWriteGuard<'a, T>(spin::RwLockWriteGuard<'a, PageType>, PhantomData<T>);
-
-impl<'a, T> SpecificPageWriteGuard<'a, T>
-where
-    T: TryFrom<PageType>, PageType: From<T>
-{
     pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
     where
         F: FnOnce(&mut T) -> R,
     {
-        let mut page_type = (*self.0).clone();
-        T::try_from(page_type)
-            .ok()
-            .map(|mut specific_page| {
-                let result = f(&mut specific_page);
-                *self.0 = specific_page.into();
-                result
-            })
+        match &mut *self.inner.page.write() {
+            PageType::ExtendedHashTableBucket(bucket_page) => {
+                bucket_page.with_downcast_mut::<8, _, _>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                    let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
+                    f(typed_page)
+                })
+            },
+            PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+            PageType::ExtendedHashTableDirectory(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+            PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+        }
+    }
+    }
+
+pub struct SpecificPageReadGuard<'a, T: 'static>(spin::RwLockReadGuard<'a, PageType>, PhantomData<T>);
+
+impl<'a, T: 'static> SpecificPageReadGuard<'a, T> {
+    pub fn access<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&T) -> R,
+    {
+        match &*self.0 {
+            PageType::ExtendedHashTableBucket(bucket_page) => {
+                bucket_page.with_downcast::<8, _, _>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                    let typed_page = unsafe { &*(page as *const _ as *const T) };
+                    f(typed_page)
+                })
+            },
+            PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
+            PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
+            PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
+        }
     }
 }
 
-impl<T> Drop for SpecificPageGuard<T> {
+pub struct SpecificPageWriteGuard<'a, T: 'static>(spin::RwLockWriteGuard<'a, PageType>, PhantomData<T>);
+
+impl<'a, T: 'static> SpecificPageWriteGuard<'a, T> {
+    pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        match &mut *self.0 {
+            PageType::ExtendedHashTableBucket(bucket_page) => {
+                bucket_page.with_downcast_mut::<8, _, _>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                    let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
+                    f(typed_page)
+                })
+            },
+            PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+            PageType::ExtendedHashTableDirectory(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+            PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),
+        }
+    }
+}
+
+impl<T: 'static> Drop for SpecificPageGuard<T> {
     fn drop(&mut self) {
         // The inner PageGuard's drop will handle unpinning
-    }
-}
-
-// Implement TryFrom for your specific page types
-impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
-    type Error = ();
-
-    fn try_from(page_type: PageType) -> Result<Self, Self::Error> {
-        match page_type {
-            PageType::ExtendedHashTableDirectory(page) => Ok(page),
-            _ => Err(()),
-        }
-    }
-}
-
-impl TryFrom<PageType> for ExtendableHTableHeaderPage {
-    type Error = ();
-
-    fn try_from(page_type: PageType) -> Result<Self, Self::Error> {
-        match page_type {
-            PageType::ExtendedHashTableHeader(page) => Ok(page),
-            _ => Err(()),
-        }
-    }
-}
-
-// Implement From for converting specific page types back to PageType
-impl From<ExtendableHTableDirectoryPage> for PageType {
-    fn from(page: ExtendableHTableDirectoryPage) -> Self {
-        PageType::ExtendedHashTableDirectory(page)
-    }
-}
-
-impl From<ExtendableHTableHeaderPage> for PageType {
-    fn from(page: ExtendableHTableHeaderPage) -> Self {
-        PageType::ExtendedHashTableHeader(page)
     }
 }
