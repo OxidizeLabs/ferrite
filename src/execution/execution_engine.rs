@@ -1,15 +1,12 @@
-use std::sync::Arc;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::catalogue::Catalog;
-use crate::common::rid::RID;
 use crate::concurrency::transaction_manager::TransactionManager;
-use crate::execution::execution_common::AbstractExecutor;
-use crate::storage::table::tuple::Tuple;
+use std::sync::Arc;
 
 pub struct ExecutorEngine {
     buffer_pool_manager: Arc<BufferPoolManager>,
     catalog: Arc<Catalog>,
-    transaction_manager: Arc<TransactionManager>
+    transaction_manager: Arc<TransactionManager>,
 }
 
 impl ExecutorEngine {

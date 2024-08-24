@@ -5,6 +5,7 @@ pub enum CheckOption {
     EnableTopnCheck = 1,
 }
 
+#[derive(Default)]
 pub struct CheckOptions {
-    _check_options_set: HashSet<CheckOption>
+    _check_options_set: HashSet<CheckOption>,
 }

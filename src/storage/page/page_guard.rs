@@ -1,15 +1,15 @@
-use std::any::TypeId;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::AccessType;
 use crate::common::config::PageId;
-use crate::storage::page::page::{AsAny, Page};
 use crate::storage::page::page::PageType;
-use spin::RwLock;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use crate::storage::page::page::{AsAny, Page};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::{BucketPageTrait, ExtendableHTableBucketPage};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use spin::RwLock;
+use std::any::TypeId;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 
 pub struct PageGuard {
@@ -114,7 +114,7 @@ impl<T: 'static> SpecificPageGuard<T> {
                     let typed_page = unsafe { &*(page as *const _ as *const T) };
                     f(typed_page)
                 })
-            },
+            }
             PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
             PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
             PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
@@ -132,13 +132,13 @@ impl<T: 'static> SpecificPageGuard<T> {
                     let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
                     f(typed_page)
                 })
-            },
+            }
             PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
             PageType::ExtendedHashTableDirectory(page) => page.as_any_mut().downcast_mut::<T>().map(f),
             PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),
         }
     }
-    }
+}
 
 pub struct SpecificPageReadGuard<'a, T: 'static>(spin::RwLockReadGuard<'a, PageType>, PhantomData<T>);
 
@@ -154,7 +154,7 @@ impl<'a, T: 'static> SpecificPageReadGuard<'a, T> {
                     let typed_page = unsafe { &*(page as *const _ as *const T) };
                     f(typed_page)
                 })
-            },
+            }
             PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
             PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
             PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
@@ -176,7 +176,7 @@ impl<'a, T: 'static> SpecificPageWriteGuard<'a, T> {
                     let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
                     f(typed_page)
                 })
-            },
+            }
             PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
             PageType::ExtendedHashTableDirectory(page) => page.as_any_mut().downcast_mut::<T>().map(f),
             PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),

@@ -4,7 +4,7 @@ use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
 use std::cmp::Ordering;
 use std::sync::Arc;
-use std::{fmt, mem};
+use std::fmt;
 
 /// A generic key used for indexing with opaque data.
 #[derive(Clone)]

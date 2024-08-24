@@ -1,5 +1,4 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
-use async_trait::async_trait;
 use log::{debug, error, info, trace, warn};
 use spin::{Mutex, RwLock};
 use std::fs::File;

@@ -1,13 +1,13 @@
-use std::any::Any;
 use crate::common::config::*;
-use log::{debug, error, info, warn};
-use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::convert::TryInto;
 use crate::common::exception::PageError;
 use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use log::{debug, error, info, warn};
+use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::any::Any;
+use std::convert::TryInto;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -56,7 +56,6 @@ impl Page {
         self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
         info!("Set LSN for Page ID {}", self.page_id);
     }
-
 }
 
 pub trait PageTrait {
@@ -175,7 +174,6 @@ pub enum PageType {
 }
 
 impl PageType {
-
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
         unimplemented!()
     }

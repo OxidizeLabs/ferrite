@@ -90,7 +90,7 @@ mod unit_tests {
         if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableDirectoryPage>(/* fn(ExtendableHTableHeaderPage) -> PageType */) {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
-                let directory_size = page.size();
+                let directory_size = page.get_size();
                 println!("Directory size: {}", directory_size);
             });
 

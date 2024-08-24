@@ -1,7 +1,7 @@
+use crate::common::config::{FrameId, PageId};
 use std::error::Error;
 use std::fmt;
 use thiserror::Error;
-use crate::common::config::{FrameId, PageId};
 
 #[derive(Error, Debug)]
 pub enum DeletePageError {
@@ -28,7 +28,7 @@ pub enum PageError {
     InvalidCast,
     DataTooLarge { data_size: usize, remaining_space: usize },
     InvalidOffset { offset: usize, page_size: usize },
-    InvalidOperation
+    InvalidOperation,
 }
 
 #[derive(Debug)]

@@ -1,19 +1,3 @@
-use spin::Mutex;
-use std::sync::Arc;
-
-use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalogue::column::Column;
-use tkdb::catalogue::schema::Schema;
-// use tkdb::storage::disk::disk_manager::DiskManager;
-use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-use tkdb::storage::table::tuple::Tuple;
-use tkdb::types_db::boolean_type::BooleanType;
-use tkdb::types_db::integer_type::IntegerType;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::types::Type;
-use tkdb::types_db::value::Value;
-
 fn main() {
 
     //info!("tkbd");

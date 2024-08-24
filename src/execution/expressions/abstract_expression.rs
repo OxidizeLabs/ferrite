@@ -79,7 +79,7 @@ pub trait AbstractExpression: fmt::Debug + Send + Sync {
 
 /// A macro to define the clone_with_children method for implementing structs.
 #[macro_export]
-macro_rules! impl_clone_with_children {
+macro_rules! impl_clone_exp_with_children {
     ($struct_name:ident) => {
         fn clone_with_children(
             &self,

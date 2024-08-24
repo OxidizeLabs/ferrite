@@ -1,16 +1,15 @@
 extern crate tkdb;
 
+use crate::test_setup::initialize_logger;
 use chrono::Utc;
-use log::info;
-use spin::{Mutex, RwLock};
+use spin::RwLock;
 use std::fs;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::thread;
+use std::thread::sleep;
 use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-use crate::test_setup::initialize_logger;
-use std::thread::sleep;
 
 
 struct TestContext {

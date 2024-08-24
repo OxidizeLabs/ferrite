@@ -1,13 +1,13 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
-use crate::common::config::{INVALID_PAGE_ID, PageId, DB_PAGE_SIZE};
-use log::{info, debug, warn};
-use std::mem::size_of;
+use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::{ExtendableHTableDirectoryPage, HTABLE_DIRECTORY_ARRAY_SIZE};
+use log::{debug, info, warn};
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::mem::size_of;
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
@@ -17,7 +17,7 @@ pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;
 pub struct ExtendableHTableHeaderPage {
     base: Page,
     directory_page_ids: Vec<PageId>,
-    global_depth: u32
+    global_depth: u32,
 }
 
 impl ExtendableHTableHeaderPage {
@@ -96,7 +96,7 @@ impl ExtendableHTableHeaderPage {
                 "Retrieved directory page ID at index {}: {:?}",
                 directory_idx, page_id
             );
-            return page_id.cloned()
+            return page_id.cloned();
         }
         None
     }
@@ -144,7 +144,7 @@ impl ExtendableHTableHeaderPage {
         let max_idx_width = std::cmp::max(header_idx.len(), self.directory_page_ids.len().to_string().len());
         let max_page_id_width = std::cmp::max(header_pid.len(), self.directory_page_ids.iter().map(|&page_id| page_id.to_string().len()).max().unwrap_or(0));
 
-        println!("======== HEADER (max_size: {}) (max_depth: {}) ========", self.max_size(),  self.global_depth());
+        println!("======== HEADER (max_size: {}) (max_depth: {}) ========", self.max_size(), self.global_depth());
         println!(
             "| {:<width_idx$} | {:<width_pid$} |",
             header_idx, header_pid,

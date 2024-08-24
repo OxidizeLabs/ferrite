@@ -1,20 +1,19 @@
 use crate::test_setup::initialize_logger;
 use chrono::Utc;
-use log::{info, error};
+use log::{error, info};
 use rand::Rng;
 use spin::RwLock;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
+use tkdb::buffer::buffer_pool_manager::NewPageType;
 use tkdb::buffer::lru_k_replacer::AccessType;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::common::config::{PageId, DB_PAGE_SIZE};
+use tkdb::common::exception::DeletePageError;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-use tkdb::buffer::buffer_pool_manager::NewPageType;
-use tkdb::common::exception::DeletePageError;
-use tkdb::storage::page::page::PageType;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,
@@ -69,7 +68,6 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
-
     use super::*;
 
     #[test]

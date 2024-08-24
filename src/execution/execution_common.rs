@@ -1,16 +1,15 @@
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::storage::table::tuple::Tuple;
-
+use std::sync::Arc;
 
 pub trait AbstractExecutor {
-    fn new() -> Box<dyn AbstractExecutor> {
+    fn new(&self) -> Box<Self> {
         todo!()
     }
 
-    fn init() {
+    fn init(&self) {
         todo!()
     }
 
@@ -18,11 +17,11 @@ pub trait AbstractExecutor {
         todo!()
     }
 
-    fn get_output_schema() -> Schema {
+    fn get_output_schema(&self) -> Schema {
         todo!()
     }
 
     fn get_executor_context(&self) -> Arc<ExecutorContext> {
-        Arc::clone(&self._exec_ctx)
+        todo!()
     }
 }

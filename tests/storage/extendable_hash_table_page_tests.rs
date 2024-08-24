@@ -253,7 +253,7 @@ mod basic_behavior {
                 */
                 directory_page.print_directory();
                 directory_page.verify_integrity();
-                assert_eq!(directory_page.size(), 1);
+                assert_eq!(directory_page.get_size(), 1);
                 assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
 
                 // grow the directory, local depths should change!
@@ -272,7 +272,7 @@ mod basic_behavior {
 
                 directory_page.print_directory();
                 directory_page.verify_integrity();
-                assert_eq!(directory_page.size(), 2);
+                assert_eq!(directory_page.get_size(), 2);
                 assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
                 assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
 
@@ -296,7 +296,7 @@ mod basic_behavior {
 
                 directory_page.print_directory();
                 directory_page.verify_integrity();
-                assert_eq!(directory_page.size(), 4);
+                assert_eq!(directory_page.get_size(), 4);
                 assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
                 assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
                 assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
@@ -326,7 +326,7 @@ mod basic_behavior {
 
                 directory_page.print_directory();
                 directory_page.verify_integrity();
-                assert_eq!(directory_page.size(), 8);
+                assert_eq!(directory_page.get_size(), 8);
                 assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
                 assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
                 assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
@@ -382,7 +382,7 @@ mod basic_behavior {
 
                 directory_page.print_directory();
                 directory_page.verify_integrity();
-                assert_eq!(directory_page.size(), 4);
+                assert_eq!(directory_page.get_size(), 4);
                 assert_eq!(directory_page.can_shrink(), false);
 
                 info!("Basic behaviour test completed successfully");
@@ -489,7 +489,7 @@ mod edge_case {
             ext_dir_guard.access_mut(|directory_page| {
                 directory_page.init(0); // Start with global depth 0
                 assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
-                assert_eq!(directory_page.size(), 1, "Empty directory should have size 1");
+                assert_eq!(directory_page.get_size(), 1, "Empty directory should have size 1");
 
                 // Try to access a bucket
                 assert_eq!(directory_page.get_bucket_page_id(0), Some(INVALID_PAGE_ID), "Empty directory should return INVALID_PAGE_ID");

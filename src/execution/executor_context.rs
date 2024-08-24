@@ -1,13 +1,13 @@
-use std::collections::{HashSet, VecDeque};
-use std::fmt::Pointer;
-use std::sync::Arc;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::catalogue::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
-use crate::execution::check_option::{CheckOption, CheckOptions};
-use crate::execution::execution_common::AbstractExecutor;
+use crate::execution::check_option::CheckOptions;
+use crate::execution::executors::abstract_exector::AbstractExecutor;
+use std::collections::VecDeque;
+use std::fmt::Pointer;
+use std::sync::Arc;
 
 pub struct ExecutorContext {
     transaction: Arc<Transaction>,
@@ -17,7 +17,7 @@ pub struct ExecutorContext {
     lock_manager: Arc<LockManager>,
     _nlj_check_exec_set: VecDeque<(AbstractExecutor, AbstractExecutor)>,
     _check_options: Arc<CheckOptions>,
-    _is_delete: bool
+    _is_delete: bool,
 }
 
 impl ExecutorContext {
@@ -26,7 +26,7 @@ impl ExecutorContext {
                transaction_manager: Arc<TransactionManager>,
                catalog: Arc<Catalog>,
                buffer_pool_manager: Arc<BufferPoolManager>,
-               lock_manager: Arc<LockManager>
+               lock_manager: Arc<LockManager>,
     ) -> Self {
         Self {
             transaction,
@@ -35,7 +35,7 @@ impl ExecutorContext {
             transaction_manager,
             lock_manager,
             _nlj_check_exec_set: Default::default(),
-            _check_options: Arc::new(CheckOptions::EnableNljCheck),
+            _check_options: Arc::new(CheckOptions::default()),
             _is_delete: false,
         }
     }
@@ -60,7 +60,7 @@ impl ExecutorContext {
         &self.lock_manager
     }
 
-    pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(dyn AbstractExecutor, dyn AbstractExecutor)> {
+    pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(AbstractExecutor, AbstractExecutor)> {
         &self._nlj_check_exec_set
     }
 
@@ -68,7 +68,7 @@ impl ExecutorContext {
         Arc::clone(&self._check_options)
     }
 
-    pub fn add_check_option(&mut self, _left_exec: dyn AbstractExecutor, _right_exec: dyn AbstractExecutor) {
+    pub fn add_check_option(&mut self, _left_exec: AbstractExecutor, _right_exec: AbstractExecutor) {
         self._nlj_check_exec_set.push_back((_left_exec, _right_exec))
     }
 

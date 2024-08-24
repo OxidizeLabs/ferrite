@@ -1,9 +1,9 @@
 extern crate tkdb;
 use std::sync::{Arc, Mutex};
-use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
+use tkdb::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 
 #[cfg(test)]
 mod unit_tests {
