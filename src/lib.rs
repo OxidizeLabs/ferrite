@@ -10,7 +10,7 @@ pub mod primer;
 pub mod recovery;
 pub mod storage;
 pub mod types_db;
-
+pub mod binder;
 // src/lib.rs
 // pub mod buffer {
 //     pub mod buffer_pool_manager;
