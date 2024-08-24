@@ -1,3 +1,8 @@
+use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
+use crate::common::rid::RID;
+use crate::concurrency::transaction::Transaction;
+use crate::concurrency::transaction_manager::TransactionManager;
+use parking_lot::Mutex;
 /// [LOCK_NOTE]
 ///
 /// # General Behavior
@@ -93,14 +98,9 @@
 /// # Bookkeeping
 /// After a resource is unlocked, the lock manager should update the transaction's lock sets appropriately (check `transaction.rs`).
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Condvar};
 use std::thread;
-use parking_lot::Mutex;
-use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
-use crate::common::rid::RID;
-use crate::concurrency::transaction::Transaction;
-use crate::concurrency::transaction_manager::TransactionManager;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LockMode {
@@ -218,10 +218,11 @@ impl LockManager {
     /// Starts the deadlock detection process.
     pub fn start_deadlock_detection(&mut self) {
         // Ensure transaction manager is set
-        assert!(self.txn_manager.lock(), "txn_manager_ is not set.");
-        self.enable_cycle_detection.store(true, Ordering::SeqCst);
-        let lm = self.clone();
-        self.cycle_detection_thread = Some(thread::spawn(move || lm.run_cycle_detection()));
+        // let _ = self.txn_manager.lock();
+        // self.enable_cycle_detection.store(true, Ordering::SeqCst);
+        // // let _lm = self.clone();
+        // self.cycle_detection_thread = Some(thread::spawn(move || self.run_cycle_detection()));
+        todo!()
     }
 
     /// Acquires a lock on a table in the given lock mode.

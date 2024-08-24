@@ -1,6 +1,4 @@
 use spin::RwLock;
-use std::sync::{Arc, Barrier};
-use std::thread;
 use tkdb::common::config::Lsn;
 use tkdb::common::config::DB_PAGE_SIZE;
 use tkdb::storage::page::page::Page;
@@ -10,8 +8,6 @@ use tkdb::storage::page::page::PageTrait;
 // Unit Tests
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-
     #[test]
     fn test_page_creation() {
         let page = Page::new(1);
@@ -44,8 +40,6 @@ mod unit_tests {
 // Basic Behavior
 #[cfg(test)]
 mod basic_behavior {
-    use super::*;
-
     #[test]
     fn test_increment_and_decrement_pin_count() {
         let mut page = Page::new(1);
@@ -180,8 +174,6 @@ mod concurrency {
 // Edge Cases
 #[cfg(test)]
 mod edge_cases {
-    use super::*;
-
     #[test]
     fn test_pin_count_underflow_protection() {
         let mut page = Page::new(1);

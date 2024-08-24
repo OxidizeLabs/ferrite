@@ -90,10 +90,7 @@ impl Column {
 
     pub fn to_string(&self, simplified: bool) -> String {
         if simplified {
-            format!(
-                "Column(name: {}, type: {:?})",
-                self.column_name, self.column_type
-            )
+            format!("{}, {:?})", self.column_name, self.column_type)
         } else {
             format!(
                 "Column(name: {}, type: {:?}, length: {}, offset: {})",

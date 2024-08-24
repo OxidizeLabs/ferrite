@@ -760,7 +760,7 @@ impl BufferPoolManager {
             NewPageType::ExtendedHashTableBucket => {
                 let bucket_page = ExtendableHTableBucketPage::<8>::new(page_id);
                 ExtendedHashTableBucket(TypeErasedBucketPage::new(bucket_page))
-            },
+            }
         };
 
         Arc::new(RwLock::new(new_page))

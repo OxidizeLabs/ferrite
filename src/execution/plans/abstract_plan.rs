@@ -69,16 +69,9 @@ impl fmt::Display for dyn AbstractPlanNode {
     }
 }
 
-// Implement for Box<dyn AbstractPlanNode> to allow formatting of boxed nodes
-impl fmt::Display for Box<dyn AbstractPlanNode> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
-    }
-}
-
 // Macro to simplify implementation of clone_with_children for concrete plan nodes
 #[macro_export]
-macro_rules! impl_clone_with_children {
+macro_rules! impl_clone_plan_with_children {
     ($type:ident) => {
         fn clone_with_children(&self, children: Vec<AbstractPlanNodeRef>) -> Box<dyn AbstractPlanNode> {
             let mut new_node = self.clone();

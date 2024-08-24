@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use crate::catalogue::catalogue::Catalog;
 use crate::common::config::TxnId;
@@ -96,7 +96,8 @@ impl TransactionManager {
 
         // TODO: acquire commit ts!
 
-        let mut txn = _txn.lock();
+        let binding = _txn.clone();
+        let mut txn = binding.lock();
         if txn.state() != TransactionState::Running {
             drop(commit_lck);
             panic!("txn not in running state");

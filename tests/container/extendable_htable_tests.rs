@@ -1,14 +1,14 @@
-use std::sync::Arc;
 use chrono::Utc;
-use tokio::fs::remove_file;
-use tokio::sync::Mutex;
+use std::sync::Arc;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::container::disk_extendable_hash_table::DiskExtendableHashTable;
+use tkdb::container::hash_function::HashFunction;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 use tkdb::storage::index::int_comparator::IntComparator;
-use tkdb::container::hash_function::HashFunction;
+use tokio::fs::remove_file;
+use tokio::sync::Mutex;
 
 use crate::test_setup::initialize_logger;
 
@@ -68,8 +68,6 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_insert1() {
         let ctx = TestContext::new("test_insert1").await;

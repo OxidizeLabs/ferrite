@@ -1,6 +1,6 @@
+use crate::storage::index::generic_key::Comparator;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use crate::storage::index::generic_key::Comparator;
 
 #[derive(Debug, Clone, Copy)]
 pub struct IntComparator {

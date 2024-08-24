@@ -5,9 +5,9 @@ use log::{debug, error, info};
 use spin::RwLock;
 use std::collections::VecDeque;
 use std::sync::mpsc;
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread;
-use std::sync::mpsc::channel;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
@@ -47,7 +47,7 @@ impl DiskScheduler {
         is_write: bool,
         data: Arc<RwLock<[u8; 4096]>>,
         page_id: PageId,
-        tx: mpsc::Sender<()>
+        tx: mpsc::Sender<()>,
     ) {
         // Create a simple streaming channel
 

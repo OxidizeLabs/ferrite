@@ -1,14 +1,13 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::storage::disk::disk_manager::DiskIO;
-use async_trait::async_trait;
 use log::info;
 use std::collections::HashMap;
+use std::io::{Error, ErrorKind, Result as IoResult};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::ThreadId;
 use std::time::Duration;
-use std::io::{Result as IoResult, Error, ErrorKind};
 
 type Page = [u8; DB_PAGE_SIZE];
 
@@ -26,7 +25,6 @@ impl DiskManagerMemory {
     }
 }
 
-#[async_trait]
 impl DiskIO for DiskManagerMemory {
     fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> IoResult<()> {
         let offset = page_id as usize * DB_PAGE_SIZE;
@@ -123,7 +121,6 @@ impl DiskManagerUnlimitedMemory {
     }
 }
 
-#[async_trait]
 impl DiskIO for DiskManagerUnlimitedMemory {
     fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> Result<(), Error> {
         self.process_latency(page_id);

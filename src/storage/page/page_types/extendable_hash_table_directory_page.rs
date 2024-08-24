@@ -189,14 +189,14 @@ impl ExtendableHTableDirectoryPage {
     pub fn incr_global_depth(&mut self) {
         assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
 
-        // if self.global_depth == self.max_depth {
-        //     panic!("Cannot increase global depth past max_depth: {}", self.max_depth)
-        // }
+        if self.global_depth == self.max_depth {
+            panic!("Cannot increase global depth past max_depth: {}", self.max_depth)
+        }
 
         // Step 1: Double the size of the directory
-        let old_size = self.size();  // Current size of the directory
+        let old_size = self.get_size();  // Current size of the directory
         self.global_depth += 1;      // Increment global depth
-        let new_size = self.size();  // New size of the directory
+        let new_size = self.get_size();  // New size of the directory
 
         // Step 2: Copy existing entries to the new slots
         for i in 0..old_size {
@@ -216,7 +216,7 @@ impl ExtendableHTableDirectoryPage {
         //     }
         // }
 
-        debug!("Global depth increased. New size of the directory: {}", self.size());
+        debug!("Global depth increased. New size of the directory: {}", self.get_size());
     }
 
     /// Decrements the global depth of the directory.
@@ -243,7 +243,7 @@ impl ExtendableHTableDirectoryPage {
     ///
     /// # Returns
     /// The current directory size.
-    pub fn size(&self) -> u32 {
+    pub fn get_size(&self) -> u32 {
         assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
 
         assert!(self.global_depth < 32, "Global depth {} is too large!", self.global_depth);
@@ -255,7 +255,7 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The maximum directory size.
     pub fn max_size(&self) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
+        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
 
         HTABLE_DIRECTORY_ARRAY_SIZE as u32
     }
@@ -324,7 +324,7 @@ impl ExtendableHTableDirectoryPage {
 
         // Update the directory entries to point to the correct buckets
         let mask = self.get_local_depth_mask(bucket_idx as u32);
-        let size = self.size();
+        let size = self.get_size();
         for i in 0..size {
             if i & mask == split_image_index {
                 self.set_bucket_page_id(i as usize, new_page_id);
@@ -355,7 +355,7 @@ impl ExtendableHTableDirectoryPage {
     /// 2. Each bucket has precisely 2^(global depth - local depth) pointers pointing to it.
     /// 3. The local depth is the same at each index with the same bucket page ID.
     pub fn verify_integrity(&self) {
-        let size = self.size();
+        let size = self.get_size();
         debug!("Verifying integrity of directory with size: {}", size);
 
         // Ensure all local depths are less than or equal to the global depth
@@ -439,7 +439,7 @@ impl ExtendableHTableDirectoryPage {
 
     /// Prints the current directory.
     pub fn print_directory(&self) {
-        let size = self.size();
+        let size = self.get_size();
         let header_bucket_idx = "bucket_idx";
         let header_page_id = "page_id";
         let header_local_depth = "local_depth";
@@ -474,7 +474,7 @@ impl ExtendableHTableDirectoryPage {
 
     // Helper method to find the correct bucket index for a given page ID
     fn find_bucket_index_for_page_id(&self, page_id: PageId) -> usize {
-        for idx in 0..self.size() {
+        for idx in 0..self.get_size() {
             if self.get_bucket_page_id(idx.try_into().unwrap()) == Some(page_id) {
                 return idx.try_into().unwrap();
             }
