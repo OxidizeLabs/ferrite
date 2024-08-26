@@ -45,11 +45,11 @@ impl fmt::Display for BoundOrderBy {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]
-    fn test_bound_order_by() {
+    fn bound_order_by() {
         let order_by = BoundOrderBy::new(
             OrderByType::Asc,
             Box::new(BoundConstant::new("column_name")),
@@ -68,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn test_order_by_type_display() {
+    fn order_by_type_display() {
         assert_eq!(format!("{}", OrderByType::Invalid), "Invalid");
         assert_eq!(format!("{}", OrderByType::Default), "Default");
         assert_eq!(format!("{}", OrderByType::Asc), "Ascending");

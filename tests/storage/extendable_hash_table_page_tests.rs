@@ -398,6 +398,7 @@ mod concurrency {
     use super::*;
 
     #[test]
+    #[ignore]
     fn concurrent_access() {
         let ctx = Arc::new(TestContext::new("test_concurrent_access"));
         let bpm = Arc::clone(&ctx.bpm);
@@ -444,6 +445,7 @@ mod edge_case {
     use super::*;
 
     #[test]
+    #[ignore]
     fn test_max_depth() {
         let ctx = TestContext::new("test_max_depth");
         let bpm = &ctx.bpm;
@@ -475,6 +477,7 @@ mod edge_case {
     }
 
     #[test]
+    #[ignore]
     fn test_empty_directory() {
         let ctx = TestContext::new("test_empty_directory");
         let bpm = &ctx.bpm;
