@@ -3,15 +3,19 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
+use crate::container::hash_function::HashFunction;
 use crate::recovery::log_manager::LogManager;
-use crate::storage::index::index::Index;
+use crate::storage::index::b_plus_tree_index::BPlusTreeIndex;
+use crate::storage::index::extendable_hash_table_index::ExtendableHashTableIndex;
+use crate::storage::index::index::{Index, IndexMetadata};
 use crate::storage::table::table_heap::TableHeap;
 
 pub enum IndexType {
@@ -48,6 +52,14 @@ impl TableInfo {
             table,
             oid,
         }
+    }
+
+    pub fn get_table_schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    pub fn get_table_oidt(&self) -> TableOidT {
+        self.oid
     }
 }
 
@@ -170,7 +182,7 @@ impl Catalog {
         let table = if create_table_heap {
             Box::new(TableHeap::new(self.bpm.clone()))
         } else {
-            TableHeap::create_empty_heap(false)?
+            TableHeap::create_empty_heap(true)?
         };
 
         let table_oid = self.next_table_oid.fetch_add(1, Ordering::SeqCst);
@@ -252,8 +264,9 @@ impl Catalog {
     //     let index: Box<dyn Index> = match index_type {
     //         IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
     //         IndexType::BPlusTreeIndex => Box::new(BPlusTreeIndex::new(meta, self.bpm.clone(), ())),
-    //         IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
-    //         IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
+    //         // IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
+    //         // IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
+    //         _ => {}
     //     };
     //
     //     let table_meta = self.get_table(table_name)?;
@@ -345,6 +358,14 @@ impl Catalog {
     /// A vector of table names.
     pub fn get_table_names(&self) -> Vec<String> {
         self.table_names.keys().cloned().collect()
+    }
+
+    pub fn get_table_schema(&self, table_name: &str) -> Option<Schema> {
+        self.table_names
+            .get(table_name)
+            .and_then(|&table_oid| {
+                self.tables.get(&table_oid).map(|table_schema| table_schema.get_table_schema())
+            })
     }
 }
 

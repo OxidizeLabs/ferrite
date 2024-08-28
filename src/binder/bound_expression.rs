@@ -1,4 +1,6 @@
+use std::any::Any;
 use std::fmt;
+use std::fmt::Display;
 
 /// Represents different types of expressions in the binder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,30 +17,20 @@ pub enum ExpressionType {
     Alias,
     FuncCall,
     Window,
+    GroupingSets,
+    Cube,
+    Rollup,
 }
 
-impl fmt::Display for ExpressionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            ExpressionType::Invalid => "Invalid",
-            ExpressionType::Constant => "Constant",
-            ExpressionType::ColumnRef => "ColumnRef",
-            ExpressionType::TypeCast => "TypeCast",
-            ExpressionType::Function => "Function",
-            ExpressionType::AggCall => "AggregationCall",
-            ExpressionType::Star => "Star",
-            ExpressionType::UnaryOp => "UnaryOperation",
-            ExpressionType::BinaryOp => "BinaryOperation",
-            ExpressionType::Alias => "Alias",
-            ExpressionType::FuncCall => "FuncCall",
-            ExpressionType::Window => "Window",
-        };
-        write!(f, "{}", name)
-    }
+/// A default implementation for BoundExpression that can be used as a base
+/// for concrete expression types.
+#[derive(Debug, Clone)]
+pub struct DefaultBoundExpression {
+    expression_type: ExpressionType,
 }
 
 /// Trait for bound expressions.
-pub trait BoundExpression: fmt::Display {
+pub trait BoundExpression: Display {
     /// Returns the type of this expression.
     fn expression_type(&self) -> ExpressionType;
 
@@ -56,12 +48,10 @@ pub trait BoundExpression: fmt::Display {
     fn has_window_function(&self) -> bool {
         false
     }
-}
 
-/// A default implementation for BoundExpression that can be used as a base
-/// for concrete expression types.
-pub struct DefaultBoundExpression {
-    expression_type: ExpressionType,
+    fn as_any(&self) -> &dyn Any;
+
+    fn clone_box(&self) -> Box<dyn BoundExpression>;
 }
 
 impl DefaultBoundExpression {
@@ -75,11 +65,48 @@ impl BoundExpression for DefaultBoundExpression {
     fn expression_type(&self) -> ExpressionType {
         self.expression_type
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(self.clone())
+    }
 }
 
-impl fmt::Display for DefaultBoundExpression {
+impl Clone for Box<dyn BoundExpression> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+impl Display for DefaultBoundExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "")
+        write!(f, "DefaultBoundExpression({})", self.expression_type)
+    }
+}
+
+impl Display for ExpressionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            ExpressionType::Invalid => "Invalid",
+            ExpressionType::Constant => "Constant",
+            ExpressionType::ColumnRef => "ColumnRef",
+            ExpressionType::TypeCast => "TypeCast",
+            ExpressionType::Function => "Function",
+            ExpressionType::AggCall => "AggregationCall",
+            ExpressionType::Star => "Star",
+            ExpressionType::UnaryOp => "UnaryOperation",
+            ExpressionType::BinaryOp => "BinaryOperation",
+            ExpressionType::Alias => "Alias",
+            ExpressionType::FuncCall => "FuncCall",
+            ExpressionType::Window => "Window",
+            ExpressionType::GroupingSets => "GroupingSets",
+            ExpressionType::Cube => "Cub",
+            ExpressionType::Rollup => "Rollup",
+        };
+        write!(f, "{}", name)
     }
 }
 
@@ -99,6 +126,6 @@ mod unit_tests {
         let expr = DefaultBoundExpression::new(ExpressionType::Constant);
         assert_eq!(expr.expression_type(), ExpressionType::Constant);
         assert!(!expr.is_invalid());
-        assert_eq!(format!("{}", expr), "");
+        assert_eq!(format!("{}", expr), "DefaultBoundExpression(Constant)");
     }
 }

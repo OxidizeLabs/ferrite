@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -23,14 +24,14 @@ impl Column {
             _ => panic!("Cannot get size of invalid type"),
         }
     }
-    pub fn new(column_name: String, column_type: TypeId) -> Self {
-        assert_ne!(
-            column_type,
-            TypeId::VarChar,
-            "Wrong constructor for VARCHAR type."
-        );
+    pub fn new(column_name: &str, column_type: TypeId) -> Self {
+        // assert_ne!(
+        //     column_type,
+        //     TypeId::VarChar,
+        //     "Wrong constructor for VARCHAR type."
+        // );
         Column {
-            column_name,
+            column_name: column_name.to_string(),
             column_type,
             length: Self::type_size(column_type, 0) as usize,
             column_offset: 0,
@@ -90,7 +91,7 @@ impl Column {
 
     pub fn to_string(&self, simplified: bool) -> String {
         if simplified {
-            format!("{}, {:?})", self.column_name, self.column_type)
+            format!("{}", self.column_name)
         } else {
             format!(
                 "Column(name: {}, type: {:?}, length: {}, offset: {})",

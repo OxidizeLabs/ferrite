@@ -1,21 +1,22 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
+use sqlparser::ast::BinaryOperator;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound binary operator, e.g., `a+b`.
+#[derive(Clone)]
 pub struct BoundBinaryOp {
-    /// Operator name.
-    pub op_name: String,
-    /// Left argument of the op.
-    pub larg: Box<dyn BoundExpression>,
-    /// Right argument of the op.
-    pub rarg: Box<dyn BoundExpression>,
+    op: BinaryOperator,
+    left: Box<dyn BoundExpression>,
+    right: Box<dyn BoundExpression>,
 }
+
 
 impl BoundBinaryOp {
     /// Creates a new BoundBinaryOp.
-    pub fn new(op_name: String, larg: Box<dyn BoundExpression>, rarg: Box<dyn BoundExpression>) -> Self {
-        Self { op_name, larg, rarg }
+    pub fn new(op: &BinaryOperator, left: Box<dyn BoundExpression>, right: Box<dyn BoundExpression>) -> Self {
+        Self { op: op.clone(), left, right}
     }
 }
 
@@ -25,13 +26,29 @@ impl BoundExpression for BoundBinaryOp {
     }
 
     fn has_aggregation(&self) -> bool {
-        self.larg.has_aggregation() || self.rarg.has_aggregation()
+        self.left.has_aggregation() || self.right.has_aggregation()
+    }
+
+    fn has_window_function(&self) -> bool {
+        self.left.has_window_function() || self.right.has_window_function()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            op: self.op.clone(),
+            left: self.left.clone_box(),
+            right: self.right.clone_box(),
+        })
     }
 }
 
-impl fmt::Display for BoundBinaryOp {
+impl Display for BoundBinaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}{}{})", self.larg, self.op_name, self.rarg)
+        write!(f, "({} {} {})", self.left, self.op, self.right)
     }
 }
 
@@ -39,6 +56,7 @@ impl fmt::Display for BoundBinaryOp {
 mod unit_tests {
     use super::*;
 
+    #[derive(Clone)]
     struct TestExpression(bool);
 
     impl BoundExpression for TestExpression {
@@ -49,9 +67,17 @@ mod unit_tests {
         fn has_aggregation(&self) -> bool {
             self.0
         }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn clone_box(&self) -> Box<dyn BoundExpression> {
+            Box::new(self.clone())
+        }
     }
 
-    impl fmt::Display for TestExpression {
+    impl Display for TestExpression {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "test_expr")
         }
@@ -60,22 +86,22 @@ mod unit_tests {
     #[test]
     fn bound_binary_op() {
         let binary_op = BoundBinaryOp::new(
-            "+".to_string(),
+            &BinaryOperator::Plus,
             Box::new(TestExpression(false)),
             Box::new(TestExpression(true)),
         );
 
         assert_eq!(binary_op.expression_type(), ExpressionType::BinaryOp);
         assert!(binary_op.has_aggregation());
-        assert_eq!(binary_op.to_string(), "(test_expr+test_expr)");
+        assert_eq!(binary_op.to_string(), "(test_expr + test_expr)");
 
         let binary_op_no_agg = BoundBinaryOp::new(
-            "*".to_string(),
+            &BinaryOperator::Multiply,
             Box::new(TestExpression(false)),
             Box::new(TestExpression(false)),
         );
 
         assert!(!binary_op_no_agg.has_aggregation());
-        assert_eq!(binary_op_no_agg.to_string(), "(test_expr*test_expr)");
+        assert_eq!(binary_op_no_agg.to_string(), "(test_expr * test_expr)");
     }
 }

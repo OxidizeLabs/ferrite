@@ -170,7 +170,7 @@ impl TableHeap {
     /// A `Box` containing a `TableHeap`.
     pub fn create_empty_heap(create_table_heap: bool) -> Option<Box<Self>> {
         // The input parameter should be false in order to generate an empty heap
-        assert!(!create_table_heap);
+        assert!(create_table_heap);
         unimplemented!()
         // Some(Box::new(TableHeap::new(Arc::new(Mutex::new(BufferPoolManager::new(0, Arc::new(()), Arc::new(()), Arc::new(Mutex::new(()))))))))
     }

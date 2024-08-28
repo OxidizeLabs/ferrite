@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents the star (*) in SELECT statements, e.g., `SELECT * FROM x`.
+#[derive(Clone)]
 pub struct BoundStar;
 
 impl BoundStar {
@@ -20,9 +22,17 @@ impl BoundExpression for BoundStar {
     fn has_aggregation(&self) -> bool {
         panic!("`has_aggregation` should not have been called on `BoundStar`.")
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(self.clone())
+    }
 }
 
-impl fmt::Display for BoundStar {
+impl Display for BoundStar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "*")
     }

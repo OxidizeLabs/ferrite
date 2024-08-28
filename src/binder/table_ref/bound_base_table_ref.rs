@@ -1,19 +1,21 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::{Debug, Display};
 use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
 use crate::catalogue::schema::Schema;
 use crate::common::config::TableOidT;
 
 /// A bound table ref type for single table. e.g., `SELECT x FROM y`, where `y` is `BoundBaseTableRef`.
+#[derive(Clone)]
 pub struct BoundBaseTableRef {
     /// The name of the table.
-    pub table: String,
+    table: String,
     /// The oid of the table.
-    pub oid: TableOidT,
+    oid: TableOidT,
     /// The alias of the table.
-    pub alias: Option<String>,
+    alias: Option<String>,
     /// The schema of the table.
-    pub schema: Schema,
+    schema: Schema,
 }
 
 impl BoundBaseTableRef {
@@ -37,9 +39,17 @@ impl BoundTableRef for BoundBaseTableRef {
     fn table_reference_type(&self) -> TableReferenceType {
         TableReferenceType::BaseTable
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundTableRef> {
+        Box::new(self.clone())
+    }
 }
 
-impl fmt::Display for BoundBaseTableRef {
+impl Display for BoundBaseTableRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.alias {
             Some(alias) => write!(
@@ -53,6 +63,17 @@ impl fmt::Display for BoundBaseTableRef {
                 self.table, self.oid
             ),
         }
+    }
+}
+
+impl Debug for BoundBaseTableRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BoundBaseTableRef")
+            .field("table_name", &self.table)
+            .field("table_oid", &self.oid)
+            .field("alias", &self.alias)
+            .field("schema", &self.schema)
+            .finish()
     }
 }
 

@@ -1,5 +1,6 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::binder::bound_order_by::BoundOrderBy;
 use crate::binder::expressions::bound_constant::BoundConstant;
@@ -18,6 +19,7 @@ pub enum WindowBoundary {
 }
 
 /// Represents a bound window function, e.g., `sum(x) OVER (PARTITION BY y ORDER BY z)`.
+#[derive(Clone)]
 pub struct BoundWindow {
     /// Function name.
     pub func_name: String,
@@ -77,15 +79,34 @@ impl BoundExpression for BoundWindow {
     }
 
     fn has_aggregation(&self) -> bool {
-        false
+        self.args.iter().any(|expr| expr.has_aggregation()) ||
+            self.partition_by.iter().any(|expr| expr.has_aggregation()) ||
+            self.order_bys.iter().any(|expr| expr.expr.has_aggregation())
     }
 
     fn has_window_function(&self) -> bool {
         true
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            func_name: self.func_name.clone(),
+            args: self.args.iter().map(|expr| expr.clone_box()).collect(),
+            partition_by: self.partition_by.iter().map(|expr| expr.clone_box()).collect(),
+            order_bys: self.order_bys.iter().map(|expr| expr.clone()).collect(),
+            start_offset: self.start_offset.as_ref().map(|expr| expr.clone_box()),
+            end_offset: self.end_offset.as_ref().map(|expr| expr.clone_box()),
+            start: self.start,
+            end: self.end,
+        })
+    }
 }
 
-impl fmt::Display for BoundWindow {
+impl Display for BoundWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}(", self.func_name)?;
         for (i, arg) in self.args.iter().enumerate() {
@@ -95,7 +116,6 @@ impl fmt::Display for BoundWindow {
             write!(f, "{}", arg)?;
         }
         write!(f, ") OVER (")?;
-
         if !self.partition_by.is_empty() {
             write!(f, "PARTITION BY ")?;
             for (i, expr) in self.partition_by.iter().enumerate() {
@@ -105,22 +125,18 @@ impl fmt::Display for BoundWindow {
                 write!(f, "{}", expr)?;
             }
         }
-
         if !self.order_bys.is_empty() {
             if !self.partition_by.is_empty() {
                 write!(f, " ")?;
             }
             write!(f, "ORDER BY ")?;
-            for (i, order_by) in self.order_bys.iter().enumerate() {
+            for (i, expr) in self.order_bys.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", order_by)?;
+                write!(f, "{}", expr)?;
             }
         }
-
-        // TODO: Implement window frame clause formatting
-
         write!(f, ")")
     }
 }

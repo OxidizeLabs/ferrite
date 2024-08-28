@@ -1,5 +1,6 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::binder::expressions::bound_constant::BoundConstant;
 
@@ -24,11 +25,26 @@ impl BoundExpression for BoundFuncCall {
     }
 
     fn has_aggregation(&self) -> bool {
-        false
+        self.args.iter().any(|arg| arg.has_aggregation())
+    }
+
+    fn has_window_function(&self) -> bool {
+        self.args.iter().any(|arg| arg.has_window_function())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            func_name: self.func_name.clone(),
+            args: self.args.iter().map(|arg| arg.clone_box()).collect(),
+        })
     }
 }
 
-impl fmt::Display for BoundFuncCall {
+impl Display for BoundFuncCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}(", self.func_name)?;
         for (i, arg) in self.args.iter().enumerate() {
