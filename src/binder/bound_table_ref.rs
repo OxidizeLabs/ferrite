@@ -23,7 +23,7 @@ pub struct DefaultBoundTableRef {
 }
 
 /// A bound table reference.
-pub trait BoundTableRef: fmt::Display {
+pub trait BoundTableRef: Display {
     fn table_reference_type(&self) -> TableReferenceType;
     fn is_invalid(&self) -> bool {
         self.table_reference_type() == TableReferenceType::Invalid

@@ -10,11 +10,11 @@ use std::fmt::Display;
 #[derive(Clone)]
 pub struct BoundSubqueryRef {
     /// Subquery.
-    pub subquery: Box<SelectStatement>,
+    subquery: Box<SelectStatement>,
     /// Name of each item in the select list.
-    pub select_list_name: Vec<Vec<String>>,
+    select_list_name: Vec<Vec<String>>,
     /// Alias.
-    pub alias: String,
+    alias: String,
 }
 
 impl BoundSubqueryRef {

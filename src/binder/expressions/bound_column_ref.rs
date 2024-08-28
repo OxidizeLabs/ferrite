@@ -12,8 +12,8 @@ pub struct BoundColumnRef {
 
 impl BoundColumnRef {
     /// Creates a new BoundColumnRef.
-    pub fn new(col_name: Vec<String>) -> Self {
-        Self { col_name }
+    pub fn new(col_names: Vec<String>) -> Self {
+        Self { col_name: col_names }
     }
 
     /// Prepends a prefix to the column name.
@@ -54,7 +54,7 @@ mod unit_tests {
 
     #[test]
     fn bound_column_ref() {
-        let col_ref = BoundColumnRef::new(vec!["y".to_string(), "x".to_string()]);
+        let col_ref = BoundColumnRef::new(vec!["y".to_string(), "x".to_string()], );
 
         assert_eq!(col_ref.expression_type(), ExpressionType::ColumnRef);
         assert!(!col_ref.has_aggregation());
