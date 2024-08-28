@@ -22,7 +22,7 @@ impl BoundBaseTableRef {
     /// Creates a new BoundBaseTableRef.
     pub fn new(table: String, oid: TableOidT, alias: Option<String>, schema: Schema) -> Self {
         Self {
-            table,
+            table: table.to_string(),
             oid,
             alias,
             schema,
@@ -58,9 +58,7 @@ impl Display for BoundBaseTableRef {
                 self.table, self.oid, alias
             ),
             None => write!(
-                f,
-                "BoundBaseTableRef {{ table={}, oid={} }}",
-                self.table, self.oid
+                f, "{}", self.table
             ),
         }
     }

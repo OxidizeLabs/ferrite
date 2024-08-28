@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Display;
 
 /// Simplified tokens are a simplified (dense) representation of the lexer
 /// used for simple syntax highlighting in the tests.
@@ -32,7 +33,7 @@ pub struct ParserKeyword {
     pub category: KeywordCategory,
 }
 
-impl fmt::Display for SimplifiedTokenType {
+impl Display for SimplifiedTokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SimplifiedTokenType::Identifier => write!(f, "Identifier"),
@@ -45,7 +46,7 @@ impl fmt::Display for SimplifiedTokenType {
     }
 }
 
-impl fmt::Display for KeywordCategory {
+impl Display for KeywordCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             KeywordCategory::Reserved => write!(f, "Reserved"),
