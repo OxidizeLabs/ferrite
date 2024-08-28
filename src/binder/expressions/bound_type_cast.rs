@@ -1,8 +1,8 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
+use sqlparser::ast::DataType;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use sqlparser::ast::DataType;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 #[derive(Clone)]
 pub struct BoundTypeCast {

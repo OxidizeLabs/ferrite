@@ -1,7 +1,7 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound column reference, e.g., `y.x` in the SELECT list.
 #[derive(Debug, Clone)]

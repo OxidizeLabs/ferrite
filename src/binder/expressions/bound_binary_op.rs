@@ -1,8 +1,8 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
+use sqlparser::ast::BinaryOperator;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use sqlparser::ast::BinaryOperator;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound binary operator, e.g., `a+b`.
 #[derive(Clone)]
@@ -16,7 +16,7 @@ pub struct BoundBinaryOp {
 impl BoundBinaryOp {
     /// Creates a new BoundBinaryOp.
     pub fn new(op: &BinaryOperator, left: Box<dyn BoundExpression>, right: Box<dyn BoundExpression>) -> Self {
-        Self { op: op.clone(), left, right}
+        Self { op: op.clone(), left, right }
     }
 }
 

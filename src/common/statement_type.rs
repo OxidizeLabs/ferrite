@@ -15,7 +15,7 @@ pub enum StatementType {
     IndexStatement,
     VariableSetStatement,
     VariableShowStatement,
-    TransactionStatement
+    TransactionStatement,
 }
 
 impl StatementType {

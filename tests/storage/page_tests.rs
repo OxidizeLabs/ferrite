@@ -78,8 +78,6 @@ mod basic_behavior {
 // Concurrency
 #[cfg(test)]
 mod concurrency {
-    use super::*;
-
     #[test]
     fn concurrent_read_and_write() {
         let page = Arc::new(RwLock::new(Page::new(1))); // Wrap Page in Arc<RwLock>.

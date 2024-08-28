@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::catalogue::catalogue::Catalog;
 use crate::common::config::TxnId;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog};

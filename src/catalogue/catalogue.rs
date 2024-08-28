@@ -1,21 +1,18 @@
 use core::fmt;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
-use crate::container::hash_function::HashFunction;
 use crate::recovery::log_manager::LogManager;
-use crate::storage::index::b_plus_tree_index::BPlusTreeIndex;
-use crate::storage::index::extendable_hash_table_index::ExtendableHashTableIndex;
-use crate::storage::index::index::{Index, IndexMetadata};
+use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
 
 pub enum IndexType {

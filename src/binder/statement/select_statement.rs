@@ -1,14 +1,14 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Display};
 use crate::binder::bound_expression::BoundExpression;
 use crate::binder::bound_order_by::BoundOrderBy;
 use crate::binder::bound_statement::BoundStatement;
-use crate::common::statement_type::StatementType;
 use crate::binder::bound_table_ref::BoundTableRef;
-use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::binder::bound_table_ref::TableReferenceType;
+use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
+use crate::common::statement_type::StatementType;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display};
 
 /// Represents a bound SELECT statement in SQL.
 #[derive(Clone)]
