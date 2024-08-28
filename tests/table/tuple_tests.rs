@@ -17,8 +17,6 @@ use tkdb::types_db::value::Value;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     fn construct_tuple(schema: &Schema) -> Tuple {
         let mut values = Vec::new();
         let seed = SystemTime::now()

@@ -3,8 +3,8 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
 use std::cmp::Ordering;
-use std::sync::Arc;
 use std::fmt;
+use std::sync::Arc;
 
 /// A generic key used for indexing with opaque data.
 #[derive(Clone)]

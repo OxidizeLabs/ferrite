@@ -1,6 +1,6 @@
+use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt::{Debug, Display};
-use crate::common::statement_type::StatementType;
 
 pub struct DefaultBoundStatement {
     statement_type: StatementType,

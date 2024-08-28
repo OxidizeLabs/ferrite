@@ -1,10 +1,10 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
-use crate::binder::bound_statement::{BoundStatement};
+use crate::binder::bound_statement::BoundStatement;
 use crate::catalogue::column::Column;
 use crate::common::statement_type::StatementType;
 use crate::types_db::type_id::TypeId;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 
 /// Represents a CREATE TABLE statement in SQL.
 #[derive(Debug)]

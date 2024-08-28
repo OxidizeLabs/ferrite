@@ -18,14 +18,14 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
+use crate::catalogue::schema::Schema;
 use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::types_db::value::Value as DbValue;
-use crate::catalogue::schema::Schema;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use chrono::Utc;
 use parking_lot::Mutex;
 use spin::RwLock;
@@ -554,10 +554,10 @@ impl<'a> Drop for ContextGuard<'a> {
 
 #[cfg(test)]
 mod unit_tests {
-    use log::info;
+    use super::*;
     use crate::types_db::integer_type::IntegerType;
     use crate::types_db::type_id::TypeId;
-    use super::*;
+    use log::info;
 
     fn setup_database_components(db_name: &str) -> (
         Arc<FileDiskManager>,

@@ -1,9 +1,9 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
+use crate::binder::expressions::bound_constant::BoundConstant;
+use sqlparser::ast::UnaryOperator;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use sqlparser::ast::UnaryOperator;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::binder::expressions::bound_constant::BoundConstant;
 
 /// Represents a bound unary operation, e.g., `-x`.
 #[derive(Clone)]
@@ -18,7 +18,6 @@ impl BoundUnaryOp {
         Self { op, expr }
     }
 }
-
 
 
 impl BoundExpression for BoundUnaryOp {

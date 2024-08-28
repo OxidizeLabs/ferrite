@@ -1,9 +1,9 @@
+use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
+use crate::binder::expressions::bound_constant::BoundConstant;
+use crate::binder::statement::select_statement::SelectStatement;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
-use crate::binder::statement::select_statement::SelectStatement;
-use crate::binder::expressions::bound_constant::BoundConstant;
 
 /// Represents a subquery. e.g., `SELECT * FROM (SELECT * FROM t1)`,
 /// where `(SELECT * FROM t1)` is `BoundSubqueryRef`.

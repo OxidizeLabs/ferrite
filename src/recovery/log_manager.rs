@@ -1,10 +1,9 @@
-use std::sync::atomic::{AtomicI32, Ordering};
+use crate::common::config::INVALID_LSN;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use parking_lot::Mutex;
+use std::sync::atomic::AtomicI32;
 use std::sync::{Arc, Condvar};
 use std::thread;
-use parking_lot::Mutex;
-use crate::common::config::{Lsn, INVALID_LSN};
-use crate::recovery::log_record::LogRecord;
-use crate::storage::disk::disk_manager::FileDiskManager;
 
 const LOG_BUFFER_SIZE: usize = 4096; // Adjust as necessary
 

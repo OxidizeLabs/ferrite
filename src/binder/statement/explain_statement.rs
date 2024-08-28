@@ -1,11 +1,11 @@
+use crate::binder::bound_statement::{AnyBoundStatement, BoundStatement};
+use crate::binder::bound_table_ref::DefaultBoundTableRef;
+use crate::binder::statement::select_statement::SelectStatement;
+use crate::common::statement_type::StatementType;
+use bitflags::bitflags;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use bitflags::bitflags;
-use crate::binder::bound_statement::{AnyBoundStatement, BoundStatement};
-use crate::common::statement_type::StatementType;
-use crate::binder::statement::select_statement::SelectStatement;
-use crate::binder::bound_table_ref::DefaultBoundTableRef;
 
 bitflags! {
     #[derive(Debug)]
@@ -69,8 +69,8 @@ impl Debug for ExplainStatement {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::binder::bound_table_ref::TableReferenceType;
     use super::*;
+    use crate::binder::bound_table_ref::TableReferenceType;
 
 
     #[test]
@@ -85,12 +85,12 @@ mod unit_tests {
             None,
             vec![],
             vec![],
-            false
+            false,
         );
 
         let explain_stmt = ExplainStatement::new(
             Box::new(select_stmt),
-            ExplainOptions::BINDER | ExplainOptions::PLANNER
+            ExplainOptions::BINDER | ExplainOptions::PLANNER,
         );
 
         assert_eq!(explain_stmt.statement_type(), StatementType::ExplainStatement);

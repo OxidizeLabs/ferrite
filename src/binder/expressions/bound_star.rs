@@ -1,7 +1,7 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents the star (*) in SELECT statements, e.g., `SELECT * FROM x`.
 #[derive(Clone)]

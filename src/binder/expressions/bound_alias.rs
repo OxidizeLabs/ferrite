@@ -1,7 +1,7 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents an alias in SELECT list, e.g., `SELECT count(x) AS y`, where `y` is an alias.
 #[derive(Clone)]

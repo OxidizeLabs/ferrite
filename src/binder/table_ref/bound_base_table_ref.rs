@@ -1,9 +1,9 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Display};
 use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
 use crate::catalogue::schema::Schema;
 use crate::common::config::TableOidT;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display};
 
 /// A bound table ref type for single table. e.g., `SELECT x FROM y`, where `y` is `BoundBaseTableRef`.
 #[derive(Clone)]

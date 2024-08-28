@@ -1,9 +1,9 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
+use crate::types_db::types::Type;
+use crate::types_db::value::{Val, Value};
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::types_db::types::Type;
-use crate::types_db::value::{Value, Val};
 
 /// Represents a bound constant, e.g., `1`.
 #[derive(Clone)]

@@ -1,8 +1,8 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
+use crate::binder::expressions::bound_constant::BoundConstant;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::binder::expressions::bound_constant::BoundConstant;
 
 /// Represents a bound function call, e.g., `lower(x)`.
 pub struct BoundFuncCall {

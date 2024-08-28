@@ -1,7 +1,7 @@
+use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
-use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound aggregate call, e.g., `sum(x)`.
 #[derive(Clone)]
