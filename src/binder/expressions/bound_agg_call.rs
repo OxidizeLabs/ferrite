@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound aggregate call, e.g., `sum(x)`.
+#[derive(Clone)]
 pub struct BoundAggCall {
     /// Function name.
     pub func_name: String,
@@ -31,9 +33,20 @@ impl BoundExpression for BoundAggCall {
     fn has_aggregation(&self) -> bool {
         true
     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            func_name: self.func_name.clone(),
+            is_distinct: self.is_distinct,
+            args: self.args.iter().map(|arg| arg.clone_box()).collect(),
+        })
+    }
 }
 
-impl fmt::Display for BoundAggCall {
+impl Display for BoundAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -53,15 +66,24 @@ impl fmt::Display for BoundAggCall {
 mod unit_tests {
     use super::*;
 
+    #[derive(Clone)]
     struct TestExpression(String);
 
     impl BoundExpression for TestExpression {
         fn expression_type(&self) -> ExpressionType {
             ExpressionType::Constant
         }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn clone_box(&self) -> Box<dyn BoundExpression> {
+            Box::new(self.clone())
+        }
     }
 
-    impl fmt::Display for TestExpression {
+    impl Display for TestExpression {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}", self.0)
         }

@@ -1,13 +1,15 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::types_db::types::Type;
 use crate::types_db::value::{Value, Val};
 
 /// Represents a bound constant, e.g., `1`.
+#[derive(Clone)]
 pub struct BoundConstant {
     /// The constant being bound.
-    pub val: Value,
+    val: Value,
 }
 
 impl BoundConstant {
@@ -25,9 +27,17 @@ impl BoundExpression for BoundConstant {
     fn has_aggregation(&self) -> bool {
         false
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(self.clone())
+    }
 }
 
-impl fmt::Display for BoundConstant {
+impl Display for BoundConstant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.val.get_value() {
             Val::Boolean(b) => write!(f, "{}", b),

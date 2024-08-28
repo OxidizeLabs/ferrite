@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Display;
 
 /// Represents different types of SQL statements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +15,7 @@ pub enum StatementType {
     IndexStatement,
     VariableSetStatement,
     VariableShowStatement,
-    TransactionStatement,
+    TransactionStatement
 }
 
 impl StatementType {
@@ -37,14 +38,14 @@ impl StatementType {
     }
 }
 
-impl fmt::Display for StatementType {
+impl Display for StatementType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

@@ -1,7 +1,9 @@
-use std::sync::atomic::AtomicI32;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Condvar};
 use std::thread;
-
+use parking_lot::Mutex;
+use crate::common::config::{Lsn, INVALID_LSN};
+use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::disk_manager::FileDiskManager;
 
 const LOG_BUFFER_SIZE: usize = 4096; // Adjust as necessary
@@ -16,46 +18,45 @@ pub struct LogManager {
     latch: Mutex<()>,
     cv: Condvar,
     flush_thread: Option<thread::JoinHandle<()>>,
-    disk_manager: Arc<Mutex<FileDiskManager>>,
+    disk_manager: Arc<FileDiskManager>,
 }
 
-// impl LogManager {
-//     /// Creates a new `LogManager`.
-//     ///
-//     /// # Parameters
-//     /// - `disk_manager`: A reference to the disk manager.
-//     ///
-//     /// # Returns
-//     /// A new `LogManager` instance.
-//     pub fn new(disk_manager: Arc<Mutex<DiskManager>>) -> Self {
-//         Self {
-//             next_lsn: AtomicI32::new(0),
-//             persistent_lsn: AtomicI32::new(INVALID_LSN),
-//             log_buffer: vec![0; LOG_BUFFER_SIZE],
-//             flush_buffer: vec![0; LOG_BUFFER_SIZE],
-//             latch: Mutex::new(()),
-//             cv: Condvar::new(),
-//             flush_thread: None,
-//             disk_manager,
-//         }
-//     }
+impl LogManager {
+    /// Creates a new `LogManager`.
+    ///
+    /// # Parameters
+    /// - `disk_manager`: A reference to the disk manager.
+    ///
+    /// # Returns
+    /// A new `LogManager` instance.
+    pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
+        Self {
+            next_lsn: AtomicI32::new(0),
+            persistent_lsn: AtomicI32::new(INVALID_LSN),
+            log_buffer: vec![0; LOG_BUFFER_SIZE],
+            flush_buffer: vec![0; LOG_BUFFER_SIZE],
+            latch: Mutex::new(()),
+            cv: Condvar::new(),
+            flush_thread: None,
+            disk_manager,
+        }
+    }
+}
 //
 //     /// Runs the flush thread which writes the log buffer's content to the disk.
 //     pub fn run_flush_thread(&mut self) {
 //         let disk_manager = Arc::clone(&self.disk_manager);
-//         let cv = &self.cv;
 //         let latch = &self.latch;
-//         let log_buffer = self.log_buffer.clone();
+//         self.log_buffer.clone();
 //         let flush_buffer = self.flush_buffer.clone();
 //
 //         self.flush_thread = Some(thread::spawn(move || {
 //             loop {
-//                 let _lock = latch.lock().unwrap();
-//                 cv.wait(_lock).unwrap();
+//                 let _lock = latch.lock();
 //
 //                 // Perform flush to disk
-//                 let disk_manager = disk_manager.lock().unwrap();
-//                 disk_manager.write_log(&flush_buffer);
+//                 let disk_manager = disk_manager.lock();
+//                 disk_manager.write_log(&flush_buffer).expect("TODO: panic message");
 //             }
 //         }));
 //     }
@@ -76,11 +77,10 @@ pub struct LogManager {
 //     /// The log sequence number (LSN) of the appended log record.
 //     pub fn append_log_record(&mut self, log_record: &LogRecord) -> Lsn {
 //         let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
-//         log_record.set_lsn(lsn);
 //
 //         // Serialize log record and write to log buffer
 //         let log_record_bytes = log_record.to_string();
-//         self.log_buffer.extend_from_slice(&log_record_bytes);
+//         self.log_buffer.extend_from_slice((&log_record_bytes).as_ref());
 //
 //         lsn
 //     }

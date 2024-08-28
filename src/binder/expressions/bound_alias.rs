@@ -1,19 +1,21 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents an alias in SELECT list, e.g., `SELECT count(x) AS y`, where `y` is an alias.
+#[derive(Clone)]
 pub struct BoundAlias {
     /// Alias name.
     pub alias: String,
     /// The actual expression.
-    pub child: Box<dyn BoundExpression>,
+    pub expr: Box<dyn BoundExpression>,
 }
 
 impl BoundAlias {
     /// Creates a new BoundAlias.
-    pub fn new(alias: String, child: Box<dyn BoundExpression>) -> Self {
-        Self { alias, child }
+    pub fn new(alias: String, expr: Box<dyn BoundExpression>) -> Self {
+        Self { alias, expr }
     }
 }
 
@@ -23,17 +25,28 @@ impl BoundExpression for BoundAlias {
     }
 
     fn has_aggregation(&self) -> bool {
-        self.child.has_aggregation()
+        self.expr.has_aggregation()
     }
 
     fn has_window_function(&self) -> bool {
-        self.child.has_window_function()
+        self.expr.has_window_function()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            expr: self.expr.clone_box(),
+            alias: self.alias.clone(),
+        })
     }
 }
 
-impl fmt::Display for BoundAlias {
+impl Display for BoundAlias {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({} as {})", self.child, self.alias)
+        write!(f, "{} AS {}", self.expr, self.alias)
     }
 }
 
@@ -41,6 +54,7 @@ impl fmt::Display for BoundAlias {
 mod unit_tests {
     use super::*;
 
+    #[derive(Clone)]
     struct TestExpression;
 
     impl BoundExpression for TestExpression {
@@ -55,9 +69,17 @@ mod unit_tests {
         fn has_window_function(&self) -> bool {
             false
         }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn clone_box(&self) -> Box<dyn BoundExpression> {
+            Box::new(self.clone())
+        }
     }
 
-    impl fmt::Display for TestExpression {
+    impl Display for TestExpression {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "test_expr")
         }
@@ -70,6 +92,6 @@ mod unit_tests {
         assert_eq!(alias.expression_type(), ExpressionType::Alias);
         assert!(alias.has_aggregation());
         assert!(!alias.has_window_function());
-        assert_eq!(alias.to_string(), "(test_expr as y)");
+        assert_eq!(alias.to_string(), "test_expr AS y");
     }
 }

@@ -44,19 +44,19 @@ pub struct TransactionManager {
     running_txns: RunningTransactions,
     commit_mutex: Mutex<()>,
     last_commit_ts: AtomicU64,
-    catalog: Arc<Catalog>,
+    // catalog: Arc<Catalog>,
     version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
 }
 
 impl TransactionManager {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
+    pub fn new() -> Self {
         TransactionManager {
             next_txn_id: AtomicU64::new(0),
             txn_map: RwLock::new(HashMap::new()),
             running_txns: RunningTransactions::default(),
             commit_mutex: Mutex::new(()),
             last_commit_ts: AtomicU64::new(0),
-            catalog,
+            // catalog,
             version_info: RwLock::new(HashMap::new()),
         }
     }

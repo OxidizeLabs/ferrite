@@ -105,7 +105,7 @@ impl Type for Value {
             (Val::Timestamp(l), Val::Timestamp(r)) => (l < r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l < r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l < r).into(),
-            _ => CmpBool::CmpFalse,
+            _ => CmpFalse,
         }
     }
 
@@ -120,7 +120,7 @@ impl Type for Value {
             (Val::Timestamp(l), Val::Timestamp(r)) => (l > r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l > r).into(),
-            _ => CmpBool::CmpFalse,
+            _ => CmpFalse,
         }
     }
 

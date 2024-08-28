@@ -1,11 +1,13 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 
 /// Represents a bound column reference, e.g., `y.x` in the SELECT list.
+#[derive(Debug, Clone)]
 pub struct BoundColumnRef {
     /// The name of the column.
-    pub col_name: Vec<String>,
+    col_name: Vec<String>,
 }
 
 impl BoundColumnRef {
@@ -30,9 +32,17 @@ impl BoundExpression for BoundColumnRef {
     fn has_aggregation(&self) -> bool {
         false
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(self.clone())
+    }
 }
 
-impl fmt::Display for BoundColumnRef {
+impl Display for BoundColumnRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.col_name.join("."))
     }

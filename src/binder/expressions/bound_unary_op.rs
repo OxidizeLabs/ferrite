@@ -1,22 +1,25 @@
+use std::any::Any;
 use std::fmt;
-
+use std::fmt::Display;
+use sqlparser::ast::UnaryOperator;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::binder::expressions::bound_constant::BoundConstant;
 
 /// Represents a bound unary operation, e.g., `-x`.
+#[derive(Clone)]
 pub struct BoundUnaryOp {
-    /// Operator name.
-    pub op_name: String,
-    /// Argument of the op.
-    pub arg: Box<dyn BoundExpression>,
+    op: UnaryOperator, // Assuming you have a UnaryOperator enum
+    expr: Box<dyn BoundExpression>,
 }
 
 impl BoundUnaryOp {
     /// Creates a new BoundUnaryOp.
-    pub fn new(op_name: String, arg: Box<dyn BoundExpression>) -> Self {
-        Self { op_name, arg }
+    pub fn new(op: UnaryOperator, expr: Box<dyn BoundExpression>) -> Self {
+        Self { op, expr }
     }
 }
+
+
 
 impl BoundExpression for BoundUnaryOp {
     fn expression_type(&self) -> ExpressionType {
@@ -24,13 +27,28 @@ impl BoundExpression for BoundUnaryOp {
     }
 
     fn has_aggregation(&self) -> bool {
-        self.arg.has_aggregation()
+        self.expr.has_aggregation()
+    }
+
+    fn has_window_function(&self) -> bool {
+        self.expr.has_window_function()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn clone_box(&self) -> Box<dyn BoundExpression> {
+        Box::new(Self {
+            op: self.op.clone(),
+            expr: self.expr.clone_box(),
+        })
     }
 }
 
-impl fmt::Display for BoundUnaryOp {
+impl Display for BoundUnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}{})", self.op_name, self.arg)
+        write!(f, "({}{})", self.op, self.expr)
     }
 }
 
@@ -43,7 +61,7 @@ mod unit_tests {
     #[test]
     fn bound_unary_op() {
         let unary_op = BoundUnaryOp::new(
-            "-".to_string(),
+            UnaryOperator::Minus,
             Box::new(BoundConstant::new(42)),
         );
 
@@ -52,9 +70,9 @@ mod unit_tests {
         assert_eq!(unary_op.to_string(), "(-42)");
 
         let nested_unary_op = BoundUnaryOp::new(
-            "NOT".to_string(),
+            UnaryOperator::Not,
             Box::new(BoundUnaryOp::new(
-                "-".to_string(),
+                UnaryOperator::Minus,
                 Box::new(BoundConstant::new(10)),
             )),
         );
