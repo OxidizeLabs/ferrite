@@ -54,11 +54,12 @@ impl Display for BoundBaseTableRef {
         match &self.alias {
             Some(alias) => write!(
                 f,
-                "BoundBaseTableRef {{ table={}, oid={}, alias={} }}",
-                self.table, self.oid, alias
+                "{} AS {}",
+                self.table, alias
             ),
             None => write!(
-                f, "{}", self.table
+                f,
+                "{}", self.table
             ),
         }
     }
@@ -81,7 +82,7 @@ mod unit_tests {
 
     #[test]
     fn bound_base_table_ref() {
-        let schema = Schema::new(vec![]); // Assuming Schema can be created with an empty vector
+        let schema = Schema::new(vec![]);
         let table_ref = BoundBaseTableRef::new(
             "users".to_string(),
             1,
@@ -93,7 +94,7 @@ mod unit_tests {
         assert_eq!(table_ref.get_bound_table_name(), "u");
         assert_eq!(
             table_ref.to_string(),
-            "BoundBaseTableRef { table=users, oid=1, alias=u }"
+            "users AS u"
         );
 
         let table_ref_no_alias = BoundBaseTableRef::new(
@@ -106,7 +107,7 @@ mod unit_tests {
         assert_eq!(table_ref_no_alias.get_bound_table_name(), "products");
         assert_eq!(
             table_ref_no_alias.to_string(),
-            "BoundBaseTableRef { table=products, oid=2 }"
+            "products"
         );
     }
 }

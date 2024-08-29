@@ -47,7 +47,7 @@ impl Display for BoundConstant {
             Val::BigInt(i) => write!(f, "{}", i),
             Val::Decimal(d) => write!(f, "{}", d),
             Val::Timestamp(t) => write!(f, "{}", t),
-            Val::VarLen(s) | Val::ConstVarLen(s) => write!(f, "\"{}\"", s),
+            Val::VarLen(s) | Val::ConstVarLen(s) => write!(f, "\"{}\"", s.replace("\"", "\\\"")),
             Val::Vector(v) => write!(f, "{:?}", v),
         }
     }
