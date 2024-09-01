@@ -76,7 +76,7 @@ impl IndexMetadata {
             "IndexMetadata[Name = {}, Type = B+Tree, Table name = {}] :: {}",
             self.name,
             self.table_name,
-            self.key_schema.to_string(false)
+            self.key_schema.to_string()
         )
     }
 }

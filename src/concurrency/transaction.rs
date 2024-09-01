@@ -4,7 +4,7 @@ use std::{fmt, thread};
 
 use crate::common::config::{TimeStampOidT, TxnId, INVALID_TS, INVALID_TXN_ID};
 use crate::common::rid::RID;
-use crate::execution::expressions::abstract_expression::AbstractExpression;
+use crate::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 
 /// Represents a link to a previous version of this tuple.
@@ -66,7 +66,7 @@ pub struct Transaction {
     latch: Mutex<()>,
     undo_logs: Mutex<Vec<UndoLog>>,
     write_set: Mutex<HashMap<u32, HashSet<RID>>>,
-    scan_predicates: Mutex<HashMap<u32, Vec<Arc<dyn AbstractExpression>>>>,
+    scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
 }
 
 impl Transaction {
@@ -180,7 +180,7 @@ impl Transaction {
     /// # Parameters
     /// - `t`: The table OID.
     /// - `predicate`: The scan predicate expression.
-    pub fn append_scan_predicate(&self, t: u32, predicate: Arc<dyn AbstractExpression>) {
+    pub fn append_scan_predicate(&self, t: u32, predicate: Arc<Expression>) {
         let mut scan_predicates = self.scan_predicates.lock().unwrap();
         scan_predicates
             .entry(t)
@@ -189,7 +189,7 @@ impl Transaction {
     }
 
     /// Returns the scan predicates.
-    pub fn scan_predicates(&self) -> HashMap<u32, Vec<Arc<dyn AbstractExpression>>> {
+    pub fn scan_predicates(&self) -> HashMap<u32, Vec<Arc<Expression>>> {
         self.scan_predicates.lock().unwrap().clone()
     }
 

@@ -1,5 +1,5 @@
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
@@ -7,15 +7,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool::{CmpFalse, CmpTrue};
 use crate::types_db::types::{get_type_size, CmpBool, Type};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Value {
-    value_: Val,
-    size_: Size,
-    manage_data_: bool,
-    type_id_: TypeId,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
     Boolean(bool),
     TinyInt(i8),
@@ -29,10 +21,18 @@ pub enum Val {
     Vector(Vec<i32>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Size {
     Length(usize),
     ElemTypeId(TypeId),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Value {
+    value_: Val,
+    size_: Size,
+    manage_data_: bool,
+    type_id_: TypeId,
 }
 
 impl Value {
@@ -446,6 +446,22 @@ impl From<bool> for CmpBool {
     }
 }
 
+impl From<CmpBool> for Val {
+    fn from(cmp_bool: CmpBool) -> Self {
+        match cmp_bool {
+            CmpTrue => Val::Boolean(true),
+            CmpFalse => Val::Boolean(false),
+            CmpBool::CmpNull => Val::Boolean(false),
+        }
+    }
+}
+
+impl From<CmpBool> for Value {
+    fn from(cmp_bool: CmpBool) -> Self {
+        Value::new(Val::from(cmp_bool))
+    }
+}
+
 pub trait Serializable: Debug {
     fn serialize_to(&self, storage: &mut [u8]);
     fn deserialize_from(storage: &[u8]) -> Self
@@ -464,9 +480,8 @@ impl Serializable for i32 {
     }
 }
 
-// Implement fmt::Display for Value to use with fmt::Formatter
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.value_)
     }
 }

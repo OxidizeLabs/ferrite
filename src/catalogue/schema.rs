@@ -1,3 +1,5 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
 use crate::catalogue::column::Column;
@@ -109,20 +111,18 @@ impl Schema {
     }
 }
 
-// fn main() {
-//     let col1 = Column::new("id".to_string(), true, 4);
-//     let col2 = Column::new_varlen("name".to_string(), 100);
-//     let col3 = Column::replicate("id_copy".to_string(), &col1);
-//
-//     info!("Column 1: {}", col1.to_string(false));
-//     info!("Column 2: {}", col2.to_string(false));
-//     info!("Column 3: {}", col3.to_string(false));
-//
-//     let columns = vec![col1, col2, col3];
-//     let schema = Schema::new(columns);
-//     info!("{}", schema.to_string(false));
-//     info!("{}", schema.to_string(true));
-//
-//     let copied_schema = Schema::copy_schema(&schema, vec![0, 2]);
-//     info!("Copied Schema: {}", copied_schema.to_string(false));
-// }
+impl PartialEq for Schema {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare all fields
+        self.columns == other.columns &&
+            self.length == other.length &&
+            self.tuple_is_inlined == other.tuple_is_inlined &&
+            self.unlined_columns == other.unlined_columns
+    }
+}
+
+impl Display for Schema {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Schema {}", self.to_string(true))
+    }
+}

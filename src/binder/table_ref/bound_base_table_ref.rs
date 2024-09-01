@@ -33,6 +33,10 @@ impl BoundBaseTableRef {
     pub fn get_bound_table_name(&self) -> &str {
         self.alias.as_deref().unwrap_or(&self.table)
     }
+
+    pub fn get_schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl BoundTableRef for BoundBaseTableRef {

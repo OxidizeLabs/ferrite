@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 
 use crate::types_db::type_id::TypeId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Column {
     column_name: String,
     column_type: TypeId,
