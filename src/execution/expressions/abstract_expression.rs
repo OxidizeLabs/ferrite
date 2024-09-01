@@ -14,6 +14,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::rc::Rc;
 use crate::common::exception::{ArrayExpressionError, ExpressionError};
+use crate::execution::expressions::array_expression::ArrayExpression;
 
 #[derive(Debug, Clone)]
 pub enum Expression {
@@ -23,7 +24,7 @@ pub enum Expression {
     Comparison(ComparisonExpression),
     Logic(LogicExpression),
     String(StringExpression),
-    // Array(ArrayExpression),
+    Array(ArrayExpression),
 }
 
 pub trait ExpressionOps {
@@ -43,10 +44,9 @@ impl ExpressionOps for Expression {
             Self::Arithmetic(expr) => expr.evaluate(tuple, schema),
             Self::Comparison(expr) => expr.evaluate(tuple, schema),
             Self::Logic(expr) => expr.evaluate(tuple, schema),
-            Self::String(expr) => expr.evaluate(tuple, schema)
-        }
-            // Self::Array(expr) => expr.evaluate(tuple, schema).map_err(|e| e),
-    }
+            Self::String(expr) => expr.evaluate(tuple, schema),
+            Self::Array(expr) => expr.evaluate(tuple, schema),
+        } }
 
     fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
         match self {
@@ -56,7 +56,7 @@ impl ExpressionOps for Expression {
             Self::Comparison(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
             Self::Logic(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
             Self::String(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            // Self::Array(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema).map_err(|e| e),
+            Self::Array(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
         }
     }
 
@@ -68,6 +68,7 @@ impl ExpressionOps for Expression {
             Self::Comparison(expr) => expr.get_child_at(child_idx),
             Self::Logic(expr) => expr.get_child_at(child_idx),
             Self::String(expr) => expr.get_child_at(child_idx),
+            Self::Array(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -79,6 +80,7 @@ impl ExpressionOps for Expression {
             Self::Comparison(expr) => expr.get_children(),
             Self::Logic(expr) => expr.get_children(),
             Self::String(expr) => expr.get_children(),
+            Self::Array(expr) => expr.get_children(),
         }
     }
 
@@ -90,7 +92,7 @@ impl ExpressionOps for Expression {
             Self::Comparison(expr) => expr.get_return_type(),
             Self::Logic(expr) => expr.get_return_type(),
             Self::String(expr) => expr.get_return_type(),
-            // Self::Array(expr) => expr.get_return_type(),
+            Self::Array(expr) => expr.get_return_type(),
         }
     }
 
@@ -102,50 +104,7 @@ impl ExpressionOps for Expression {
             Self::Comparison(expr) => expr.clone_with_children(children),
             Self::Logic(expr) => expr.clone_with_children(children),
             Self::String(expr) => expr.clone_with_children(children),
-        }
-    }
-}
-
-impl Expression {
-   pub fn get_children(&self) -> Vec<&Expression> {
-        match self {
-            Self::Constant(_) | Self::ColumnRef(_) => vec![],
-            Self::Arithmetic(expr) => vec![expr.get_left(), expr.get_right()],
-            Self::Comparison(expr) => vec![expr.get_left(), expr.get_right()],
-            Self::Logic(expr) => vec![expr.get_left(), expr.get_right()],
-            Self::String(expr) => vec![expr.get_arg()],
-            // Self::Array(expr) => expr.get_children().iter().map(AsRef::as_ref).collect(),
-        }
-    }
-
-   pub fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Result<Rc<Expression>, ExpressionError> {
-        match self {
-            Self::Constant(expr) => Ok(Rc::new(Self::Constant(expr.clone()))),
-            Self::ColumnRef(expr) => Ok(Rc::new(Self::ColumnRef(expr.clone()))),
-            Self::Arithmetic(expr) => Ok(Rc::new(Self::Arithmetic(ArithmeticExpression::new(
-                children[0].clone(),
-                children[1].clone(),
-                expr.get_op(),
-                children
-            )))),
-            Self::Comparison(expr) => Ok(Rc::new(Self::Comparison(ComparisonExpression::new(
-                children[0].clone(),
-                children[1].clone(),
-                expr.get_comp_type(),
-                children
-            )))),
-            Self::Logic(expr) => Ok(Rc::new(Self::Logic(LogicExpression::new(
-                children[0].clone(),
-                children[1].clone(),
-                expr.get_logic_type(),
-                children
-            )))),
-            Self::String(expr) => Ok(Rc::new(Self::String(StringExpression::new(
-                children[0].clone(),
-                expr.get_expr_type(),
-                children
-            )))),
-            // Self::Array(_) => Ok(Rc::new(Self::Array(ArrayExpression::new(children)))),
+            Self::Array(expr) => expr.clone_with_children(children),
         }
     }
 }
@@ -159,17 +118,17 @@ impl Display for Expression {
             Self::Comparison(expr) => write!(f, "(Col#{} {} Col#{})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
             Self::Logic(expr) => write!(f, "({} {} {})", expr.get_left(), expr.get_logic_type(), expr.get_right()),
             Self::String(expr) => write!(f, "{}({})", expr.get_expr_type(), expr.get_arg()),
-            // Self::Array(expr) => {
-            //     write!(f, "[")?;
-            //     let mut iter = expr.get_children().iter();
-            //     if let Some(first) = iter.next() {
-            //         write!(f, "{}", first)?;
-            //         for child in iter {
-            //             write!(f, ", {}", child)?;
-            //         }
-            //     }
-            //     write!(f, "]")
-            // }
+            Self::Array(expr) => {
+                write!(f, "[")?;
+                let mut iter = expr.get_children().iter();
+                if let Some(first) = iter.next() {
+                    write!(f, "{}", first)?;
+                    for child in iter {
+                        write!(f, ", {}", child)?;
+                    }
+                }
+                write!(f, "]")
+            }
         }
     }
 }

@@ -20,16 +20,11 @@ impl Column {
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar => length as u8,
-            // TypeId::Vector => (length * size_of::<f64>() as usize) as u8,
+            TypeId::Vector => (length * size_of::<f64>()) as u8,
             _ => panic!("Cannot get size of invalid type"),
         }
     }
     pub fn new(column_name: &str, column_type: TypeId) -> Self {
-        // assert_ne!(
-        //     column_type,
-        //     TypeId::VarChar,
-        //     "Wrong constructor for VARCHAR type."
-        // );
         Column {
             column_name: column_name.to_string(),
             column_type,
