@@ -71,8 +71,8 @@ pub struct BPlusTreeLeafPage<K: KeyType, V: ValueType, C: KeyComparator<K>> {
 //     ///
 //     /// # Returns
 //     /// The string representation of all keys in the current leaf page.
-//     pub fn to_string(&self) -> String {
-//         let keys: Vec<String> = self.array.iter().map(|(key, _)| key.to_string()).collect();
+//     pub fn to_string(&self) -> string {
+//         let keys: Vec<string> = self.array.iter().map(|(key, _)| key.to_string()).collect();
 //         format!("({})", keys.join(","))
 //     }
 // }

@@ -109,10 +109,7 @@ mod unit_tests {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let table_oid = 1;
         let table_name = "test_table".to_string();
-        let filter_predicate = Some(Rc::new(Expression::Constant(ConstantExpression::new(
-            Value::from(true),
-            Column::new("test_column", TypeId::Integer),
-        ))));
+        let filter_predicate = Some(Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
 
         let seq_scan_node = SeqScanNode::new(
             schema,

@@ -70,7 +70,7 @@
 //         }
 //     }
 //
-//     pub fn plan_node_to_string(&self) -> String {
+//     pub fn plan_node_to_string(&self) -> string {
 //         match self {
 //             PlanNode::Filter(node) => {
 //                 format!("Filter {{ predicate={:?} }}", node.predicate)
