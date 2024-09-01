@@ -68,10 +68,10 @@ impl Expression {
 
     pub fn to_string(&self) -> String {
         match self {
-            Expression::Constant(expr) => format!("Constant({:?})", expr.get_value()),
-            Expression::ColumnRef(expr) => format!("ColumnRef({})", expr.get_column_index()),
-            Expression::Arithmetic(expr) => format!("({:?} {:?} {:?})", expr.get_left(), expr.get_op(), expr.get_right()),
-            Expression::Comparison(expr) => format!("({:?} {:?} {:?})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
+            Expression::Constant(expr) => format!("Constant({})", expr.get_value()),
+            Expression::ColumnRef(expr) => format!("{}", expr.get_column_index()),
+            Expression::Arithmetic(expr) => format!("(Col#{} {} Col#{})", expr.get_left(), expr.get_op(), expr.get_right()),
+            Expression::Comparison(expr) => format!("(Col#{} {} Col#{})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
         }
     }
 
@@ -93,7 +93,6 @@ impl Expression {
     }
 }
 
-// Implement Display for Expression
 impl Display for Expression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string())
@@ -117,6 +116,4 @@ mod unit_tests {
         assert_eq!(expr.get_children().len(), 0);
         assert_eq!(expr.to_string(), "Constant(Integer(42))");
     }
-
-    // Add more tests for other expression types and operations
 }

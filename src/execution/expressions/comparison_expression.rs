@@ -1,3 +1,4 @@
+use std::fmt;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
@@ -6,7 +7,7 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -81,7 +82,7 @@ impl ComparisonExpression {
 }
 
 impl Display for ComparisonType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ComparisonType::Equal => write!(f, "="),
             ComparisonType::NotEqual => write!(f, "!="),
@@ -98,7 +99,7 @@ mod unit_tests {
     use super::*;
 
     #[test]
-    fn test_comparison_expression() {
+    fn comparison_expression() {
         let schema = Schema::new(vec![
             Column::new("col1", TypeId::Integer),
             Column::new("col2", TypeId::Integer),

@@ -1,3 +1,5 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalogue::column::Column;
 
 #[derive(Debug, Clone)]
@@ -23,3 +25,8 @@ impl ColumnRefExpression {
     }
 }
 
+impl Display for ColumnRefExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+       write!(f, "Col#{}", self.column_index)
+    }
+}

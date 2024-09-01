@@ -196,7 +196,7 @@ mod unit_tests {
     use super::*;
 
     #[test]
-    fn test_arithmetic_expression() {
+    fn arithmetic_expression() {
         let schema = Schema::new(vec![
             Column::new("col1", TypeId::Integer),
             Column::new("col2", TypeId::Decimal),
@@ -209,7 +209,7 @@ mod unit_tests {
             schema.get_column(0).unwrap().clone()))
         );
         let col2 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
+            1,
             schema.get_column(1).unwrap().clone()))
         );
 

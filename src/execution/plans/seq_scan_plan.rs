@@ -101,7 +101,7 @@ impl From<SeqScanNode> for PlanNode {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]
