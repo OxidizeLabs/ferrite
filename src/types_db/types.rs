@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::types_db::bigint_type::BigIntType;
 use crate::types_db::boolean_type::BooleanType;
 use crate::types_db::decimal_type::DecimalType;
@@ -300,8 +301,8 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::SmallInt => 2,
         TypeId::Integer => 4,
         TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
-        TypeId::VarChar => 0,
-        _ => panic!(),
+        TypeId::VarChar | TypeId::Invalid => 0,
+        TypeId::Vector => size_of::<Rc<Vec<Value>>>() as u64,
     }
 }
 
