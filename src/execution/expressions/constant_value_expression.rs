@@ -1,4 +1,7 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalogue::column::Column;
+use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::types_db::value::{Val, Value};
 
 #[derive(Debug, Clone)]
@@ -21,5 +24,11 @@ impl ConstantExpression {
 
     pub fn get_ret_type(&self) -> &Column {
         &self.ret_type
+    }
+}
+
+impl Display for ConstantExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
     }
 }

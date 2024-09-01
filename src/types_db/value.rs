@@ -124,6 +124,18 @@ impl Type for Value {
         }
     }
 
+    fn compare_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (_l, _r) => (_l == _r).into()
+        }
+    }
+
+    fn compare_not_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (_l, _r) => (_l != _r).into()
+        }
+    }
+
     fn serialize_to(&self, _val: &Value, storage: &mut [u8]) {
         self.serialize_to(storage);
     }
