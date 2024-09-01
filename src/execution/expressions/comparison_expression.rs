@@ -1,14 +1,17 @@
-use std::fmt;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
-use crate::execution::expressions::abstract_expression::Expression;
+use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
-use crate::types_db::value::Value;
+use crate::types_db::value::{Val, Value};
+use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
+use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
+use crate::common::exception::ExpressionError;
+use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComparisonType {
@@ -26,16 +29,18 @@ pub struct ComparisonExpression {
     right: Rc<Expression>,
     comp_type: ComparisonType,
     ret_type: Column,
+    children: Vec<Rc<Expression>>
 }
 
 impl ComparisonExpression {
-    pub fn new(left: Rc<Expression>, right: Rc<Expression>, comp_type: ComparisonType) -> Self {
+    pub fn new(left: Rc<Expression>, right: Rc<Expression>, comp_type: ComparisonType, children: Vec<Rc<Expression>>) -> Self {
         let ret_type = Column::new("<val>", TypeId::Boolean);
         Self {
             left,
             right,
             comp_type,
             ret_type,
+            children
         }
     }
 
@@ -51,25 +56,7 @@ impl ComparisonExpression {
         self.comp_type
     }
 
-    pub fn get_ret_type(&self) -> &Column {
-        &self.ret_type
-    }
-
-    pub fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, String> {
-        let lhs = self.left.evaluate(tuple, schema)?;
-        let rhs = self.right.evaluate(tuple, schema)?;
-        let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        Ok(Value::new(comparison_result))
-    }
-
-    pub fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, String> {
-        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        Ok(Value::new(comparison_result))
-    }
-
-    fn perform_comparison(&self, lhs: &Value, rhs: &Value) -> Result<CmpBool, String> {
+    fn perform_comparison(&self, lhs: &Value, rhs: &Value) -> Result<CmpBool, ExpressionError> {
         match self.comp_type {
             ComparisonType::Equal => Ok(lhs.compare_equals(rhs)),
             ComparisonType::NotEqual => Ok(lhs.compare_not_equals(rhs)),
@@ -78,6 +65,48 @@ impl ComparisonExpression {
             ComparisonType::GreaterThan => Ok(lhs.compare_greater_than(rhs)),
             ComparisonType::GreaterThanOrEqual => Ok(lhs.compare_greater_than_equals(rhs)),
         }
+    }
+}
+
+impl ExpressionOps for ComparisonExpression {
+    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        let lhs = self.left.evaluate(tuple, schema)?;
+        let rhs = self.right.evaluate(tuple, schema)?;
+        let comparison_result = self.perform_comparison(&lhs, &rhs)?;
+        Ok(Value::new(comparison_result))
+    }
+
+    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let comparison_result = self.perform_comparison(&lhs, &rhs)?;
+        Ok(Value::new(comparison_result))
+    }
+
+    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+        &self.children[child_idx]
+    }
+
+    fn get_children(&self) -> &Vec<Rc<Expression>> {
+        &self.children
+    }
+
+    fn get_return_type(&self) -> &Column {
+        &self.ret_type
+    }
+
+    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
+        if children.len() != 2 {
+            panic!("ComparisonExpression requires exactly two children");
+        }
+
+        Rc::new(Expression::Comparison(ComparisonExpression {
+            left: children[0].clone(),
+            right: children[1].clone(),
+            ret_type: self.ret_type.clone(),
+            children,
+            comp_type: ComparisonType::Equal,
+        }))
     }
 }
 
@@ -107,28 +136,16 @@ mod unit_tests {
 
         let tuple = Tuple::new(vec![Value::new(5), Value::new(10)], schema.clone(), 0);
 
-        let col1 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
-            schema.get_column(0).unwrap().clone())));
+        let col1 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(0, schema.get_column(0).unwrap().clone(), vec![])));
 
-        let col2 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1,
-            schema.get_column(1).unwrap().clone())));
+        let col2 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(1, schema.get_column(1).unwrap().clone(), vec![])));
 
-        let less_than_expr = Expression::Comparison(ComparisonExpression::new(
-            col1.clone(),
-            col2.clone(),
-            ComparisonType::LessThan,
-        ));
+        let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
 
         let result = less_than_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(true));
 
-        let equal_expr = Expression::Comparison(ComparisonExpression::new(
-            col1,
-            col2,
-            ComparisonType::Equal,
-        ));
+        let equal_expr = Expression::Comparison(ComparisonExpression::new(col1, col2, ComparisonType::Equal, vec![]));
 
         let result = equal_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(false));
@@ -137,7 +154,3 @@ mod unit_tests {
         assert_eq!(equal_expr.to_string(), "(Col#0 = Col#1)");
     }
 }
-
-impl ComparisonExpression {}
-
-

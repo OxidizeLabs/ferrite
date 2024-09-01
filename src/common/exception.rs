@@ -1,6 +1,7 @@
 use crate::common::config::{FrameId, PageId};
 use std::error::Error;
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -31,6 +32,37 @@ pub enum PageError {
     InvalidOperation,
 }
 
+#[derive(Error, Debug)]
+pub enum ExpressionError {
+    #[error("Invalid type for StringExpression: expected VARCHAR")]
+    InvalidStringExpressionType,
+    #[error("Evaluation error: {0}")]
+    EvaluationError(String),
+    #[error("Array Expression error: {0}")]
+    Array(ArrayExpressionError),
+    #[error("Arithmetic error: {0}")]
+    ArithmeticError(ArithmeticExpressionError)
+}
+
+#[derive(Debug, Error)]
+pub enum ArrayExpressionError {
+    #[error("Vector value can only be constructed from decimal type")]
+    NonDecimalType,
+    #[error("Failed to evaluate child expression: {0}")]
+    ChildEvaluationError(String),
+    #[error("Failed to convert float to integer: {0}")]
+    FloatToIntConversionError(f64),
+}
+
+#[derive(Debug, Error)]
+pub enum ArithmeticExpressionError {
+    #[error("Unknown")]
+    Unknown,
+    #[error("Division by zero")]
+    DivisionByZero
+}
+
+
 #[derive(Debug)]
 pub struct PageGuardError;
 
@@ -38,8 +70,8 @@ impl Error for PageError {}
 
 impl Error for PageGuardError {}
 
-impl fmt::Display for PageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for PageError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PageError::InvalidOffset { offset, page_size } => {
                 write!(f, "Attempt to write out of bounds data at offset {} with length {}", offset, page_size)
@@ -66,10 +98,8 @@ impl fmt::Display for PageError {
     }
 }
 
-impl fmt::Display for PageGuardError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for PageGuardError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Page guard error")
     }
 }
-
-

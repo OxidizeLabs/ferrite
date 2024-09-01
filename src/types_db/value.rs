@@ -1,11 +1,9 @@
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
-
-use serde::{Deserialize, Serialize};
-
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool::{CmpFalse, CmpTrue};
 use crate::types_db::types::{get_type_size, CmpBool, Type};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
@@ -94,6 +92,18 @@ impl Type for Value {
         self.type_id_
     }
 
+    fn compare_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (_l, _r) => (_l == _r).into()
+        }
+    }
+
+    fn compare_not_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (_l, _r) => (_l != _r).into()
+        }
+    }
+
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Boolean(l), Val::Boolean(r)) => (l < r).into(),
@@ -121,18 +131,6 @@ impl Type for Value {
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l > r).into(),
             _ => CmpFalse,
-        }
-    }
-
-    fn compare_equals(&self, other: &Value) -> CmpBool {
-        match (&self.value_, &other.value_) {
-            (_l, _r) => (_l == _r).into()
-        }
-    }
-
-    fn compare_not_equals(&self, other: &Value) -> CmpBool {
-        match (&self.value_, &other.value_) {
-            (_l, _r) => (_l != _r).into()
         }
     }
 

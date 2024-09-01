@@ -11,7 +11,7 @@
 // use std::fmt::Debug;
 // use std::hash::Hash;
 // use std::marker::PhantomData;
-// use std::string::String;
+// use std::string::string;
 // use std::sync::Arc;
 // use std::vec::Vec;
 // use crate::common::config::PageId;
@@ -28,7 +28,7 @@
 // where
 //     C: Comparator<K>,
 // {
-//     index_name: String,
+//     index_name: string,
 //     bpm: Arc<BufferPoolManager>,
 //     cmp: C,
 //     hash_fn: HashFunction<K>,
@@ -59,7 +59,7 @@
 //     /// # Returns
 //     /// A new instance of `DiskExtendableHashTable`.
 //     pub fn new(
-//         name: String,
+//         name: string,
 //         bpm: Arc<BufferPoolManager>,
 //         cmp: C,
 //         hash_fn: HashFunction<K>,
