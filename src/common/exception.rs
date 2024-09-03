@@ -4,6 +4,28 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
 
+#[derive(Debug, PartialEq)]
+pub enum ComparisonError {
+    ValueRetrievalError(String),
+}
+
+#[derive(Debug)]
+pub enum KeyConversionError {
+    ColumnNotFound(String),
+    OffsetConversionError(String),
+    DeserializationError(String),
+}
+
+#[derive(Error, Debug)]
+pub enum TupleError {
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] bincode::Error),
+    #[error("Storage buffer is too small")]
+    BufferTooSmall,
+    #[error("Column not found: {0}")]
+    ColumnNotFound(usize),
+}
+
 #[derive(Error, Debug)]
 pub enum DeletePageError {
     #[error("Page {0} not found in page table")]
@@ -41,7 +63,7 @@ pub enum ExpressionError {
     #[error("Array Expression error: {0}")]
     Array(ArrayExpressionError),
     #[error("Arithmetic error: {0}")]
-    ArithmeticError(ArithmeticExpressionError)
+    ArithmeticError(ArithmeticExpressionError),
 }
 
 #[derive(Debug, Error)]
@@ -59,9 +81,8 @@ pub enum ArithmeticExpressionError {
     #[error("Unknown")]
     Unknown,
     #[error("Division by zero")]
-    DivisionByZero
+    DivisionByZero,
 }
-
 
 #[derive(Debug)]
 pub struct PageGuardError;
@@ -69,6 +90,8 @@ pub struct PageGuardError;
 impl Error for PageError {}
 
 impl Error for PageGuardError {}
+
+impl Error for KeyConversionError {}
 
 impl Display for PageError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -103,3 +126,14 @@ impl Display for PageGuardError {
         write!(f, "Page guard error")
     }
 }
+
+impl Display for KeyConversionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyConversionError::ColumnNotFound(msg) => write!(f, "Column not found: {}", msg),
+            KeyConversionError::OffsetConversionError(msg) => write!(f, "Offset conversion error: {}", msg),
+            KeyConversionError::DeserializationError(msg) => write!(f, "Deserialization error: {}", msg),
+        }
+    }
+}
+

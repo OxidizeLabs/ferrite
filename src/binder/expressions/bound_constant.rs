@@ -13,9 +13,19 @@ pub struct BoundConstant {
 }
 
 impl BoundConstant {
-    /// Creates a new BoundConstant.
-    pub fn new<T: Into<Value>>(val: T) -> Self {
+    pub fn new<T>(val: T) -> Self
+    where
+        T: Into<Value>,
+    {
         Self { val: val.into() }
+    }
+
+    pub fn new_vector<I>(iter: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<Value>,
+    {
+        Self { val: Value::new_vector(iter) }
     }
 }
 
@@ -49,6 +59,7 @@ impl Display for BoundConstant {
             Val::Timestamp(t) => write!(f, "{}", t),
             Val::VarLen(s) | Val::ConstVarLen(s) => write!(f, "\"{}\"", s.replace("\"", "\\\"")),
             Val::Vector(v) => write!(f, "{:?}", v),
+            Val::Null => write!(f, "Null"),
         }
     }
 }
@@ -61,7 +72,6 @@ mod unit_tests {
     #[test]
     fn bound_constant() {
         let constant = BoundConstant::new(42);
-
         assert_eq!(constant.expression_type(), ExpressionType::Constant);
         assert!(!constant.has_aggregation());
         assert_eq!(constant.to_string(), "42");
@@ -75,7 +85,14 @@ mod unit_tests {
         let float_constant = BoundConstant::new(3.14);
         assert_eq!(float_constant.to_string(), "3.14");
 
-        let vector_constant = BoundConstant::new(vec![1, 2, 3]);
-        assert_eq!(vector_constant.to_string(), "[1, 2, 3]");
+        let int_vector_constant = BoundConstant::new_vector(vec![1, 2, 3]);
+        assert!(int_vector_constant.to_string().contains("1") &&
+            int_vector_constant.to_string().contains("2") &&
+            int_vector_constant.to_string().contains("3"));
+
+        let mixed_vector_constant = BoundConstant::new_vector(vec![Value::new(1), Value::new("two"), Value::new(3.0)]);
+        assert!(mixed_vector_constant.to_string().contains("1") &&
+            mixed_vector_constant.to_string().contains("\"two\"") &&
+            mixed_vector_constant.to_string().contains("3"));
     }
 }

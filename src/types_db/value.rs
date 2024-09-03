@@ -1,9 +1,12 @@
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::CmpBool::{CmpFalse, CmpTrue};
 use crate::types_db::types::{get_type_size, CmpBool, Type};
-use serde::{Deserialize, Serialize};
-use std::fmt;
+use serde::de::{SeqAccess, Visitor};
+use serde::ser::{SerializeSeq, SerializeStruct};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Debug, Display, Formatter};
+use std::io::Write;
+use std::rc::Rc;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
@@ -16,7 +19,8 @@ pub enum Val {
     Timestamp(u64),
     VarLen(String),
     ConstVarLen(String),
-    Vector(Vec<i32>),
+    Vector(Rc<Vec<Value>>),
+    Null
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,12 +50,27 @@ impl Value {
             Val::Timestamp(_) => TypeId::Timestamp,
             Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
             Val::Vector(_) => TypeId::Vector,
+            Val::Null => TypeId::Invalid
         };
         Value {
             value_: val,
             size_: Size::Length(get_type_size(type_id) as usize),
             manage_data_: false,
-            type_id_: type_id,
+            type_id_: type_id
+        }
+    }
+
+    pub fn new_vector<I>(iter: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<Value>,
+    {
+        let vec: Vec<Value> = iter.into_iter().map(Into::into).collect();
+        Value {
+            value_: Val::Vector(Rc::new(vec.clone())),
+            size_: Size::Length(vec.len()),
+            manage_data_: false,
+            type_id_: TypeId::Vector,
         }
     }
 
@@ -70,19 +89,7 @@ impl Value {
             Val::Timestamp(_) => 8,
             Val::VarLen(s) | Val::ConstVarLen(s) => s.len() as u32,
             Val::Vector(v) => 4 + v.len() as u32 * 4,
-        }
-    }
-
-    pub fn serialize_to(&self, storage: &mut [u8]) {
-        self.value_.serialize_to(storage)
-    }
-
-    pub fn deserialize_from(storage: &[u8], type_id: TypeId) -> Self {
-        Value {
-            value_: Val::deserialize_from(storage, type_id),
-            size_: Size::Length(storage.len()),
-            manage_data_: false,
-            type_id_: type_id,
+            Val::Null => 1
         }
     }
 }
@@ -93,15 +100,11 @@ impl Type for Value {
     }
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
-        match (&self.value_, &other.value_) {
-            (_l, _r) => (_l == _r).into()
-        }
+        (self.value_ == other.value_).into()
     }
 
     fn compare_not_equals(&self, other: &Value) -> CmpBool {
-        match (&self.value_, &other.value_) {
-            (_l, _r) => (_l != _r).into()
-        }
+        (self.value_ != other.value_).into()
     }
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
@@ -115,7 +118,7 @@ impl Type for Value {
             (Val::Timestamp(l), Val::Timestamp(r)) => (l < r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l < r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l < r).into(),
-            _ => CmpFalse,
+            _ => CmpBool::CmpFalse,
         }
     }
 
@@ -130,87 +133,12 @@ impl Type for Value {
             (Val::Timestamp(l), Val::Timestamp(r)) => (l > r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l > r).into(),
-            _ => CmpFalse,
-        }
-    }
-
-    fn serialize_to(&self, _val: &Value, storage: &mut [u8]) {
-        self.serialize_to(storage);
-    }
-
-    fn deserialize_from(&self, storage: &mut [u8]) -> Value {
-        Value::deserialize_from(storage, self.type_id_)
-    }
-}
-
-impl Val {
-    pub fn serialize_to(&self, storage: &mut [u8]) {
-        match self {
-            Val::Boolean(b) => storage[0] = *b as u8,
-            Val::TinyInt(i) => storage[0] = *i as u8,
-            Val::SmallInt(i) => storage[..2].copy_from_slice(&i.to_le_bytes()),
-            Val::Integer(i) => storage[..4].copy_from_slice(&i.to_le_bytes()),
-            Val::BigInt(i) => storage[..8].copy_from_slice(&i.to_le_bytes()),
-            Val::Decimal(f) => storage[..8].copy_from_slice(&f.to_le_bytes()),
-            Val::Timestamp(t) => storage[..8].copy_from_slice(&t.to_le_bytes()),
-            Val::VarLen(s) | Val::ConstVarLen(s) => {
-                let bytes = s.as_bytes();
-                storage[..bytes.len()].copy_from_slice(bytes);
-            }
-            Val::Vector(v) => {
-                let len = v.len() as u32;
-                storage[..4].copy_from_slice(&len.to_le_bytes());
-                for (i, val) in v.iter().enumerate() {
-                    let start = 4 + i * 4;
-                    let end = start + 4;
-                    storage[start..end].copy_from_slice(&val.to_le_bytes());
-                }
-            }
-        }
-    }
-
-    pub fn deserialize_from(storage: &[u8], type_id: TypeId) -> Self {
-        match type_id {
-            TypeId::Boolean => Val::Boolean(storage[0] != 0),
-            TypeId::TinyInt => Val::TinyInt(storage[0] as i8),
-            TypeId::SmallInt => Val::SmallInt(i16::from_le_bytes([storage[0], storage[1]])),
-            TypeId::Integer => Val::Integer(i32::from_le_bytes([
-                storage[0], storage[1], storage[2], storage[3],
-            ])),
-            TypeId::BigInt => Val::BigInt(i64::from_le_bytes([
-                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
-                storage[7],
-            ])),
-            TypeId::Decimal => Val::Decimal(f64::from_le_bytes([
-                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
-                storage[7],
-            ])),
-            TypeId::Timestamp => Val::Timestamp(u64::from_le_bytes([
-                storage[0], storage[1], storage[2], storage[3], storage[4], storage[5], storage[6],
-                storage[7],
-            ])),
-            TypeId::VarChar => Val::VarLen(String::from_utf8_lossy(storage).to_string()),
-            TypeId::Vector => {
-                let len =
-                    u32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]]) as usize;
-                let mut v = Vec::with_capacity(len);
-                for i in 0..len {
-                    let start = 4 + i * 4;
-                    let _end = start + 4;
-                    v.push(i32::from_le_bytes([
-                        storage[start],
-                        storage[start + 1],
-                        storage[start + 2],
-                        storage[start + 3],
-                    ]));
-                }
-                Val::Vector(v)
-            }
-            _ => panic!("Unsupported type for deserialization"),
+            _ => CmpBool::CmpFalse,
         }
     }
 }
 
+// Implement From<T> for Val
 impl From<bool> for Val {
     fn from(b: bool) -> Self {
         Val::Boolean(b)
@@ -265,233 +193,167 @@ impl From<&str> for Val {
     }
 }
 
-impl From<Vec<i32>> for Val {
-    fn from(v: Vec<i32>) -> Self {
-        Val::Vector(v)
-    }
-}
-
-// Implement trait for each type conversion to Value
-pub trait ToValue {
-    fn to_value(self) -> Value;
-}
-
-impl ToValue for bool {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::Boolean(self),
-            size_: Size::Length(1),
-            manage_data_: false,
-            type_id_: TypeId::Boolean,
-        }
-    }
-}
-
-impl ToValue for i8 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::TinyInt(self),
-            size_: Size::Length(1),
-            manage_data_: false,
-            type_id_: TypeId::TinyInt,
-        }
-    }
-}
-
-impl ToValue for i16 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::SmallInt(self),
-            size_: Size::Length(2),
-            manage_data_: false,
-            type_id_: TypeId::SmallInt,
-        }
-    }
-}
-
-impl ToValue for i32 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::Integer(self),
-            size_: Size::Length(4),
-            manage_data_: false,
-            type_id_: TypeId::Integer,
-        }
-    }
-}
-
-impl ToValue for i64 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::BigInt(self),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::BigInt,
-        }
-    }
-}
-
-impl ToValue for f64 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::Decimal(self),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::Decimal,
-        }
-    }
-}
-
-impl ToValue for u64 {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::Timestamp(self),
-            size_: Size::Length(8),
-            manage_data_: false,
-            type_id_: TypeId::Timestamp,
-        }
-    }
-}
-
-impl ToValue for &str {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::VarLen(self.to_string()),
-            size_: Size::Length(self.len()),
-            manage_data_: false,
-            type_id_: TypeId::VarChar,
-        }
-    }
-}
-
-impl ToValue for Vec<i32> {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::Vector(self.clone()),
-            size_: Size::Length(4 + self.len() * 4), // 4 bytes for the length + 4 bytes per i32
-            manage_data_: false,
-            type_id_: TypeId::Vector,
-        }
-    }
-}
-
-impl ToValue for String {
-    fn to_value(self) -> Value {
-        Value {
-            value_: Val::VarLen(self.clone()),
-            size_: Size::Length(self.len()),
-            manage_data_: false,
-            type_id_: TypeId::VarChar,
-        }
-    }
-}
-
-impl From<bool> for Value {
-    fn from(b: bool) -> Self {
-        b.to_value()
-    }
-}
-
-impl From<i8> for Value {
-    fn from(i: i8) -> Self {
-        i.to_value()
-    }
-}
-
-impl From<i16> for Value {
-    fn from(i: i16) -> Self {
-        i.to_value()
-    }
-}
-
-impl From<i32> for Value {
-    fn from(i: i32) -> Self {
-        i.to_value()
-    }
-}
-
-impl From<i64> for Value {
-    fn from(i: i64) -> Self {
-        i.to_value()
-    }
-}
-
-impl From<f64> for Value {
-    fn from(d: f64) -> Self {
-        d.to_value()
-    }
-}
-
-impl From<u64> for Value {
-    fn from(t: u64) -> Self {
-        t.to_value()
-    }
-}
-
-impl From<&str> for Value {
-    fn from(data: &str) -> Self {
-        data.to_value()
-    }
-}
-
-impl From<Vec<i32>> for Value {
-    fn from(data: Vec<i32>) -> Self {
-        data.to_value()
-    }
-}
-
-impl From<String> for Value {
-    fn from(data: String) -> Self {
-        data.to_value()
-    }
-}
-
-impl From<bool> for CmpBool {
-    fn from(val: bool) -> Self {
-        if val {
-            CmpTrue
-        } else {
-            CmpFalse
-        }
+impl From<Vec<Value>> for Val {
+    fn from(v: Vec<Value>) -> Self {
+        Val::Vector(Rc::new(v))
     }
 }
 
 impl From<CmpBool> for Val {
     fn from(cmp_bool: CmpBool) -> Self {
         match cmp_bool {
-            CmpTrue => Val::Boolean(true),
-            CmpFalse => Val::Boolean(false),
-            CmpBool::CmpNull => Val::Boolean(false),
+            CmpBool::CmpTrue => Val::Boolean(true),
+            CmpBool::CmpFalse => Val::Boolean(false),
+            CmpBool::CmpNull => Val::Null
         }
     }
 }
 
-impl From<CmpBool> for Value {
-    fn from(cmp_bool: CmpBool) -> Self {
-        Value::new(Val::from(cmp_bool))
+// Implement From<T> for Value
+impl<T: Into<Val>> From<T> for Value {
+    fn from(t: T) -> Self {
+        Value::new(t)
     }
 }
 
-pub trait Serializable: Debug {
-    fn serialize_to(&self, storage: &mut [u8]);
-    fn deserialize_from(storage: &[u8]) -> Self
-    where
-        Self: Sized;
-}
 
-impl Serializable for i32 {
-    fn serialize_to(&self, storage: &mut [u8]) {
-        let bytes = self.to_le_bytes();
-        storage[..4].copy_from_slice(&bytes);
-    }
-
-    fn deserialize_from(storage: &[u8]) -> Self {
-        i32::from_le_bytes([storage[0], storage[1], storage[2], storage[3]])
-    }
-}
+// impl From<CmpBool> for Value {
+//     fn from(cmp_bool: CmpBool) -> Self {
+//         Value::new(match cmp_bool {
+//             CmpBool::CmpTrue => true,
+//             CmpBool::CmpFalse => false,
+//             CmpBool::CmpNull => false,
+//         })
+//     }
+// }
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.value_)
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn value_creation() {
+        let bool_val = Value::new(true);
+        assert_eq!(bool_val.get_type_id(), TypeId::Boolean);
+
+        let int_val = Value::new(42i32);
+        assert_eq!(int_val.get_type_id(), TypeId::Integer);
+
+        let string_val = Value::new("Hello");
+        assert_eq!(string_val.get_type_id(), TypeId::VarChar);
+
+        let vec_val = Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]);
+        assert_eq!(vec_val.get_type_id(), TypeId::Vector);
+    }
+
+    #[test]
+    fn tvalue_comparison() {
+        let val1 = Value::new(5);
+        let val2 = Value::new(10);
+        let val3 = Value::new(5);
+
+        assert_eq!(val1.compare_less_than(&val2), CmpBool::CmpTrue);
+        assert_eq!(val1.compare_greater_than(&val2), CmpBool::CmpFalse);
+        assert_eq!(val1.compare_equals(&val3), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn serialize_val() {
+        // Test serialization of different Val variants
+        let val_boolean = Val::Boolean(true);
+        let serialized_boolean = bincode::serialize(&val_boolean).expect("Serialization failed");
+        assert_eq!(serialized_boolean, vec![0, 0, 0, 0, 1]); // Check the binary representation as needed
+
+        let val_integer = Val::Integer(42);
+        let serialized_integer = bincode::serialize(&val_integer).expect("Serialization failed");
+        assert_eq!(serialized_integer, vec![3, 0, 0, 0, 42, 0, 0, 0]); // Adjust this to match the actual binary format
+
+        let val_string = Val::VarLen("Hello".to_string());
+        let serialized_string = bincode::serialize(&val_string).expect("Serialization failed");
+        assert_eq!(serialized_string, vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]); // Binary format for the string
+
+        let val_vector = Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]));
+        let serialized_vector = bincode::serialize(&val_vector).expect("Serialization failed");
+        // Adjust this based on the expected binary format
+    }
+
+    #[test]
+    fn deserialize_val() {
+        // Test deserialization of binary data into Val variants
+        let binary_boolean = vec![0, 0, 0, 0, 1];
+        let deserialized_boolean: Val = bincode::deserialize(&binary_boolean).expect("Deserialization failed");
+        assert_eq!(deserialized_boolean, Val::Boolean(true));
+
+        let binary_integer = vec![3, 0, 0, 0, 42, 0, 0, 0];
+        let deserialized_integer: Val = bincode::deserialize(&binary_integer).expect("Deserialization failed");
+        assert_eq!(deserialized_integer, Val::Integer(42));
+
+        let binary_string = vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111];
+        let deserialized_string: Val = bincode::deserialize(&binary_string).expect("Deserialization failed");
+        assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
+
+        let binary_vector = bincode::serialize(&Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))])))
+            .expect("Serialization failed");
+        let deserialized_vector: Val = bincode::deserialize(&binary_vector).expect("Deserialization failed");
+        assert_eq!(
+            deserialized_vector,
+            Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]))
+        );
+    }
+
+    #[test]
+    fn round_trip_val() {
+        // Round-trip test for Val serialization and deserialization
+        let original_val = Val::BigInt(123456789);
+        let serialized = bincode::serialize(&original_val).expect("Serialization failed");
+        let deserialized: Val = bincode::deserialize(&serialized).expect("Deserialization failed");
+        assert_eq!(original_val, deserialized);
+    }
+
+    #[test]
+    fn serialize_value() {
+        // Test serialization of Value struct
+        let value = Value {
+            value_: Val::Integer(42),
+            size_: Size::Length(4),
+            manage_data_: false,
+            type_id_: TypeId::Integer,
+        };
+        let serialized = bincode::serialize(&value).expect("Serialization failed");
+        // Add checks for expected binary representation
+    }
+
+    #[test]
+    fn deserialize_value() {
+        // Test deserialization of binary data into Value struct
+        let value = Value {
+            value_: Val::Integer(42),
+            size_: Size::Length(4),
+            manage_data_: false,
+            type_id_: TypeId::Integer, // Replace with an appropriate variant
+        };
+        let serialized = bincode::serialize(&value).expect("Serialization failed");
+        let deserialized_value: Value = bincode::deserialize(&serialized).expect("Deserialization failed");
+        assert_eq!(deserialized_value, value);
+    }
+
+    #[test]
+    fn round_trip_value() {
+        // Round-trip test for Value serialization and deserialization
+        let original_value = Value {
+            value_: Val::Decimal(123.456),
+            size_: Size::Length(8),
+            manage_data_: true,
+            type_id_: TypeId::Decimal, // Replace with an appropriate variant
+        };
+        let serialized = bincode::serialize(&original_value).expect("Serialization failed");
+        let deserialized: Value = bincode::deserialize(&serialized).expect("Deserialization failed");
+        assert_eq!(original_value, deserialized);
     }
 }

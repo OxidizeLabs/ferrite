@@ -3,7 +3,7 @@ use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
 use crate::container::hash_function::HashFunction;
 use crate::storage::index::b_plus_tree::BPlusTree;
-use crate::storage::index::generic_key::{GenericComparator, GenericKey};
+use crate::storage::index::generic_key::{Comparator, GenericKey};
 use crate::storage::index::index::IndexMetadata;
 use crate::storage::index::index_iterator::IndexIterator;
 use crate::storage::table::tuple::Tuple;
@@ -127,7 +127,7 @@ where
 pub const TWO_INTEGER_SIZE_B_TREE: usize = 8;
 pub type IntegerKeyTypeBTree = GenericKey<TWO_INTEGER_SIZE_B_TREE>;
 pub type IntegerValueTypeBTree = RID;
-pub type IntegerComparatorTypeBTree<'a> = GenericComparator;
+pub type IntegerComparatorTypeBTree<'a> = Comparator;
 pub type BPlusTreeIndexForTwoIntegerColumn<'a> = BPlusTreeIndex<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
 pub type BPlusTreeIndexIteratorForTwoIntegerColumn<'a> = IndexIterator<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
 pub type IntegerHashFunctionType = HashFunction<IntegerKeyTypeBTree>;

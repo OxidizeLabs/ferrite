@@ -15,7 +15,9 @@ pub enum TypeId {
     BigInt,
 }
 
-// fn main() {
-//     let type_id = TypeId::Integer;
-//     info!("{:?}", type_id);
-// }
+// Implement the Default trait for TypeId
+impl Default for TypeId {
+    fn default() -> Self {
+        TypeId::Invalid
+    }
+}

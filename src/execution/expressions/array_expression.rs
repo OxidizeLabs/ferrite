@@ -30,23 +30,24 @@ impl ArrayExpression {
     where
         F: FnMut(&Expression) -> Result<Value, ExpressionError>,
     {
-        let values: Result<Vec<i32>, ArrayExpressionError> = self.children
+        // Collect the evaluated values into a Vec<Value>
+        let values: Result<Vec<Value>, ArrayExpressionError> = self.children
             .iter()
             .map(|expr| {
                 let val = eval_func(expr).map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))?;
                 match val.get_value() {
                     Val::Decimal(d) => {
                         // Convert f64 to i32, handling potential loss of precision
-                        (d.round() as i32)
-                            .try_into()
-                            .map_err(|_| ArrayExpressionError::FloatToIntConversionError(*d))
+                        let rounded_value = (d.round() as i32);
+                        Ok(Value::new(Val::Integer(rounded_value))) // Convert to Val::Integer
                     }
                     _ => Err(ArrayExpressionError::NonDecimalType),
                 }
             })
             .collect();
 
-        values.map(|v| Value::new(Val::Vector(v)))
+        // If all values are successfully evaluated, return them wrapped in Val::Vector
+        values.map(|v| Value::new(Val::Vector(Rc::new(v))))
     }
 }
 
@@ -115,7 +116,10 @@ mod tests {
         let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
         if let Val::Vector(vec) = result.get_value() {
-            assert_eq!(vec, &[1, 2, 3]);
+            assert_eq!(vec.len(), 3);
+            assert_eq!(vec[0].get_value(), &Val::Integer(1));
+            assert_eq!(vec[1].get_value(), &Val::Integer(2));
+            assert_eq!(vec[2].get_value(), &Val::Integer(3));
         } else {
             panic!("Expected Vector value");
         }

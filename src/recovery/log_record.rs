@@ -117,7 +117,7 @@ impl LogRecord {
         let size = Self::HEADER_SIZE as i32
             + size_of::<RID>() as i32
             + size_of::<i32>() as i32
-            + tuple.get_length() as i32;
+            + tuple.get_length().unwrap() as i32;
         if log_record_type == LogRecordType::Insert {
             Self {
                 size,
@@ -182,8 +182,8 @@ impl LogRecord {
     ) -> Self {
         let size = Self::HEADER_SIZE as i32
             + size_of::<RID>() as i32
-            + old_tuple.get_length() as i32
-            + new_tuple.get_length() as i32
+            + old_tuple.get_length().unwrap() as i32
+            + new_tuple.get_length().unwrap() as i32
             + 2 * size_of::<i32>() as i32;
         Self {
             size,

@@ -1,6 +1,6 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
-use crate::storage::index::generic_key::{Comparator, GenericComparator, GenericKey};
+use crate::storage::index::generic_key::{Comparator, GenericKey};
 use crate::storage::page::page::{AsAny, Page, PageTrait};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::Any;
@@ -27,9 +27,9 @@ pub struct TypeErasedBucketPage {
 
 pub trait BucketPageTrait: PageTrait + AsAny + Send + Sync {
     fn get_key_size(&self) -> usize;
-    fn lookup(&self, key: &[u8], comparator: &GenericComparator) -> Option<PageId>;
-    fn insert(&mut self, key: &[u8], value: PageId, comparator: &GenericComparator) -> bool;
-    fn remove(&mut self, key: &[u8], comparator: &GenericComparator) -> bool;
+    fn lookup(&self, key: &[u8], comparator: &Comparator) -> Option<PageId>;
+    fn insert(&mut self, key: &[u8], value: PageId, comparator: &Comparator) -> bool;
+    fn remove(&mut self, key: &[u8], comparator: &Comparator) -> bool;
     fn is_full(&self) -> bool;
     fn is_empty(&self) -> bool;
     fn get_size(&self) -> u16;
@@ -59,10 +59,10 @@ impl<const KEY_SIZE: usize> ExtendableHTableBucketPage<KEY_SIZE> {
         self.array.resize(self.max_size as usize, None);
     }
 
-    pub fn lookup(&self, key: &GenericKey<KEY_SIZE>, comparator: &GenericComparator) -> Option<PageId> {
+    pub fn lookup(&self, key: &GenericKey<KEY_SIZE>, comparator: &Comparator) -> Option<PageId> {
         for entry in self.array.iter().take(self.size as usize) {
             if let Some((k, v)) = entry {
-                if comparator.compare(k, key) == Ordering::Equal {
+                if comparator.compare(k, key) == Ok(Ordering::Equal) {
                     return Some(*v);
                 }
             }
@@ -70,7 +70,7 @@ impl<const KEY_SIZE: usize> ExtendableHTableBucketPage<KEY_SIZE> {
         None
     }
 
-    pub fn insert(&mut self, key: GenericKey<KEY_SIZE>, value: PageId, comparator: &GenericComparator) -> bool {
+    pub fn insert(&mut self, key: GenericKey<KEY_SIZE>, value: PageId, comparator: &Comparator) -> bool {
         if self.is_full() {
             return false;
         }
@@ -82,9 +82,9 @@ impl<const KEY_SIZE: usize> ExtendableHTableBucketPage<KEY_SIZE> {
         true
     }
 
-    pub fn remove(&mut self, key: &GenericKey<KEY_SIZE>, comparator: &GenericComparator) -> bool {
+    pub fn remove(&mut self, key: &GenericKey<KEY_SIZE>, comparator: &Comparator) -> bool {
         if let Some(index) = (0..self.size as usize)
-            .find(|&i| self.array[i].as_ref().map_or(false, |(k, _)| comparator.compare(k, key) == std::cmp::Ordering::Equal))
+            .find(|&i| self.array[i].as_ref().map_or(false, |(k, _)| comparator.compare(k, key) == Ok(Ordering::Equal)))
         {
             self.array[index] = None;
             self.array[index..self.size as usize].rotate_left(1);
@@ -181,17 +181,17 @@ impl<const KEY_SIZE: usize> BucketPageTrait for ExtendableHTableBucketPage<KEY_S
         KEY_SIZE
     }
 
-    fn lookup(&self, key: &[u8], comparator: &GenericComparator) -> Option<PageId> {
+    fn lookup(&self, key: &[u8], comparator: &Comparator) -> Option<PageId> {
         let generic_key = GenericKey::<KEY_SIZE>::from_bytes(key);
         self.lookup(&generic_key, comparator)
     }
 
-    fn insert(&mut self, key: &[u8], value: PageId, comparator: &GenericComparator) -> bool {
+    fn insert(&mut self, key: &[u8], value: PageId, comparator: &Comparator) -> bool {
         let generic_key = GenericKey::<KEY_SIZE>::from_bytes(key);
         self.insert(generic_key, value, comparator)
     }
 
-    fn remove(&mut self, key: &[u8], comparator: &GenericComparator) -> bool {
+    fn remove(&mut self, key: &[u8], comparator: &Comparator) -> bool {
         let generic_key = GenericKey::<KEY_SIZE>::from_bytes(key);
         self.remove(&generic_key, comparator)
     }

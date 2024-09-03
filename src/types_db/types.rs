@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use crate::types_db::bigint_type::BigIntType;
 use crate::types_db::boolean_type::BooleanType;
 use crate::types_db::decimal_type::DecimalType;
@@ -7,9 +6,12 @@ use crate::types_db::smallint_type::SmallIntType;
 use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{ToValue, Value};
+use crate::types_db::value::Val::Null;
+use crate::types_db::value::Value;
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
+use std::mem::size_of;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CmpBool {
@@ -30,28 +32,17 @@ pub trait Type {
             | TypeId::SmallInt
             | TypeId::Integer
             | TypeId::BigInt
-            | TypeId::Decimal => match type_id {
-                TypeId::TinyInt
-                | TypeId::SmallInt
-                | TypeId::Integer
-                | TypeId::BigInt
-                | TypeId::Decimal
-                | TypeId::VarChar => true,
-                _ => false,
-            },
+            | TypeId::Decimal => matches!(type_id,
+                TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer |
+                TypeId::BigInt | TypeId::Decimal | TypeId::VarChar
+            ),
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
-            TypeId::VarChar => match type_id {
-                TypeId::Boolean
-                | TypeId::TinyInt
-                | TypeId::SmallInt
-                | TypeId::Integer
-                | TypeId::BigInt
-                | TypeId::Decimal
-                | TypeId::Timestamp
-                | TypeId::VarChar => true,
-                _ => false,
-            },
-            _ => type_id == self.get_type_id(),
+            TypeId::VarChar => matches!(type_id,
+                TypeId::Boolean | TypeId::TinyInt | TypeId::SmallInt |
+                TypeId::Integer | TypeId::BigInt | TypeId::Decimal |
+                TypeId::Timestamp | TypeId::VarChar
+            ),
+            TypeId::Vector => matches!(type_id, TypeId::Vector)
         }
     }
     fn get_min_value(type_id: TypeId) -> Value
@@ -59,15 +50,16 @@ pub trait Type {
         Self: Sized,
     {
         match type_id {
-            TypeId::Boolean => false.to_value(),
-            TypeId::TinyInt => i8::MIN.to_value(),
-            TypeId::SmallInt => i16::MIN.to_value(),
-            TypeId::Integer => i32::MIN.to_value(),
-            TypeId::BigInt => i64::MIN.to_value(),
-            TypeId::Decimal => f64::MIN.to_value(),
-            TypeId::Timestamp => 0_u64.to_value(),
-            TypeId::VarChar => "".to_value(),
-            _ => panic!(),
+            TypeId::Boolean => Value::from(false),
+            TypeId::TinyInt => Value::from(i8::MIN),
+            TypeId::SmallInt => Value::from(i16::MIN),
+            TypeId::Integer => Value::from(i32::MIN),
+            TypeId::BigInt => Value::from(i64::MIN),
+            TypeId::Decimal => Value::from(f64::MIN),
+            TypeId::Timestamp => Value::from(0_u64),
+            TypeId::VarChar => Value::from(""),
+            TypeId::Invalid => Value::from(Null),
+            _ => panic!("Invalid type for min value"),
         }
     }
     fn get_max_value(type_id: TypeId) -> Value
@@ -75,15 +67,16 @@ pub trait Type {
         Self: Sized,
     {
         match type_id {
-            TypeId::Boolean => true.to_value(),
-            TypeId::TinyInt => i8::MAX.to_value(),
-            TypeId::SmallInt => i16::MAX.to_value(),
-            TypeId::Integer => i32::MAX.to_value(),
-            TypeId::BigInt => i64::MAX.to_value(),
-            TypeId::Decimal => f64::MAX.to_value(),
-            TypeId::Timestamp => u64::MAX.to_value(),
-            TypeId::VarChar => "".to_value(),
-            _ => panic!(),
+            TypeId::Boolean => Value::from(true),
+            TypeId::TinyInt => Value::from(i8::MAX),
+            TypeId::SmallInt => Value::from(i16::MAX),
+            TypeId::Integer => Value::from(i32::MAX),
+            TypeId::BigInt => Value::from(i64::MAX),
+            TypeId::Decimal => Value::from(f64::MAX),
+            TypeId::Timestamp => Value::from(u64::MAX),
+            TypeId::VarChar => Value::from(""),
+            TypeId::Invalid => Value::from(Null),
+            _ => panic!("Invalid type for max value"),
         }
     }
     fn compare_equals(&self, _other: &Value) -> CmpBool {
@@ -128,7 +121,7 @@ pub trait Type {
     fn sqrt(&self, _val: &Value) -> Value {
         unimplemented!()
     }
-    fn operate_null(&self, _val: &Value, _right: &Value) -> Value {
+    fn operate_null(&self, _left: &Value, _right: &Value) -> Value {
         unimplemented!()
     }
     fn is_zero(&self, _val: &Value) -> bool {
@@ -138,10 +131,8 @@ pub trait Type {
         unimplemented!()
     }
     fn to_string(&self, _val: &Value) -> String {
-        unimplemented!()
+        "INVALID".to_string()
     }
-    fn serialize_to(&self, val: &Value, storage: &mut [u8]);
-    fn deserialize_from(&self, storage: &mut [u8]) -> Value;
     fn copy(&self, _val: &Value) -> Value {
         unimplemented!()
     }
@@ -160,123 +151,15 @@ impl Type for InvalidType {
     fn get_type_id(&self) -> TypeId {
         TypeId::Invalid
     }
+}
 
-    fn compare_equals(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn compare_not_equals(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn compare_less_than(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn compare_less_than_equals(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn compare_greater_than(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn compare_greater_than_equals(&self, _other: &Value) -> CmpBool {
-        // Implement comparison logic
-        unimplemented!()
-    }
-
-    fn add(&self, _other: &Value) -> Value {
-        // Implement addition logic
-        unimplemented!()
-    }
-
-    fn subtract(&self, _other: &Value) -> Value {
-        // Implement subtraction logic
-        unimplemented!()
-    }
-
-    fn multiply(&self, _other: &Value) -> Value {
-        // Implement multiplication logic
-        unimplemented!()
-    }
-
-    fn divide(&self, _other: &Value) -> Value {
-        // Implement division logic
-        unimplemented!()
-    }
-
-    fn modulo(&self, _other: &Value) -> Value {
-        // Implement modulo logic
-        unimplemented!()
-    }
-
-    fn min(&self, _other: &Value) -> Value {
-        // Implement min logic
-        unimplemented!()
-    }
-
-    fn max(&self, _other: &Value) -> Value {
-        // Implement max logic
-        unimplemented!()
-    }
-
-    fn sqrt(&self, _val: &Value) -> Value {
-        // Implement sqrt logic
-        unimplemented!()
-    }
-
-    fn operate_null(&self, _val: &Value, _right: &Value) -> Value {
-        // Implement null operation logic
-        unimplemented!()
-    }
-
-    fn is_zero(&self, _val: &Value) -> bool {
-        // Implement is_zero logic
-        unimplemented!()
-    }
-
-    fn is_inlined(&self, _val: &Value) -> bool {
-        // Implement is_inlined logic
-        unimplemented!()
-    }
-
-    fn to_string(&self, _val: &Value) -> String {
-        // Implement to_string logic
-        unimplemented!()
-    }
-
-    fn serialize_to(&self, _val: &Value, _storage: &mut [u8]) {
-        unimplemented!()
-    }
-
-    fn deserialize_from(&self, _storage: &mut [u8]) -> Value {
-        unimplemented!()
-    }
-
-    fn copy(&self, _val: &Value) -> Value {
-        // Implement copy logic
-        unimplemented!()
-    }
-
-    fn cast_as(&self, _val: &Value, _type_id: TypeId) -> Value {
-        // Implement cast logic
-        unimplemented!()
-    }
-
-    fn get_data(&self, _val: &Value) -> &[u8] {
-        // Implement get_data logic
-        unimplemented!()
-    }
-
-    fn get_storage_size(&self, _val: &Value) -> u32 {
-        // Implement get_storage_size logic
-        unimplemented!()
+impl From<bool> for CmpBool {
+    fn from(b: bool) -> Self {
+        if b {
+            CmpBool::CmpTrue
+        } else {
+            CmpBool::CmpFalse
+        }
     }
 }
 
@@ -332,3 +215,58 @@ static VARLEN_TYPE_INSTANCE: VarCharType = VarCharType;
 static TIMESTAMP_TYPE_INSTANCE: TimestampType = TimestampType;
 static VECTOR_TYPE_INSTANCE: VectorType = VectorType;
 static INVALID_TYPE_INSTANCE: InvalidType = InvalidType;
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_cmp_bool_from_bool() {
+        assert_eq!(CmpBool::from(true), CmpBool::CmpTrue);
+        assert_eq!(CmpBool::from(false), CmpBool::CmpFalse);
+    }
+
+    #[test]
+    fn test_get_min_value() {
+        assert_eq!(BooleanType::get_min_value(TypeId::Boolean), Value::from(false));
+        assert_eq!(TinyIntType::get_min_value(TypeId::TinyInt), Value::from(i8::MIN));
+        assert_eq!(IntegerType::get_min_value(TypeId::Integer), Value::from(i32::MIN));
+    }
+
+    #[test]
+    fn test_get_max_value() {
+        assert_eq!(BooleanType::get_max_value(TypeId::Boolean), Value::from(true));
+        assert_eq!(TinyIntType::get_max_value(TypeId::TinyInt), Value::from(i8::MAX));
+        assert_eq!(IntegerType::get_max_value(TypeId::Integer), Value::from(i32::MAX));
+    }
+
+    #[test]
+    fn test_is_coercible_from() {
+        let int_type = get_instance(TypeId::Integer);
+        assert_eq!(int_type.is_coercible_from(TypeId::SmallInt), true);
+        assert_eq!(int_type.is_coercible_from(TypeId::TinyInt), true);
+        assert_eq!(int_type.is_coercible_from(TypeId::Boolean), false);
+    }
+
+    #[test]
+    fn test_get_type_size() {
+        assert_eq!(get_type_size(TypeId::Boolean), 1);
+        assert_eq!(get_type_size(TypeId::Integer), 4);
+        assert_eq!(get_type_size(TypeId::BigInt), 8);
+    }
+
+    #[test]
+    fn test_type_id_to_string() {
+        assert_eq!(type_id_to_string(TypeId::Boolean), "Boolean");
+        assert_eq!(type_id_to_string(TypeId::Integer), "Integer");
+        assert_eq!(type_id_to_string(TypeId::VarChar), "VarChar");
+    }
+
+    #[test]
+    fn test_invalid_type() {
+        let invalid_type = InvalidType;
+        assert_eq!(invalid_type.get_type_id(), TypeId::Invalid);
+        assert_eq!(invalid_type.is_coercible_from(TypeId::Integer), false);
+        assert_eq!(invalid_type.to_string(&Value::from(1)), "INVALID");
+    }
+}
