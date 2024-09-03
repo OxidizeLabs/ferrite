@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use sqlparser::ast::Delete;
 use crate::catalogue::schema::Schema;
+use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::hash_join_plan::HashJoinNode;
 use crate::execution::plans::index_scan_plan::IndexScanNode;
@@ -50,7 +51,7 @@ pub enum PlanNode {
     // Insert(InsertNode),
     // Update(UpdateNode),
     // Delete(DeleteNode),
-    // Aggregation(AggregationPlanNode),
+    Aggregation(AggregationPlanNode),
     // Limit(LimitNode),
     // NestedLoopJoin(NestedLoopJoinNode),
     // NestedIndexJoin(NestedIndexJoinNode),
@@ -61,7 +62,7 @@ pub enum PlanNode {
     // Sort(SortNode),
     // TopN(TopNNode),
     // TopNPerGroup(TopNPerGroupNode),
-    // MockScan(MockScanNode),
+    MockScan(MockScanNode),
     // Window(WindowNode)
 }
 
@@ -81,7 +82,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::IndexScan(node) => &node.get_output_schema(),
             // PlanNode::NestedLoopJoin(node) => &node.get_output_schema(),
             // PlanNode::Filter(node) => &node.get_output_schema(),
-            // PlanNode::Aggregation(node) => &node.get_output_schema(),
+            PlanNode::Aggregation(node) => &node.get_output_schema(),
             // PlanNode::Insert(node) => &node.get_output_schema(),
             // PlanNode::Update(node) => &node.get_output_schema(),
             // PlanNode::Delete(node) => &node.get_output_schema(),
@@ -93,7 +94,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::Sort(node) => &node.get_output_schema(),
             // PlanNode::TopN(node) => &node.get_output_schema(),
             // PlanNode::TopNPerGroup(node) => &node.get_output_schema(),
-            // PlanNode::MockScan(node) => &node.get_output_schema(),
+            PlanNode::MockScan(node) => &node.get_output_schema(),
             // PlanNode::Window(node) => &node.get_output_schema(),
         }
     }
@@ -107,7 +108,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::Insert(node) => &node.get_children(),
             // PlanNode::Update(node) => &node.get_children(),
             // PlanNode::Delete(node) => &node.get_children(),
-            // PlanNode::Aggregation(node) => &node.get_children(),
+            PlanNode::Aggregation(node) => &node.get_children(),
             // PlanNode::Limit(node) => &node.get_children(),
             // PlanNode::NestedIndexJoin(node) => &node.get_children(),
             // PlanNode::HashJoin(node) => &node.get_children(),
@@ -116,7 +117,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::Sort(node) => &node.get_children(),
             // PlanNode::TopN(node) => &node.get_children(),
             // PlanNode::TopNPerGroup(node) => &node.get_children(),
-            // PlanNode::MockScan(node) => &node.get_children(),
+            PlanNode::MockScan(node) => &node.get_children(),
             // PlanNode::Window(node) => &node.get_children(),
         }
     }
@@ -127,7 +128,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::IndexScan(_) => PlanType::IndexScan,
             // PlanNode::NestedLoopJoin(_) => PlanType::NestedLoopJoin,
             // PlanNode::Filter(_) => PlanType::Filter,
-            // PlanNode::Aggregation(_) => PlanType::Aggregation,
+            PlanNode::Aggregation(_) => PlanType::Aggregation,
             // PlanNode::Insert(_) => PlanType::Insert,
             // PlanNode::Update(_) => PlanType::Update,
             // PlanNode::Delete(_) => PlanType::Delete,
@@ -139,7 +140,7 @@ impl AbstractPlanNode for PlanNode {
             // PlanNode::Sort(_) => PlanType::Sort,
             // PlanNode::TopN(_) => PlanType::TopN,
             // PlanNode::TopNPerGroup(_) => PlanType::TopNPerGroup,
-            // PlanNode::MockScan(_) => PlanType::MockScan,
+            PlanNode::MockScan(_) => PlanType::MockScan,
             // PlanNode::Window(_) => PlanType::Window,
         }
     }

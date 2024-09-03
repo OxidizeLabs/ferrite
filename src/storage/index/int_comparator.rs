@@ -1,4 +1,3 @@
-use crate::storage::index::generic_key::Comparator;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 
@@ -15,7 +14,7 @@ impl IntComparator {
     }
 }
 
-impl Comparator<i32> for IntComparator {
+impl IntComparator {
     /// Compares two integers.
     ///
     /// # Parameters

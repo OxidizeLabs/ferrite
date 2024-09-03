@@ -4,7 +4,7 @@ use crate::common::exception::DeletePageError;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::b_plus_tree_index::KeyComparator;
-use crate::storage::index::generic_key::{Comparator, GenericComparator, GenericKey};
+use crate::storage::index::generic_key::{Comparator, GenericKey};
 use crate::storage::page::page::PageType::{ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader};
 use crate::storage::page::page::{Page, PageTrait, PageType};
 use crate::storage::page::page_guard::PageGuard;

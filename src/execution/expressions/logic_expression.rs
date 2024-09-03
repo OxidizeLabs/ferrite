@@ -149,6 +149,7 @@ impl Display for LogicType {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::types_db::value::Val::Null;
     use super::*;
 
     #[test]
@@ -187,7 +188,7 @@ mod unit_tests {
         let tuple = Tuple::new(vec![], schema.clone(), 0);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result, Value::from(false));
+        assert_eq!(result, Value::from(Null));
     }
 
     #[test]
