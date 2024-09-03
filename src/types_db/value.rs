@@ -3,10 +3,10 @@ use crate::types_db::types::{get_type_size, CmpBool, Type};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Write;
 use std::rc::Rc;
-use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
@@ -20,7 +20,7 @@ pub enum Val {
     VarLen(String),
     ConstVarLen(String),
     Vector(Rc<Vec<Value>>),
-    Null
+    Null,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ impl Value {
             value_: val,
             size_: Size::Length(get_type_size(type_id) as usize),
             manage_data_: false,
-            type_id_: type_id
+            type_id_: type_id,
         }
     }
 

@@ -1,25 +1,9 @@
-use std::rc::Rc;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use sqlparser::ast::Delete;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
-use crate::execution::plans::delete_plan::DeleteNode;
-use crate::execution::plans::hash_join_plan::HashJoinNode;
-use crate::execution::plans::index_scan_plan::IndexScanNode;
-use crate::execution::plans::insert_plan::InsertNode;
-use crate::execution::plans::limit_plan::LimitNode;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
-use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
-use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::execution::plans::seq_scan_plan::SeqScanNode;
-use crate::execution::plans::sort_plan::SortNode;
-use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
-use crate::execution::plans::topn_plan::TopNNode;
-use crate::execution::plans::update_plan::UpdateNode;
-use crate::execution::plans::values_plan::ValuesNode;
-use crate::execution::plans::window_plan::WindowNode;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {

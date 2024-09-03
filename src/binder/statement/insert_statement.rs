@@ -1,12 +1,12 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
 use crate::binder::bound_statement::BoundStatement;
 use crate::binder::bound_table_ref::BoundTableRef;
-use crate::common::statement_type::StatementType;
 use crate::binder::bound_table_ref::TableReferenceType;
 use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::binder::statement::select_statement::SelectStatement;
+use crate::common::statement_type::StatementType;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 
 /// Represents a bound INSERT statement in SQL.
 #[derive(Clone)]

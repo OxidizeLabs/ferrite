@@ -1,12 +1,11 @@
 use crate::catalogue::schema::Schema;
-use crate::container::hash_function::HashFunction;
+use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
-use crate::execution::expressions::abstract_expression::Expression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggregationType {

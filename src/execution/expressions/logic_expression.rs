@@ -25,18 +25,18 @@ pub struct LogicExpression {
     right: Rc<Expression>,
     logic_type: LogicType,
     ret_type: Column,
-    children: Vec<Rc<Expression>>
+    children: Vec<Rc<Expression>>,
 }
 
 impl LogicExpression {
-    pub fn new(left: Rc<Expression>, right: Rc<Expression>, logic_type: LogicType, children: Vec<Rc<Expression>>
+    pub fn new(left: Rc<Expression>, right: Rc<Expression>, logic_type: LogicType, children: Vec<Rc<Expression>>,
     ) -> Self {
         Self {
             left,
             right,
             logic_type,
             ret_type: Column::new("logic_result", TypeId::Boolean),
-            children
+            children,
         }
     }
 
@@ -132,7 +132,7 @@ impl ExpressionOps for LogicExpression {
             right: children[1].clone(),
             ret_type: self.ret_type.clone(),
             children,
-            logic_type: self.logic_type
+            logic_type: self.logic_type,
         }))
     }
 }

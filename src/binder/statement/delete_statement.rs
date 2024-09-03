@@ -1,11 +1,11 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::{Debug, Formatter, Display};
 use crate::binder::bound_expression::BoundExpression;
 use crate::binder::bound_statement::BoundStatement;
+use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
 use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::common::statement_type::StatementType;
-use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 
 /// Represents a DELETE statement in SQL.
 pub struct DeleteStatement {

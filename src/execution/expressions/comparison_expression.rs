@@ -29,7 +29,7 @@ pub struct ComparisonExpression {
     right: Rc<Expression>,
     comp_type: ComparisonType,
     ret_type: Column,
-    children: Vec<Rc<Expression>>
+    children: Vec<Rc<Expression>>,
 }
 
 impl ComparisonExpression {
@@ -40,7 +40,7 @@ impl ComparisonExpression {
             right,
             comp_type,
             ret_type,
-            children
+            children,
         }
     }
 

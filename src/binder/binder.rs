@@ -392,7 +392,7 @@ impl Binder {
             Expr::Identifier(ident) => Ok(Box::new(BoundColumnRef::new(vec![ident.value.clone()]))),
             Expr::CompoundIdentifier(idents) => {
                 let col_name = idents.iter().map(|i| i.value.clone()).collect();
-                Ok(Box::new(BoundColumnRef::new(col_name, )))
+                Ok(Box::new(BoundColumnRef::new(col_name)))
             }
             Expr::Value(value) => {
                 let db_value = self.sql_value_to_db_value(value)?;

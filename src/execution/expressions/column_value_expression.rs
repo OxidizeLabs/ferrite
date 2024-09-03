@@ -22,7 +22,7 @@ impl ColumnRefExpression {
         Self {
             column_index,
             ret_type,
-            children
+            children,
         }
     }
 
@@ -73,6 +73,6 @@ impl ExpressionOps for ColumnRefExpression {
 
 impl Display for ColumnRefExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-       write!(f, "Col#{}", self.column_index)
+        write!(f, "Col#{}", self.column_index)
     }
 }
