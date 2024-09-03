@@ -25,7 +25,7 @@ pub struct ArithmeticExpression {
     right: Rc<Expression>,
     op: ArithmeticOp,
     ret_type: Column,
-    children: Vec<Rc<Expression>>
+    children: Vec<Rc<Expression>>,
 }
 
 impl ArithmeticExpression {
@@ -36,7 +36,7 @@ impl ArithmeticExpression {
             right,
             op,
             ret_type,
-            children
+            children,
         }
     }
 
@@ -136,7 +136,6 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Divide => l.checked_div(*r),
                 };
                 result.map(Value::from).ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
-
             }
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -242,7 +241,7 @@ mod unit_tests {
             col1.clone(),
             col2.clone(),
             ArithmeticOp::Add,
-            vec![]
+            vec![],
         ));
 
         let result = add_expr.evaluate(&tuple, &schema).unwrap();
@@ -252,7 +251,7 @@ mod unit_tests {
             col1,
             col2,
             ArithmeticOp::Multiply,
-            vec![]
+            vec![],
         ));
 
         let result = mul_expr.evaluate(&tuple, &schema).unwrap();

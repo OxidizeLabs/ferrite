@@ -1,7 +1,7 @@
+use crate::types_db::type_id::TypeId;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use serde::{Deserialize, Serialize};
-use crate::types_db::type_id::TypeId;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {

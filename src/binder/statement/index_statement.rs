@@ -1,14 +1,14 @@
-use std::fmt;
-use std::any::Any;
-use std::fmt::Display;
-use crate::binder::bound_statement::BoundStatement;
-use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
-use crate::binder::expressions::bound_column_ref::BoundColumnRef;
-use crate::common::statement_type::StatementType;
 use crate::binder::bound_statement::AnyBoundStatement;
-use crate::catalogue::schema::Schema;
+use crate::binder::bound_statement::BoundStatement;
+use crate::binder::expressions::bound_column_ref::BoundColumnRef;
+use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalogue::column::Column;
+use crate::catalogue::schema::Schema;
+use crate::common::statement_type::StatementType;
 use crate::types_db::type_id::TypeId;
+use std::any::Any;
+use std::fmt;
+use std::fmt::Display;
 
 /// Represents a bound CREATE INDEX statement.
 #[derive(Debug)]
@@ -100,12 +100,11 @@ impl Display for IndexStatement {
 
 #[cfg(test)]
 mod unit_tests {
-
     use super::*;
 
     #[test]
     fn index_statement_creation() {
-        let schema= Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
 
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
@@ -124,7 +123,7 @@ mod unit_tests {
 
     #[test]
     fn index_statement_display() {
-        let schema= Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
             Box::new(BoundBaseTableRef::new("users".to_string(), 0, None, schema)),
@@ -143,7 +142,7 @@ mod unit_tests {
 
     #[test]
     fn index_statement_bound_statement() {
-        let schema= Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
             Box::new(BoundBaseTableRef::new("users".to_string(), 0, None, schema)),

@@ -46,7 +46,8 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.evaluate(tuple, schema),
             Self::String(expr) => expr.evaluate(tuple, schema),
             Self::Array(expr) => expr.evaluate(tuple, schema),
-        } }
+        }
+    }
 
     fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
         match self {

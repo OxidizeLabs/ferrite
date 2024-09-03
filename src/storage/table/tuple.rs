@@ -1,10 +1,10 @@
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
-use bincode::{serialize, deserialize, serialized_size};
+use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::exception::TupleError;
-use crate::types_db::value::Value;
 use crate::types_db::type_id::TypeId;
-use crate::catalogue::column::Column;
+use crate::types_db::value::Value;
+use bincode::{deserialize, serialize, serialized_size};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TupleMeta {
@@ -113,7 +113,7 @@ impl<'de> Deserialize<'de> for Tuple {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::{self, Visitor, SeqAccess, MapAccess};
+        use serde::de::{self, MapAccess, SeqAccess, Visitor};
 
         struct TupleVisitor;
 

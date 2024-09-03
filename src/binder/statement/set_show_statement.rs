@@ -1,8 +1,8 @@
-use std::fmt;
-use std::any::Any;
-use std::fmt::{Display, Formatter};
 use crate::binder::bound_statement::BoundStatement;
 use crate::common::statement_type::StatementType;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 /// Represents a bound VARIABLE SET statement.
 #[derive(Debug, Clone)]
