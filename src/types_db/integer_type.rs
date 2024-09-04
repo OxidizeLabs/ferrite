@@ -2,7 +2,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
 
 // Implementation for IntegerType
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct IntegerType;
 
 impl IntegerType {
