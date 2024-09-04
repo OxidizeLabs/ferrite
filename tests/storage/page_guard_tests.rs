@@ -87,7 +87,7 @@ mod unit_tests {
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
         let page_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
 
-        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableDirectoryPage>(/* fn(ExtendableHTableHeaderPage) -> PageType */) {
+        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
                 let directory_size = page.get_size();

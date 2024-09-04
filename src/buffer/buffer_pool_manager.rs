@@ -4,7 +4,7 @@ use crate::common::exception::DeletePageError;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::b_plus_tree_index::KeyComparator;
-use crate::storage::index::generic_key::{Comparator, GenericKey};
+use crate::storage::index::generic_key::{GenericKeyComparator, GenericKey};
 use crate::storage::page::page::PageType::{ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader};
 use crate::storage::page::page::{Page, PageTrait, PageType};
 use crate::storage::page::page_guard::PageGuard;
@@ -758,7 +758,7 @@ impl BufferPoolManager {
             NewPageType::ExtendedHashTableDirectory => ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id)),
             NewPageType::ExtendedHashTableHeader => ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id)),
             NewPageType::ExtendedHashTableBucket => {
-                let bucket_page = ExtendableHTableBucketPage::<8>::new(page_id);
+                let bucket_page = ExtendableHTableBucketPage::<i32, 8>::new(page_id);
                 ExtendedHashTableBucket(TypeErasedBucketPage::new(bucket_page))
             }
         };

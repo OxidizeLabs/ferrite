@@ -14,6 +14,8 @@ pub enum KeyConversionError {
     ColumnNotFound(String),
     OffsetConversionError(String),
     DeserializationError(String),
+    OffsetOutOfBounds,
+    InvalidOffset,
 }
 
 #[derive(Error, Debug)]
@@ -133,6 +135,7 @@ impl Display for KeyConversionError {
             KeyConversionError::ColumnNotFound(msg) => write!(f, "Column not found: {}", msg),
             KeyConversionError::OffsetConversionError(msg) => write!(f, "Offset conversion error: {}", msg),
             KeyConversionError::DeserializationError(msg) => write!(f, "Deserialization error: {}", msg),
+            &KeyConversionError::OffsetOutOfBounds | &KeyConversionError::InvalidOffset => todo!(),
         }
     }
 }

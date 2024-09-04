@@ -10,18 +10,18 @@ use crate::storage::page::page_guard::{SpecificPageReadGuard, SpecificPageWriteG
 use crate::storage::page::page_types::b_plus_tree_page::BPlusTreePage;
 
 /// Context class to help keep track of pages being modified or accessed.
-pub struct Context<'a, T: 'static> {
+pub struct Context<'a, T: 'static, const KEY_SIZE: usize> {
     /// The write guard of the header page during insert/remove operations.
-    pub header_page: Option<SpecificPageWriteGuard<'a, T>>,
+    pub header_page: Option<SpecificPageWriteGuard<'a, T, KEY_SIZE>>,
     /// The root page ID for easier identification of the root page.
     pub root_page_id: u32,
     /// The write guards of the pages being modified.
-    pub write_set: VecDeque<SpecificPageWriteGuard<'a, T>>,
+    pub write_set: VecDeque<SpecificPageWriteGuard<'a, T, KEY_SIZE>>,
     /// The read guards of the pages being read.
-    pub read_set: VecDeque<SpecificPageReadGuard<'a, T>>,
+    pub read_set: VecDeque<SpecificPageReadGuard<'a, T, KEY_SIZE>>,
 }
 
-impl<T> Context<'_, T> {
+impl<T, const KEY_SIZE: usize> Context<'_, T, KEY_SIZE> {
     /// Checks if the given page ID is the root page.
     ///
     /// # Parameters

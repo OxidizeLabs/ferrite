@@ -11,7 +11,6 @@ use std::any::TypeId;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-
 pub struct PageGuard {
     bpm: Arc<BufferPoolManager>,
     page: Arc<RwLock<PageType>>,
@@ -53,13 +52,13 @@ impl PageGuard {
         }
     }
 
-    pub fn into_specific_type<T: 'static>(self) -> Option<SpecificPageGuard<T>> {
+    pub fn into_specific_type<T: Clone + 'static, const KEY_SIZE: usize>(self) -> Option<SpecificPageGuard<T, KEY_SIZE>> {
         let page_type = TypeId::of::<T>();
         let is_matching_type = match &*self.page.read() {
             PageType::Basic(_) =>
                 page_type == TypeId::of::<Page>(),
             PageType::ExtendedHashTableBucket(bucket_page) =>
-                page_type == TypeId::of::<ExtendableHTableBucketPage<8>>() && bucket_page.get_key_size() == 8,
+                page_type == TypeId::of::<ExtendableHTableBucketPage<T, KEY_SIZE>>() && bucket_page.get_key_size() == KEY_SIZE,
             PageType::ExtendedHashTableDirectory(_) =>
                 page_type == TypeId::of::<ExtendableHTableDirectoryPage>(),
             PageType::ExtendedHashTableHeader(_) =>
@@ -85,17 +84,17 @@ impl Drop for PageGuard {
     }
 }
 
-pub struct SpecificPageGuard<T: 'static> {
+pub struct SpecificPageGuard<T: 'static, const KEY_SIZE: usize> {
     inner: PageGuard,
     _phantom: PhantomData<T>,
 }
 
-impl<T: 'static> SpecificPageGuard<T> {
-    pub fn read(&self) -> SpecificPageReadGuard<T> {
+impl<T: Clone + 'static, const KEY_SIZE: usize> SpecificPageGuard<T, KEY_SIZE> {
+    pub fn read(&self) -> SpecificPageReadGuard<T, KEY_SIZE> {
         SpecificPageReadGuard(self.inner.read(), PhantomData)
     }
 
-    pub fn write(&self) -> SpecificPageWriteGuard<T> {
+    pub fn write(&self) -> SpecificPageWriteGuard<T, KEY_SIZE> {
         SpecificPageWriteGuard(self.inner.write(), PhantomData)
     }
 
@@ -109,8 +108,8 @@ impl<T: 'static> SpecificPageGuard<T> {
     {
         match &*self.inner.page.read() {
             PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast::<8, _, _>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                bucket_page.with_downcast::<T, KEY_SIZE, _, R>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
                     let typed_page = unsafe { &*(page as *const _ as *const T) };
                     f(typed_page)
                 })
@@ -127,8 +126,8 @@ impl<T: 'static> SpecificPageGuard<T> {
     {
         match &mut *self.inner.page.write() {
             PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast_mut::<8, _, _>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                bucket_page.with_downcast_mut::<T, KEY_SIZE, _, R>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
                     let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
                     f(typed_page)
                 })
@@ -140,17 +139,17 @@ impl<T: 'static> SpecificPageGuard<T> {
     }
 }
 
-pub struct SpecificPageReadGuard<'a, T: 'static>(spin::RwLockReadGuard<'a, PageType>, PhantomData<T>);
+pub struct SpecificPageReadGuard<'a, T: 'static, const KEY_SIZE: usize>(spin::RwLockReadGuard<'a, PageType>, PhantomData<T>);
 
-impl<'a, T: 'static> SpecificPageReadGuard<'a, T> {
+impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageReadGuard<'a, T, KEY_SIZE> {
     pub fn access<F, R>(&self, f: F) -> Option<R>
     where
         F: FnOnce(&T) -> R,
     {
         match &*self.0 {
             PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast::<8, _, _>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                bucket_page.with_downcast::<T, KEY_SIZE, _, R>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
                     let typed_page = unsafe { &*(page as *const _ as *const T) };
                     f(typed_page)
                 })
@@ -162,17 +161,18 @@ impl<'a, T: 'static> SpecificPageReadGuard<'a, T> {
     }
 }
 
-pub struct SpecificPageWriteGuard<'a, T: 'static>(spin::RwLockWriteGuard<'a, PageType>, PhantomData<T>);
+pub struct SpecificPageWriteGuard<'a, T: 'static, const KEY_SIZE: usize>(spin::RwLockWriteGuard<'a, PageType>, PhantomData<T>);
 
-impl<'a, T: 'static> SpecificPageWriteGuard<'a, T> {
+
+impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageWriteGuard<'a, T, KEY_SIZE> {
     pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
     where
         F: FnOnce(&mut T) -> R,
     {
         match &mut *self.0 {
             PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast_mut::<8, _, _>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<8> in into_specific_type
+                bucket_page.with_downcast_mut::<T, KEY_SIZE, _, R>(|page| {
+                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
                     let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
                     f(typed_page)
                 })
@@ -184,7 +184,7 @@ impl<'a, T: 'static> SpecificPageWriteGuard<'a, T> {
     }
 }
 
-impl<T: 'static> Drop for SpecificPageGuard<T> {
+impl<T: 'static, const KEY_SIZE: usize> Drop for SpecificPageGuard<T, KEY_SIZE> {
     fn drop(&mut self) {
         // The inner PageGuard's drop will handle unpinning
     }

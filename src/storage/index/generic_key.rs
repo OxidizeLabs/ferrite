@@ -1,122 +1,31 @@
 use std::cmp::Ordering;
-use std::error::Error;
-use std::fmt::Display;
-use std::mem::size_of;
-use std::sync::Arc;
-
-use bincode;
-use serde::de::{SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
-use crate::common::exception::{ComparisonError, KeyConversionError, TupleError};
-use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::types::{CmpBool, Type};
-use crate::types_db::value::Value;
+use std::marker::PhantomData;
 
 /// A generic key used for indexing with opaque data.
-#[derive(Clone)]
-pub struct GenericKey<const KEY_SIZE: usize> {
-    data: [u8; KEY_SIZE],
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenericKey<T, const N: usize> {
+    /// The fixed-size array holding the key data.
+    data: [u8; N],
+    _marker: PhantomData<T>,
 }
 
-impl<const KEY_SIZE: usize> GenericKey<KEY_SIZE> {
-    /// Creates a new GenericKey with zeroed data.
+impl<T, const N: usize> GenericKey<T, N> {
+    /// Creates a new `GenericKey` with zeroed data.
     pub fn new() -> Self {
-        Self { data: [0; KEY_SIZE] }
+        Self {
+            data: [0; N],
+            _marker: PhantomData,
+        }
     }
 
-    /// Sets the key data from a tuple.
+    /// Sets the key data from a slice of bytes.
     ///
     /// # Arguments
     ///
-    /// * `tuple` - The tuple to set the key from.
-    ///
-    /// # Returns
-    ///
-    /// A Result indicating success or a TupleError if serialization fails.
-    pub fn set_from_tuple(&mut self, tuple: &Tuple) -> Result<(), TupleError> {
-        self.data.fill(0);
-        let mut buffer = vec![0u8; KEY_SIZE];
-        let serialized_len = tuple.serialize_to(&mut buffer)?;
-        let len = serialized_len.min(KEY_SIZE);
-        self.data[..len].copy_from_slice(&buffer[..len]);
-        Ok(())
-    }
-
-    /// Sets the key data from an integer.
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - The integer to set the key from.
-    pub fn set_from_integer(&mut self, key: i64) {
-        self.data.fill(0);
-        let key_bytes = key.to_le_bytes();
-        self.data[..size_of::<i64>()].copy_from_slice(&key_bytes);
-    }
-
-    /// Attempts to convert the key to a value using `bincode`.
-    ///
-    /// # Arguments
-    ///
-    /// * `schema` - The schema of the key.
-    /// * `column_idx` - The index of the column in the schema.
-    ///
-    /// # Returns
-    ///
-    /// A Result containing a Value representation of the key, or an error if conversion fails.
-    pub fn to_value(&self, schema: &Schema, column_idx: usize) -> Result<Value, KeyConversionError> {
-        // Get the column from the schema
-        let col = schema
-            .get_column(column_idx)
-            .ok_or_else(|| KeyConversionError::ColumnNotFound(format!("Index {} not found", column_idx)))?;
-
-        // Determine the data pointer
-        let data_ptr = if col.is_inlined() {
-            &self.data[col.get_offset()..]
-        } else {
-            let offset_bytes = self.data.get(col.get_offset()..col.get_offset() + 4)
-                .ok_or_else(|| KeyConversionError::OffsetConversionError("Failed to extract offset bytes".to_string()))?;
-
-            let offset = i32::from_le_bytes(offset_bytes.try_into().map_err(|_| {
-                KeyConversionError::OffsetConversionError("Failed to convert offset bytes to i32".to_string())
-            })?);
-
-            self.data.get(offset as usize..).ok_or_else(|| {
-                KeyConversionError::OffsetConversionError(format!("Invalid offset: {}", offset))
-            })?
-        };
-
-        // Attempt to deserialize the value using bincode
-        bincode::deserialize(data_ptr).map_err(|e| KeyConversionError::DeserializationError(e.to_string()))
-    }
-
-    /// Creates a GenericKey from a byte slice.
-    ///
-    /// # Arguments
-    ///
-    /// * `bytes` - The byte slice to create the key from.
-    ///
-    /// # Returns
-    ///
-    /// A new GenericKey instance.
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        let mut key = Self::new();
-        key.set_from_key_slice(bytes);
-        key
-    }
-
-    /// Sets the key data from a byte slice.
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - The byte slice to set the key from.
-    pub fn set_from_key_slice(&mut self, key: &[u8]) {
-        self.data.fill(0);
-        let len = key.len().min(KEY_SIZE);
-        self.data[..len].copy_from_slice(&key[..len]);
+    /// * `bytes` - The slice of bytes to set the key from.
+    pub fn set_from_bytes(&mut self, bytes: &[u8]) {
+        let len = bytes.len().min(N);
+        self.data[..len].copy_from_slice(&bytes[..len]);
     }
 
     /// Returns a reference to the key's byte data.
@@ -125,23 +34,20 @@ impl<const KEY_SIZE: usize> GenericKey<KEY_SIZE> {
     }
 }
 
-/// Function object that compares GenericKeys based on a schema.
-#[derive(Debug, Clone)]
-pub struct Comparator {
-    key_schema: Arc<Schema>,
+/// Comparator for `GenericKey`.
+pub struct GenericKeyComparator<T, const N: usize> {
+    _marker: PhantomData<T>,
 }
 
-impl Comparator {
-    /// Creates a new GenericComparator.
-    ///
-    /// # Arguments
-    ///
-    /// * `key_schema` - The schema used for comparison.
-    pub fn new(key_schema: Arc<Schema>) -> Self {
-        Self { key_schema }
+impl<T, const N: usize> GenericKeyComparator<T, N> {
+    /// Creates a new `GenericKeyComparator`.
+    pub fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
     }
 
-    /// Compares two GenericKeys.
+    /// Compares two `GenericKey`s.
     ///
     /// # Arguments
     ///
@@ -150,97 +56,51 @@ impl Comparator {
     ///
     /// # Returns
     ///
-    /// A Result containing either an Ordering representing the comparison result or a ComparisonError.
-    pub fn compare<const KEY_SIZE: usize>(
-        &self,
-        lhs: &GenericKey<KEY_SIZE>,
-        rhs: &GenericKey<KEY_SIZE>,
-    ) -> Result<Ordering, ComparisonError> {
-        for i in 0..self.key_schema.get_column_count() {
-            // Try to retrieve values from both sides
-            let (lhs_value, rhs_value) = match (
-                lhs.to_value(&self.key_schema, i as usize),
-                rhs.to_value(&self.key_schema, i as usize),
-            ) {
-                (Ok(lhs_value), Ok(rhs_value)) => (lhs_value, rhs_value),
-                (Err(e), _) | (_, Err(e)) => {
-                    return Err(ComparisonError::ValueRetrievalError(format!(
-                        "Failed to retrieve value: {}",
-                        e
-                    )));
-                }
-            };
-
-            // Compare the two values
-            if lhs_value.compare_less_than(&rhs_value) == CmpBool::CmpTrue {
-                return Ok(Ordering::Less);
-            }
-            if lhs_value.compare_greater_than(&rhs_value) == CmpBool::CmpTrue {
-                return Ok(Ordering::Greater);
-            }
-        }
-        Ok(Ordering::Equal)
+    /// An `Ordering` representing the comparison result.
+    pub fn compare(&self, lhs: &GenericKey<T, N>, rhs: &GenericKey<T, N>) -> Ordering {
+        lhs.data.cmp(&rhs.data)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn generic_key_new() {
-        let key: GenericKey<16> = GenericKey::new();
-        assert_eq!(key.data, [0; 16]);
+    fn test_generic_key_new() {
+        let key: GenericKey<i32, 8> = GenericKey::new();
+        assert_eq!(key.as_bytes(), [0; 8]);
     }
 
     #[test]
-    fn generic_key_set_from_integer() {
-        let mut key: GenericKey<16> = GenericKey::new();
-        key.set_from_integer(42);
-        assert_eq!(key.data[..8], 42i64.to_le_bytes());
-        assert_eq!(key.data[8..], [0; 8]);
+    fn test_generic_key_set_from_bytes() {
+        let mut key: GenericKey<i32, 8> = GenericKey::new();
+        key.set_from_bytes(&[1, 2, 3, 4]);
+        assert_eq!(key.as_bytes(), [1, 2, 3, 4, 0, 0, 0, 0]);
     }
 
     #[test]
-    fn generic_key_from_bytes() {
-        let bytes = [1, 2, 3, 4, 5, 6, 7, 8];
-        let key: GenericKey<16> = GenericKey::from_bytes(&bytes);
-        assert_eq!(key.data[..8], bytes);
-        assert_eq!(key.data[8..], [0; 8]);
+    fn test_generic_key_set_from_bytes_overflow() {
+        let mut key: GenericKey<i32, 4> = GenericKey::new();
+        key.set_from_bytes(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(key.as_bytes(), [1, 2, 3, 4]);
     }
 
     #[test]
-    fn generic_key_to_value() {
-        let schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
-        let mut key: GenericKey<16> = GenericKey::new();
-        key.set_from_integer(42);
+    fn test_generic_key_comparator() {
+        let comparator = GenericKeyComparator::<i32, 4>::new();
 
-        let value = key.to_value(&schema, 0);
-        assert_eq!(value.unwrap(), Value::new(42i32));
-    }
+        let mut key1: GenericKey<i32, 4> = GenericKey::new();
+        key1.set_from_bytes(&[1, 2, 3, 4]);
 
-    #[test]
-    fn generic_key_to_value_error() {
-        let schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
-        let key: GenericKey<16> = GenericKey::new(); // Empty key
+        let mut key2: GenericKey<i32, 4> = GenericKey::new();
+        key2.set_from_bytes(&[1, 2, 3, 5]);
 
-        assert!(key.to_value(&schema, 0).is_err());
-    }
+        let mut key3: GenericKey<i32, 4> = GenericKey::new();
+        key3.set_from_bytes(&[1, 2, 3, 4]);
 
-    #[test]
-    fn generic_comparator() {
-        let schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
-        let comparator = Comparator::new(schema);
-
-        let mut key1: GenericKey<16> = GenericKey::new();
-        let mut key2: GenericKey<16> = GenericKey::new();
-        let mut key3: GenericKey<16> = GenericKey::new();
-
-        key1.set_from_integer(1);
-        key2.set_from_integer(1);
-        key3.set_from_integer(100);
-
-        assert_eq!(comparator.compare(&key1, &key2).unwrap(), Ordering::Equal);
-        assert_eq!(comparator.compare(&key1, &key3).unwrap(), Ordering::Less);
-        assert_eq!(comparator.compare(&key3, &key2).unwrap(), Ordering::Greater);
+        assert_eq!(comparator.compare(&key1, &key2), Ordering::Less);
+        assert_eq!(comparator.compare(&key2, &key1), Ordering::Greater);
+        assert_eq!(comparator.compare(&key1, &key3), Ordering::Equal);
     }
 }
