@@ -554,48 +554,80 @@ impl<'a> Drop for ContextGuard<'a> {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::fs;
     use super::*;
     use crate::types_db::integer_type::IntegerType;
     use crate::types_db::type_id::TypeId;
     use log::info;
 
-    fn setup_database_components(db_name: &str) -> (
-        Arc<FileDiskManager>,
-        Arc<RwLock<DiskScheduler>>,
-        Arc<BufferPoolManager>,
-        Arc<Mutex<TransactionManager>>,
-        Arc<Mutex<LockManager>>,
-        Arc<Mutex<LogManager>>
-    ) {
-        const BUFFER_POOL_SIZE: usize = 10;
-        const K: usize = 2;
+    struct TestContext {
+        disk_manager: Arc<FileDiskManager>,
+        disk_scheduler: Arc<RwLock<DiskScheduler>>,
+        bpm: Arc<BufferPoolManager>,
+        transaction_manager: Arc<Mutex<TransactionManager>>,
+        lock_manager: Arc<Mutex<LockManager>>,
+        log_manager: Arc<Mutex<LogManager>>,
+        db_file: String,
+        db_log: String,
+    }
 
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-        let db_file = format!("tests/data/{}_{}.db", db_name, timestamp);
-        let db_log_file = format!("tests/data/{}_{}.log", db_name, timestamp);
+    impl TestContext {
+        fn new(db_name: &str) -> (
+            Arc<FileDiskManager>,
+            Arc<RwLock<DiskScheduler>>,
+            Arc<BufferPoolManager>,
+            Arc<Mutex<TransactionManager>>,
+            Arc<Mutex<LockManager>>,
+            Arc<Mutex<LogManager>>
+        ) {
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-        let disk_manager = Arc::new(FileDiskManager::new(db_file, db_log_file, 100));
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(
-            BUFFER_POOL_SIZE,
-            disk_scheduler.clone(),
-            disk_manager.clone(),
-            replacer,
-        ));
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", db_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", db_name, timestamp);
 
-        // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
-        let lock_manager = Arc::new(Mutex::new(LockManager::new(Arc::clone(&transaction_manager))));
-        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+            let disk_manager = Arc::new(FileDiskManager::new(db_file, db_log_file, 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler.clone(),
+                disk_manager.clone(),
+                replacer,
+            ));
 
-        (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)
+            // Create TransactionManager with a placeholder Catalog
+            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+            let lock_manager = Arc::new(Mutex::new(LockManager::new(Arc::clone(&transaction_manager))));
+            let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+
+            (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)
+        }
+
+        fn cleanup(&self) {
+            let _ = fs::remove_file(&self.db_file);
+            let _ = fs::remove_file(&self.db_log);
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup();
+        }
     }
 
     #[test]
     fn parse_and_bind_select() {
-        let (_, _, bpm, transaction_manager, lock_manager, log_manager) =
-            setup_database_components("parse_and_bind_select");
+        let ctx = TestContext::new("parse_and_bind_select");
+        let (
+            disk_manager,
+            disk_scheduler,
+            bpm,
+            transaction_manager,
+            lock_manager,
+            log_manager
+        ) = ctx;
 
         // Create the real Catalog
         let txn = Transaction::new(0, IsolationLevel::Serializable);
