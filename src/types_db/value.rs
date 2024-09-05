@@ -209,27 +209,43 @@ impl From<CmpBool> for Val {
     }
 }
 
-// Implement From<T> for Value
 impl<T: Into<Val>> From<T> for Value {
     fn from(t: T) -> Self {
         Value::new(t)
     }
 }
 
-
-// impl From<CmpBool> for Value {
-//     fn from(cmp_bool: CmpBool) -> Self {
-//         Value::new(match cmp_bool {
-//             CmpBool::CmpTrue => true,
-//             CmpBool::CmpFalse => false,
-//             CmpBool::CmpNull => false,
-//         })
-//     }
-// }
-
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.value_)
+        if f.alternate() {
+            // Detailed representation (activated by {:?} or {:#})
+            write!(f, "{:?}", self.value_)
+        } else {
+            // Simple representation (activated by {})
+            match &self.value_ {
+                Val::Integer(i) => write!(f, "{}", i),
+                Val::Decimal(fl) => write!(f, "{}", fl),
+                Val::Boolean(b) => write!(f, "{}", b),
+                Val::VarLen(s) => write!(f, "{}", s),
+                Val::TinyInt(t) => write!(f, "{}", t),
+                Val::SmallInt(sm) => write!(f, "{}", sm),
+                Val::BigInt(bi) => write!(f, "{}", bi),
+                Val::Timestamp(ti) => write!(f, "{}", ti),
+                Val::ConstVarLen(c) => write!(f, "{}", c),
+                Val::Vector(v) => {
+                    write!(f, "[")?;
+                    let mut first = true;
+                    for value in v.iter() {
+                        if !first {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", value)?;
+                        first = false;
+                    }
+                    write!(f, "]")
+                },                Val::Null => write!(f, "Null"),
+            }
+        }
     }
 }
 
@@ -356,4 +372,30 @@ mod unit_tests {
         let deserialized: Value = bincode::deserialize(&serialized).expect("Deserialization failed");
         assert_eq!(original_value, deserialized);
     }
+
+    #[test]
+    fn test_value_display() {
+        let int_value = Value::new(42);
+        let float_value = Value::new(3.14);
+        let bool_value = Value::new(true);
+        let string_value = Value::new("Hello");
+        let vector_value = Value::new_vector(vec![
+            Value::new(1),
+            Value::new("two"),
+            Value::new(3.0),
+        ]);
+
+        assert_eq!(format!("{}", int_value), "42");
+        assert_eq!(format!("{}", float_value), "3.14");
+        assert_eq!(format!("{}", bool_value), "true");
+        assert_eq!(format!("{}", string_value), "Hello");
+        assert_eq!(format!("{}", vector_value), "[1, two, 3]");
+
+        assert_eq!(format!("{:#}", int_value), "Integer(42)");
+        assert_eq!(format!("{:#}", float_value), "Decimal(3.14)");
+        assert_eq!(format!("{:#}", bool_value), "Boolean(true)");
+        assert_eq!(format!("{:#}", string_value), "VarLen(\"Hello\")");
+        assert_eq!(format!("{:#}", vector_value), "Vector([Value { value_: Integer(1), size_: Length(4), manage_data_: false, type_id_: Integer }, Value { value_: VarLen(\"two\"), size_: Length(0), manage_data_: false, type_id_: VarChar }, Value { value_: Decimal(3.0), size_: Length(8), manage_data_: false, type_id_: Decimal }])");
+    }
+
 }
