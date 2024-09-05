@@ -20,12 +20,14 @@ pub enum KeyConversionError {
 
 #[derive(Error, Debug)]
 pub enum TupleError {
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] bincode::Error),
     #[error("Storage buffer is too small")]
     BufferTooSmall,
     #[error("Column not found: {0}")]
     ColumnNotFound(usize),
+    #[error("SerializationError: {0}")]
+    SerializationError(String),
+    #[error("DeserializationError: {0}")]
+    DeserializationError(String),
 }
 
 #[derive(Error, Debug)]

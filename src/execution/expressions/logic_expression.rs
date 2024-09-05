@@ -149,6 +149,7 @@ impl Display for LogicType {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::common::rid::RID;
     use crate::types_db::value::Val::Null;
     use super::*;
 
@@ -159,7 +160,8 @@ mod unit_tests {
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(false));
@@ -172,7 +174,8 @@ mod unit_tests {
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(true));
@@ -185,7 +188,8 @@ mod unit_tests {
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(Null));

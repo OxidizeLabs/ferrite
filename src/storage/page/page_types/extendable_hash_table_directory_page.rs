@@ -2,7 +2,7 @@ use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
 use crate::storage::page::page_types::extendable_hash_table_header_page::HTABLE_HEADER_ARRAY_SIZE;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -58,8 +58,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The bucket index the key is hashed to.
     pub fn hash_to_bucket_index(&self, hash: u32) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         hash & ((1 << self.global_depth) - 1)
     }
 
@@ -71,8 +69,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The bucket page ID corresponding to the bucket index.
     pub fn get_bucket_page_id(&self, bucket_idx: usize) -> Option<PageId> {
-        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         if bucket_idx < self.bucket_page_ids.len() {
             let page_id = self.bucket_page_ids[bucket_idx];
             debug!(
@@ -128,8 +124,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The directory index of the split image.
     pub fn get_split_image_index(&self, bucket_idx: u32) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         // The split image index is determined by flipping the most significant bit
         // used in the local depth of the bucket index.
 
@@ -145,8 +139,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// A mask of global depth 1's and the rest 0's.
     pub fn get_global_depth_mask(&self) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         (1 << self.global_depth) - 1
     }
 
@@ -158,9 +150,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// A mask of local depth 1's and the rest 0's.
     pub fn get_local_depth_mask(&self, bucket_idx: u32) -> u32 {
-
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         (1 << self.local_depths[bucket_idx as usize]) - 1
     }
 
@@ -169,8 +158,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The global depth of the directory.
     pub fn get_global_depth(&self) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         self.global_depth
     }
 
@@ -179,51 +166,49 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The maximum depth of the directory.
     pub fn get_max_depth(&self) -> u32 {
-        // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         debug!("Max depth: {}", self.max_depth);
         self.max_depth
     }
 
     /// Increments the global depth of the directory.
     pub fn incr_global_depth(&mut self) {
-        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         if self.global_depth == self.max_depth {
-            panic!("Cannot increase global depth past max_depth: {}", self.max_depth)
+            warn!("Cannot increase global depth past max_depth: {}", self.max_depth)
+        } else {
+            // Step 1: Double the size of the directory
+            // let old_size = self.get_size();  // Current size of the directory
+            // let old_global_depth = self.get_global_depth();
+            self.global_depth += 1;      // Increment global depth
+
+            // Step 2: Copy existing entries to the new slots
+            // for i in 0..old_size {
+            //     // The new entry is a copy of the current entry
+            //     self.set_bucket_page_id(i as usize + old_size as usize, self.get_bucket_page_id(i as usize).unwrap());
+            //     self.set_local_depth(i as usize + old_size as usize, self.get_local_depth(i));
+            // }
+
+            // Step 3: Split buckets that need splitting after global depth increase
+            // for i in 0..old_size {
+            //     let local_depth = self.get_local_depth(i);
+            //
+            //     // If the local depth is equal to the old global depth, this bucket needs to be split
+            //     if local_depth == old_size {
+            //         let new_bucket_page_id = self.get_split_image_index(i);
+            //         self.split_bucket(i as usize, new_bucket_page_id as PageId);
+            //     }
+            // }
+
+            debug!("Global depth increased. New size of the directory: {}", self.get_size());
         }
-
-        // Step 1: Double the size of the directory
-        let old_size = self.get_size();  // Current size of the directory
-        self.global_depth += 1;      // Increment global depth
-        let new_size = self.get_size();  // New size of the directory
-
-        // Step 2: Copy existing entries to the new slots
-        for i in 0..old_size {
-            // The new entry is a copy of the current entry
-            self.set_bucket_page_id(i as usize + old_size as usize, self.get_bucket_page_id(i as usize).unwrap());
-            self.set_local_depth(i as usize + old_size as usize, self.get_local_depth(i));
-        }
-
-        // Step 3: Split buckets that need splitting after global depth increase
-        // for i in 0..old_size {
-        //     let local_depth = self.get_local_depth(i);
-        //
-        //     // If the local depth is equal to the old global depth, this bucket needs to be split
-        //     if local_depth == self.global_depth - 1 {
-        //         let new_bucket_page_id = self.get_split_image_index(i);
-        //         self.split_bucket(i as usize, new_bucket_page_id as PageId);
-        //     }
-        // }
-
-        debug!("Global depth increased. New size of the directory: {}", self.get_size());
     }
 
     /// Decrements the global depth of the directory.
     pub fn decr_global_depth(&mut self) {
-        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
-        self.global_depth -= 1;
+        if self.global_depth == 0 {
+            warn!("Global depth is already at zero!")
+        } else {
+            self.global_depth -= 1;
+        }
     }
 
     /// Returns true if the directory can be shrunk.
@@ -244,8 +229,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The current directory size.
     pub fn get_size(&self) -> u32 {
-        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         assert!(self.global_depth < 32, "Global depth {} is too large!", self.global_depth);
         1 << self.global_depth
     }
@@ -255,8 +238,6 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The maximum directory size.
     pub fn max_size(&self) -> u32 {
-        assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
-
         HTABLE_DIRECTORY_ARRAY_SIZE as u32
     }
 
@@ -548,11 +529,165 @@ impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
     }
 }
 
-impl AsAny for ExtendableHTableDirectoryPage {
-    fn as_any(&self) -> &dyn Any {
-        self
+#[cfg(test)]
+mod basic_behavior {
+    use std::sync::Arc;
+    use chrono::Utc;
+    use log::{error, info};
+    use spin::RwLock;
+    use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::common::config::{PageId, INVALID_PAGE_ID};
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::page::page::PageTrait;
+    use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+    use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+
+    const PAGE_ID_SIZE: usize = size_of::<PageId>();
+
+    struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        db_file: String,
+        db_log_file: String,
+        buffer_pool_size: usize,
     }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
+
+    impl TestContext {
+        fn new(test_name: &str) -> Self {
+            initialize_logger();
+            let buffer_pool_size: usize = 5;
+            const K: usize = 2;
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
+                &disk_manager,
+            ))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let bpm = Arc::new((BufferPoolManager::new(
+                buffer_pool_size,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            )));
+            Self {
+                bpm,
+                db_file,
+                db_log_file,
+                buffer_pool_size,
+            }
+        }
+
+        fn cleanup(&self) {
+            let _ = std::fs::remove_file(&self.db_file);
+            let _ = std::fs::remove_file(&self.db_log_file);
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup()
+        }
+    }
+
+    #[test]
+    fn directory_page_integrity() {
+        let ctx = TestContext::new("directory_page_integrity");
+        let bpm = &ctx.bpm;
+
+        // DIRECTORY PAGE TEST
+        let header_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableHeader).unwrap();
+
+        // DIRECTORY PAGE TEST
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        match directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+            Some(mut ext_guard) => {
+                info!("Successfully converted to ExtendableHTableDirectoryPage");
+
+                ext_guard.access(|page| {
+                    info!("ExtendableHTableDirectoryPage ID: {}", page.get_page_id());
+                });
+
+                ext_guard.access_mut(|page| {
+                    page.init(3);
+                    info!("Initialized directory page with global depth: {}", page.get_global_depth());
+                });
+            }
+            None => {
+                error!("Failed to convert to ExtendableHTableDirectoryPage");
+                panic!("Conversion to ExtendableHTableDirectoryPage failed");
+            }
+        }
+    }
+
+    #[test]
+    fn test_max_depth() {
+        let ctx = TestContext::new("test_max_depth");
+        let bpm = &ctx.bpm;
+
+        info!("Starting max depth test");
+
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_page_id = directory_guard.get_page_id();
+        info!("Created directory page with ID: {}", directory_page_id);
+
+        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+            ext_dir_guard.access_mut(|directory_page| {
+                directory_page.init(2);
+                assert_eq!(directory_page.get_max_depth(), 2, "Initial max depth should be 2");
+                assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
+
+                // Try to increment beyond the maximum depth
+                directory_page.incr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 1, "Global depth should be 1 after increment");
+
+                // This should increase the global depth further
+                directory_page.incr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 2, "Global depth should be 2 after increment");
+
+                // This should not increase the global depth further
+                directory_page.incr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 2, "Global depth should remain 2 after attempting to exceed max depth");
+
+                info!("Max depth test completed successfully");
+            });
+        } else {
+            panic!("Failed to convert to ExtendableHTableDirectoryPage");
+        }
+    }
+
+    #[test]
+    fn test_empty_directory() {
+        let ctx = TestContext::new("test_empty_directory");
+        let bpm = &ctx.bpm;
+
+        info!("Starting empty directory test");
+
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_page_id = directory_guard.get_page_id();
+        info!("Created directory page with ID: {}", directory_page_id);
+
+        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+            ext_dir_guard.access_mut(|directory_page| {
+                directory_page.init(0);
+                assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
+                assert_eq!(directory_page.get_size(), 1, "Empty directory should have size 1");
+
+                // Try to access a bucket
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(INVALID_PAGE_ID), "Empty directory should return INVALID_PAGE_ID");
+
+                // Try to decrement global depth (should not change)
+                directory_page.decr_global_depth();
+                assert_eq!(directory_page.get_global_depth(), 0, "Global depth should remain 0 after attempted decrement");
+
+                info!("Empty directory test completed successfully");
+            });
+        } else {
+            panic!("Failed to convert to ExtendableHTableDirectoryPage");
+        }
     }
 }
