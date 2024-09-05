@@ -250,6 +250,7 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
+    use log::info;
     use crate::buffer::buffer_pool_manager::NewPageType;
     use crate::storage::page::page::PageTrait;
     use super::*;
@@ -285,7 +286,7 @@ mod unit_tests {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
                 let directory_size = page.get_size();
-                println!("Directory size: {}", directory_size);
+                info!("Directory size: {}", directory_size);
             });
 
             let mut write_guard = ext_guard.write();

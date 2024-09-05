@@ -52,7 +52,7 @@ impl TablePage {
     }
 
     /// Gets the next offset to insert a tuple.
-    pub(crate) fn get_next_tuple_offset(&self, meta: &TupleMeta, tuple: &Tuple) -> Option<u32> {
+    pub fn get_next_tuple_offset(&self, meta: &TupleMeta, tuple: &Tuple) -> Option<u32> {
         let tuple_size = self.serialize_tuple(meta, tuple).len() as u32;
         if self.page_start.len() as u32 + tuple_size <= DB_PAGE_SIZE as u32 {
             Some(self.page_start.len() as u32)
@@ -189,14 +189,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_table_page() {
+    fn new_table_page() {
         let page = TablePage::new(1);
         assert_eq!(page.get_num_tuples(), 0);
         assert_eq!(page.get_next_page_id(), 1);
     }
 
     #[test]
-    fn test_insert_and_get_tuple() {
+    fn insert_and_get_tuple() {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_tuple_meta() {
+    fn update_tuple_meta() {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn test_page_full() {
+    fn page_full() {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_deserialize_tuple() {
+    fn serialize_deserialize_tuple() {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
