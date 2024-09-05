@@ -47,7 +47,7 @@ impl ArrayExpression {
             .collect();
 
         // If all values are successfully evaluated, return them wrapped in Val::Vector
-        values.map(|v| Value::new(Val::Vector(Rc::new(v))))
+        values.map(|v| Value::new(Val::Vector(v)))
     }
 }
 
