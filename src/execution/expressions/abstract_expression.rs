@@ -136,6 +136,7 @@ impl Display for Expression {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::common::rid::RID;
     use super::*;
 
     #[test]
@@ -145,10 +146,11 @@ mod unit_tests {
         let expr = Expression::Constant(ConstantExpression::new(value.clone(), ret_type, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0, 0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), value);
         assert_eq!(expr.get_children().len(), 0);
-        assert_eq!(expr.to_string(), "Constant(Integer(42))");
+        assert_eq!(expr.to_string(), "Constant(42)");
     }
 }

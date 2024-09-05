@@ -1,14 +1,24 @@
 use std::any::Any;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::marker::PhantomData;
 use xxhash_rust::xxh3;
+use xxhash_rust::xxh3::Xxh3;
+
+// Custom hasher struct to wrap Xxh3 hasher
+#[derive(Default)]
+pub struct Xxh3Hasher {
+    hasher: Xxh3,
+}
 
 /// Represents a hash function for a given key type.
 pub struct HashFunction<K> {
     _marker: PhantomData<K>,
 }
 
-impl<K> HashFunction<K> {
+impl<K> HashFunction<K>
+where
+    K: Any + Hash + 'static,
+{
     /// Creates a new `HashFunction`.
     ///
     /// # Returns
@@ -18,12 +28,7 @@ impl<K> HashFunction<K> {
             _marker: PhantomData,
         }
     }
-}
 
-impl<K> HashFunction<K>
-where
-    K: Any + Hash + 'static,
-{
     /// Returns the hash value of the given key.
     ///
     /// # Parameters
@@ -49,18 +54,50 @@ where
     }
 }
 
-// fn main() {
-//     let hash_fn = HashFunction::new();
-//
-//     let key_i32 = 42;
-//     let key_str = "hello";
-//     let key_string = string::from("hello");
-//
-//     let hash_i32 = hash_fn.get_hash(&key_i32);
-//     let hash_str = hash_fn.get_hash(&key_str);
-//     let hash_string = hash_fn.get_hash(&key_string);
-//
-//     println!("Hash for i32: {}", hash_i32);
-//     println!("Hash for &str: {}", hash_str);
-//     println!("Hash for string: {}", hash_string);
-// }
+impl Hasher for Xxh3Hasher {
+    fn finish(&self) -> u64 {
+        self.hasher.clone().digest()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.hasher.update(bytes);
+    }
+}
+
+
+#[cfg(test)]
+mod unit_tests {
+    use super::HashFunction;
+
+    #[test]
+    fn hash_function_with_i32() {
+        let hash_function = HashFunction::<i32>::new();
+        let key = 42;
+        let hash = hash_function.get_hash(&key);
+        assert_ne!(hash, 0);
+    }
+
+    #[test]
+    fn hash_function_with_u32() {
+        let hash_function = HashFunction::<u32>::new();
+        let key = 42u32;
+        let hash = hash_function.get_hash(&key);
+        assert_ne!(hash, 0);
+    }
+
+    #[test]
+    fn hash_function_with_str() {
+        let hash_function = HashFunction::<&str>::new();
+        let key = "test_key";
+        let hash = hash_function.get_hash(&key);
+        assert_ne!(hash, 0);
+    }
+
+    #[test]
+    fn hash_function_with_string() {
+        let hash_function = HashFunction::<String>::new();
+        let key = String::from("test_key");
+        let hash = hash_function.get_hash(&key);
+        assert_ne!(hash, 0);
+    }
+}

@@ -1,14 +1,17 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
 use spin::RwLock;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use log::{error, info};
+use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -16,7 +19,7 @@ pub struct TableHeap {
     bpm: Arc<BufferPoolManager>,
     first_page_id: PageId,
     latch: RwLock<()>,
-    last_page_id: AtomicI32,
+    last_page_id: PageId,
 }
 
 impl TableHeap {
@@ -34,7 +37,7 @@ impl TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
             latch: RwLock::new(()),
-            last_page_id: AtomicI32::new(INVALID_PAGE_ID.into()),
+            last_page_id: INVALID_PAGE_ID
         }
     }
 
@@ -50,7 +53,7 @@ impl TableHeap {
     ///
     /// # Returns
     ///
-    /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large.
+    /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
     pub fn insert_tuple(
         &self,
         meta: &TupleMeta,
@@ -58,9 +61,29 @@ impl TableHeap {
         lock_mgr: Option<&LockManager>,
         txn: Option<&Transaction>,
         oid: TableOidT,
-    ) -> Option<RID> {
-        // Implementation of insert tuple logic here
-        unimplemented!()
+    ) -> Result<RID, String> {
+        let _write_guard = self.latch.write(); // Use RAII for the write lock
+
+        let page_guard = self.bpm.fetch_page_guarded(self.last_page_id)
+            .ok_or_else(|| "Failed to fetch page".to_string())?;
+
+        let page_id = page_guard.get_page_id();
+
+        let mut table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
+            .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
+
+        table_page_guard.access_mut(|table_page| {
+            table_page.insert_tuple(meta, tuple)
+                .map(|table_page_rid: RID| {
+                    info!("Tuple inserted successfully");
+                    assert_ne!(table_page.get_next_tuple_offset(meta, tuple), None);
+                    assert_ne!(table_page.get_num_tuples(), 0);
+
+                    tuple.get_rid()
+
+                })
+                .ok_or_else(|| "Failed to insert tuple: Not enough space".to_string())
+        }).unwrap_or_else(|| Err("Failed to access table page".to_string()))
     }
 
     /// Updates the meta of a tuple.

@@ -110,6 +110,7 @@ impl Display for StringExpressionType {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::common::rid::RID;
     use super::*;
 
     #[test]
@@ -122,7 +123,8 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_value(), &Val::VarLen("hello".to_string()));
@@ -138,7 +140,8 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Upper, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_value(), &Val::VarLen("HELLO".to_string()));
@@ -154,7 +157,8 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());

@@ -223,7 +223,6 @@ impl Display for ExtendableHTableHeaderPage {
     }
 }
 
-
 impl TryFrom<PageType> for ExtendableHTableHeaderPage {
     type Error = ();
 
@@ -235,11 +234,138 @@ impl TryFrom<PageType> for ExtendableHTableHeaderPage {
     }
 }
 
-impl AsAny for ExtendableHTableHeaderPage {
-    fn as_any(&self) -> &dyn Any {
-        self
+#[cfg(test)]
+mod basic_behavior {
+    use std::sync::Arc;
+    use chrono::Utc;
+    use log::info;
+    use spin::RwLock;
+    use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::common::config::PageId;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::page::page::PageTrait;
+    use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+
+    const PAGE_ID_SIZE: usize = size_of::<PageId>();
+
+    struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        db_file: String,
+        db_log_file: String,
+        buffer_pool_size: usize,
     }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
+
+    impl TestContext {
+        fn new(test_name: &str) -> Self {
+            initialize_logger();
+            let buffer_pool_size: usize = 5;
+            const K: usize = 2;
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
+                &disk_manager,
+            ))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let bpm = Arc::new((BufferPoolManager::new(
+                buffer_pool_size,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            )));
+            Self {
+                bpm,
+                db_file,
+                db_log_file,
+                buffer_pool_size,
+            }
+        }
+
+        fn cleanup(&self) {
+            let _ = std::fs::remove_file(&self.db_file);
+            let _ = std::fs::remove_file(&self.db_log_file);
+        }
     }
-}
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup()
+        }
+    }
+
+
+    #[test]
+    fn header_page_integrity() {
+        let ctx = TestContext::new("header_page_integrity");
+        let bpm = &ctx.bpm;
+
+        info!("Creating ExtendedHashTableHeader page");
+        let header_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableHeader).unwrap();
+        info!("Created page type: {}", header_guard.get_page_type());
+
+        match header_guard.into_specific_type::<ExtendableHTableHeaderPage, 8>() {
+            Some(mut ext_guard) => {
+                info!("Successfully converted to ExtendableHTableHeaderPage");
+
+                ext_guard.access(|page| {
+                    info!("ExtendableHTableHeaderPage ID: {}", page.get_page_id());
+                });
+
+                // Initialize the header page with a max depth of 2
+                ext_guard.access_mut(|page| {
+                    page.init(2);
+                    info!("Initialized header page with global depth: {}", page.global_depth());
+                });
+
+                // Test hashes that will produce different upper bits
+                let hashes = [
+                    0b00000000000000000000000000000000, // Should map to 0
+                    0b01000000000000000000000000000000, // Should map to 1
+                    0b10000000000000000000000000000000, // Should map to 2
+                    0b11000000000000000000000000000000, // Should map to 3
+                ];
+
+                for (i, &hash) in hashes.iter().enumerate() {
+                    ext_guard.access_mut(|page| {
+                        let index = page.hash_to_directory_index(hash);
+                        info!("Hash {:#034b} mapped to index {}", hash, index);
+                        assert_eq!(index, i as u32, "Hash {:#034b} should map to index {}", hash, i);
+                    });
+                }
+                info!("All hash to index mappings verified successfully");
+
+                // Test with max_depth 0
+                ext_guard.access_mut(|page| {
+                    page.init(0);
+                    for &hash in &hashes {
+                        let index = page.hash_to_directory_index(hash);
+                        info!("With max_depth 0, hash {:#034b} mapped to index {}", hash, index);
+                        assert_eq!(index, 0, "With max_depth 0, all hashes should map to index 0");
+                    }
+                });
+                info!("Max depth 0 test completed successfully");
+
+                // Test with max_depth 31 (maximum allowed)
+                ext_guard.access_mut(|page| {
+                    page.init(31);
+                    for (i, &hash) in hashes.iter().enumerate() {
+                        let index = page.hash_to_directory_index(hash);
+                        info!("With max_depth 31, hash {:#034b} mapped to index {}", hash, index);
+                        assert_eq!(index, hash >> 1, "With max_depth 31, hash {:#034b} should map to index {}", hash, hash >> 1);
+                    }
+                });
+                info!("Max depth 31 test completed successfully");
+            }
+            None => {
+                panic!("Failed to convert to ExtendableHTableHeaderPage");
+            }
+        }
+
+        info!("Header page test completed successfully");
+    }
+    }

@@ -99,6 +99,7 @@ impl Display for ArrayExpression {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::rid::RID;
     use super::*;
 
     #[test]
@@ -111,7 +112,8 @@ mod tests {
         let expr = Expression::Array(ArrayExpression::new(children));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
@@ -134,7 +136,8 @@ mod tests {
         let expr = Expression::Array(ArrayExpression::new(children));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(vec![], schema.clone(), 0);
+        let rid = RID::new(0,0);
+        let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());
