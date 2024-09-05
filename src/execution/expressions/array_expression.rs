@@ -12,7 +12,7 @@ use std::rc::Rc;
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::types_db::types::Type;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {
     children: Vec<Rc<Expression>>,
     ret_type: Column,

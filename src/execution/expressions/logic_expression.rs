@@ -19,7 +19,7 @@ pub enum LogicType {
     Or,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicExpression {
     left: Rc<Expression>,
     right: Rc<Expression>,
