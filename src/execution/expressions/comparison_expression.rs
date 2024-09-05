@@ -13,7 +13,7 @@ use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknow
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ComparisonType {
     Equal,
     NotEqual,
@@ -23,7 +23,7 @@ pub enum ComparisonType {
     GreaterThanOrEqual,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComparisonExpression {
     left: Rc<Expression>,
     right: Rc<Expression>,

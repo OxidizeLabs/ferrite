@@ -2,7 +2,7 @@ use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::rc::Rc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MockScanNode {
     output_schema: Rc<Schema>,
     child: Option<Rc<PlanNode>>,

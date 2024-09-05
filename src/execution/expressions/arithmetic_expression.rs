@@ -11,7 +11,7 @@ use std::rc::Rc;
 use crate::common::exception::ExpressionError;
 use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArithmeticOp {
     Add,
     Subtract,
@@ -19,7 +19,7 @@ pub enum ArithmeticOp {
     Divide,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ArithmeticExpression {
     left: Rc<Expression>,
     right: Rc<Expression>,

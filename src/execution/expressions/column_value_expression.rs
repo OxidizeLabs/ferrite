@@ -10,7 +10,7 @@ use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression,
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnRefExpression {
     column_index: usize,
     ret_type: Column,

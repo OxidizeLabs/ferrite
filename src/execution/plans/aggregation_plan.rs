@@ -16,7 +16,7 @@ pub enum AggregationType {
     Max,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {
     output_schema: Rc<Schema>,
     child: Rc<PlanNode>,

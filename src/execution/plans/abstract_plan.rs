@@ -4,6 +4,22 @@ use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::execution::plans::seq_scan_plan::SeqScanNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::execution::plans::abstract_plan::PlanType::Aggregation;
+use crate::execution::plans::delete_plan::DeleteNode;
+use crate::execution::plans::filter_plan::FilterNode;
+use crate::execution::plans::hash_join_plan::HashJoinNode;
+use crate::execution::plans::index_scan_plan::IndexScanNode;
+use crate::execution::plans::insert_plan::InsertNode;
+use crate::execution::plans::limit_plan::LimitNode;
+use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
+use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+use crate::execution::plans::projection_plan::ProjectionNode;
+use crate::execution::plans::sort_plan::SortNode;
+use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
+use crate::execution::plans::topn_plan::TopNNode;
+use crate::execution::plans::update_plan::UpdateNode;
+use crate::execution::plans::values_plan::ValuesNode;
+use crate::execution::plans::window_plan::WindowNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -28,26 +44,26 @@ pub enum PlanType {
     Window,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlanNode {
     SeqScan(SeqScanNode),
-    // IndexScan(IndexScanNode),
-    // Insert(InsertNode),
-    // Update(UpdateNode),
-    // Delete(DeleteNode),
+    IndexScan(IndexScanNode),
+    Insert(InsertNode),
+    Update(UpdateNode),
+    Delete(DeleteNode),
     Aggregation(AggregationPlanNode),
-    // Limit(LimitNode),
-    // NestedLoopJoin(NestedLoopJoinNode),
-    // NestedIndexJoin(NestedIndexJoinNode),
-    // HashJoin(HashJoinNode),
-    // Filter(FilterNode),
-    // Values(ValuesNode),
-    // Projection(ProjectionNode),
-    // Sort(SortNode),
-    // TopN(TopNNode),
-    // TopNPerGroup(TopNPerGroupNode),
+    Limit(LimitNode),
+    NestedLoopJoin(NestedLoopJoinNode),
+    NestedIndexJoin(NestedIndexJoinNode),
+    HashJoin(HashJoinNode),
+    Filter(FilterNode),
+    Values(ValuesNode),
+    Projection(ProjectionNode),
+    Sort(SortNode),
+    TopN(TopNNode),
+    TopNPerGroup(TopNPerGroupNode),
     MockScan(MockScanNode),
-    // Window(WindowNode)
+    Window(WindowNode)
 }
 
 pub trait AbstractPlanNode {
@@ -62,99 +78,68 @@ pub trait AbstractPlanNode {
 impl AbstractPlanNode for PlanNode {
     fn get_output_schema(&self) -> &Schema {
         match self {
-            PlanNode::SeqScan(node) => &node.get_output_schema(),
-            // PlanNode::IndexScan(node) => &node.get_output_schema(),
-            // PlanNode::NestedLoopJoin(node) => &node.get_output_schema(),
-            // PlanNode::Filter(node) => &node.get_output_schema(),
-            PlanNode::Aggregation(node) => &node.get_output_schema(),
-            // PlanNode::Insert(node) => &node.get_output_schema(),
-            // PlanNode::Update(node) => &node.get_output_schema(),
-            // PlanNode::Delete(node) => &node.get_output_schema(),
-            // PlanNode::Limit(node) => &node.get_output_schema(),
-            // PlanNode::NestedIndexJoin(node) => &node.get_output_schema(),
-            // PlanNode::HashJoin(node) => &node.get_output_schema(),
-            // PlanNode::Values(node) => &node.get_output_schema(),
-            // PlanNode::Projection(node) => &node.get_output_schema(),
-            // PlanNode::Sort(node) => &node.get_output_schema(),
-            // PlanNode::TopN(node) => &node.get_output_schema(),
-            // PlanNode::TopNPerGroup(node) => &node.get_output_schema(),
-            PlanNode::MockScan(node) => &node.get_output_schema(),
-            // PlanNode::Window(node) => &node.get_output_schema(),
+            _ => self.as_abstract_plan_node().get_output_schema()
         }
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
         match self {
-            PlanNode::SeqScan(node) => node.get_children(),
-            // PlanNode::IndexScan(node) => &node.get_children(),
-            // PlanNode::NestedLoopJoin(node) => &node.get_children(),
-            // PlanNode::Filter(node) => &node.get_children(),
-            // PlanNode::Insert(node) => &node.get_children(),
-            // PlanNode::Update(node) => &node.get_children(),
-            // PlanNode::Delete(node) => &node.get_children(),
-            PlanNode::Aggregation(node) => &node.get_children(),
-            // PlanNode::Limit(node) => &node.get_children(),
-            // PlanNode::NestedIndexJoin(node) => &node.get_children(),
-            // PlanNode::HashJoin(node) => &node.get_children(),
-            // PlanNode::Values(node) => &node.get_children(),
-            // PlanNode::Projection(node) => &node.get_children(),
-            // PlanNode::Sort(node) => &node.get_children(),
-            // PlanNode::TopN(node) => &node.get_children(),
-            // PlanNode::TopNPerGroup(node) => &node.get_children(),
-            PlanNode::MockScan(node) => &node.get_children(),
-            // PlanNode::Window(node) => &node.get_children(),
+            _ => self.as_abstract_plan_node().get_children()
         }
     }
 
     fn get_type(&self) -> PlanType {
         match self {
-            PlanNode::SeqScan(_) => PlanType::SeqScan,
-            // PlanNode::IndexScan(_) => PlanType::IndexScan,
-            // PlanNode::NestedLoopJoin(_) => PlanType::NestedLoopJoin,
-            // PlanNode::Filter(_) => PlanType::Filter,
-            PlanNode::Aggregation(_) => PlanType::Aggregation,
-            // PlanNode::Insert(_) => PlanType::Insert,
-            // PlanNode::Update(_) => PlanType::Update,
-            // PlanNode::Delete(_) => PlanType::Delete,
-            // PlanNode::Limit(_) => PlanType::Limit,
-            // PlanNode::NestedIndexJoin(_) => PlanType::NestedIndexJoin,
-            // PlanNode::HashJoin(_) => PlanType::HashJoin,
-            // PlanNode::Values(_) => PlanType::Values,
-            // PlanNode::Projection(_) => PlanType::Projection,
-            // PlanNode::Sort(_) => PlanType::Sort,
-            // PlanNode::TopN(_) => PlanType::TopN,
-            // PlanNode::TopNPerGroup(_) => PlanType::TopNPerGroup,
-            PlanNode::MockScan(_) => PlanType::MockScan,
-            // PlanNode::Window(_) => PlanType::Window,
+            _ => self.as_abstract_plan_node().get_type()
         }
     }
 
     fn to_string(&self, with_schema: bool) -> String {
-        let node_str = self.plan_node_to_string();
-        let children_str = self.children_to_string(2);
-
-        if with_schema {
-            format!("{} | {}{}", node_str, self.get_output_schema(), children_str)
-        } else {
-            format!("{}{}", node_str, children_str)
+        match self {
+            _ => self.as_abstract_plan_node().to_string(with_schema)
         }
     }
 
     fn plan_node_to_string(&self) -> String {
-        format!("{:?}", self.get_type())
+        match self {
+            _ => self.as_abstract_plan_node().plan_node_to_string()
+        }
     }
 
     fn children_to_string(&self, indent: usize) -> String {
-        let mut result = String::new();
-        for child in self.get_children() {
-            result.push_str(&format!("\n{:indent$}", "", indent = indent));
-            let child_str = ToString::to_string(&child);
-            result.push_str(&child_str.as_str());
+        match self {
+            _ => self.as_abstract_plan_node().children_to_string(indent)
         }
-        result
     }
+
 }
 
+impl PlanNode {
+
+    // Helper method to get a reference to the AbstractPlanNode
+    fn as_abstract_plan_node(&self) -> &dyn AbstractPlanNode {
+        match self {
+            PlanNode::SeqScan(node) => node,
+            PlanNode::IndexScan(node) => node,
+            PlanNode::NestedLoopJoin(node) => node,
+            PlanNode::Filter(node) => node,
+            PlanNode::Aggregation(node) => node,
+            PlanNode::Insert(node) => node,
+            PlanNode::Update(node) => node,
+            PlanNode::Delete(node) => node,
+            PlanNode::Limit(node) => node,
+            PlanNode::NestedIndexJoin(node) => node,
+            PlanNode::HashJoin(node) => node,
+            PlanNode::Values(node) => node,
+            PlanNode::Projection(node) => node,
+            PlanNode::Sort(node) => node,
+            PlanNode::TopN(node) => node,
+            PlanNode::TopNPerGroup(node) => node,
+            PlanNode::MockScan(node) => node,
+            PlanNode::Window(node) => node,
+        }
+    }
+}
 // impl PartialEq for PlanNode {
 //     fn eq(&self, other: &Self) -> bool {
 //         if std::mem::discriminant(self) != std::mem::discriminant(other) {
@@ -165,10 +150,10 @@ impl AbstractPlanNode for PlanNode {
 //             (PlanNode::SeqScan(a), PlanNode::SeqScan(b)) => a.get_output_schema() == b.get_output_schema(),
 //             (PlanNode::IndexScan(a), PlanNode::IndexScan(b)) => a.get_output_schema() == b.get_output_schema(),
 //             (PlanNode::NestedLoopJoin(a), PlanNode::NestedLoopJoin(b)) => {
-//                 a.get_output_schema() == b.get_output_schema() && a.left == b.left && a.right == b.right
+//                 a.get_output_schema() == b.get_output_schema() && a.get_left() == b.get_left() && a.get_right() == b.get_right()
 //             }
 //             (PlanNode::Filter(a), PlanNode::Filter(b)) => {
-//                 a.get_output_schema() == b.get_output_schema() && a.child == b.child
+//                 a == b
 //             }
 //
 //             (PlanNode::Insert(_), _) => {}
@@ -185,6 +170,23 @@ impl AbstractPlanNode for PlanNode {
 //             (PlanNode::TopNPerGroup(_), _) => {}
 //             (PlanNode::MockScan(_), _) => {}
 //             (PlanNode::Window(_), _) => {}
+//             (PlanNode::SeqScan(_), PlanNode::IndexScan(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Insert(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Update(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Delete(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Aggregation(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Limit(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::NestedLoopJoin(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::NestedIndexJoin(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::HashJoin(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Filter(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Values(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Projection(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Sort(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::TopN(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::TopNPerGroup(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::MockScan(_)) => {}
+//             (PlanNode::SeqScan(_), PlanNode::Window(_)) => {}
 //         }
 //     }
 // }
@@ -194,40 +196,3 @@ impl Display for PlanNode {
         write!(f, "{}", AbstractPlanNode::to_string(self, true))
     }
 }
-
-// #[cfg(test)]
-// mod unit_tests {
-//     use super::*;
-//
-//     #[test]
-//     fn plan_node() {
-//         let schema = Rc::new(Schema::new(vec![]));
-//         let seq_scan = PlanNode::SeqScan(SeqScanNode {
-//             output_schema: schema.clone(),
-//         });
-//         let index_scan = PlanNode::IndexScan(IndexScanNode {
-//             output_schema: schema.clone(),
-//         });
-//         let nested_loop_join = PlanNode::NestedLoopJoin(NestedLoopJoinNode {
-//             output_schema: schema.clone(),
-//             left: Box::new(seq_scan),
-//             right: Box::new(index_scan),
-//         });
-//
-//         assert_eq!(nested_loop_join.get_type(), PlanType::NestedLoopJoin);
-//         assert_eq!(nested_loop_join.get_children().len(), 2);
-//         assert_eq!(nested_loop_join.get_children()[0].get_type(), PlanType::SeqScan);
-//         assert_eq!(nested_loop_join.get_children()[1].get_type(), PlanType::IndexScan);
-//     }
-//
-//     #[test]
-//     fn to_string() {
-//         let schema = Rc::new(Schema::new(vec![]));
-//         let child = SeqScanNode::new((), 0, "".to_string(), None, vec![]);
-//         let parent = FilterNode::new(Rc::new(()));
-//
-//
-//         let expected = "Filter | Schema ()\n  SeqScan | Schema ()";
-//         assert_eq!(parent.to_string(), expected);
-//     }
-// }

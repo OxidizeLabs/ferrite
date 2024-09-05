@@ -16,7 +16,7 @@ use std::rc::Rc;
 use crate::common::exception::{ArrayExpressionError, ExpressionError};
 use crate::execution::expressions::array_expression::ArrayExpression;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Constant(ConstantExpression),
     ColumnRef(ColumnRefExpression),
