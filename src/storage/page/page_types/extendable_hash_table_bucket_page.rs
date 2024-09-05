@@ -367,12 +367,13 @@ mod basic_behavior {
     use spin::RwLock;
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::config::PageId;
+    use crate::common::config::{PageId, INVALID_PAGE_ID};
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::common::logger::initialize_logger;
     use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
+    use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use crate::types_db::integer_type::IntegerType;
 
@@ -426,33 +427,219 @@ mod basic_behavior {
     }
 
     #[test]
-    #[ignore]
     fn bucket_page_integrity() {
         let ctx = TestContext::new("bucket_page_integrity");
         let bpm = &ctx.bpm;
 
-        let bucket_guard = match bpm.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
+        let bucket_page_guard = match bpm.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
             Some(guard) => guard,
             None => {
                 error!("Failed to create new bucket page");
                 panic!("Failed to create new bucket page");
             }
         };
-        let bucket_page_id = bucket_guard.get_page_id();
-        match bucket_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
-            Some(mut bucket_guard_1) => {
-                bucket_guard_1.access_mut(|page| {
+        if let Some(ext_guard) = bucket_page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
+            let read_guard = ext_guard.read();
+            read_guard.access(|page| {
+                let bucket_page_size = page.get_size();
+                info!("bucket page size: {}", bucket_page_size);
+            });
+
+            let mut write_guard = ext_guard.write();
+            write_guard.access_mut(|page| {
+                page.init(10);
+                info!("Initialized bucket page with max size: {}", page.get_size());
+                assert_eq!(page.get_size(), 10)
+            });
+        }
+    }
+
+    #[test]
+    fn end_to_end() {
+        let ctx = TestContext::new("test_basic_behaviour");
+        let bpm = &ctx.bpm;
+
+        info!("Starting basic behaviour test");
+
+        let mut bucket_page_ids = [INVALID_PAGE_ID; 4];
+
+        // Create bucket pages
+        for i in 0..4 {
+            let bucket_page_guard = match bpm.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
+                Some(guard) => guard,
+                None => {
+                    error!("Failed to create new bucket page");
+                    panic!("Failed to create new bucket page");
+                }
+            };
+            bucket_page_ids[i] = bucket_page_guard.get_page_id();
+            if let Some(ext_guard) = bucket_page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
+                let mut write_guard = ext_guard.write();
+                write_guard.access_mut(|page| {
                     page.init(10);
+
                     info!("Initialized bucket page with max size: {}", page.get_size());
                 });
             }
-            None => {
-                error!("Failed to convert to ExtendableHTableBucketPage<8>");
-                // Print more information about the page
-                error!("Page ID: {}", bucket_page_id);
-                // error!("Page type: {}", bucket_guard_1.get_page_type());
-                panic!("Conversion to ExtendableHTableBucketPage<8> failed");
-            }
+        }
+
+        // Create directory page
+        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_page_id = directory_guard.get_page_id();
+        info!("Created directory page with ID: {}", directory_page_id);
+
+        if let Some(ext_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+            let mut write_guard = ext_guard.write();
+            write_guard.access_mut(|directory_page| {
+                directory_page.init(3);
+                info!("Initialized bucket page with max size: {}", directory_page.get_size());
+
+                directory_page.set_bucket_page_id(0, bucket_page_ids[0]);
+
+                /*
+                ======== DIRECTORY (global_depth_: 0) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    0    |    0        |
+                ================ END DIRECTORY ================
+                */
+                directory_page.print_directory();
+                directory_page.verify_integrity();
+                assert_eq!(directory_page.get_size(), 1);
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
+
+                // grow the directory, local depths should change!
+                directory_page.set_local_depth(0, 1);
+                directory_page.incr_global_depth();
+                directory_page.set_bucket_page_id(1, bucket_page_ids[1]);
+                directory_page.set_local_depth(1, 1);
+
+                /*
+                ======== DIRECTORY (global_depth_: 1) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    0    |    1        |
+                |    1       |    1    |    1        |
+                ================ END DIRECTORY ================
+                */
+
+                directory_page.print_directory();
+                directory_page.verify_integrity();
+                assert_eq!(directory_page.get_size(), 2);
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
+                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
+
+                for i in 0..100 {
+                    assert_eq!(directory_page.hash_to_bucket_index(i), i % 2);
+                }
+
+                directory_page.set_local_depth(0, 2);
+                directory_page.incr_global_depth();
+                directory_page.set_bucket_page_id(2, bucket_page_ids[2]);
+
+                /*
+                ======== DIRECTORY (global_depth_: 2) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    0    |    2        |
+                |    1       |    1    |    1        |
+                |    2       |    2    |    1        |
+                |    3       |    1    |    1        |
+                ================ END DIRECTORY ================
+                */
+
+                directory_page.print_directory();
+                directory_page.verify_integrity();
+                assert_eq!(directory_page.get_size(), 4);
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
+                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
+                assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
+                assert_eq!(directory_page.get_bucket_page_id(3), Some(bucket_page_ids[1]));
+
+                for i in 0..100 {
+                    assert_eq!(directory_page.hash_to_bucket_index(i), i % 4);
+                }
+
+                directory_page.set_local_depth(0, 3);
+                directory_page.incr_global_depth();
+                directory_page.set_bucket_page_id(4, bucket_page_ids[3]);
+
+                /*
+                ======== DIRECTORY (global_depth_: 3) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    1    |    3        |
+                |    1       |    2    |    1        |
+                |    2       |    3    |    2        |
+                |    3       |    2    |    1        |
+                |    4       |    4    |    3        |
+                |    5       |    2    |    1        |
+                |    6       |    3    |    2        |
+                |    7       |    2    |    1        |
+                ================ END DIRECTORY ================
+                */
+
+                directory_page.print_directory();
+                directory_page.verify_integrity();
+                assert_eq!(directory_page.get_size(), 8);
+                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
+                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
+                assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
+                assert_eq!(directory_page.get_bucket_page_id(3), Some(bucket_page_ids[1]));
+                assert_eq!(directory_page.get_bucket_page_id(4), Some(bucket_page_ids[3]));
+                assert_eq!(directory_page.get_bucket_page_id(5), Some(bucket_page_ids[1]));
+                assert_eq!(directory_page.get_bucket_page_id(6), Some(bucket_page_ids[2]));
+                assert_eq!(directory_page.get_bucket_page_id(7), Some(bucket_page_ids[1]));
+
+                for i in 0..100 {
+                    assert_eq!(directory_page.hash_to_bucket_index(i), i % 8);
+                }
+
+                // uncommenting this code line below should cause an "Assertion failed"
+                // since this would be exceeding the max depth we initialized
+                // directory_page.incr_global_depth();
+
+                // at this time, we cannot shrink the directory since we have ld = gd = 3
+                directory_page.print_directory();
+                assert_eq!(directory_page.can_shrink(), false);
+
+                directory_page.set_local_depth(0, 2);
+                directory_page.set_local_depth(4, 2);
+                directory_page.set_bucket_page_id(0, bucket_page_ids[3]);
+
+                /*
+                ======== DIRECTORY (global_depth_: 3) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    4    |    2        |
+                |    1       |    2    |    1        |
+                |    2       |    3    |    2        |
+                |    3       |    2    |    1        |
+                |    4       |    4    |    2        |
+                |    5       |    2    |    1        |
+                |    6       |    3    |    2        |
+                |    7       |    2    |    1        |
+                ================ END DIRECTORY ================
+                */
+
+                directory_page.print_directory();
+                assert_eq!(directory_page.can_shrink(), true);
+                directory_page.decr_global_depth();
+
+                /*
+                ======== DIRECTORY (global_depth_: 2) ========
+                | bucket_idx | page_id | local_depth |
+                |    0       |    4    |    2        |
+                |    1       |    2    |    1        |
+                |    2       |    3    |    2        |
+                |    3       |    2    |    1        |
+                ================ END DIRECTORY ================
+                */
+
+                directory_page.print_directory();
+                directory_page.verify_integrity();
+                assert_eq!(directory_page.get_size(), 4);
+                assert_eq!(directory_page.can_shrink(), false);
+
+                info!("Basic behaviour test completed successfully");
+        });
+        } else {
+            panic!("Failed to convert to ExtendableHTableDirectoryPage");
         }
     }
 

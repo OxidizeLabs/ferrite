@@ -155,7 +155,6 @@ impl Tuple {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
