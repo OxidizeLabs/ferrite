@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Write;
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
@@ -19,7 +19,7 @@ pub enum Val {
     Timestamp(u64),
     VarLen(String),
     ConstVarLen(String),
-    Vector(Rc<Vec<Value>>),
+    Vector(Vec<Value>),
     Null,
 }
 
@@ -67,7 +67,7 @@ impl Value {
     {
         let vec: Vec<Value> = iter.into_iter().map(Into::into).collect();
         Value {
-            value_: Val::Vector(Rc::new(vec.clone())),
+            value_: Val::Vector(vec.clone()),
             size_: Size::Length(vec.len()),
             manage_data_: false,
             type_id_: TypeId::Vector,
@@ -195,7 +195,7 @@ impl From<&str> for Val {
 
 impl From<Vec<Value>> for Val {
     fn from(v: Vec<Value>) -> Self {
-        Val::Vector(Rc::new(v))
+        Val::Vector(v)
     }
 }
 
@@ -294,7 +294,7 @@ mod unit_tests {
         let serialized_string = bincode::serialize(&val_string).expect("Serialization failed");
         assert_eq!(serialized_string, vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]); // Binary format for the string
 
-        let val_vector = Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]));
+        let val_vector = Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]);
         let serialized_vector = bincode::serialize(&val_vector).expect("Serialization failed");
         // Adjust this based on the expected binary format
     }
@@ -314,12 +314,12 @@ mod unit_tests {
         let deserialized_string: Val = bincode::deserialize(&binary_string).expect("Deserialization failed");
         assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
 
-        let binary_vector = bincode::serialize(&Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))])))
+        let binary_vector = bincode::serialize(&Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]))
             .expect("Serialization failed");
         let deserialized_vector: Val = bincode::deserialize(&binary_vector).expect("Deserialization failed");
         assert_eq!(
             deserialized_vector,
-            Val::Vector(Rc::new(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]))
+            Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))])
         );
     }
 

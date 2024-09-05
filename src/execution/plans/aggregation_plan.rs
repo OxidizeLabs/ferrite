@@ -6,6 +6,7 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
+use crate::types_db::types::CmpBool;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggregationType {
@@ -112,6 +113,25 @@ impl AbstractPlanNode for AggregationPlanNode {
     }
 }
 
+impl AggregateKey {
+    pub fn compare(&self, other: AggregateKey) -> CmpBool {
+        if AggregateKey::iterators_equal(self.group_bys.clone().into_iter(), other.group_bys.into_iter()) {
+            CmpBool::CmpTrue
+        } else {
+            CmpBool::CmpFalse
+        }
+    }
+
+    fn iterators_equal<I, J, T>(a: I, b: J) -> bool
+    where
+        I: Iterator<Item = T>,
+        J: Iterator<Item = T>,
+        T: PartialEq,
+    {
+        a.zip(b).all(|(x, y)| x == y)
+    }
+}
+
 impl Display for AggregationType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -168,5 +188,16 @@ mod tests {
 
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
+    }
+
+    #[test]
+    fn aggregate_key_compare() {
+        let key1 = AggregateKey {
+            group_bys: vec![Value::from(1), Value::from(2)],
+        };
+        let key2 = AggregateKey {
+            group_bys: vec![Value::from(1), Value::from(2)],
+        };
+        assert_eq!(key1.compare(key2), CmpBool::CmpTrue);
     }
 }
