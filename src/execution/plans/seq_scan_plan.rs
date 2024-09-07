@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
@@ -9,14 +10,13 @@ use crate::execution::expressions::constant_value_expression::ConstantExpression
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqScanNode {
     output_schema: Schema,
     table_oid: TableOidT,
     table_name: String,
-    filter_predicate: Option<Rc<Expression>>,
+    filter_predicate: Option<Arc<Expression>>,
     children: Vec<PlanNode>,
 }
 
@@ -25,7 +25,7 @@ impl SeqScanNode {
         output_schema: Schema,
         table_oid: TableOidT,
         table_name: String,
-        filter_predicate: Option<Rc<Expression>>,
+        filter_predicate: Option<Arc<Expression>>,
     ) -> Self {
         Self {
             output_schema,
@@ -44,7 +44,7 @@ impl SeqScanNode {
         &self.table_name
     }
 
-    pub fn get_filter_predicate(&self) -> Option<&Rc<Expression>> {
+    pub fn get_filter_predicate(&self) -> Option<&Arc<Expression>> {
         self.filter_predicate.as_ref()
     }
 
@@ -112,7 +112,7 @@ mod unit_tests {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let table_oid = 1;
         let table_name = "test_table".to_string();
-        let filter_predicate = Some(Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
+        let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
 
         let seq_scan_node = SeqScanNode::new(
             schema,
@@ -218,7 +218,7 @@ mod unit_tests {
             schema,
             table_oid,
             table_name.clone(),
-            Some(Rc::new(filter)),
+            Some(Arc::new(filter)),
         );
 
         let with_schema = seq_scan_node.to_string(true);
@@ -294,9 +294,9 @@ mod seq_scan_string_tests {
         let table_name = "filtered_employees".to_string();
 
         let age_column = schema.get_column(1).unwrap().clone();
-        let age_expr = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(2, age_column, vec![])));
-        let const_expr = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(30), Column::new("const", TypeId::Integer), vec![])));
-        let filter = Rc::new(Expression::Comparison(ComparisonExpression::new(
+        let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,2, age_column, vec![])));
+        let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(30), Column::new("const", TypeId::Integer), vec![])));
+        let filter = Arc::new(Expression::Comparison(ComparisonExpression::new(
             age_expr,
             const_expr,
             ComparisonType::GreaterThan,

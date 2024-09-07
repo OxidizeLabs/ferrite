@@ -1,11 +1,10 @@
+use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::rc::Rc;
-use crate::execution::plans::projection_plan::ProjectionNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SortNode {
-    output_schema: Rc<Schema>,
+    output_schema: Arc<Schema>,
     child: Box<PlanNode>,
 }
 

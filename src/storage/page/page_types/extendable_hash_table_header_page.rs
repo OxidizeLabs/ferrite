@@ -368,4 +368,4 @@ mod basic_behavior {
 
         info!("Header page test completed successfully");
     }
-    }
+}

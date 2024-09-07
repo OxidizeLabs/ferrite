@@ -5,21 +5,20 @@ use crate::execution::expressions::abstract_expression::{Expression, ExpressionO
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
-use crate::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::types_db::types::Type;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {
-    children: Vec<Rc<Expression>>,
+    children: Vec<Arc<Expression>>,
     ret_type: Column,
 }
 
 impl ArrayExpression {
-    pub fn new(children: Vec<Rc<Expression>>) -> Self {
+    pub fn new(children: Vec<Arc<Expression>>) -> Self {
         Self {
             ret_type: Column::new("<val>", TypeId::Vector),
             children,
@@ -62,11 +61,11 @@ impl ExpressionOps for ArrayExpression {
             .map_err(|e| ExpressionError::Array(e))
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         &self.children[child_idx]
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -74,8 +73,8 @@ impl ExpressionOps for ArrayExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
-        Rc::new(Expression::Array(ArrayExpression {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
+        Arc::new(Expression::Array(ArrayExpression {
             ret_type: self.ret_type.clone(),
             children,
         }))
@@ -99,20 +98,20 @@ impl Display for ArrayExpression {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
 
     #[test]
     fn array_expression() {
         let children = vec![
-            Rc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Rc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(2.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Rc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(3.0)), Column::new("const", TypeId::Decimal), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(2.0)), Column::new("const", TypeId::Decimal), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(3.0)), Column::new("const", TypeId::Decimal), vec![]))),
         ];
         let expr = Expression::Array(ArrayExpression::new(children));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
@@ -130,13 +129,13 @@ mod tests {
     #[test]
     fn array_expression_invalid_type() {
         let children = vec![
-            Rc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Rc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Integer(2)), Column::new("const", TypeId::Integer), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Integer(2)), Column::new("const", TypeId::Integer), vec![]))),
         ];
         let expr = Expression::Array(ArrayExpression::new(children));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema);

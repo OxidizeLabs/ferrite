@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
@@ -7,14 +7,14 @@ use crate::execution::plans::seq_scan_plan::SeqScanNode;
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterNode {
     output_schema: Schema,
-    predicate: Rc<Expression>,
+    predicate: Arc<Expression>,
     children: Vec<PlanNode>,
 }
 
 impl FilterNode {
     pub fn new(
         output_schema: Schema,
-        predicate: Rc<Expression>,
+        predicate: Arc<Expression>,
         child: PlanNode,
     ) -> Self {
         Self {
@@ -24,7 +24,7 @@ impl FilterNode {
         }
     }
 
-    pub fn get_predicate(&self) -> &Rc<Expression> {
+    pub fn get_predicate(&self) -> &Arc<Expression> {
         &self.predicate
     }
 
@@ -83,12 +83,12 @@ mod tests {
             Column::new("col2", TypeId::Integer),
         ]);
 
-        let col1 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(0, schema.get_column(0).unwrap().clone(), vec![])));
-        let col2 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(1, schema.get_column(1).unwrap().clone(), vec![])));
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, schema.get_column(0).unwrap().clone(), vec![])));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,1, schema.get_column(1).unwrap().clone(), vec![])));
 
         let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
 
-        let predicate = Rc::new(less_than_expr);
+        let predicate = Arc::new(less_than_expr);
         let child = PlanNode::SeqScan(SeqScanNode::new(schema.clone(), 0, "test_table".to_string(), None));
 
         let filter_node = FilterNode::new(schema.clone(), predicate.clone(), child);
@@ -99,7 +99,6 @@ mod tests {
         assert_eq!(filter_node.get_children().len(), 1);
 
         let expected_string = filter_node.to_string(true);
-        println!("Actual string:\n{}", expected_string);
 
         assert!(expected_string.contains("Filter { predicate="));
         assert!(expected_string.contains("Schema: Schema (col1, col2)"));

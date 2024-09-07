@@ -1,11 +1,10 @@
 use crate::catalogue::schema::Schema;
-use std::rc::Rc;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::execution::plans::filter_plan::FilterNode;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexScanNode {
-    output_schema: Rc<Schema>,
+    output_schema: Arc<Schema>,
 }
 
 impl AbstractPlanNode for IndexScanNode {

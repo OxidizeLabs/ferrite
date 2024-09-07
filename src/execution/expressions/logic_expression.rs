@@ -1,5 +1,6 @@
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
+use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::storage::table::tuple::Tuple;
@@ -8,10 +9,7 @@ use crate::types_db::types::CmpBool;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
-use crate::common::exception::ExpressionError;
-use crate::execution::expressions::arithmetic_expression::ArithmeticExpression;
-use crate::execution::expressions::comparison_expression::ComparisonExpression;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {
@@ -21,15 +19,15 @@ pub enum LogicType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogicExpression {
-    left: Rc<Expression>,
-    right: Rc<Expression>,
+    left: Arc<Expression>,
+    right: Arc<Expression>,
     logic_type: LogicType,
     ret_type: Column,
-    children: Vec<Rc<Expression>>,
+    children: Vec<Arc<Expression>>,
 }
 
 impl LogicExpression {
-    pub fn new(left: Rc<Expression>, right: Rc<Expression>, logic_type: LogicType, children: Vec<Rc<Expression>>,
+    pub fn new(left: Arc<Expression>, right: Arc<Expression>, logic_type: LogicType, children: Vec<Arc<Expression>>,
     ) -> Self {
         Self {
             left,
@@ -40,11 +38,11 @@ impl LogicExpression {
         }
     }
 
-    pub fn get_left(&self) -> &Rc<Expression> {
+    pub fn get_left(&self) -> &Arc<Expression> {
         &self.left
     }
 
-    pub fn get_right(&self) -> &Rc<Expression> {
+    pub fn get_right(&self) -> &Arc<Expression> {
         &self.right
     }
 
@@ -110,11 +108,11 @@ impl ExpressionOps for LogicExpression {
         Ok(Value::new(comparison_result))
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         &self.children[child_idx]
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -122,12 +120,12 @@ impl ExpressionOps for LogicExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         if children.len() != 2 {
             panic!("ArithmeticExpression requires exactly two children");
         }
 
-        Rc::new(Expression::Logic(LogicExpression {
+        Arc::new(Expression::Logic(LogicExpression {
             left: children[0].clone(),
             right: children[1].clone(),
             ret_type: self.ret_type.clone(),
@@ -149,18 +147,18 @@ impl Display for LogicType {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use crate::common::rid::RID;
     use crate::types_db::value::Val::Null;
-    use super::*;
 
     #[test]
     fn logic_expression_and() {
-        let left = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -169,12 +167,12 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_or() {
-        let left = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -183,12 +181,12 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_with_null() {
-        let left = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Boolean), vec![])));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -197,8 +195,8 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_invalid_types() {
-        let left = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Integer), vec![])));
-        let right = Rc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Integer), vec![])));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
         let result = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
         assert_eq!(result.get_return_type().get_type(), TypeId::Boolean);
     }

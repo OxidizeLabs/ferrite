@@ -1,10 +1,10 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LimitNode {
-    output_schema: Rc<Schema>,
+    output_schema: Arc<Schema>,
     child: Box<PlanNode>,
 }
 
