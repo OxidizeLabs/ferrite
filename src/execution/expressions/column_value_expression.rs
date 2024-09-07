@@ -1,25 +1,25 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
-use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::{Val, Value};
+use crate::types_db::value::Value;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnRefExpression {
+    tuple_index: usize,
     column_index: usize,
     ret_type: Column,
-    children: Vec<Rc<Expression>>,
+    children: Vec<Arc<Expression>>,
 }
 
 impl ColumnRefExpression {
-    pub fn new(column_index: usize, ret_type: Column, children: Vec<Rc<Expression>>) -> Self {
+    pub fn new(tuple_index: usize, column_index: usize, ret_type: Column, children: Vec<Arc<Expression>>) -> Self {
         Self {
+            tuple_index,
             column_index,
             ret_type,
             children,
@@ -50,11 +50,11 @@ impl ExpressionOps for ColumnRefExpression {
         }
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         &self.children[child_idx]
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -62,8 +62,9 @@ impl ExpressionOps for ColumnRefExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
-        Rc::new(Expression::ColumnRef(ColumnRefExpression {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
+        Arc::new(Expression::ColumnRef(ColumnRefExpression {
+            tuple_index: self.tuple_index,
             column_index: self.column_index,
             ret_type: self.ret_type.clone(),
             children,
@@ -73,6 +74,6 @@ impl ExpressionOps for ColumnRefExpression {
 
 impl Display for ColumnRefExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Col#{}", self.column_index)
+        write!(f, "#{}.{}", self.tuple_index, self.column_index)
     }
 }

@@ -6,17 +6,17 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstantExpression {
     value: Value,
     ret_type: Column,
-    children: Vec<Rc<Expression>>,
+    children: Vec<Arc<Expression>>,
 }
 
 impl ConstantExpression {
-    pub fn new(value: Value, ret_type: Column, children: Vec<Rc<Expression>>) -> Self {
+    pub fn new(value: Value, ret_type: Column, children: Vec<Arc<Expression>>) -> Self {
         Self {
             value,
             ret_type,
@@ -38,11 +38,11 @@ impl ExpressionOps for ConstantExpression {
         todo!()
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         todo!()
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -50,8 +50,8 @@ impl ExpressionOps for ConstantExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
-        Rc::new(Expression::Constant(ConstantExpression::new(
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
+        Arc::new(Expression::Constant(ConstantExpression::new(
             self.value.clone(),
             self.ret_type.clone(),
             children,
@@ -61,6 +61,6 @@ impl ExpressionOps for ConstantExpression {
 
 impl Display for ConstantExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
+        write!(f, "Constant({})", self.value)
     }
 }
