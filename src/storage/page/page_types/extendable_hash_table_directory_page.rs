@@ -531,19 +531,19 @@ impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
 
 #[cfg(test)]
 mod basic_behavior {
-    use std::sync::Arc;
-    use chrono::Utc;
-    use log::{error, info};
-    use spin::RwLock;
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::config::{PageId, INVALID_PAGE_ID};
+    use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::common::logger::initialize_logger;
     use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+    use chrono::Utc;
+    use log::{error, info};
+    use spin::RwLock;
+    use std::sync::Arc;
 
     const PAGE_ID_SIZE: usize = size_of::<PageId>();
 

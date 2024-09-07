@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
@@ -10,11 +10,11 @@ pub struct NestedLoopJoinNode {
 }
 
 impl NestedLoopJoinNode {
-    pub fn new(output_schema: Arc<Schema>, left: Box<PlanNode>, right: Box<PlanNode>,) -> Self {
+    pub fn new(output_schema: Arc<Schema>, left: Box<PlanNode>, right: Box<PlanNode>) -> Self {
         Self {
             output_schema,
             left,
-            right
+            right,
         }
     }
 

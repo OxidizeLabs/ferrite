@@ -4,11 +4,11 @@ use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, Exten
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use crate::storage::page::page_types::table_page::TablePage;
 use log::{debug, error, info, warn};
 use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::Any;
 use std::convert::TryInto;
-use crate::storage::page::page_types::table_page::TablePage;
 
 // Constants
 const OFFSET_PAGE_START: usize = 0;
@@ -328,11 +328,11 @@ mod basic_behavior {
 // Concurrency
 #[cfg(test)]
 mod concurrency {
-    use std::sync::Arc;
-    use std::thread;
-    use spin::{Barrier, RwLock};
     use crate::common::config::DB_PAGE_SIZE;
     use crate::storage::page::page::{Page, PageTrait};
+    use spin::{Barrier, RwLock};
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn concurrent_read_and_write() {

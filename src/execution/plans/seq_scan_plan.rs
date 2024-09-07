@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
@@ -10,6 +9,7 @@ use crate::execution::expressions::constant_value_expression::ConstantExpression
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqScanNode {
@@ -294,7 +294,7 @@ mod seq_scan_string_tests {
         let table_name = "filtered_employees".to_string();
 
         let age_column = schema.get_column(1).unwrap().clone();
-        let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,2, age_column, vec![])));
+        let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 2, age_column, vec![])));
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(30), Column::new("const", TypeId::Integer), vec![])));
         let filter = Arc::new(Expression::Comparison(ComparisonExpression::new(
             age_expr,

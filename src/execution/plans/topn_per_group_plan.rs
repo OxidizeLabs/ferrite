@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNPerGroupNode {

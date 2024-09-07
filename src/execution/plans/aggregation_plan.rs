@@ -252,8 +252,8 @@ mod tests {
         let col1 = Column::new("col1", TypeId::Integer);
         let col2 = Column::new("col2", TypeId::Integer);
 
-        let group_by = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, col1, vec![])));
-        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,1, col2, vec![])));
+        let group_by = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, col1, vec![])));
+        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, col2, vec![])));
 
         let agg_node = AggregationPlanNode::new(
             schema,
@@ -277,7 +277,7 @@ mod tests {
 
         let col1 = Column::new("col1", TypeId::Integer);
 
-        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, col1, vec![])));
+        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, col1, vec![])));
 
         let agg_node = AggregationPlanNode::new(
             schema,

@@ -137,9 +137,9 @@ mod unit_tests {
 
         let tuple = Tuple::new(vec![Value::new(5), Value::new(10)], schema.clone(), rid);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, schema.get_column(0).unwrap().clone(), vec![])));
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![])));
 
-        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(1,1, schema.get_column(1).unwrap().clone(), vec![])));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(1, 1, schema.get_column(1).unwrap().clone(), vec![])));
 
         let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
 

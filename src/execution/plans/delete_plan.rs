@@ -135,7 +135,7 @@ mod tests {
         let delete_node = DeleteNode::new(schema, child);
 
         match delete_node.get_child() {
-            PlanNode::MockScan(_) => {},
+            PlanNode::MockScan(_) => {}
             _ => panic!("Expected child to be MockScanNode"),
         }
     }

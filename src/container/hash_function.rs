@@ -1,9 +1,8 @@
-use std::any::Any;
-use std::hash::{BuildHasherDefault, Hash, Hasher};
-use std::marker::PhantomData;
-use xxhash_rust::xxh3;
-use xxhash_rust::xxh3::Xxh3;
 use crate::types_db::value::Value;
+use std::any::Any;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use xxhash_rust::xxh3::Xxh3;
 
 // Custom hasher struct to wrap Xxh3 hasher
 #[derive(Default)]
@@ -69,8 +68,8 @@ impl Hasher for Xxh3Hasher {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::types_db::value::Value;
     use super::HashFunction;
+    use crate::types_db::value::Value;
 
     #[test]
     fn hash_function_with_i32() {

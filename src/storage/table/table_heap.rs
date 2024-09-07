@@ -4,14 +4,14 @@ use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::table_page::TablePage;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
+use log::{error, info};
 use spin::RwLock;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
-use log::{error, info};
-use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -37,7 +37,7 @@ impl TableHeap {
             bpm,
             first_page_id: INVALID_PAGE_ID,
             latch: RwLock::new(()),
-            last_page_id: INVALID_PAGE_ID
+            last_page_id: INVALID_PAGE_ID,
         }
     }
 
@@ -80,7 +80,6 @@ impl TableHeap {
                     assert_ne!(table_page.get_num_tuples(), 0);
 
                     tuple.get_rid()
-
                 })
                 .ok_or_else(|| "Failed to insert tuple: Not enough space".to_string())
         }).unwrap_or_else(|| Err("Failed to access table page".to_string()))
