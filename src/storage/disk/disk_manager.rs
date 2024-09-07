@@ -1,7 +1,10 @@
-use std::fs;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::logger::initialize_logger;
+use chrono::Utc;
 use log::{debug, error, info, trace, warn};
+use mockall::automock;
 use spin::{Mutex, RwLock};
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -12,9 +15,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use chrono::Utc;
-use mockall::automock;
-use crate::common::logger::initialize_logger;
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
@@ -528,10 +528,10 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
+    use super::*;
+    use spin::Barrier;
     use std::sync::mpsc::channel;
     use std::thread;
-    use spin::Barrier;
-    use super::*;
 
     #[test]
     fn concurrent_write_and_read_page() -> Result<(), Box<dyn std::error::Error>> {
@@ -692,8 +692,8 @@ mod concurrency {
 #[cfg(test)]
 mod edge_cases {
     use super::*;
-    use std::io::{Error, ErrorKind};
     use mockall::predicate::{always, eq};
+    use std::io::{Error, ErrorKind};
 
     #[test]
     fn reading_non_existent_page() -> Result<(), Error> {

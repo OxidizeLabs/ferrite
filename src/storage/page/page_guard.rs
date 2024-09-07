@@ -1,21 +1,21 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::PageId;
+use crate::common::logger::initialize_logger;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::page::page::PageType;
 use crate::storage::page::page::{AsAny, Page};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::{BucketPageTrait, ExtendableHTableBucketPage};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use crate::storage::page::page_types::table_page::TablePage;
+use chrono::Utc;
+use mockall::Any;
 use spin::RwLock;
 use std::any::TypeId;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use chrono::Utc;
-use mockall::Any;
-use crate::common::logger::initialize_logger;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::page::page_types::table_page::TablePage;
 
 pub struct PageGuard {
     bpm: Arc<BufferPoolManager>,
@@ -250,10 +250,10 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
-    use log::info;
+    use super::*;
     use crate::buffer::buffer_pool_manager::NewPageType;
     use crate::storage::page::page::PageTrait;
-    use super::*;
+    use log::info;
 
     #[test]
     fn basic_page_guard() {
@@ -299,8 +299,8 @@ mod unit_tests {
 
 #[cfg(test)]
 mod basic_behaviour {
-    use crate::buffer::buffer_pool_manager::NewPageType;
     use super::*;
+    use crate::buffer::buffer_pool_manager::NewPageType;
 
     #[test]
     fn create_and_drop() {
@@ -376,11 +376,10 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::NewPageType;
     use std::fmt::Pointer;
     use std::thread;
-    use crate::buffer::buffer_pool_manager::NewPageType;
-    use crate::storage;
-    use super::*;
 
     #[test]
     fn reads() {
@@ -418,67 +417,67 @@ mod concurrency {
 
     #[test]
     fn modify_data_concurrently() {
-        use std::sync::{Arc, Barrier, RwLock};
+        use std::sync::{Arc, Barrier};
         use std::thread;
-    
+
         let ctx = TestContext::new("modify_data_concurrently");
         let bpm = Arc::clone(&ctx.bpm);
-    
+
         // Create a new page with bpm
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
-    
+
         // Barrier to synchronize the start of all threads
         let barrier = Arc::new(Barrier::new(3)); // 2 worker threads + main thread
-    
+
         let mut threads = Vec::new();
         for i in 0..2 {
             let bpm_clone = Arc::clone(&bpm);
             let page0_clone = Arc::clone(&page0);
             let barrier_clone = Arc::clone(&barrier);
-    
+
             threads.push(thread::spawn(move || {
                 // Wait until all threads are ready
                 barrier_clone.wait();
-    
+
                 // Create a basic guard
                 let basic_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page0_clone), page0_clone.read().as_page_trait().get_page_id());
-    
+
                 // Upgrade to WritePageGuard
                 let mut write_guard = basic_guard.write();
-    
+
                 // Perform different modifications in each thread
                 let mut data_mut = write_guard.as_page_trait_mut().get_data_mut();
                 data_mut[i * 4] = (i + 1) as u8; // Each thread writes at a different index
                 data_mut[4 + i * 4..8 + i * 4].copy_from_slice(&(i as u32).to_ne_bytes());
-    
+
                 // Verify that the written data is correct for the current thread
                 assert_eq!(data_mut[i * 4], (i + 1) as u8, "Value should match the thread index");
                 let expected_value = u32::from_ne_bytes(data_mut[4 + i * 4..8 + i * 4].try_into().unwrap());
                 assert_eq!(expected_value, i as u32, "Bucket page ID should match the thread index");
-    
+
                 // Drop the write guard to release the lock
             }));
         }
-    
+
         barrier.wait(); // Synchronize all threads
-    
+
         // Wait for all threads to finish
         for thread in threads {
             thread.join().unwrap();
         }
-    
+
         // Final check after concurrent modifications
         let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
         let binding = final_guard.read();
         let data = binding.as_page_trait().get_data();
-    
+
         // Verify the data written by each thread
         for i in 0..2 {
             assert_eq!(data[i * 4], (i + 1) as u8, "Expected value not found at index {}", i * 4);
             let bucket_page_id = u32::from_ne_bytes(data[4 + i * 4..8 + i * 4].try_into().unwrap());
             assert_eq!(bucket_page_id, i as u32, "Expected bucket page ID not found for index {}", i);
         }
-    
+
         // Ensure the pin count is zero after all threads are done
         assert_eq!(page0.read().as_page_trait().get_pin_count(), 0, "Pin count should be 0 after all guards are dropped");
     }

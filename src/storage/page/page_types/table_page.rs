@@ -1,10 +1,10 @@
+use crate::catalogue::schema::Schema;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::container::hash_function::Xxh3Hasher;
 use crate::storage::page::page::PageTrait;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::catalogue::schema::Schema;
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -182,11 +182,11 @@ impl PageTrait for TablePage {
 
 #[cfg(test)]
 mod tests {
-    use log::info;
+    use super::*;
     use crate::catalogue::column::Column;
     use crate::types_db::type_id::TypeId::Integer;
     use crate::types_db::value::Value;
-    use super::*;
+    use log::info;
 
     #[test]
     fn new_table_page() {
@@ -200,7 +200,7 @@ mod tests {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);
 
         info!("Initial page state: {:?}", page);
@@ -219,10 +219,10 @@ mod tests {
                         assert_eq!(retrieved_meta.get_timestamp(), meta.get_timestamp());
                         assert_eq!(retrieved_meta.is_deleted(), meta.is_deleted());
                         assert_eq!(retrieved_tuple.get_value(0), tuple.get_value(0));
-                    },
+                    }
                     None => panic!("Failed to retrieve tuple with RID: {:?}", inserted_rid),
                 }
-            },
+            }
             None => panic!("Failed to insert tuple"),
         }
     }
@@ -236,7 +236,7 @@ mod tests {
             Column::new("col_2", Integer),
             Column::new("col_3", Integer)
         ]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema, rid);
 
         let new_meta = TupleMeta::new(453, false);
@@ -253,9 +253,9 @@ mod tests {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![
-            Column::new("col_1", Integer);1000
+            Column::new("col_1", Integer); 1000
         ]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::from(1); 1000], schema, rid);
 
         // Insert tuples until the page is full
@@ -270,7 +270,7 @@ mod tests {
         let mut page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::from(1), Value::from(1), Value::from(1)], schema, rid);
 
         let serialized = page.serialize_tuple(&meta, &tuple);

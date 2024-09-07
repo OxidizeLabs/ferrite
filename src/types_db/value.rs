@@ -7,7 +7,6 @@ use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {
@@ -109,7 +108,7 @@ impl Value {
                 for value in v {
                     bytes.extend(value.as_bytes());
                 }
-            },
+            }
             Val::Null => bytes.extend_from_slice(&[0u8]),
         }
         bytes
@@ -265,7 +264,8 @@ impl Display for Value {
                         first = false;
                     }
                     write!(f, "]")
-                },                Val::Null => write!(f, "Null"),
+                }
+                Val::Null => write!(f, "Null"),
             }
         }
     }
@@ -287,7 +287,7 @@ impl Hash for Value {
                 for value in v {
                     value.hash(state);
                 }
-            },
+            }
             Val::Null => (), // Null doesn't need additional hashing
         }
     }
@@ -295,10 +295,10 @@ impl Hash for Value {
 
 #[cfg(test)]
 mod tests {
-    use std::hash::{DefaultHasher, Hash, Hasher};
     use crate::container::hash_function::HashFunction;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
+    use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[test]
     fn test_typeid_hash() {
@@ -512,5 +512,4 @@ mod unit_tests {
         assert_eq!(format!("{:#}", string_value), "VarLen(\"Hello\")");
         assert_eq!(format!("{:#}", vector_value), "Vector([Value { value_: Integer(1), size_: Length(4), manage_data_: false, type_id_: Integer }, Value { value_: VarLen(\"two\"), size_: Length(0), manage_data_: false, type_id_: VarChar }, Value { value_: Decimal(3.0), size_: Length(8), manage_data_: false, type_id_: Decimal }])");
     }
-
 }

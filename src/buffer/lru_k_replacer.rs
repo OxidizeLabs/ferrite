@@ -221,9 +221,9 @@ impl LRUKReplacer {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use std::thread::sleep;
     use std::time::Duration;
-    use super::*;
 
     #[test]
     fn evict_single_frame() {
@@ -438,8 +438,8 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
-    use std::thread;
     use super::*;
+    use std::thread;
 
     #[test]
     fn concurrent_access() {

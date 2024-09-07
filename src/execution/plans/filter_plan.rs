@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::execution::plans::seq_scan_plan::SeqScanNode;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterNode {
@@ -83,8 +83,8 @@ mod tests {
             Column::new("col2", TypeId::Integer),
         ]);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, schema.get_column(0).unwrap().clone(), vec![])));
-        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,1, schema.get_column(1).unwrap().clone(), vec![])));
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![])));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, schema.get_column(1).unwrap().clone(), vec![])));
 
         let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
 

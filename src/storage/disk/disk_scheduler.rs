@@ -1,5 +1,7 @@
 use crate::common::config::PageId;
+use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
+use chrono::Utc;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{debug, error, info};
 use spin::RwLock;
@@ -8,8 +10,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::{fs, thread};
-use chrono::Utc;
-use crate::common::logger::initialize_logger;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
@@ -232,8 +232,8 @@ mod unit_tests {
 
 #[cfg(test)]
 mod basic_behaviour {
-    use crate::common::config::DB_PAGE_SIZE;
     use super::*;
+    use crate::common::config::DB_PAGE_SIZE;
 
     #[test]
     fn schedule_write_and_read_operations() {
@@ -287,9 +287,9 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
-    use std::thread::sleep;
-    use crate::common::config::DB_PAGE_SIZE;
     use super::*;
+    use crate::common::config::DB_PAGE_SIZE;
+    use std::thread::sleep;
 
     #[test]
     fn write_and_read_operations() {
@@ -352,8 +352,8 @@ mod concurrency {
 
 #[cfg(test)]
 mod edge_cases {
-    use crate::common::config::DB_PAGE_SIZE;
     use super::*;
+    use crate::common::config::DB_PAGE_SIZE;
 
     #[test]
     fn empty_queue_handling() {

@@ -484,8 +484,8 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
 
 #[cfg(test)]
 mod tests {
-    use crate::common::logger::initialize_logger;
     use super::*;
+    use crate::common::logger::initialize_logger;
 
     // #[test]
     // fn test_insert_and_search() {

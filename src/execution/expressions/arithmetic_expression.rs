@@ -233,7 +233,7 @@ mod unit_tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, schema.get_column(0).unwrap().clone(), vec![]))
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![]))
         );
         let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, schema.get_column(1).unwrap().clone(), vec![]))
         );

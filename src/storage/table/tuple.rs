@@ -1,10 +1,10 @@
-use bincode;
-use serde::{Deserialize, Serialize};
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
+use bincode;
+use serde::{Deserialize, Serialize};
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, Serialize, Deserialize)]

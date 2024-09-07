@@ -7,9 +7,8 @@ use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
 use std::mem::size_of;
-use crate::storage::index::generic_key;
+use std::sync::Arc;
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;
 pub const BUCKET_HEADER_SIZE: usize = size_of::<PageId>() + size_of::<u16>() * 2;
@@ -135,7 +134,8 @@ impl TypeErasedBucketPage {
 
     pub fn with_downcast<T, const KEY_SIZE: usize, F, R>(&self, f: F) -> Option<R>
     where
-        F: FnOnce(&ExtendableHTableBucketPage<T, KEY_SIZE>) -> R, T: Clone + 'static
+        F: FnOnce(&ExtendableHTableBucketPage<T, KEY_SIZE>) -> R,
+        T: Clone + 'static,
     {
         let read_guard = self.inner.read();
         read_guard.as_any().downcast_ref::<ExtendableHTableBucketPage<T, KEY_SIZE>>().map(f)
@@ -143,7 +143,8 @@ impl TypeErasedBucketPage {
 
     pub fn with_downcast_mut<T, const KEY_SIZE: usize, F, R>(&self, f: F) -> Option<R>
     where
-        F: FnOnce(&mut ExtendableHTableBucketPage<T, KEY_SIZE>) -> R, T: std::clone::Clone + 'static
+        F: FnOnce(&mut ExtendableHTableBucketPage<T, KEY_SIZE>) -> R,
+        T: std::clone::Clone + 'static,
     {
         let mut write_guard = self.inner.write();
         write_guard.as_any_mut().downcast_mut::<ExtendableHTableBucketPage<T, KEY_SIZE>>().map(f)
@@ -360,22 +361,22 @@ impl Display for TypeErasedBucketPage {
 
 #[cfg(test)]
 mod basic_behavior {
-    use std::sync::Arc;
-    use std::thread;
-    use chrono::Utc;
-    use log::{error, info};
-    use spin::RwLock;
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::config::{PageId, INVALID_PAGE_ID};
+    use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::common::logger::initialize_logger;
     use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use crate::types_db::integer_type::IntegerType;
+    use chrono::Utc;
+    use log::{error, info};
+    use spin::RwLock;
+    use std::sync::Arc;
+    use std::thread;
 
     const PAGE_ID_SIZE: usize = size_of::<PageId>();
 
@@ -637,7 +638,7 @@ mod basic_behavior {
                 assert_eq!(directory_page.can_shrink(), false);
 
                 info!("Basic behaviour test completed successfully");
-        });
+            });
         } else {
             panic!("Failed to convert to ExtendableHTableDirectoryPage");
         }

@@ -554,11 +554,11 @@ impl<'a> Drop for ContextGuard<'a> {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::fs;
     use super::*;
     use crate::types_db::integer_type::IntegerType;
     use crate::types_db::type_id::TypeId;
     use log::info;
+    use std::fs;
 
     struct TestContext {
         disk_manager: Arc<FileDiskManager>,
