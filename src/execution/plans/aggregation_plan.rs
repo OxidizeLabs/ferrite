@@ -191,8 +191,9 @@ mod tests {
 
     #[test]
     fn test_aggregation_plan_node_creation() {
-        let schema = Arc::new(Schema::new(vec![])); // Dummy schema
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), vec![]))];
+        let schema = Arc::new(Schema::new(vec![]));
+        let table = "mock_table".to_string();
+        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table, vec![]))];
         let group_bys = vec![];
         let aggregates = vec![];
         let agg_types = vec![AggregationType::CountStar];
@@ -247,7 +248,8 @@ mod tests {
 
     fn test_aggregation_plan_node_to_string() {
         let schema = Arc::new(Schema::new(vec![]));
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), vec![]))];
+        let table = "mock_table".to_string();
+        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table,vec![]))];
 
         let col1 = Column::new("col1", TypeId::Integer);
         let col2 = Column::new("col2", TypeId::Integer);
@@ -273,7 +275,8 @@ mod tests {
     #[test]
     fn test_aggregation_plan_node_to_string_no_group_by() {
         let schema = Arc::new(Schema::new(vec![]));
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), vec![]))];
+        let table = "mock_table".to_string();
+        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table, vec![]))];
 
         let col1 = Column::new("col1", TypeId::Integer);
 

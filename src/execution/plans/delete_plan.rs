@@ -1,6 +1,7 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
+use crate::common::config::TableOidT;
 
 /// Represents a delete operation in the query execution plan.
 ///
@@ -9,6 +10,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteNode {
     output_schema: Arc<Schema>,
+    table_id: TableOidT,
     child: Box<PlanNode>,
 }
 
@@ -18,14 +20,16 @@ impl DeleteNode {
     /// # Arguments
     ///
     /// * `output_schema` - The schema of the output after the delete operation.
+    /// * `table_id` - The TableID of the table to delete from
     /// * `child` - The child node that produces the rows to be deleted.
     ///
     /// # Returns
     ///
     /// A new instance of DeleteNode.
-    pub fn new(output_schema: Arc<Schema>, child: Box<PlanNode>) -> Self {
+    pub fn new(output_schema: Arc<Schema>, table_id: TableOidT,child: Box<PlanNode>) -> Self {
         DeleteNode {
             output_schema,
+            table_id,
             child,
         }
     }
@@ -94,15 +98,16 @@ mod tests {
     use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     fn create_mock_child() -> Box<PlanNode> {
-        let schema = Arc::new(Schema::new(vec![])); // Empty schema for simplicity
-        Box::new(PlanNode::MockScan(MockScanNode::new(schema, vec![])))
+        let schema = Arc::new(Schema::new(vec![]));
+        let table = "mock_table".to_string();
+        Box::new(PlanNode::MockScan(MockScanNode::new(schema, table,vec![])))
     }
 
     #[test]
     fn test_delete_node_creation() {
         let schema = Arc::new(Schema::new(vec![]));
         let child = create_mock_child();
-        let delete_node = DeleteNode::new(schema.clone(), child);
+        let delete_node = DeleteNode::new(schema.clone(), 0, child);
 
         assert_eq!(delete_node.get_output_schema(), &*schema);
         assert_eq!(delete_node.get_type(), PlanType::Delete);
@@ -112,7 +117,7 @@ mod tests {
     fn test_delete_node_to_string() {
         let schema = Arc::new(Schema::new(vec![]));
         let child = create_mock_child();
-        let delete_node = DeleteNode::new(schema, child);
+        let delete_node = DeleteNode::new(schema,0, child);
 
         assert_eq!(delete_node.to_string(false), "DeleteNode");
         assert!(delete_node.to_string(true).starts_with("DeleteNode ["));
@@ -122,7 +127,7 @@ mod tests {
     fn test_delete_node_children_to_string() {
         let schema = Arc::new(Schema::new(vec![]));
         let child = create_mock_child();
-        let delete_node = DeleteNode::new(schema, child);
+        let delete_node = DeleteNode::new(schema, 0, child);
 
         let children_string = delete_node.children_to_string(2);
         assert!(children_string.starts_with("  Child: MockScanNode"));
@@ -132,7 +137,7 @@ mod tests {
     fn test_delete_node_get_child() {
         let schema = Arc::new(Schema::new(vec![]));
         let child = create_mock_child();
-        let delete_node = DeleteNode::new(schema, child);
+        let delete_node = DeleteNode::new(schema, 0, child);
 
         match delete_node.get_child() {
             PlanNode::MockScan(_) => {}
