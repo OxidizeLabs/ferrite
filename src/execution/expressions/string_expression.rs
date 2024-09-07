@@ -8,7 +8,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StringExpressionType {
@@ -18,14 +18,14 @@ pub enum StringExpressionType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StringExpression {
-    arg: Rc<Expression>,
-    children: Vec<Rc<Expression>>,
+    arg: Arc<Expression>,
+    children: Vec<Arc<Expression>>,
     expr_type: StringExpressionType,
     ret_type: Column,
 }
 
 impl StringExpression {
-    pub fn new(arg: Rc<Expression>, expr_type: StringExpressionType, children: Vec<Rc<Expression>>) -> Self {
+    pub fn new(arg: Arc<Expression>, expr_type: StringExpressionType, children: Vec<Arc<Expression>>) -> Self {
         Self {
             arg,
             children,
@@ -38,7 +38,7 @@ impl StringExpression {
         self.expr_type
     }
 
-    pub fn get_arg(&self) -> &Rc<Expression> {
+    pub fn get_arg(&self) -> &Arc<Expression> {
         &self.arg
     }
 
@@ -73,11 +73,11 @@ impl ExpressionOps for StringExpression {
         }
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         &self.children[child_idx]
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -85,12 +85,12 @@ impl ExpressionOps for StringExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         if children.len() != 1 {
             panic!("StringExpression requires exactly one child");
         }
 
-        Rc::new(Expression::String(StringExpression {
+        Arc::new(Expression::String(StringExpression {
             arg: children[0].clone(),
             ret_type: self.ret_type.clone(),
             children,
@@ -110,12 +110,12 @@ impl Display for StringExpressionType {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
 
     #[test]
     fn string_expression_lower() {
-        let arg = Rc::new(Expression::Constant(ConstantExpression::new(
+        let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("HELLO".to_string())),
             Column::new("const", TypeId::VarChar),
             vec![])
@@ -123,7 +123,7 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -132,7 +132,7 @@ mod unit_tests {
 
     #[test]
     fn string_expression_upper() {
-        let arg = Rc::new(Expression::Constant(ConstantExpression::new(
+        let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("hello".to_string())),
             Column::new("const", TypeId::VarChar),
             vec![])
@@ -140,7 +140,7 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Upper, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -149,7 +149,7 @@ mod unit_tests {
 
     #[test]
     fn string_expression_invalid_type() {
-        let arg = Rc::new(Expression::Constant(ConstantExpression::new(
+        let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(42)),
             Column::new("const", TypeId::Integer),
             vec![])
@@ -157,7 +157,7 @@ mod unit_tests {
         let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
-        let rid = RID::new(0,0);
+        let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema);

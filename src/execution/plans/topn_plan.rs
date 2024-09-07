@@ -1,11 +1,10 @@
+use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::rc::Rc;
-use crate::execution::plans::sort_plan::SortNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNNode {
-    output_schema: Rc<Schema>,
+    output_schema: Arc<Schema>,
     child: Box<PlanNode>,
 }
 

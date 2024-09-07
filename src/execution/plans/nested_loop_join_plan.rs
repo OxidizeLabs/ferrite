@@ -1,17 +1,16 @@
+use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::rc::Rc;
-use crate::execution::plans::topn_plan::TopNNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
-    output_schema: Rc<Schema>,
+    output_schema: Arc<Schema>,
     left: Box<PlanNode>,
     right: Box<PlanNode>,
 }
 
 impl NestedLoopJoinNode {
-    pub fn new(output_schema: Rc<Schema>, left: Box<PlanNode>, right: Box<PlanNode>,) -> Self {
+    pub fn new(output_schema: Arc<Schema>, left: Box<PlanNode>, right: Box<PlanNode>,) -> Self {
         Self {
             output_schema,
             left,
@@ -25,7 +24,7 @@ impl NestedLoopJoinNode {
     pub fn get_right(&self) -> &Box<PlanNode> {
         &self.right
     }
-    pub fn get_output_schema(&self) -> &Rc<Schema> {
+    pub fn get_output_schema(&self) -> &Arc<Schema> {
         &self.output_schema
     }
 }
