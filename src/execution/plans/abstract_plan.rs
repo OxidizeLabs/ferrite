@@ -1,25 +1,24 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
-use crate::execution::plans::mock_scan_plan::MockScanNode;
-use crate::execution::plans::seq_scan_plan::SeqScanNode;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use crate::execution::plans::abstract_plan::PlanType::Aggregation;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::plans::hash_join_plan::HashJoinNode;
 use crate::execution::plans::index_scan_plan::IndexScanNode;
 use crate::execution::plans::insert_plan::InsertNode;
 use crate::execution::plans::limit_plan::LimitNode;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
+use crate::execution::plans::seq_scan_plan::SeqScanNode;
 use crate::execution::plans::sort_plan::SortNode;
 use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::execution::plans::topn_plan::TopNNode;
 use crate::execution::plans::update_plan::UpdateNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -63,7 +62,7 @@ pub enum PlanNode {
     TopN(TopNNode),
     TopNPerGroup(TopNPerGroupNode),
     MockScan(MockScanNode),
-    Window(WindowNode)
+    Window(WindowNode),
 }
 
 pub trait AbstractPlanNode {
@@ -111,11 +110,9 @@ impl AbstractPlanNode for PlanNode {
             _ => self.as_abstract_plan_node().children_to_string(indent)
         }
     }
-
 }
 
 impl PlanNode {
-
     // Helper method to get a reference to the AbstractPlanNode
     fn as_abstract_plan_node(&self) -> &dyn AbstractPlanNode {
         match self {
@@ -140,56 +137,6 @@ impl PlanNode {
         }
     }
 }
-// impl PartialEq for PlanNode {
-//     fn eq(&self, other: &Self) -> bool {
-//         if std::mem::discriminant(self) != std::mem::discriminant(other) {
-//             return false;
-//         }
-//
-//         match (self, other) {
-//             (PlanNode::SeqScan(a), PlanNode::SeqScan(b)) => a.get_output_schema() == b.get_output_schema(),
-//             (PlanNode::IndexScan(a), PlanNode::IndexScan(b)) => a.get_output_schema() == b.get_output_schema(),
-//             (PlanNode::NestedLoopJoin(a), PlanNode::NestedLoopJoin(b)) => {
-//                 a.get_output_schema() == b.get_output_schema() && a.get_left() == b.get_left() && a.get_right() == b.get_right()
-//             }
-//             (PlanNode::Filter(a), PlanNode::Filter(b)) => {
-//                 a == b
-//             }
-//
-//             (PlanNode::Insert(_), _) => {}
-//             (PlanNode::Update(_), _) => {}
-//             (PlanNode::Delete(_), _) => {}
-//             (PlanNode::Aggregation(_), _) => {}
-//             (PlanNode::Limit(_), _) => {}
-//             (PlanNode::NestedIndexJoin(_), _) => {}
-//             (PlanNode::HashJoin(_), _) => {}
-//             (PlanNode::Values(_), _) => {}
-//             (PlanNode::Projection(_), _) => {}
-//             (PlanNode::Sort(_), _) => {}
-//             (PlanNode::TopN(_), _) => {}
-//             (PlanNode::TopNPerGroup(_), _) => {}
-//             (PlanNode::MockScan(_), _) => {}
-//             (PlanNode::Window(_), _) => {}
-//             (PlanNode::SeqScan(_), PlanNode::IndexScan(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Insert(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Update(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Delete(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Aggregation(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Limit(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::NestedLoopJoin(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::NestedIndexJoin(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::HashJoin(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Filter(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Values(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Projection(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Sort(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::TopN(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::TopNPerGroup(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::MockScan(_)) => {}
-//             (PlanNode::SeqScan(_), PlanNode::Window(_)) => {}
-//         }
-//     }
-// }
 
 impl Display for PlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

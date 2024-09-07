@@ -1,7 +1,8 @@
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
+use crate::common::exception::ExpressionError;
 use crate::execution::expressions::arithmetic_expression::ArithmeticExpression;
-// use crate::execution::expressions::array_expression::ArrayExpression;
+use crate::execution::expressions::array_expression::ArrayExpression;
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
@@ -9,12 +10,10 @@ use crate::execution::expressions::logic_expression::LogicExpression;
 use crate::execution::expressions::string_expression::StringExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{Val, Value};
+use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
-use std::rc::Rc;
-use crate::common::exception::{ArrayExpressionError, ExpressionError};
-use crate::execution::expressions::array_expression::ArrayExpression;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -30,10 +29,10 @@ pub enum Expression {
 pub trait ExpressionOps {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError>;
     fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError>;
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression>;
-    fn get_children(&self) -> &Vec<Rc<Expression>>;
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression>;
+    fn get_children(&self) -> &Vec<Arc<Expression>>;
     fn get_return_type(&self) -> &Column;
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression>;
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression>;
 }
 
 impl ExpressionOps for Expression {
@@ -61,7 +60,7 @@ impl ExpressionOps for Expression {
         }
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         match self {
             Self::Arithmetic(expr) => expr.get_child_at(child_idx),
             Self::Constant(expr) => expr.get_child_at(child_idx),
@@ -73,7 +72,7 @@ impl ExpressionOps for Expression {
         }
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         match self {
             Self::Arithmetic(expr) => expr.get_children(),
             Self::Constant(expr) => expr.get_children(),
@@ -97,7 +96,7 @@ impl ExpressionOps for Expression {
         }
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         match self {
             Self::Arithmetic(expr) => expr.clone_with_children(children),
             Self::Constant(expr) => expr.clone_with_children(children),
@@ -113,10 +112,10 @@ impl ExpressionOps for Expression {
 impl Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Constant(expr) => write!(f, "Constant({})", expr.get_value()),
-            Self::ColumnRef(expr) => write!(f, "{}", expr.get_column_index()),
-            Self::Arithmetic(expr) => write!(f, "(Col#{} {} Col#{})", expr.get_left(), expr.get_op(), expr.get_right()),
-            Self::Comparison(expr) => write!(f, "(Col#{} {} Col#{})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
+            Self::Constant(expr) => write!(f, "{}", expr.to_string()),
+            Self::ColumnRef(expr) => write!(f, "{}", expr.to_string()),
+            Self::Arithmetic(expr) => write!(f, "(Col{} {} Col{})", expr.get_left(), expr.get_op(), expr.get_right()),
+            Self::Comparison(expr) => write!(f, "(Col{} {} Col{})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
             Self::Logic(expr) => write!(f, "({} {} {})", expr.get_left(), expr.get_logic_type(), expr.get_right()),
             Self::String(expr) => write!(f, "{}({})", expr.get_expr_type(), expr.get_arg()),
             Self::Array(expr) => {
@@ -136,8 +135,8 @@ impl Display for Expression {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
 
     #[test]
     fn constant_expression() {

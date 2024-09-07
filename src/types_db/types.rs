@@ -11,7 +11,7 @@ use crate::types_db::value::Value;
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
 use std::mem::size_of;
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CmpBool {
@@ -185,7 +185,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::Integer => 4,
         TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
         TypeId::VarChar | TypeId::Invalid => 0,
-        TypeId::Vector => size_of::<Rc<Vec<Value>>>() as u64,
+        TypeId::Vector => size_of::<Arc<Vec<Value>>>() as u64,
     }
 }
 

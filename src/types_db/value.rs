@@ -5,6 +5,7 @@ use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::sync::Arc;
 
@@ -91,6 +92,27 @@ impl Value {
             Val::Vector(v) => 4 + v.len() as u32 * 4,
             Val::Null => 1
         }
+    }
+
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        match &self.value_ {
+            Val::Boolean(b) => bytes.extend_from_slice(&[*b as u8]),
+            Val::TinyInt(i) => bytes.extend_from_slice(&i.to_le_bytes()),
+            Val::SmallInt(i) => bytes.extend_from_slice(&i.to_le_bytes()),
+            Val::Integer(i) => bytes.extend_from_slice(&i.to_le_bytes()),
+            Val::BigInt(i) => bytes.extend_from_slice(&i.to_le_bytes()),
+            Val::Decimal(f) => bytes.extend_from_slice(&f.to_le_bytes()),
+            Val::Timestamp(t) => bytes.extend_from_slice(&t.to_le_bytes()),
+            Val::VarLen(s) | Val::ConstVarLen(s) => bytes.extend_from_slice(s.as_bytes()),
+            Val::Vector(v) => {
+                for value in v {
+                    bytes.extend(value.as_bytes());
+                }
+            },
+            Val::Null => bytes.extend_from_slice(&[0u8]),
+        }
+        bytes
     }
 }
 
@@ -246,6 +268,99 @@ impl Display for Value {
                 },                Val::Null => write!(f, "Null"),
             }
         }
+    }
+}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_id_.hash(state);
+        match &self.value_ {
+            Val::Boolean(b) => b.hash(state),
+            Val::TinyInt(i) => i.hash(state),
+            Val::SmallInt(i) => i.hash(state),
+            Val::Integer(i) => i.hash(state),
+            Val::BigInt(i) => i.hash(state),
+            Val::Decimal(f) => f.to_bits().hash(state),
+            Val::Timestamp(t) => t.hash(state),
+            Val::VarLen(s) | Val::ConstVarLen(s) => s.hash(state),
+            Val::Vector(v) => {
+                for value in v {
+                    value.hash(state);
+                }
+            },
+            Val::Null => (), // Null doesn't need additional hashing
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use crate::container::hash_function::HashFunction;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+
+    #[test]
+    fn test_typeid_hash() {
+        let type1 = TypeId::Integer;
+        let type2 = TypeId::Integer;
+        let type3 = TypeId::VarChar;
+
+        let mut hasher1 = DefaultHasher::new();
+        let mut hasher2 = DefaultHasher::new();
+        let mut hasher3 = DefaultHasher::new();
+
+        type1.hash(&mut hasher1);
+        type2.hash(&mut hasher2);
+        type3.hash(&mut hasher3);
+
+        assert_eq!(hasher1.finish(), hasher2.finish());
+        assert_ne!(hasher1.finish(), hasher3.finish());
+    }
+
+    #[test]
+    fn test_value_hash() {
+        let value1 = Value::new(42);
+        let value2 = Value::new(42);
+        let value3 = Value::new(43);
+
+        let mut hasher1 = DefaultHasher::new();
+        let mut hasher2 = DefaultHasher::new();
+        let mut hasher3 = DefaultHasher::new();
+
+        value1.hash(&mut hasher1);
+        value2.hash(&mut hasher2);
+        value3.hash(&mut hasher3);
+
+        assert_eq!(hasher1.finish(), hasher2.finish());
+        assert_ne!(hasher1.finish(), hasher3.finish());
+    }
+
+    #[test]
+    fn test_value_hash_with_custom_hasher() {
+        let hash_function = HashFunction::<Value>::new();
+
+        let value1 = Value::new(42);
+        let value2 = Value::new(42);
+        let value3 = Value::new(43);
+
+        let hash1 = hash_function.get_hash(&value1);
+        let hash2 = hash_function.get_hash(&value2);
+        let hash3 = hash_function.get_hash(&value3);
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_value_as_bytes() {
+        let int_value = Value::new(42);
+        let string_value = Value::new("Hello");
+        let vector_value = Value::new_vector(vec![Value::new(1), Value::new(2)]);
+
+        assert_eq!(int_value.as_bytes(), [42, 0, 0, 0]); // TypeId::Integer (3) + 42 as i32
+        assert_eq!(string_value.as_bytes(), [72, 101, 108, 108, 111]); // TypeId::VarChar (7) + "Hello"
+        assert_eq!(vector_value.as_bytes(), [1, 0, 0, 0, 2, 0, 0, 0]); // TypeId::Vector (9) + [TypeId::Integer (3), 1, TypeId::Integer (3), 2]
     }
 }
 

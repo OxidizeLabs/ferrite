@@ -1,5 +1,7 @@
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
+use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
+use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::storage::table::tuple::Tuple;
@@ -7,9 +9,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
-use crate::common::exception::ExpressionError;
-use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArithmeticOp {
@@ -21,15 +21,15 @@ pub enum ArithmeticOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArithmeticExpression {
-    left: Rc<Expression>,
-    right: Rc<Expression>,
+    left: Arc<Expression>,
+    right: Arc<Expression>,
     op: ArithmeticOp,
     ret_type: Column,
-    children: Vec<Rc<Expression>>,
+    children: Vec<Arc<Expression>>,
 }
 
 impl ArithmeticExpression {
-    pub fn new(left: Rc<Expression>, right: Rc<Expression>, op: ArithmeticOp, children: Vec<Rc<Expression>>) -> Self {
+    pub fn new(left: Arc<Expression>, right: Arc<Expression>, op: ArithmeticOp, children: Vec<Arc<Expression>>) -> Self {
         let ret_type = Self::infer_return_type(left.get_return_type(), right.get_return_type()).unwrap();
         Self {
             left,
@@ -40,11 +40,11 @@ impl ArithmeticExpression {
         }
     }
 
-    pub fn get_left(&self) -> &Rc<Expression> {
+    pub fn get_left(&self) -> &Arc<Expression> {
         &self.left
     }
 
-    pub fn get_right(&self) -> &Rc<Expression> {
+    pub fn get_right(&self) -> &Arc<Expression> {
         &self.right
     }
 
@@ -181,11 +181,11 @@ impl ExpressionOps for ArithmeticExpression {
         }
     }
 
-    fn get_child_at(&self, child_idx: usize) -> &Rc<Expression> {
+    fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
         &self.children[child_idx]
     }
 
-    fn get_children(&self) -> &Vec<Rc<Expression>> {
+    fn get_children(&self) -> &Vec<Arc<Expression>> {
         &self.children
     }
 
@@ -193,12 +193,12 @@ impl ExpressionOps for ArithmeticExpression {
         &self.ret_type
     }
 
-    fn clone_with_children(&self, children: Vec<Rc<Expression>>) -> Rc<Expression> {
+    fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         if children.len() != 2 {
             panic!("ArithmeticExpression requires exactly two children");
         }
 
-        Rc::new(Expression::Arithmetic(ArithmeticExpression {
+        Arc::new(Expression::Arithmetic(ArithmeticExpression {
             left: children[0].clone(),
             right: children[1].clone(),
             op: self.op,
@@ -221,8 +221,8 @@ impl Display for ArithmeticOp {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
 
     #[test]
     fn arithmetic_expression() {
@@ -233,9 +233,9 @@ mod unit_tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
 
-        let col1 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(0, schema.get_column(0).unwrap().clone(), vec![]))
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0,0, schema.get_column(0).unwrap().clone(), vec![]))
         );
-        let col2 = Rc::new(Expression::ColumnRef(ColumnRefExpression::new(1, schema.get_column(1).unwrap().clone(), vec![]))
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, schema.get_column(1).unwrap().clone(), vec![]))
         );
 
         let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
@@ -258,7 +258,7 @@ mod unit_tests {
         let result = mul_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(12.5));
 
-        assert_eq!(add_expr.to_string(), "(Col#0 + Col#1)");
-        assert_eq!(mul_expr.to_string(), "(Col#0 * Col#1)");
+        assert_eq!(add_expr.to_string(), "(Col#0.0 + Col#0.1)");
+        assert_eq!(mul_expr.to_string(), "(Col#0.0 * Col#0.1)");
     }
 }

@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 // Every possible SQL type ID
@@ -19,5 +20,12 @@ pub enum TypeId {
 impl Default for TypeId {
     fn default() -> Self {
         TypeId::Invalid
+    }
+}
+
+impl Hash for TypeId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Use the discriminant of the enum for hashing
+        std::mem::discriminant(self).hash(state);
     }
 }
