@@ -1044,123 +1044,123 @@ mod unit_tests {
 #[cfg(test)]
 mod basic_behaviour {}
 
-// #[cfg(test)]
-// mod concurrency {
-//     use super::*;
-//     use rand::Rng;
-//
-//     #[test]
-//     fn concurrent_page_access() {
-//         let ctx = TestContext::new("concurrent_page_access_test");
-//         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
-//         let page = bpm.write().new_page(NewPageType::Basic).unwrap();
-//
-//         let page_id = page.read().as_page_trait().get_page_id();
-//         let bpm_clone = bpm.clone();
-//         let mut handles = vec![];
-//
-//         // Spawn multiple threads to simulate concurrent access to the same page
-//         for i in 0..10 {
-//             let bpm = bpm_clone.clone();
-//             let page_id = page_id;
-//
-//             let handle = thread::spawn(move || {
-//                 {
-//                     // First, fetch the page with a short-lived lock on the BPM
-//                     let page = {
-//                         let bpm = bpm.read(); // Use a read lock on the BPM
-//                         bpm.fetch_page(page_id).unwrap() // Fetch the page
-//                     };
-//
-//                     // Then, modify the page with a write lock on the page itself
-//                     {
-//                         let mut page_guard = page.write(); // Acquire write lock on the Page
-//                         let mut data = page_guard.as_page_trait_mut().get_data_mut();
-//                         data[0] = i as u8; // Each thread writes its index as the first byte
-//                     }
-//
-//                     // Finally, unpin the page
-//                     let mut bpm = bpm.write();
-//                     bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
-//                 }
-//             });
-//
-//             handles.push(handle);
-//         }
-//
-//         // Wait for all threads to complete
-//         for handle in handles {
-//             handle.join().expect("Thread failed");
-//         }
-//
-//         // Verify the final state of the page
-//         {
-//             let bpm = bpm.read();
-//             let final_page = bpm.fetch_page(page_id).unwrap();
-//             let binding = final_page.read();
-//             let final_data = binding.as_page_trait().get_data();
-//             assert!(
-//                 final_data[0] < 10,
-//                 "Final modification resulted in incorrect data: expected value < 10, got {}",
-//                 final_data[0]
-//             );
-//         }
-//
-//         // Clean up by unpinning the page
-//         bpm.write().unpin_page(page_id, false, AccessType::Lookup);
-//     }
-//
-//     #[test]
-//     fn write_page_deadlock() {
-//         // Initialize the test context
-//         let ctx = TestContext::new("test_write_page_deadlock");
-//         let bpm = Arc::clone(&ctx.bpm);
-//
-//         // Generate random data for writing
-//         let mut rng = rand::thread_rng();
-//         let data: [u8; DB_PAGE_SIZE] = rng.gen();
-//
-//         // Mutex for synchronizing test completion
-//         let done = Arc::new(Mutex::new(false));
-//         let done_clone = Arc::clone(&done);
-//
-//         // Create a list to hold thread handles
-//         let mut handles = vec![];
-//
-//         // Spawn threads to perform concurrent write operations
-//         for i in 0..10 {
-//             let bpm_clone = Arc::clone(&bpm);
-//             let done_clone = Arc::clone(&done);
-//
-//             let handle = thread::spawn(move || {
-//                 // Create a new page
-//                 let page_id = i as u32;
-//                 bpm_clone.new_page(NewPageType::Basic).expect("Failed to create a new page");
-//
-//                 // Write data to the page
-//                 bpm_clone.write_page(page_id as PageId, data);
-//
-//                 // Signal completion
-//                 let mut done = done_clone.lock();
-//                 *done = true;
-//             });
-//
-//             handles.push(handle);
-//         }
-//
-//         // Wait for all threads to complete
-//         for handle in handles {
-//             handle.join().expect("Thread failed");
-//         }
-//
-//         // Check if the test finished without deadlocks
-//         let done = done.lock();
-//         assert!(*done, "Test did not complete successfully, possible deadlock detected");
-//
-//         // Cleanup the test context
-//         ctx.cleanup();
-//     }
-// }
+#[cfg(test)]
+mod concurrency {
+    use super::*;
+    use rand::Rng;
+
+    #[test]
+    fn concurrent_page_access() {
+        let ctx = TestContext::new("concurrent_page_access_test");
+        let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
+        let page = bpm.write().new_page(NewPageType::Basic).unwrap();
+
+        let page_id = page.read().as_page_trait().get_page_id();
+        let bpm_clone = bpm.clone();
+        let mut handles = vec![];
+
+        // Spawn multiple threads to simulate concurrent access to the same page
+        for i in 0..10 {
+            let bpm = bpm_clone.clone();
+            let page_id = page_id;
+
+            let handle = thread::spawn(move || {
+                {
+                    // First, fetch the page with a short-lived lock on the BPM
+                    let page = {
+                        let bpm = bpm.read(); // Use a read lock on the BPM
+                        bpm.fetch_page(page_id).unwrap() // Fetch the page
+                    };
+
+                    // Then, modify the page with a write lock on the page itself
+                    {
+                        let mut page_guard = page.write(); // Acquire write lock on the Page
+                        let mut data = page_guard.as_page_trait_mut().get_data_mut();
+                        data[0] = i as u8; // Each thread writes its index as the first byte
+                    }
+
+                    // Finally, unpin the page
+                    let mut bpm = bpm.write();
+                    bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().expect("Thread failed");
+        }
+
+        // Verify the final state of the page
+        {
+            let bpm = bpm.read();
+            let final_page = bpm.fetch_page(page_id).unwrap();
+            let binding = final_page.read();
+            let final_data = binding.as_page_trait().get_data();
+            assert!(
+                final_data[0] < 10,
+                "Final modification resulted in incorrect data: expected value < 10, got {}",
+                final_data[0]
+            );
+        }
+
+        // Clean up by unpinning the page
+        bpm.write().unpin_page(page_id, false, AccessType::Lookup);
+    }
+
+    #[test]
+    fn write_page_deadlock() {
+        // Initialize the test context
+        let ctx = TestContext::new("test_write_page_deadlock");
+        let bpm = Arc::clone(&ctx.bpm);
+
+        // Generate random data for writing
+        let mut rng = rand::thread_rng();
+        let data: [u8; DB_PAGE_SIZE] = rng.gen();
+
+        // Mutex for synchronizing test completion
+        let done = Arc::new(Mutex::new(false));
+        let done_clone = Arc::clone(&done);
+
+        // Create a list to hold thread handles
+        let mut handles = vec![];
+
+        // Spawn threads to perform concurrent write operations
+        for i in 0..10 {
+            let bpm_clone = Arc::clone(&bpm);
+            let done_clone = Arc::clone(&done);
+
+            let handle = thread::spawn(move || {
+                // Create a new page
+                let page_id = i as u32;
+                bpm_clone.new_page(NewPageType::Basic).expect("Failed to create a new page");
+
+                // Write data to the page
+                bpm_clone.write_page(page_id as PageId, data);
+
+                // Signal completion
+                let mut done = done_clone.lock();
+                *done = true;
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().expect("Thread failed");
+        }
+
+        // Check if the test finished without deadlocks
+        let done = done.lock();
+        assert!(*done, "Test did not complete successfully, possible deadlock detected");
+
+        // Cleanup the test context
+        ctx.cleanup();
+    }
+}
 
 #[cfg(test)]
 mod edge_cases {
