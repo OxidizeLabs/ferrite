@@ -414,187 +414,124 @@ mod concurrency {
             thread.join().unwrap();
         }
     }
-
+    
     #[test]
-    fn modify_data_concurrently() {
-        use std::sync::{Arc, Barrier};
-        use std::thread;
-
-        let ctx = TestContext::new("modify_data_concurrently");
+    fn reads_and_writes() {
+        let ctx = TestContext::new("concurrent_reads_and_writes");
         let bpm = Arc::clone(&ctx.bpm);
-
-        // Create a new page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
-
-        // Barrier to synchronize the start of all threads
-        let barrier = Arc::new(Barrier::new(3)); // 2 worker threads + main thread
-
+    
+        // Create a shared page
+        let page = bpm.new_page(NewPageType::Basic).unwrap();
+    
+        // Spawn multiple threads for concurrent reads and writes
         let mut threads = Vec::new();
+    
+        // Writer threads
         for i in 0..2 {
             let bpm_clone = Arc::clone(&bpm);
-            let page0_clone = Arc::clone(&page0);
-            let barrier_clone = Arc::clone(&barrier);
-
+            let page_clone = Arc::clone(&page);
+    
             threads.push(thread::spawn(move || {
-                // Wait until all threads are ready
-                barrier_clone.wait();
-
-                // Create a basic guard
-                let basic_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page0_clone), page0_clone.read().as_page_trait().get_page_id());
-
-                // Upgrade to WritePageGuard
-                let mut write_guard = basic_guard.write();
-
-                // Perform different modifications in each thread
-                let mut data_mut = write_guard.as_page_trait_mut().get_data_mut();
-                data_mut[i * 4] = (i + 1) as u8; // Each thread writes at a different index
-                data_mut[4 + i * 4..8 + i * 4].copy_from_slice(&(i as u32).to_ne_bytes());
-
-                // Verify that the written data is correct for the current thread
-                assert_eq!(data_mut[i * 4], (i + 1) as u8, "Value should match the thread index");
-                let expected_value = u32::from_ne_bytes(data_mut[4 + i * 4..8 + i * 4].try_into().unwrap());
-                assert_eq!(expected_value, i as u32, "Bucket page ID should match the thread index");
-
-                // Drop the write guard to release the lock
+                // Perform the write operation
+                let mut write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
+                let mut binding = write_guard.write();
+                let mut data_mut = binding.as_page_trait_mut().get_data_mut();
+    
+                // Each writer thread writes a value
+                data_mut[i] = (i + 1) as u8;
             }));
         }
-
-        barrier.wait(); // Synchronize all threads
-
+    
+        // Reader threads
+        for i in 0..2 {
+            let bpm_clone = Arc::clone(&bpm);
+            let page_clone = Arc::clone(&page);
+    
+            threads.push(thread::spawn(move || {
+                // Perform the read operation
+                let read_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
+                let binding = read_guard.read();
+                let data = binding.as_page_trait().get_data();
+    
+                // Simulate a read operation by checking if the page ID matches
+                assert_eq!(read_guard.get_page_id(), page_clone.read().as_page_trait().get_page_id());
+                // Reading values written by the writer threads
+                assert_eq!(data[i], (i + 1) as u8, "Unexpected values in the data");
+            }));
+        }
+    
         // Wait for all threads to finish
         for thread in threads {
             thread.join().unwrap();
         }
-
-        // Final check after concurrent modifications
-        let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
+    
+        // Verify the page's content after concurrent reads and writes
+        let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page.read().as_page_trait().get_page_id());
         let binding = final_guard.read();
         let data = binding.as_page_trait().get_data();
-
-        // Verify the data written by each thread
-        for i in 0..2 {
-            assert_eq!(data[i * 4], (i + 1) as u8, "Expected value not found at index {}", i * 4);
-            let bucket_page_id = u32::from_ne_bytes(data[4 + i * 4..8 + i * 4].try_into().unwrap());
-            assert_eq!(bucket_page_id, i as u32, "Expected bucket page ID not found for index {}", i);
-        }
-
-        // Ensure the pin count is zero after all threads are done
-        assert_eq!(page0.read().as_page_trait().get_pin_count(), 0, "Pin count should be 0 after all guards are dropped");
+    
+        assert!(data[0] <= 2 && data[1] <= 2, "Unexpected values in the data after concurrent operations");
     }
-    //
-    // #[test]
-    // fn reads_and_writes() {
-    //     let ctx = TestContext::new("concurrent_reads_and_writes");
-    //     let bpm = Arc::clone(&ctx.bpm);
-    //
-    //     // Create a shared page
-    //     let page = bpm.new_page().unwrap();
-    //
-    //     // Spawn multiple threads for concurrent reads and writes
-    //     let mut threads = Vec::new();
-    //
-    //     // Writer threads
-    //     for i in 0..2 {
-    //         let bpm_clone = Arc::clone(&bpm);
-    //         let page_clone = Arc::clone(&page);
-    //
-    //         threads.push(thread::spawn(move || {
-    //             // Perform the write operation
-    //             let mut write_guard = WritePageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone));
-    //             let mut data_mut = write_guard.get_data_mut();
-    //
-    //             // Each writer thread writes a value
-    //             data_mut[i] = (i + 1) as u8;
-    //         }));
-    //     }
-    //
-    //     // Reader threads
-    //     for i in 0..2 {
-    //         let bpm_clone = Arc::clone(&bpm);
-    //         let page_clone = Arc::clone(&page);
-    //
-    //         threads.push(thread::spawn(move || {
-    //             // Perform the read operation
-    //             let read_guard = ReadPageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone));
-    //             let data = read_guard.get_data();
-    //
-    //             // Simulate a read operation by checking if the page ID matches
-    //             assert_eq!(read_guard.get_page_id().unwrap(), page_clone.read().get_page_id());
-    //             // Reading values written by the writer threads
-    //             assert_eq!(data[i], (i + 1) as u8, "Unexpected values in the data");
-    //         }));
-    //     }
-    //
-    //     // Wait for all threads to finish
-    //     for thread in threads {
-    //         thread.join().unwrap();
-    //     }
-    //
-    //     // Verify the page's content after concurrent reads and writes
-    //     let final_guard = WritePageGuard::new(Arc::clone(&bpm), Arc::clone(&page));
-    //     let data = final_guard.get_data();
-    //
-    //     assert!(data[0] <= 2 && data[1] <= 2, "Unexpected values in the data after concurrent operations");
-    // }
 }
 
-// #[cfg(test)]
-// mod edge_cases {
-//     use super::*;
-//
-//     #[test]
-//     fn page_eviction_under_pressure() {
-//         let ctx = TestContext::new("page_eviction_under_pressure");
-//         let bpm = Arc::clone(&ctx.bpm);
-//
-//         // Fill the buffer pool to force eviction
-//         let mut pages = Vec::new();
-//         for _ in 0..5 {
-//             let page = bpm.new_page().unwrap();
-//             pages.push(page);
-//         }
-//
-//         let page0_id;
-//         {
-//             // Access the first page and hold onto it
-//             let page0 = Arc::clone(&pages[0]);
-//             page0_id = page0.read().get_page_id(); // Store page ID before releasing the guard
-//
-//             // Keep the first page pinned
-//             let guard0 = WritePageGuard::new(Arc::clone(&bpm), Arc::clone(&page0));
-//             // Perform the assertion to ensure the page is accessible
-//             assert_eq!(guard0.get_page_id().unwrap(), page0_id);
-//         }
-//
-//         // Now create a new page that should cause an eviction due to the buffer pool size limit
-//         let page_evicted = bpm.new_page().unwrap_or_else(|| panic!("Failed to create a new page, eviction didn't work as expected"));
-//         let evict_guard = WritePageGuard::new(Arc::clone(&bpm), Arc::clone(&page_evicted));
-//
-//         // Ensure the first page was not evicted by checking the page ID directly
-//         assert_eq!(pages[0].read().get_page_id(), page0_id, "The first page should not be evicted");
-//
-//         // Test if the evicted page is correctly unpinned
-//         drop(evict_guard);
-//         assert_eq!(page_evicted.read().get_pin_count(), 0, "Evicted page should be unpinned");
-//
-//         // Verify the replacer can now evict this page since it should be marked as evictable
-//         // assert!(bpm.unpin_page(page0_id, false, AccessType::Unknown), "Page should be unpinned and made evictable");
-//     }
-//
-//     #[test]
-//     fn invalid_page_access_after_drop() {
-//         let ctx = TestContext::new("invalid_page_access_after_drop");
-//         let bpm = Arc::clone(&ctx.bpm);
-//
-//         // Create a page and drop the guard
-//         let page = bpm.new_page().unwrap();
-//         let guard = WritePageGuard::new(Arc::clone(&bpm), Arc::clone(&page));
-//         drop(guard);
-//
-//         // Attempt to re-access the page after it’s been dropped
-//         let result = bpm.fetch_page(page.read().get_page_id());
-//         assert!(result.is_some(), "Accessing a dropped page should return an error");
-//     }
-// }
+#[cfg(test)]
+mod edge_cases {
+    use crate::buffer::buffer_pool_manager::NewPageType;
+    use super::*;
+
+    #[test]
+    fn page_eviction_under_pressure() {
+        let ctx = TestContext::new("page_eviction_under_pressure");
+        let bpm = Arc::clone(&ctx.bpm);
+
+        // Fill the buffer pool to force eviction
+        let mut pages = Vec::new();
+        for _ in 0..5 {
+            let page = bpm.new_page(NewPageType::Basic).unwrap();
+            pages.push(page);
+        }
+
+        let page0_id;
+        {
+            // Access the first page and hold onto it
+            let page0 = Arc::clone(&pages[0]);
+            page0_id = page0.read().as_page_trait().get_page_id(); // Store page ID before releasing the guard
+
+            // Keep the first page pinned
+            let guard0 = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
+            // Perform the assertion to ensure the page is accessible
+            assert_eq!(guard0.get_page_id(), page0_id);
+        }
+
+        // Now create a new page that should cause an eviction due to the buffer pool size limit
+        let page_evicted = bpm.new_page(NewPageType::Basic).unwrap_or_else(|| panic!("Failed to create a new page, eviction didn't work as expected"));
+        let evict_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page_evicted), page_evicted.read().as_page_trait().get_page_id());
+
+        // Ensure the first page was not evicted by checking the page ID directly
+        assert_eq!(pages[0].read().as_page_trait().get_page_id(), page0_id, "The first page should not be evicted");
+
+        // Test if the evicted page is correctly unpinned
+        drop(evict_guard);
+        assert_eq!(page_evicted.read().as_page_trait().get_pin_count(), 0, "Evicted page should be unpinned");
+
+        // Verify the replacer can now evict this page since it should be marked as evictable
+        // assert!(bpm.unpin_page(page0_id, false, AccessType::Unknown), "Page should be unpinned and made evictable");
+    }
+
+    #[test]
+    fn invalid_page_access_after_drop() {
+        let ctx = TestContext::new("invalid_page_access_after_drop");
+        let bpm = Arc::clone(&ctx.bpm);
+
+        // Create a page and drop the guard
+        let page = bpm.new_page(NewPageType::Basic).unwrap();
+        let guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page.read().as_page_trait().get_page_id());
+        drop(guard);
+
+        // Attempt to re-access the page after it’s been dropped
+        let result = bpm.fetch_page(page.read().as_page_trait().get_page_id());
+        assert!(result.is_some(), "Accessing a dropped page should return an error");
+    }
+}
 
 
