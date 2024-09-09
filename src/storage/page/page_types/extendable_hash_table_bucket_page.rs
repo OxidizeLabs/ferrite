@@ -644,45 +644,40 @@ mod basic_behavior {
         }
     }
 
-    // #[test]
-    // #[ignore]
-    // fn concurrent_access() {
-    //     let ctx = Arc::new(TestContext::new("test_concurrent_access"));
-    //     let bpm = Arc::clone(&ctx.bpm);
-    //
-    //     info!("Starting concurrent access test");
-    //
-    //     let num_threads = 4;
-    //     let operations_per_thread = 100;
-    //
-    //     let mut handles = vec![];
-    //
-    //     for i in 0..num_threads {
-    //         let bpm_clone = Arc::clone(&bpm);
-    //         let handle = thread::spawn(move || {
-    //             for j in 0..operations_per_thread {
-    //                 let bucket_guard = bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket).unwrap();
-    //                 let bucket_page_id = bucket_guard.get_page_id();
-    //                 info!("Thread {} created bucket page with ID: {} (operation {})", i, bucket_page_id, j);
-    //
-    //                 if let Some(mut bucket_guard) = bucket_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
-    //                     bucket_guard.access_mut(|bucket_page| {
-    //                         bucket_page.init(10);
-    //                         assert_eq!(bucket_page.get_size(), 0, "Initial bucket size should be 0");
-    //                         info!("Thread {} initialized bucket page {} (operation {})", i, bucket_page_id, j);
-    //                     });
-    //                 } else {
-    //                     panic!("Thread {} failed to convert to ExtendableHTableBucketPage<8> (operation {})", i, j);
-    //                 }
-    //             }
-    //         });
-    //         handles.push(handle);
-    //     }
-    //
-    //     for handle in handles {
-    //         handle.join().unwrap();
-    //     }
-    //
-    //     info!("Concurrent access test completed successfully");
-    // }
+    #[test]
+    fn concurrent_access() {
+        let ctx = Arc::new(TestContext::new("test_concurrent_access"));
+        let bpm = &ctx.bpm;
+
+        info!("Starting concurrent access test");
+
+        let num_threads = 4;
+        let operations_per_thread = 100;
+
+        let mut handles = vec![];
+
+        for i in 0..num_threads {
+            let bpm_clone = Arc::clone(&bpm);
+            let handle = thread::spawn(move || {
+                for j in 0..operations_per_thread {
+                    let bucket_page_guard = match bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
+                        Some(guard) => guard,
+                        None => {
+                            error!("Failed to create new bucket page");
+                            panic!("Failed to create new bucket page");
+                        }
+                    };
+                    let bucket_page_id = bucket_page_guard.get_page_id();
+                    info!("Thread {} created bucket page with ID: {} (operation {})", i, bucket_page_id, j);
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().expect("Failed to join thread");
+        }
+
+        info!("Concurrent access test completed successfully");
+    }
 }
