@@ -57,7 +57,7 @@ impl TableHeap {
     pub fn insert_tuple(
         &self,
         meta: &TupleMeta,
-        tuple: &Tuple,
+        tuple: &mut Tuple,
         lock_mgr: Option<&LockManager>,
         txn: Option<&Transaction>,
         oid: TableOidT,
