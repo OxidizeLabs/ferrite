@@ -73,6 +73,12 @@ impl RID {
     pub fn get_slot_num(&self) -> u32 {
         self.slot_num
     }
+
+    pub fn deserialize(data: &[u8]) -> Self {
+        let page_id = u32::from_le_bytes(data[..4].try_into().unwrap());
+        let slot_num = u32::from_le_bytes(data[4..8].try_into().unwrap());
+        RID::new(page_id as PageId, slot_num)
+    }
 }
 
 impl fmt::Display for RID {

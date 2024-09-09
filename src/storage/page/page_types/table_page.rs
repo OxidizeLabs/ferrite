@@ -6,9 +6,9 @@ use crate::container::hash_function::Xxh3Hasher;
 use crate::storage::page::page::PageTrait;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use bincode::{deserialize, serialize};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::mem;
 
 // Create a type alias for our custom hasher
 type XxHashBuilder = BuildHasherDefault<Xxh3Hasher>;
@@ -62,9 +62,10 @@ impl TablePage {
     }
 
     /// Inserts a tuple into the table.
-    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &Tuple) -> Option<RID> {
+    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &mut Tuple) -> Option<RID> {
         if let Some(offset) = self.get_next_tuple_offset(meta, tuple) {
             let rid = RID::new(self.next_page_id, offset);
+            tuple.set_rid(rid);
 
             self.tuple_info.insert(rid, (meta.clone(), tuple.clone()));
             self.num_tuples += 1;
@@ -80,9 +81,37 @@ impl TablePage {
 
     /// Updates the metadata of a tuple.
     pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) {
-        if let Some((old_meta, tuple)) = self.tuple_info.get_mut(rid) {
+        if let Some((old_meta, _tuple)) = self.tuple_info.get_mut(rid) {
+            // Update the metadata in tuple_info
             *old_meta = meta.clone();
+
+            // Update the metadata in page_start
+            if let Some(offset) = self.find_tuple_offset(rid) {
+                let serialized_meta = self.serialize_meta(meta);
+                let meta_size = serialized_meta.len();
+                self.page_start[offset..offset + meta_size].copy_from_slice(&serialized_meta);
+            }
         }
+    }
+
+    // Helper method to find the offset of a tuple in page_start
+    fn find_tuple_offset(&self, rid: &RID) -> Option<usize> {
+        let mut current_offset = 0;
+        while current_offset < self.page_start.len() {
+            // Read the RID at the current offset
+            let current_rid = RID::deserialize(&self.page_start[current_offset..]);
+
+            if current_rid == *rid {
+                return Some(current_offset);
+            }
+
+            // Move to the next tuple
+            // Assuming the structure: RID + TupleMeta + TupleData
+            let meta_size = mem::size_of::<TupleMeta>();
+            let tuple_size = self.read_tuple_size(&self.page_start[current_offset + mem::size_of::<RID>() + meta_size..]);
+            current_offset += mem::size_of::<RID>() + meta_size + tuple_size;
+        }
+        None
     }
 
     /// Reads a tuple from the table.
@@ -131,6 +160,20 @@ impl TablePage {
     fn deserialize_tuple(&self, data: &[u8]) -> Option<(TupleMeta, Tuple)> {
         // Deserialize the tuple and its metadata from bytes using bincode
         deserialize(data).ok()
+    }
+
+    // Helper method to serialize metadata
+    fn serialize_meta(&self, meta: &TupleMeta) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&meta.get_timestamp().to_le_bytes());
+        buffer.push(if meta.is_deleted() { 1 } else { 0 });
+        buffer
+    }
+
+    // Helper method to read the size of a tuple from its serialized form
+    fn read_tuple_size(&self, data: &[u8]) -> usize {
+        // Assuming the first 4 bytes represent the tuple size
+        u32::from_le_bytes(data[..4].try_into().unwrap()) as usize
     }
 }
 
@@ -201,11 +244,11 @@ mod tests {
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);
+        let mut tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);
 
         info!("Initial page state: {:?}", page);
 
-        match page.insert_tuple(&meta, &tuple) {
+        match page.insert_tuple(&meta, &mut tuple) {
             Some(inserted_rid) => {
                 info!("Tuple inserted successfully. RID: {:?}", inserted_rid);
                 assert_eq!(page.get_num_tuples(), 1);
@@ -237,13 +280,15 @@ mod tests {
             Column::new("col_3", Integer)
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema, rid);
+        let mut tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema, rid);
 
         let new_meta = TupleMeta::new(453, false);
-        page.insert_tuple(&meta, &tuple);
-        page.update_tuple_meta(&new_meta, &rid);
+        page.insert_tuple(&meta, &mut tuple);
 
-        let retrieved_meta = page.get_tuple(&rid).unwrap();
+        let new_rid = tuple.get_rid();
+        page.update_tuple_meta(&new_meta, &new_rid);
+        let retrieved_meta = page.get_tuple(&new_rid).unwrap();
+        println!("Retrieved meta: {:?}", retrieved_meta);
         assert_eq!(retrieved_meta.0.get_timestamp(), new_meta.get_timestamp());
         assert_eq!(retrieved_meta.0.is_deleted(), new_meta.is_deleted());
     }
@@ -256,13 +301,13 @@ mod tests {
             Column::new("col_1", Integer); 1000
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![Value::from(1); 1000], schema, rid);
+        let mut tuple = Tuple::new(vec![Value::from(1); 1000], schema, rid);
 
         // Insert tuples until the page is full
-        while page.insert_tuple(&meta, &tuple).is_some() {}
+        while page.insert_tuple(&meta, &mut tuple).is_some() {}
 
         assert!(page.get_next_tuple_offset(&meta, &tuple).is_none());
-        assert!(page.insert_tuple(&meta, &tuple).is_none());
+        assert!(page.insert_tuple(&meta, &mut tuple).is_none());
     }
 
     #[test]

@@ -277,29 +277,25 @@ impl ExtendableHTableDirectoryPage {
     pub fn split_bucket(&mut self, bucket_idx: usize, new_page_id: PageId) {
         let local_depth = self.get_local_depth(bucket_idx as u32);
 
-        // Check if the local depth equals the global depth
         if local_depth == self.global_depth {
             self.incr_global_depth();
         }
 
-        // Calculate the split image index
         let split_image_index = self.get_split_image_index(bucket_idx as u32);
+        let old_page_id = self.get_bucket_page_id(bucket_idx).unwrap();
 
-        // Set the new page ID for the split image index
         self.set_bucket_page_id(split_image_index as usize, new_page_id);
-
-        // Increment the local depth of both the original bucket and the split bucket
         self.incr_local_depth(bucket_idx);
         self.set_local_depth(split_image_index as usize, self.get_local_depth(bucket_idx as u32));
 
-        // Update the directory entries to point to the correct buckets
         let mask = self.get_local_depth_mask(bucket_idx as u32);
         let size = self.get_size();
+
         for i in 0..size {
-            if i & mask == split_image_index {
+            if i & mask == bucket_idx as u32 {
+                self.set_bucket_page_id(i as usize, old_page_id);
+            } else if i & mask == split_image_index {
                 self.set_bucket_page_id(i as usize, new_page_id);
-            } else if i & mask == bucket_idx as u32 {
-                self.set_bucket_page_id(i as usize, self.get_bucket_page_id(bucket_idx).unwrap());
             }
         }
 
