@@ -37,7 +37,7 @@ impl ArrayExpression {
                 match val.get_value() {
                     Val::Decimal(d) => {
                         // Convert f64 to i32, handling potential loss of precision
-                        let rounded_value = (d.round() as i32);
+                        let rounded_value = d.round() as i32;
                         Ok(Value::new(Val::Integer(rounded_value))) // Convert to Val::Integer
                     }
                     _ => Err(ArrayExpressionError::NonDecimalType),
