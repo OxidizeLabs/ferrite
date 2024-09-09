@@ -173,33 +173,22 @@ impl ExtendableHTableDirectoryPage {
     /// Increments the global depth of the directory.
     pub fn incr_global_depth(&mut self) {
         if self.global_depth == self.max_depth {
-            warn!("Cannot increase global depth past max_depth: {}", self.max_depth)
-        } else {
-            // Step 1: Double the size of the directory
-            // let old_size = self.get_size();  // Current size of the directory
-            // let old_global_depth = self.get_global_depth();
-            self.global_depth += 1;      // Increment global depth
-
-            // Step 2: Copy existing entries to the new slots
-            // for i in 0..old_size {
-            //     // The new entry is a copy of the current entry
-            //     self.set_bucket_page_id(i as usize + old_size as usize, self.get_bucket_page_id(i as usize).unwrap());
-            //     self.set_local_depth(i as usize + old_size as usize, self.get_local_depth(i));
-            // }
-
-            // Step 3: Split buckets that need splitting after global depth increase
-            // for i in 0..old_size {
-            //     let local_depth = self.get_local_depth(i);
-            //
-            //     // If the local depth is equal to the old global depth, this bucket needs to be split
-            //     if local_depth == old_size {
-            //         let new_bucket_page_id = self.get_split_image_index(i);
-            //         self.split_bucket(i as usize, new_bucket_page_id as PageId);
-            //     }
-            // }
-
-            debug!("Global depth increased. New size of the directory: {}", self.get_size());
+            warn!("Cannot increase global depth past max_depth: {}", self.max_depth);
+            return;
         }
+
+        let old_size = self.get_size();
+        self.global_depth += 1;
+
+        // Copy existing entries to the new slots
+        for i in (0..old_size).rev() {
+            let bucket_page_id = self.get_bucket_page_id(i as usize).unwrap();
+            let local_depth = self.get_local_depth(i);
+            self.set_bucket_page_id(i as usize + old_size as usize, bucket_page_id);
+            self.set_local_depth(i as usize + old_size as usize, local_depth);
+        }
+
+        debug!("Global depth increased. New size of the directory: {}", self.get_size());
     }
 
     /// Decrements the global depth of the directory.
