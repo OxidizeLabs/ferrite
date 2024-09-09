@@ -462,9 +462,9 @@ mod concurrency {
     
         // Wait for all threads to finish
         for thread in threads {
-            thread.join().unwrap();
+            thread.join().expect("TODO: panic message");
         }
-    
+        
         // Verify the page's content after concurrent reads and writes
         let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page.read().as_page_trait().get_page_id());
         let binding = final_guard.read();
