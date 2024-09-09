@@ -424,14 +424,15 @@ mod concurrency {
         let page = bpm.new_page(NewPageType::Basic).unwrap();
     
         // Spawn multiple threads for concurrent reads and writes
-        let mut threads = Vec::new();
+        let mut writer_threads = Vec::new();
+        let mut reader_threads = Vec::new();
     
         // Writer threads
         for i in 0..2 {
             let bpm_clone = Arc::clone(&bpm);
             let page_clone = Arc::clone(&page);
-    
-            threads.push(thread::spawn(move || {
+
+            writer_threads.push(thread::spawn(move || {
                 // Perform the write operation
                 let mut write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
                 let mut binding = write_guard.write();
@@ -447,7 +448,7 @@ mod concurrency {
             let bpm_clone = Arc::clone(&bpm);
             let page_clone = Arc::clone(&page);
     
-            threads.push(thread::spawn(move || {
+            reader_threads.push(thread::spawn(move || {
                 // Perform the read operation
                 let read_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
                 let binding = read_guard.read();
@@ -461,8 +462,13 @@ mod concurrency {
         }
     
         // Wait for all threads to finish
-        for thread in threads {
-            thread.join().expect("TODO: panic message");
+        for thread in writer_threads {
+            thread.join().expect("Failed to join writer threads");
+        }
+
+        // Wait for all threads to finish
+        for thread in reader_threads {
+            thread.join().expect("Failed to join reader threads");
         }
         
         // Verify the page's content after concurrent reads and writes
