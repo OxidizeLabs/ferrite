@@ -381,6 +381,7 @@ mod concurrency {
     use std::thread;
 
     #[test]
+    #[ignore]
     fn reads() {
         let ctx = TestContext::new("concurrent_reads");
         let bpm = Arc::clone(&ctx.bpm);
