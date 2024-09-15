@@ -1,6 +1,4 @@
 use crate::binder::bound_statement::{AnyBoundStatement, BoundStatement};
-use crate::binder::bound_table_ref::DefaultBoundTableRef;
-use crate::binder::statement::select_statement::SelectStatement;
 use crate::common::statement_type::StatementType;
 use bitflags::bitflags;
 use std::any::Any;
@@ -70,8 +68,8 @@ impl Debug for ExplainStatement {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::binder::bound_table_ref::TableReferenceType;
-
+    use crate::binder::bound_table_ref::{DefaultBoundTableRef, TableReferenceType};
+    use crate::binder::statement::select_statement::SelectStatement;
 
     #[test]
     fn explain_statement() {

@@ -2,8 +2,6 @@ use crate::binder::bound_expression::BoundExpression;
 use crate::binder::bound_order_by::BoundOrderBy;
 use crate::binder::bound_statement::BoundStatement;
 use crate::binder::bound_table_ref::BoundTableRef;
-use crate::binder::bound_table_ref::TableReferenceType;
-use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
 use crate::common::statement_type::StatementType;
 use std::any::Any;
@@ -77,7 +75,7 @@ impl Display for SelectStatement {
             // Remove quotes from column names
             let expr_str = expr.to_string();
             let cleaned_expr = expr_str.trim_matches(|c| c == '"' || c == '`');
-            write!(f, "{}", clean_identifier(&expr.to_string()))?;
+            write!(f, "{}", clean_identifier(&cleaned_expr.to_string()))?;
         }
         write!(f, " FROM {}", self.table)?;
         if let Some(where_clause) = &self.where_clause {
@@ -140,6 +138,8 @@ fn clean_identifier(s: &str) -> String {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::bound_table_ref::TableReferenceType;
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     struct MockBoundTableRef;

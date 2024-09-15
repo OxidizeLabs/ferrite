@@ -370,13 +370,12 @@ mod basic_behavior {
     use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-    use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use crate::types_db::integer_type::IntegerType;
     use chrono::Utc;
     use log::{error, info};
-    use spin::RwLock;
     use std::sync::Arc;
     use std::thread;
+    use parking_lot::RwLock;
 
     const PAGE_ID_SIZE: usize = size_of::<PageId>();
 
@@ -401,12 +400,12 @@ mod basic_behavior {
                 &disk_manager,
             ))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
-            let bpm = Arc::new((BufferPoolManager::new(
+            let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
                 disk_manager.clone(),
                 replacer.clone(),
-            )));
+            ));
             Self {
                 bpm,
                 db_file,

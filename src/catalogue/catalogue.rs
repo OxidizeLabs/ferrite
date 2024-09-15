@@ -3,6 +3,7 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
+use std::ops::Add;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
@@ -11,8 +12,10 @@ use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
+use crate::container::hash_function::HashFunction;
 use crate::recovery::log_manager::LogManager;
-use crate::storage::index::index::Index;
+use crate::storage::index::b_plus_tree_index::BPlusTreeIndex;
+use crate::storage::index::index::{Index, IndexMetadata};
 use crate::storage::table::table_heap::TableHeap;
 
 pub enum IndexType {
@@ -29,35 +32,9 @@ pub struct TableInfo {
     /// The table name
     name: String,
     /// An owning pointer to the table heap
-    table: Box<TableHeap>,
+    table: Arc<Mutex<TableHeap>>,
     /// The table OID
     oid: TableOidT,
-}
-
-impl TableInfo {
-    /// Constructs a new TableInfo instance.
-    ///
-    /// # Parameters
-    /// - `schema`: The table schema.
-    /// - `name`: The table name.
-    /// - `table`: An owning pointer to the table heap.
-    /// - `oid`: The unique OID for the table.
-    pub fn new(schema: Schema, name: String, table: Box<TableHeap>, oid: TableOidT) -> Self {
-        TableInfo {
-            schema,
-            name,
-            table,
-            oid,
-        }
-    }
-
-    pub fn get_table_schema(&self) -> Schema {
-        self.schema.clone()
-    }
-
-    pub fn get_table_oidt(&self) -> TableOidT {
-        self.oid
-    }
 }
 
 /// The IndexInfo struct maintains metadata about an index.
@@ -78,6 +55,51 @@ pub struct IndexInfo {
     is_primary_key: bool,
     /// The index type
     index_type: IndexType,
+}
+
+/// The Catalog is a non-persistent catalog that is designed for
+/// use by executors within the DBMS execution engine. It handles
+/// table creation, table lookup, index creation, and index lookup.
+pub struct Catalog {
+    bpm: Arc<BufferPoolManager>,
+    lock_manager: Arc<Mutex<LockManager>>,
+    log_manager: Arc<Mutex<LogManager>>,
+    tables: HashMap<TableOidT, Box<TableInfo>>,
+    table_names: HashMap<String, TableOidT>,
+    next_table_oid: TableOidT,
+    indexes: HashMap<IndexOidT, Box<IndexInfo>>,
+    index_names: HashMap<String, HashMap<String, IndexOidT>>,
+    next_index_oid: IndexOidT,
+}
+
+impl TableInfo {
+    /// Constructs a new TableInfo instance.
+    ///
+    /// # Parameters
+    /// - `schema`: The table schema.
+    /// - `name`: The table name.
+    /// - `table`: An owning pointer to the table heap.
+    /// - `oid`: The unique OID for the table.
+    pub fn new(schema: Schema, name: String, table: Arc<Mutex<TableHeap>>, oid: TableOidT) -> Self {
+        TableInfo {
+            schema,
+            name,
+            table,
+            oid,
+        }
+    }
+
+    pub fn get_table_schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    pub fn get_table_oidt(&self) -> TableOidT {
+        self.oid
+    }
+
+    // pub fn get_table_heap(&self) -> &TableHeap {
+    //     &self.table.lock()
+    // }
 }
 
 impl IndexInfo {
@@ -115,21 +137,6 @@ impl IndexInfo {
     }
 }
 
-/// The Catalog is a non-persistent catalog that is designed for
-/// use by executors within the DBMS execution engine. It handles
-/// table creation, table lookup, index creation, and index lookup.
-pub struct Catalog {
-    bpm: Arc<BufferPoolManager>,
-    lock_manager: Arc<Mutex<LockManager>>,
-    log_manager: Arc<Mutex<LogManager>>,
-    tables: HashMap<TableOidT, Box<TableInfo>>,
-    table_names: HashMap<String, TableOidT>,
-    next_table_oid: AtomicI32,
-    indexes: HashMap<IndexOidT, Box<IndexInfo>>,
-    index_names: HashMap<String, HashMap<String, IndexOidT>>,
-    next_index_oid: AtomicI32,
-}
-
 impl Catalog {
     /// Constructs a new Catalog instance.
     ///
@@ -141,17 +148,23 @@ impl Catalog {
         bpm: Arc<BufferPoolManager>,
         lock_manager: Arc<Mutex<LockManager>>,
         log_manager: Arc<Mutex<LogManager>>,
+        next_index_oid: IndexOidT,
+        next_table_oid: TableOidT,
+        tables: HashMap<TableOidT, Box<TableInfo>>,
+        indexes: HashMap<IndexOidT, Box<IndexInfo>>,
+        table_names: HashMap<String, TableOidT>,
+        index_names: HashMap<String, HashMap<String, IndexOidT>>,
     ) -> Self {
         Catalog {
             bpm,
             lock_manager,
             log_manager,
-            tables: HashMap::new(),
-            table_names: HashMap::new(),
-            next_table_oid: AtomicI32::new(0),
-            indexes: HashMap::new(),
-            index_names: HashMap::new(),
-            next_index_oid: AtomicI32::new(0),
+            tables,
+            table_names,
+            next_table_oid,
+            indexes,
+            index_names,
+            next_index_oid
         }
     }
 
@@ -176,18 +189,13 @@ impl Catalog {
             return None;
         }
 
-        let table = if create_table_heap {
-            Box::new(TableHeap::new(self.bpm.clone()))
-        } else {
-            TableHeap::create_empty_heap(true)?
-        };
-
-        let table_oid = self.next_table_oid.fetch_add(1, Ordering::SeqCst);
+        let table = Arc::new(Mutex::new(TableHeap::new(self.bpm.clone())));
+        let table_oid= self.next_table_oid.add(1);
         let table_info = Box::new(TableInfo::new(
             schema,
             table_name.to_string(),
             table,
-            table_oid,
+            table_oid.into(),
         ));
 
         self.table_names.insert(table_name.to_string(), table_oid);
@@ -242,7 +250,7 @@ impl Catalog {
     //     table_name: &str,
     //     schema: Schema,
     //     key_schema: Schema,
-    //     key_attrs: Vec<u32>,
+    //     key_attrs: Vec<usize>,
     //     key_size: usize,
     //     hash_function: HashFunction<KeyType>,
     //     is_primary_key: bool,
@@ -274,7 +282,7 @@ impl Catalog {
     //         iter.next();
     //     }
     //
-    //     let index_oid = self.next_index_oid.fetch_add(1, Ordering::SeqCst);
+    //     let index_oid = self.next_index_oid.add(1);
     //     let index_info = Box::new(IndexInfo::new(key_schema, index_name.to_string(), index, index_oid, table_name.to_string(), key_size, is_primary_key, index_type));
     //
     //     self.indexes.insert(index_oid, index_info);

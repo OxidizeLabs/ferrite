@@ -2,10 +2,8 @@ use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::exception::{ArrayExpressionError, ExpressionError};
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -100,6 +98,8 @@ impl Display for ArrayExpression {
 mod tests {
     use super::*;
     use crate::common::rid::RID;
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::types_db::types::Type;
 
     #[test]
     fn array_expression() {

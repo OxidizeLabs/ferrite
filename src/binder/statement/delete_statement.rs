@@ -1,7 +1,6 @@
 use crate::binder::bound_expression::BoundExpression;
 use crate::binder::bound_statement::BoundStatement;
-use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
-use crate::binder::expressions::bound_constant::BoundConstant;
+use crate::binder::bound_table_ref::BoundTableRef;
 use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;
@@ -46,6 +45,8 @@ impl Display for DeleteStatement {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::bound_table_ref::TableReferenceType;
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     #[derive(Clone)]

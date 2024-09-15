@@ -1,7 +1,6 @@
 use crate::binder::bound_statement::BoundStatement;
 use crate::catalogue::column::Column;
 use crate::common::statement_type::StatementType;
-use crate::types_db::type_id::TypeId;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -58,6 +57,7 @@ impl Display for CreateStatement {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::types_db::type_id::TypeId;
     use super::*;
 
     #[test]

@@ -1,5 +1,4 @@
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 use std::any::Any;
 use std::fmt;

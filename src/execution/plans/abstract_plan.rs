@@ -10,7 +10,7 @@ use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
-use crate::execution::plans::seq_scan_plan::SeqScanNode;
+use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::sort_plan::SortNode;
 use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::execution::plans::topn_plan::TopNNode;
@@ -45,7 +45,7 @@ pub enum PlanType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanNode {
-    SeqScan(SeqScanNode),
+    SeqScan(SeqScanPlanNode),
     IndexScan(IndexScanNode),
     Insert(InsertNode),
     Update(UpdateNode),

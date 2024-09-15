@@ -1,6 +1,5 @@
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::binder::bound_order_by::BoundOrderBy;
-use crate::binder::expressions::bound_constant::BoundConstant;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
@@ -143,6 +142,7 @@ impl Display for BoundWindow {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     #[test]

@@ -14,21 +14,9 @@ use crate::binder::statement::explain_statement::ExplainStatement;
 use crate::binder::statement::select_statement::SelectStatement;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
-use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
-use crate::concurrency::transaction_manager::TransactionManager;
-use crate::recovery::log_manager::LogManager;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::types_db::value::Value as DbValue;
-use chrono::Utc;
-use parking_lot::Mutex;
-use spin::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::{ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value, WindowSpec, With};
 use sqlparser::dialect::GenericDialect;
@@ -555,18 +543,22 @@ impl<'a> Drop for ContextGuard<'a> {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::types_db::integer_type::IntegerType;
     use crate::types_db::type_id::TypeId;
     use log::info;
     use std::fs;
+    use chrono::Utc;
+    use parking_lot::{Mutex, RwLock};
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::schema::Schema;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
 
     struct TestContext {
-        disk_manager: Arc<FileDiskManager>,
-        disk_scheduler: Arc<RwLock<DiskScheduler>>,
-        bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<Mutex<TransactionManager>>,
-        lock_manager: Arc<Mutex<LockManager>>,
-        log_manager: Arc<Mutex<LogManager>>,
         db_file: String,
         db_log: String,
     }
@@ -635,7 +627,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar)
         ]);
-        let mut catalog = Catalog::new(bpm, lock_manager.clone(), log_manager);
+        let mut catalog = Catalog::new(bpm, lock_manager.clone(), log_manager, 0, 0, Default::default(), Default::default(), Default::default(), Default::default());
         catalog.create_table(&txn, "users", schema, true);
 
         // Now we can create the Binder with the Catalog

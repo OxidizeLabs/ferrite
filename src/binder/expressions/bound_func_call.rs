@@ -1,5 +1,4 @@
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::binder::expressions::bound_constant::BoundConstant;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
@@ -59,6 +58,7 @@ impl Display for BoundFuncCall {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     #[test]

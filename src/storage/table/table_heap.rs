@@ -1,17 +1,15 @@
-use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{error, info};
 use spin::RwLock;
 use std::sync::atomic::AtomicI32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -179,22 +177,6 @@ impl TableHeap {
     ) -> bool {
         // Implementation of update tuple in place logic here
         unimplemented!()
-    }
-
-    /// Creates an empty heap. For binder tests.
-    ///
-    /// # Parameters
-    ///
-    /// - `create_table_heap`: Should be `false` to generate an empty heap.
-    ///
-    /// # Returns
-    ///
-    /// A `Box` containing a `TableHeap`.
-    pub fn create_empty_heap(create_table_heap: bool) -> Option<Box<Self>> {
-        // The input parameter should be false in order to generate an empty heap
-        assert!(create_table_heap);
-        unimplemented!()
-        // Some(Box::new(TableHeap::new(Arc::new(Mutex::new(BufferPoolManager::new(0, Arc::new(()), Arc::new(()), Arc::new(Mutex::new(()))))))))
     }
 
     /// Acquires a read lock on a table page.

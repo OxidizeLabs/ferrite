@@ -1,5 +1,4 @@
 use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
-use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::binder::statement::select_statement::SelectStatement;
 use std::any::Any;
 use std::fmt;
@@ -53,6 +52,7 @@ pub type CTEList = Vec<Box<BoundSubqueryRef>>;
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     #[test]
@@ -99,7 +99,7 @@ mod unit_tests {
             Box::new(self.clone())
         }
     }
-    impl fmt::Display for MockBoundTableRef {
+    impl Display for MockBoundTableRef {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "mock_table")
         }

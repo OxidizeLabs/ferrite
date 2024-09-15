@@ -1,8 +1,7 @@
 use crate::binder::bound_expression::BoundExpression;
 use crate::binder::bound_statement::BoundStatement;
-use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
+use crate::binder::bound_table_ref::BoundTableRef;
 use crate::binder::expressions::bound_column_ref::BoundColumnRef;
-use crate::binder::expressions::bound_constant::BoundConstant;
 use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;
@@ -76,6 +75,8 @@ impl Debug for UpdateStatement {
 
 #[cfg(test)]
 mod tests {
+    use crate::binder::bound_table_ref::TableReferenceType;
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
 
     struct MockBoundTableRef;

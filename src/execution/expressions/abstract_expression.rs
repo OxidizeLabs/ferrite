@@ -9,7 +9,6 @@ use crate::execution::expressions::constant_value_expression::ConstantExpression
 use crate::execution::expressions::logic_expression::LogicExpression;
 use crate::execution::expressions::string_expression::StringExpression;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
@@ -137,6 +136,7 @@ impl Display for Expression {
 mod unit_tests {
     use super::*;
     use crate::common::rid::RID;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn constant_expression() {

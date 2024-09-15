@@ -3,13 +3,12 @@ use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use chrono::Utc;
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use log::{debug, error, info};
-use spin::RwLock;
+use log::{error, info};
 use std::collections::VecDeque;
 use std::sync::mpsc;
-use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::{fs, thread};
+use parking_lot::RwLock;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
@@ -121,10 +120,10 @@ impl DiskScheduler {
                     let mut data = request.data.write();
                     if request.is_write {
                         info!("Writing to disk: page_id={}", request.page_id);
-                        disk_manager.write_page(request.page_id, &data);
+                        let _ = disk_manager.write_page(request.page_id, &data);
                     } else {
                         info!("Reading from disk: page_id={}", request.page_id);
-                        disk_manager.read_page(request.page_id, &mut *data);
+                        let _ = disk_manager.read_page(request.page_id, &mut *data);
                     }
                     let _ = request.sender.send(());
                     info!(
@@ -139,10 +138,10 @@ impl DiskScheduler {
                 let mut data = request.data.write();
                 if request.is_write {
                     info!("Writing to disk: page_id={}", request.page_id);
-                    disk_manager.write_page(request.page_id, &data);
+                    let _ = disk_manager.write_page(request.page_id, &data);
                 } else {
                     info!("Reading from disk: page_id={}", request.page_id);
-                    disk_manager.read_page(request.page_id, &mut *data);
+                    let _ = disk_manager.read_page(request.page_id, &mut *data);
                 }
                 let _ = request.sender.send(());
                 info!("Request processed and response sent");

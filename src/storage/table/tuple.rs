@@ -1,4 +1,3 @@
-use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
@@ -157,6 +156,7 @@ impl Tuple {
 
 #[cfg(test)]
 mod tests {
+    use crate::catalogue::column::Column;
     use super::*;
     use crate::types_db::type_id::TypeId;
 
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_tuple_key_from_tuple() {
-        let (tuple, schema) = create_sample_tuple();
+        let (tuple, _schema) = create_sample_tuple();
 
         let key_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
