@@ -291,10 +291,11 @@ impl Hash for Value {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::container::hash_function::HashFunction;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
+    use crate::types_db::types::{CmpBool, Type};
+    use crate::types_db::value::{Size, Val, Value};
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[test]
@@ -359,11 +360,6 @@ mod tests {
         assert_eq!(string_value.as_bytes(), [72, 101, 108, 108, 111]); // TypeId::VarChar (7) + "Hello"
         assert_eq!(vector_value.as_bytes(), [1, 0, 0, 0, 2, 0, 0, 0]); // TypeId::Vector (9) + [TypeId::Integer (3), 1, TypeId::Integer (3), 2]
     }
-}
-
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
 
     #[test]
     fn value_creation() {
@@ -381,7 +377,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn tvalue_comparison() {
+    fn value_comparison() {
         let val1 = Value::new(5);
         let val2 = Value::new(10);
         let val3 = Value::new(5);
@@ -408,7 +404,7 @@ mod unit_tests {
 
         let val_vector = Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]);
         let serialized_vector = bincode::serialize(&val_vector).expect("Serialization failed");
-        // Adjust this based on the expected binary format
+        assert_eq!(serialized_vector, vec![9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0]);
     }
 
     #[test]
@@ -454,7 +450,46 @@ mod unit_tests {
             type_id_: TypeId::Integer,
         };
         let serialized = bincode::serialize(&value).expect("Serialization failed");
-        // Add checks for expected binary representation
+
+        // Expected binary representation
+        let expected_bytes: Vec<u8> = {
+            // Serialize the individual components to get the expected bytes
+
+            // Serialize Val::Integer(42)
+            let mut value_bytes: Vec<u8> = Vec::new();
+            // Val variant index for Integer is 3 (u32)
+            value_bytes.extend(&3u32.to_le_bytes());
+            // Integer value 42 (i32)
+            value_bytes.extend(&42i32.to_le_bytes());
+
+            // Serialize Size::Length(4)
+            let mut size_bytes: Vec<u8> = Vec::new();
+            // Size variant index for Length is 0 (u32)
+            size_bytes.extend(&0u32.to_le_bytes());
+            // Length value 4 (usize)
+            let length_bytes = 4usize.to_le_bytes();
+            size_bytes.extend(&length_bytes);
+
+            // Serialize manage_data_: false (bool)
+            let manage_data_bytes: Vec<u8> = vec![0x00]; // false
+
+            // Serialize TypeId::Integer
+            let mut type_id_bytes: Vec<u8> = Vec::new();
+            // TypeId variant index for Integer is 3 (u32)
+            type_id_bytes.extend(&3u32.to_le_bytes());
+
+            // Combine all bytes
+            let mut expected: Vec<u8> = Vec::new();
+            expected.extend(value_bytes);
+            expected.extend(size_bytes);
+            expected.extend(manage_data_bytes);
+            expected.extend(type_id_bytes);
+
+            expected
+        };
+
+        // Now assert that the serialized data matches the expected bytes
+        assert_eq!(serialized, expected_bytes);
     }
 
     #[test]

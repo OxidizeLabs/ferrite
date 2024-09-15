@@ -4,16 +4,16 @@ use std::hash::{Hash, Hasher};
 // Every possible SQL type ID
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeId {
-    Invalid = 0,
     Boolean,
-    Integer,
-    Decimal,
-    VarChar,
-    Timestamp,
-    Vector,
     TinyInt,
     SmallInt,
+    Integer,
     BigInt,
+    Decimal,
+    Timestamp,
+    VarChar,
+    Vector,
+    Invalid,
 }
 
 // Implement the Default trait for TypeId
