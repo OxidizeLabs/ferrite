@@ -1,86 +1,57 @@
+// use std::hash::Hash;
+// use std::sync::Arc;
 // use crate::buffer::buffer_pool_manager::BufferPoolManager;
 // use crate::common::config::PageId;
 // use crate::concurrency::transaction::Transaction;
 // use crate::container::hash_function::HashFunction;
-// use crate::storage::index::generic_key::GenericKeyComparator;
-// use crate::storage::page::page_guard::SpecificPageReadGuard;
-// use crate::storage::page::page_types::hash_table_header_page::HashTableHeaderPage;
-// use crate::storage::page::page_types::{
-//     extendable_hash_table_bucket_page::ExtendableHTableBucketPage,
-//     extendable_hash_table_directory_page::ExtendableHTableDirectoryPage,
-//     extendable_hash_table_header_page::ExtendableHTableHeaderPage,
-// };
-// use log::{debug, error, info, warn};
-// use std::fmt::Debug;
-// use std::hash::Hash;
-// use std::marker::PhantomData;
-// use std::string::String;
-// use std::sync::Arc;
-// use std::vec::Vec;
+// use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+// use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+// use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 //
-// /// `DiskExtendableHashTable` represents an extendable hash table that operates on disk.
-// ///
-// /// # Type Parameters
-// /// - `K`: The key type.
-// /// - `V`: The value type.
-// /// - `C`: The comparator type used for key comparison.
-// pub struct DiskExtendableHashTable<K, V, C>
-// where
-//     C: GenericKeyComparator<K, N>,
-// {
+// /// Implementation of an extendable hash table backed by a buffer pool manager.
+// /// Non-unique keys are supported. Supports insert and delete. The table grows/shrinks
+// /// dynamically as buckets become full/empty.
+// pub struct DiskExtendableHashTable<K, V, KC> {
 //     index_name: String,
 //     bpm: Arc<BufferPoolManager>,
-//     cmp: C,
+//     cmp: KC,
 //     hash_fn: HashFunction<K>,
 //     header_max_depth: u32,
 //     directory_max_depth: u32,
-//     bucket_max_size: usize,
+//     bucket_max_size: u32,
 //     header_page_id: PageId,
-//     _marker: PhantomData<V>,
 // }
 //
-// impl<K, V, C> DiskExtendableHashTable<K, V, C>
+// impl<K, V, KC> DiskExtendableHashTable<K, V, KC>
 // where
-//     K: Eq + Hash + Clone + Debug + 'static,
-//     V: Clone + Debug,
-//     C: GenericKeyComparator<K, N> + Clone,
+//     K: Eq + Hash + Clone,
+//     V: Clone,
+//     KC: Fn(&K, &K) -> std::cmp::Ordering,
 // {
 //     /// Creates a new `DiskExtendableHashTable`.
 //     ///
 //     /// # Arguments
-//     /// - `name`: The name of the hash table.
-//     /// - `bpm`: The buffer pool manager to be used.
-//     /// - `cmp`: The comparator for keys.
-//     /// - `hash_fn`: The hash function.
-//     /// - `header_max_depth`: The max depth allowed for the header page.
-//     /// - `directory_max_depth`: The max depth allowed for the directory page.
-//     /// - `bucket_max_size`: The max size allowed for the bucket page array.
 //     ///
-//     /// # Returns
-//     /// A new instance of `DiskExtendableHashTable`.
+//     /// * `name` - The name of the hash table.
+//     /// * `bpm` - The buffer pool manager to be used.
+//     /// * `cmp` - Comparator for keys.
+//     /// * `hash_fn` - The hash function.
+//     /// * `header_max_depth` - The max depth allowed for the header page.
+//     /// * `directory_max_depth` - The max depth allowed for the directory page.
+//     /// * `bucket_max_size` - The max size allowed for the bucket page array.
 //     pub fn new(
 //         name: String,
 //         bpm: Arc<BufferPoolManager>,
-//         cmp: C,
+//         cmp: KC,
 //         hash_fn: HashFunction<K>,
 //         header_max_depth: u32,
 //         directory_max_depth: u32,
-//         bucket_max_size: usize,
+//         bucket_max_size: u32,
 //     ) -> Self {
-//         info!("Creating a new DiskExtendableHashTable: {}", name);
-//
-//         let mut header_guard = match bpm.new_page_guarded() {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to create a new page for header");
-//                 panic!("Cannot proceed without a header page");
-//             }
-//         };
-//         let header_page = header_guard.as_type_mut::<ExtendableHTableHeaderPage>();
-//         header_page.init(header_max_depth);
-//         let header_page_id = header_guard.get_page_id();
-//
-//         info!("DiskExtendableHashTable created with header page ID: {}", header_page_id);
+//         let header_page_id = bpm.new_page().expect("Failed to create header page").get_page_id();
+//         let mut header_page = bpm.fetch_page(header_page_id).expect("Failed to fetch header page");
+//         let mut header = header_page.into_specific_type::<ExtendableHTableHeaderPage, 8>().unwrap();
+//         header.write().access_mut(|page| page.init(header_max_depth));
 //
 //         Self {
 //             index_name: name,
@@ -91,520 +62,200 @@
 //             directory_max_depth,
 //             bucket_max_size,
 //             header_page_id,
-//             _marker: Default::default(),
 //         }
 //     }
 //
 //     /// Inserts a key-value pair into the hash table.
 //     ///
 //     /// # Arguments
-//     /// - `key`: The key to insert.
-//     /// - `value`: The value to be associated with the key.
-//     /// - `transaction`: The current transaction (optional).
+//     ///
+//     /// * `key` - The key to insert.
+//     /// * `value` - The value to be associated with the key.
+//     /// * `transaction` - The current transaction (optional).
 //     ///
 //     /// # Returns
-//     /// `true` if the insert succeeded, `false` otherwise.
-//     pub fn insert(&self, key: &K, value: &V, _transaction: Option<&Transaction>) -> bool {
-//         let hash = self.hash(key);
-//         debug!("Inserting key: {:?}, hash: {}", key, hash);
+//     ///
+//     /// Returns `true` if the insert succeeded, `false` otherwise.
+//     pub fn insert(&mut self, key: K, value: V, transaction: Option<&Transaction>) -> bool {
+//         let hash = self.hash_fn.hash(&key);
+//         let mut header_page = self.bpm.fetch_page(self.header_page_id).expect("Failed to fetch header page");
+//         let header = header_page.into_specific_type::<ExtendableHTableHeaderPage, 8>().unwrap();
 //
-//         let mut header_page_guard = match self.bpm.fetch_page_basic(self.header_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch header page");
-//                 return false;
-//             }
-//         };
+//         let directory_index = header.read().access(|page| page.hash_to_directory_index(hash));
+//         let directory_page_id = header.read().access(|page| page.get_directory_page_id(directory_index as usize).unwrap());
 //
-//         let mut header_page_guard_clone = Arc::make_mut(&mut header_page_guard);
-//         let mut header_page = header_page_guard_clone.as_type_mut::<ExtendableHTableHeaderPage>();
+//         let mut directory_page = self.bpm.fetch_page(directory_page_id).expect("Failed to fetch directory page");
+//         let directory = directory_page.into_specific_type::<ExtendableHTableDirectoryPage, 8>().unwrap();
 //
-//         let directory_idx = header_page.hash_to_directory_index(hash);
-//         debug!("Calculated directory index: {}", directory_idx);
+//         let bucket_index = directory.read().access(|page| page.hash_to_bucket_index(hash));
+//         let bucket_page_id = directory.read().access(|page| page.get_bucket_page_id(bucket_index as usize).unwrap());
 //
-//         let Some(directory_page_id) = header_page.get_directory_page_id(directory_idx as usize) else { todo!() };
-//         let mut directory_page_guard = match self.bpm.fetch_page_basic(directory_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch directory page ID: {:?}", directory_page_id);
-//                 return false;
-//             }
-//         };
+//         let mut bucket_page = self.bpm.fetch_page(bucket_page_id).expect("Failed to fetch bucket page");
+//         let bucket = bucket_page.into_specific_type::<ExtendableHTableBucketPage<K, V>, 8>().unwrap();
 //
-//
-//         let mut directory_page_lock = Arc::make_mut(&mut directory_page_guard);
-//         let directory_page = directory_page_lock.as_type_mut::<ExtendableHTableDirectoryPage>();
-//
-//         let bucket_idx = hash & ((1 << self.directory_max_depth) - 1);
-//         debug!("Calculated bucket index: {}", bucket_idx);
-//
-//         let Some(bucket_page_id) = directory_page.get_bucket_page_id(bucket_idx as usize) else { todo!() };
-//         let mut bucket_page_guard = match self.bpm.fetch_page_basic(bucket_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch bucket page ID: {}", bucket_page_id);
-//                 return false;
-//             }
-//         };
-//
-//         let mut bucket_page_lock = Arc::make_mut(&mut bucket_page_guard);
-//         let bucket_page = bucket_page_lock.as_type_mut::<ExtendableHTableBucketPage<K, V, C>>();
-//
-//         let success = bucket_page.insert(key.clone(), value.clone(), &self.cmp);
-//
-//         if success {
-//             info!("Successfully inserted key-value pair: {:?} -> {:?}", key, value);
-//         } else {
-//             warn!("Failed to insert key-value pair: {:?} -> {:?}", key, value);
+//         if bucket.read().access(|page| page.is_full()) {
+//             self.split_bucket(directory_index, bucket_index, &key, &value);
+//             // After splitting, we need to re-insert
+//             return self.insert(key, value, transaction);
 //         }
 //
-//         success
+//         bucket.write().access_mut(|page| page.insert(key, value, &self.cmp))
 //     }
 //
 //     /// Removes a key-value pair from the hash table.
 //     ///
 //     /// # Arguments
-//     /// - `key`: The key to delete.
-//     /// - `transaction`: The current transaction (optional).
+//     ///
+//     /// * `key` - The key to delete.
+//     /// * `transaction` - The current transaction (optional).
 //     ///
 //     /// # Returns
-//     /// `true` if the remove succeeded, `false` otherwise.
-//     pub fn remove(&self, key: &K, _transaction: Option<&Transaction>) -> bool {
-//         let hash = self.hash(key);
-//         debug!("Removing key: {:?}, hash: {}", key, hash);
+//     ///
+//     /// Returns `true` if the remove succeeded, `false` otherwise.
+//     pub fn remove(&mut self, key: &K, transaction: Option<&Transaction>) -> bool {
+//         let hash = self.hash_fn.hash(key);
+//         let mut header_page = self.bpm.fetch_page(self.header_page_id).expect("Failed to fetch header page");
+//         let header = header_page.into_specific_type::<ExtendableHTableHeaderPage, 8>().unwrap();
 //
-//         let mut header_page_guard = match self.bpm.fetch_page_basic(self.header_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch header page");
-//                 return false;
-//             }
-//         };
-//         let mut header_page_lock = Arc::make_mut(&mut header_page_guard);
-//         let header_page = header_page_lock.as_type_mut::<ExtendableHTableHeaderPage>();
+//         let directory_index = header.read().access(|page| page.hash_to_directory_index(hash));
+//         let directory_page_id = header.read().access(|page| page.get_directory_page_id(directory_index as usize).unwrap());
 //
-//         let directory_idx = header_page.hash_to_directory_index(hash);
-//         debug!("Calculated directory index: {}", directory_idx);
+//         let mut directory_page = self.bpm.fetch_page(directory_page_id).expect("Failed to fetch directory page");
+//         let directory = directory_page.into_specific_type::<ExtendableHTableDirectoryPage, 8>().unwrap();
 //
-//         let Some(directory_page_id) = header_page.get_directory_page_id(directory_idx as usize) else { todo!() };
-//         let mut directory_page_guard = match self.bpm.fetch_page_basic(directory_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch directory page ID: {}", directory_page_id);
-//                 return false;
-//             }
-//         };
+//         let bucket_index = directory.read().access(|page| page.hash_to_bucket_index(hash));
+//         let bucket_page_id = directory.read().access(|page| page.get_bucket_page_id(bucket_index as usize).unwrap());
 //
-//         let mut directory_page_lock = Arc::make_mut(&mut directory_page_guard);
-//         let directory_page = directory_page_lock.as_type_mut::<ExtendableHTableDirectoryPage>();
+//         let mut bucket_page = self.bpm.fetch_page(bucket_page_id).expect("Failed to fetch bucket page");
+//         let bucket = bucket_page.into_specific_type::<ExtendableHTableBucketPage<K, V>, 8>().unwrap();
 //
-//         let bucket_idx = hash & ((1 << self.directory_max_depth) - 1);
-//         debug!("Calculated bucket index: {}", bucket_idx);
+//         let removed = bucket.write().access_mut(|page| page.remove(key, &self.cmp));
 //
-//         let Some(bucket_page_id) = directory_page.get_bucket_page_id(bucket_idx as usize) else { todo!() };
-//         let mut bucket_page_guard = match self.bpm.fetch_page_basic(bucket_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch bucket page ID: {}", bucket_page_id);
-//                 return false;
-//             }
-//         };
-//
-//         let mut bucket_page_lock = Arc::make_mut(&mut bucket_page_guard);
-//         let bucket_page = bucket_page_lock.as_type_mut::<ExtendableHTableBucketPage<K, V, C>>();
-//
-//         let success = bucket_page.remove(&key.clone(), &self.cmp);
-//
-//         if success {
-//             info!("Successfully removed key: {:?}", key);
-//         } else {
-//             warn!("Failed to remove key: {:?}", key);
+//         if removed && bucket.read().access(|page| page.is_empty()) {
+//             self.merge_bucket(directory_index, bucket_index);
 //         }
 //
-//         success
+//         removed
 //     }
 //
-//     /// Retrieves the value(s) associated with a given key in the hash table.
+//     /// Gets the value associated with a given key in the hash table.
 //     ///
 //     /// # Arguments
-//     /// - `key`: The key to look up.
-//     /// - `result`: A mutable vector to store the value(s) associated with the given key.
-//     /// - `transaction`: The current transaction (optional).
+//     ///
+//     /// * `key` - The key to look up.
+//     /// * `transaction` - The current transaction (optional).
 //     ///
 //     /// # Returns
-//     /// `true` if the lookup succeeded, `false` otherwise.
-//     pub fn get_value(&self, key: &K, result: &mut Vec<V>, _transaction: Option<&Transaction>) -> bool {
-//         let hash = self.hash(key);
-//         debug!("Getting value for key: {:?}, hash: {}", key, hash);
-//
-//         let mut header_page_guard = match self.bpm.fetch_page_basic(self.header_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch header page");
-//                 return false;
-//             }
-//         };
-//
-//         let mut header_page_lock = Arc::make_mut(&mut header_page_guard);
-//         let header_page = header_page_lock.as_type_mut::<ExtendableHTableHeaderPage>();
-//
-//         let directory_idx = header_page.hash_to_directory_index(hash);
-//         debug!("Calculated directory index: {}", directory_idx);
-//
-//         let Some(directory_page_id) = header_page.get_directory_page_id(directory_idx as usize) else { todo!() };
-//         let mut directory_page_guard = match self.bpm.fetch_page_basic(directory_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch directory page ID: {}", directory_page_id);
-//                 return false;
-//             }
-//         };
-//         let mut directory_page_lock = Arc::make_mut(&mut directory_page_guard);
-//         let directory_page = directory_page_lock.as_type_mut::<ExtendableHTableDirectoryPage>();
-//
-//         let bucket_idx = hash & ((1 << self.directory_max_depth) - 1);
-//         debug!("Calculated bucket index: {}", bucket_idx);
-//
-//         let Some(bucket_page_id) = directory_page.get_bucket_page_id(bucket_idx as usize) else { todo!() };
-//         let mut bucket_page_guard = match self.bpm.fetch_page_basic(bucket_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch bucket page ID: {}", bucket_page_id);
-//                 return false;
-//             }
-//         };
-//
-//         let mut bucket_page_lock = Arc::make_mut(&mut bucket_page_guard);
-//         let bucket_page = bucket_page_lock.as_type_mut::<ExtendableHTableBucketPage<K, V, C>>();
-//
-//         if let Some(value) = bucket_page.lookup(key, &self.cmp) {
-//             result.push(value.clone());
-//             info!("Found value for key {:?}: {:?}", key, value);
-//             true
-//         } else {
-//             warn!("Value not found for key {:?}", key);
-//             false
-//         }
-//     }
-//
-//     /// Verifies the integrity of the extendable hash table's directory and bucket pages.
-//     pub fn verify_integrity(&self) -> bool {
-//         info!("Starting integrity verification for DiskExtendableHashTable: {}", self.index_name);
-//
-//         let mut header_page_guard = match self.bpm.fetch_page_basic(self.header_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch header page");
-//                 return false;
-//             }
-//         };
-//
-//         let mut header_page_lock = Arc::make_mut(&mut header_page_guard);
-//         let header_page = header_page_lock.as_type_mut::<ExtendableHTableHeaderPage>();
-//
-//         for directory_idx in 0..(1 << self.header_max_depth) {
-//             let Some(directory_page_id) = header_page.get_directory_page_id(directory_idx) else { todo!() };
-//             let mut directory_page_guard = match self.bpm.fetch_page_basic(directory_page_id) {
-//                 Some(guard) => guard,
-//                 None => {
-//                     error!("Failed to fetch directory page ID: {}", directory_page_id);
-//                     return false;
-//                 }
-//             };
-//
-//             let mut directory_page_lock = Arc::make_mut(&mut directory_page_guard);
-//             let directory_page = directory_page_lock.as_type_mut::<ExtendableHTableDirectoryPage>();
-//             directory_page.verify_integrity();
-//         }
-//
-//         info!("Integrity verification completed for DiskExtendableHashTable: {}", self.index_name);
-//         return true;
-//     }
-//
-//     /// Prints the structure of the hash table, including header, directory, and bucket pages.
-//     pub fn print_ht(&self) -> bool {
-//         info!("Printing DiskExtendableHashTable: {}", self.index_name);
-//
-//         let mut header_page_guard = match self.bpm.fetch_page_basic(self.header_page_id) {
-//             Some(guard) => guard,
-//             None => {
-//                 error!("Failed to fetch header page");
-//                 return false;
-//             }
-//         };
-//
-//         let mut header_page_lock = Arc::make_mut(&mut header_page_guard);
-//         let header_page = header_page_lock.as_type_mut::<ExtendableHTableHeaderPage>();
-//         header_page.print_header();
-//
-//         for directory_idx in 0..(1 << self.header_max_depth) {
-//             let Some(directory_page_id) = header_page.get_directory_page_id(directory_idx) else { todo!() };
-//             let mut directory_page_guard = match self.bpm.fetch_page_basic(directory_page_id) {
-//                 Some(guard) => guard,
-//                 None => {
-//                     error!("Failed to fetch directory page ID: {}", directory_page_id);
-//                     return false;
-//                 }
-//             };
-//
-//             let mut directory_page_lock = Arc::make_mut(&mut directory_page_guard);
-//             let directory_page = directory_page_lock.as_type_mut::<ExtendableHTableDirectoryPage>();
-//             directory_page.print_directory();
-//
-//             for bucket_idx in 0..(1 << self.directory_max_depth) {
-//                 let Some(bucket_page_id) = directory_page.get_bucket_page_id(bucket_idx) else { todo!() };
-//                 let mut bucket_page_guard = match self.bpm.fetch_page_basic(bucket_page_id) {
-//                     Some(guard) => guard,
-//                     None => {
-//                         error!("Failed to fetch bucket page ID: {}", bucket_page_id);
-//                         return false;
-//                     }
-//                 };
-//
-//                 let mut bucket_page_lock = Arc::make_mut(&mut bucket_page_guard);
-//                 let bucket_page = bucket_page_lock.as_type_mut::<ExtendableHTableBucketPage<K, V, C>>();
-//                 bucket_page.print_bucket();
-//             }
-//         }
-//
-//         info!("Finished printing DiskExtendableHashTable: {}", self.index_name);
-//         return true;
-//     }
-//
-//     /// Hashes a key and returns the resulting 32-bit hash value.
 //     ///
-//     /// # Arguments
-//     /// - `key`: The key to hash.
-//     ///
-//     /// # Returns
-//     /// The 32-bit hash value of the key.
-//     fn hash(&self, key: &K) -> u32 {
-//         debug!("Hashing key: {:?}", key);
-//         let hash = self.hash_fn.get_hash(key) as u32;
-//         debug!("Hash for key {:?} is {}", key, hash);
-//         hash
-//     }
-// }
+//     /// Returns `Some(value)` if the key is found, `None` otherwise.
+//     pub fn get_value(&self, key: &mut K, transaction: Option<&Transaction>) -> Option<V> {
+//         let hash = self.hash_fn.hash(key);
+//         let mut header_page = self.bpm.fetch_page(self.header_page_id).expect("Failed to fetch header page");
+//         let header = header_page.into_specific_type::<ExtendableHTableHeaderPage, 8>().unwrap();
 //
-// struct TestContext {
-//     bpm: Arc<BufferPoolManager>,
-//     db_file: String,
-//     db_log_file: String,
-// }
+//         let directory_index = header.read().access(|page| page.hash_to_directory_index(hash));
+//         let directory_page_id = header.read().access(|page| page.get_directory_page_id(directory_index as usize).unwrap());
 //
-// impl TestContext {
-//     async fn new(test_name: &str) -> Self {
-//         initialize_logger();
-//         let buffer_pool_size: usize = 5;
-//         const K: usize = 2;
-//         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-//         let db_file = format!("{}_{}.db", test_name, timestamp);
-//         let db_log_file = format!("{}_{}.log", test_name, timestamp);
-//         let disk_manager =
-//             Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone()).await);
-//         let disk_scheduler = Arc::new(Mutex::new(DiskScheduler::new(Arc::clone(
-//             &disk_manager,
-//         ))));
-//         let replacer = Arc::new(spin::Mutex::new(LRUKReplacer::new(buffer_pool_size, K)));
-//         let bpm = Arc::new(BufferPoolManager::new(
-//             buffer_pool_size,
-//             disk_scheduler,
-//             disk_manager.clone(),
-//             replacer.clone(),
-//         ));
+//         let mut directory_page = self.bpm.fetch_page(directory_page_id).expect("Failed to fetch directory page");
+//         let directory = directory_page.into_specific_type::<ExtendableHTableDirectoryPage, 8>().unwrap();
 //
-//         Self {
-//             bpm,
-//             db_file,
-//             db_log_file,
-//         }
+//         let bucket_index = directory.read().access(|page| page.hash_to_bucket_index(hash));
+//         let bucket_page_id = directory.read().access(|page| page.get_bucket_page_id(bucket_index as usize).unwrap());
+//
+//         let mut bucket_page = self.bpm.fetch_page(bucket_page_id).expect("Failed to fetch bucket page");
+//         let bucket = bucket_page.into_specific_type::<ExtendableHTableBucketPage<K, V>, 8>().unwrap();
+//
+//         bucket.read().access(|page| page.lookup(key, &self.cmp))
 //     }
 //
-//     async fn cleanup(&self) {
-//         let _ = remove_file(&self.db_file).await;
-//         let _ = remove_file(&self.db_log_file).await;
+//     /// Helper function to split a bucket when it becomes full.
+//     fn split_bucket(&mut self, directory_index: u32, bucket_index: u32, key: &K, value: &V) {
+//         // Implementation details for splitting a bucket
+//         // This would involve creating a new bucket, redistributing entries, and updating the directory
 //     }
-// }
 //
-// impl Drop for TestContext {
-//     fn drop(&mut self) {
-//         let db_file = self.db_file.clone();
-//         let db_log_file = self.db_log_file.clone();
-//         let _ = std::thread::spawn(move || {
-//             let rt = tokio::runtime::Runtime::new().unwrap();
-//             rt.block_on(async {
-//                 let _ = remove_file(db_file).await;
-//                 let _ = remove_file(db_log_file).await;
-//             });
-//         }).join();
+//     /// Helper function to merge buckets when one becomes empty.
+//     fn merge_bucket(&mut self, directory_index: u32, bucket_index: u32) {
+//         // Implementation details for merging buckets
+//         // This would involve removing an empty bucket and updating the directory
+//     }
+//
+//     /// Helper function to verify the integrity of the extendible hash table's directory.
+//     pub fn verify_integrity(&self) {
+//         // Implementation to verify the integrity of the hash table
+//         // This could involve checking the consistency of the header, directory, and buckets
+//     }
+//
+//     /// Helper function to expose the header page ID.
+//     pub fn header_page_id(&self) -> PageId {
+//         self.header_page_id
+//     }
+//
+//     /// Helper function to print out the hash table.
+//     pub fn print_ht(&self) {
+//         // Implementation to print the hash table structure
+//         // This could involve printing the header, directory, and a summary of buckets
 //     }
 // }
 //
 // #[cfg(test)]
 // mod tests {
-//     use crate::container::disk_extendable_hash_table::{DiskExtendableHashTable, TestContext};
-//     use crate::container::hash_function::HashFunction;
-//     use crate::storage::index::generic_key::GenericKeyComparator;
+//     use super::*;
+//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+//     use crate::storage::disk::disk_manager::FileDiskManager;
+//     use std::sync::Arc;
+//     use parking_lot::RwLock;
 //
-//     #[test]
-//     fn test_insert1() {
-//         let ctx = TestContext::new("test_insert1").await;
-//         let bpm = &ctx.bpm;
-//
-//         let ht = DiskExtendableHashTable::new(
-//             "blah".to_string(),
-//             bpm.clone(),
-//             GenericKeyComparator::new(),
-//             HashFunction::new(),
-//             2,
-//             2,
-//             0,
-//         );
-//
-//         let num_keys = 8;
-//
-//         // insert some values
-//         for i in 0..num_keys {
-//             let inserted = ht.insert(&i, &i, None);
-//             assert!(inserted);
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(found);
-//             assert_eq!(res.len(), 1);
-//             assert_eq!(res[0], i);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // attempt another insert, this should fail because table is full
-//         assert!(!ht.insert(&num_keys, &num_keys, None);
+//     // Helper function to create a buffer pool manager for testing
+//     fn create_bpm() -> Arc<BufferPoolManager> {
+//         let disk_manager = Arc::new(RwLock::new(FileDiskManager::new("test.db".to_string(), "test.log".to_string(), 100)));
+//         Arc::new(BufferPoolManager::new(10, disk_manager))
 //     }
 //
 //     #[test]
-//     fn test_insert2() {
-//         let ctx = TestContext::new("test_insert2");
-//         let bpm = &ctx.bpm;
+//     fn test_insert_and_get() {
+//         let bpm = create_bpm();
+//         let cmp = |a: &u32, b: &u32| a.cmp(b);
+//         let hash_fn = HashFunction::new();
 //
-//         let ht = DiskExtendableHashTable::new(
-//             "blah".to_string(),
-//             bpm.clone(),
-//             GenericKeyComparator::new(),
-//             HashFunction::new(),
-//             2,
-//             2,
-//             0,
+//         let mut ht = DiskExtendableHashTable::new(
+//             "test_table".to_string(),
+//             bpm,
+//             cmp,
+//             hash_fn,
+//             4,
+//             4,
+//             4,
 //         );
 //
-//         let num_keys = 5;
+//         assert!(ht.insert(1, "value1".to_string(), None));
+//         assert!(ht.insert(2, "value2".to_string(), None));
 //
-//         // insert some values
-//         for i in 0..num_keys {
-//             let inserted = ht.insert(&i, &i, None);
-//             assert!(inserted);
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(found);
-//             assert_eq!(res.len(), 1);
-//             assert_eq!(res[0], i);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // check that they were actually inserted
-//         for i in 0..num_keys {
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(found);
-//             assert_eq!(res.len(), 1);
-//             assert_eq!(res[0], i);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // try to get some keys that don't exist/were not inserted
-//         for i in num_keys..2 * num_keys {
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(!found);
-//             assert_eq!(res.len(), 0);
-//         }
-//
-//         ht.verify_integrity();
+//         assert_eq!(ht.get_value(&1, None), Some("value1".to_string()));
+//         assert_eq!(ht.get_value(&2, None), Some("value2".to_string()));
+//         assert_eq!(ht.get_value(&3, None), None);
 //     }
 //
 //     #[test]
-//     fn test_remove1() {
-//         let ctx = TestContext::new("test_remove1").await;
-//         let bpm = &ctx.bpm;
+//     fn test_remove() {
+//         let bpm = create_bpm();
+//         let cmp = |a: &u32, b: &u32| a.cmp(b);
+//         let hash_fn = HashFunction::new();
 //
-//         let ht = DiskExtendableHashTable::new(
-//             "blah".to_string(),
-//             bpm.clone(),
-//             GenericKeyComparator::new(),
-//             HashFunction::new(),
-//             2,
-//             2,
-//             0,
+//         let mut ht = DiskExtendableHashTable::new(
+//             "test_table".to_string(),
+//             bpm,
+//             cmp,
+//             hash_fn,
+//             4,
+//             4,
+//             4,
 //         );
 //
-//         let num_keys = 5;
-//
-//         // insert some values
-//         for i in 0..num_keys {
-//             let inserted = ht.insert(&i, &i, None);
-//             assert!(inserted);
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(found);
-//             assert_eq!(res.len(), 1);
-//             assert_eq!(res[0], i);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // check that they were actually inserted
-//         for i in 0..num_keys {
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(found);
-//             assert_eq!(res.len(), 1);
-//             assert_eq!(res[0], i);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // try to get some keys that don't exist/were not inserted
-//         for i in num_keys..2 * num_keys {
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(!found);
-//             assert_eq!(res.len(), 0);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // remove the keys we inserted
-//         for i in 0..num_keys {
-//             let removed = ht.remove(&i, None);
-//             assert!(removed);
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(!found);
-//             assert_eq!(res.len(), 0);
-//         }
-//
-//         ht.verify_integrity();
-//
-//         // try to remove some keys that don't exist/were not inserted
-//         for i in num_keys..2 * num_keys {
-//             let removed = ht.remove(&i, None);
-//             assert!(!removed);
-//             let mut res = vec![];
-//             let found = ht.get_value(&i, &mut res, None);
-//             assert!(!found);
-//             assert_eq!(res.len(), 0);
-//         }
-//
-//         ht.verify_integrity()
+//         ht.insert(1, "value1".to_string(), None);
+//         assert!(ht.remove(&1, None));
+//         assert_eq!(ht.get_value(&1, None), None);
 //     }
+//
+//     // Add more tests as needed
 // }

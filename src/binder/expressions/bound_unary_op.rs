@@ -1,5 +1,4 @@
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::binder::expressions::bound_constant::BoundConstant;
 use sqlparser::ast::UnaryOperator;
 use std::any::Any;
 use std::fmt;
@@ -53,9 +52,8 @@ impl Display for BoundUnaryOp {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
-
-    struct TestExpression(bool);
 
     #[test]
     fn bound_unary_op() {

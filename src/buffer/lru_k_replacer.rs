@@ -450,7 +450,7 @@ mod concurrency {
         for i in 1..=10 {
             let replacer = Arc::clone(&replacer);
             let handle = thread::spawn(move || {
-                let mut replacer_lock = replacer.lock().unwrap();
+                let replacer_lock = replacer.lock().unwrap();
                 replacer_lock.record_access(i, AccessType::Lookup);
                 replacer_lock.set_evictable(i, true);
             });

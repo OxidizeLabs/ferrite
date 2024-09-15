@@ -5,13 +5,11 @@ use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeEra
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
-use log::{debug, error, info, warn};
-use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use log::{debug, error, info};
 use std::any::Any;
 use std::convert::TryInto;
 
 // Constants
-const OFFSET_PAGE_START: usize = 0;
 const OFFSET_LSN: usize = 4;
 
 /// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being

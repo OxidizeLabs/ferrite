@@ -1,9 +1,7 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
-use crate::storage::page::page_types::extendable_hash_table_header_page::HTABLE_HEADER_ARRAY_SIZE;
+use crate::storage::page::page::{Page, PageTrait, PageType};
 use log::{debug, info, warn};
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -524,11 +522,10 @@ mod basic_behavior {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-    use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::{error, info};
-    use spin::RwLock;
     use std::sync::Arc;
+    use parking_lot::RwLock;
 
     const PAGE_ID_SIZE: usize = size_of::<PageId>();
 
@@ -553,12 +550,12 @@ mod basic_behavior {
                 &disk_manager,
             ))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
-            let bpm = Arc::new((BufferPoolManager::new(
+            let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
                 disk_manager.clone(),
                 replacer.clone(),
-            )));
+            ));
             Self {
                 bpm,
                 db_file,
@@ -583,9 +580,6 @@ mod basic_behavior {
     fn directory_page_integrity() {
         let ctx = TestContext::new("directory_page_integrity");
         let bpm = &ctx.bpm;
-
-        // DIRECTORY PAGE TEST
-        let header_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableHeader).unwrap();
 
         // DIRECTORY PAGE TEST
         let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();

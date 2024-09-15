@@ -92,7 +92,7 @@ impl FileDiskManager {
     /// * `log_data` - The log data to be written.
     pub fn write_log(&self, log_data: &[u8]) -> IoResult<()> {
         let mut log_io = self.log_io.write();
-        let mut log_io_writer = log_io.get_mut();
+        let log_io_writer = log_io.get_mut();
         log_io_writer.write_all(log_data)?;
         log_io_writer.flush()?;
         log_io_writer.sync_all()?;
@@ -114,7 +114,7 @@ impl FileDiskManager {
     /// `true` if the read was successful, `false` otherwise.
     pub fn read_log(&self, log_data: &mut [u8], offset: u64) -> IoResult<bool> {
         let mut log_io = self.log_io.write();
-        let mut log_io_reader = log_io.get_mut();
+        let log_io_reader = log_io.get_mut();
 
         log_io_reader.seek(SeekFrom::Start(offset))?;
         match log_io_reader.read(log_data) {
@@ -201,7 +201,7 @@ impl DiskIO for FileDiskManager {
         trace!("Writing page {} at offset {}", page_id, offset);
 
         let mut db_io = self.db_io.write();
-        let mut db_io_writer = db_io.get_mut();
+        let db_io_writer = db_io.get_mut();
         db_io_writer.seek(SeekFrom::Start(offset))?;
         db_io_writer.write_all(page_data)?;
         db_io_writer.flush()?;
@@ -212,7 +212,7 @@ impl DiskIO for FileDiskManager {
     fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> IoResult<()> {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
         let mut db_io = self.db_io.write();
-        let mut db_io_reader = db_io.get_mut();
+        let db_io_reader = db_io.get_mut();
 
         db_io_reader.seek(SeekFrom::Start(offset))?;
 

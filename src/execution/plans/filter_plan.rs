@@ -1,7 +1,6 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::execution::plans::seq_scan_plan::SeqScanNode;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +73,7 @@ mod tests {
     use crate::catalogue::column::Column;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::types_db::type_id::TypeId;
 
     #[test]
@@ -89,7 +89,7 @@ mod tests {
         let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
 
         let predicate = Arc::new(less_than_expr);
-        let child = PlanNode::SeqScan(SeqScanNode::new(schema.clone(), 0, "test_table".to_string(), None));
+        let child = PlanNode::SeqScan(SeqScanPlanNode::new(schema.clone(), 0, "test_table".to_string(), None));
 
         let filter_node = FilterNode::new(schema.clone(), predicate.clone(), child);
 

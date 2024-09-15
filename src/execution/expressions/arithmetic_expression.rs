@@ -3,7 +3,6 @@ use crate::catalogue::schema::Schema;
 use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
@@ -223,6 +222,7 @@ impl Display for ArithmeticOp {
 mod unit_tests {
     use super::*;
     use crate::common::rid::RID;
+    use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]
     fn arithmetic_expression() {

@@ -4,27 +4,21 @@ use crate::common::exception::DeletePageError;
 use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::index::b_plus_tree_index::KeyComparator;
-use crate::storage::index::generic_key::{GenericKey, GenericKeyComparator};
 use crate::storage::page::page::PageType::{ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
-use crate::storage::page::page::{Page, PageTrait, PageType};
+use crate::storage::page::page::{Page, PageType};
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::{ExtendableHTableBucketPage, TypeErasedBucketPage};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
-use crate::types_db::integer_type::IntegerType;
 use chrono::Utc;
-use futures::AsyncWriteExt;
 use log::{debug, error, info, warn};
-use spin::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-
-const INVALID_PAGE_ID: PageId = -1;
+use parking_lot::RwLock;
 
 // Define an enum to represent the type of page to create
 #[derive(Debug)]
@@ -175,7 +169,7 @@ impl BufferPoolManager {
             let mut page_data = page.write();
 
             // Update the page data
-            page_data.as_page_trait_mut().set_data(0, &data);
+            let _ = page_data.as_page_trait_mut().set_data(0, &data);
             page_data.as_page_trait_mut().set_dirty(true);
 
             debug!("Page {} written and marked dirty", page_id);
@@ -210,7 +204,7 @@ impl BufferPoolManager {
 
                 // Step 2: Update page access in the replacer
                 {
-                    let mut replacer = self.replacer.write(); // Acquire write lock
+                    let replacer = self.replacer.write(); // Acquire write lock
                     replacer.record_access(frame_id, AccessType::Lookup);
                     replacer.set_evictable(frame_id, false);
                 }
@@ -227,7 +221,7 @@ impl BufferPoolManager {
             if let Some(frame_id) = free_list.pop() {
                 frame_id
             } else {
-                let mut replacer = self.replacer.write(); // Acquire write lock
+                let replacer = self.replacer.write(); // Acquire write lock
                 replacer.evict().unwrap_or(-1)
             }
         };
@@ -255,7 +249,7 @@ impl BufferPoolManager {
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
 
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+                    let ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
 
                     // Schedule the write-back operation synchronously
                     ds.schedule(
@@ -295,7 +289,7 @@ impl BufferPoolManager {
 
         // Step 7: Update the replacer with the new page
         {
-            let mut replacer = self.replacer.write(); // Acquire write lock
+            let replacer = self.replacer.write(); // Acquire write lock
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, AccessType::Lookup);
         }
@@ -328,7 +322,7 @@ impl BufferPoolManager {
             let page_arc = pages[frame_id as usize].as_ref()?.clone(); // Clone the Arc<RwLock<Page>>
 
             // Update page access in replacer
-            let mut replacer = self.replacer.write(); // Acquire write lock
+            let replacer = self.replacer.write(); // Acquire write lock
             replacer.record_access(frame_id, AccessType::Lookup);
             replacer.set_evictable(frame_id, false);
 
@@ -342,7 +336,7 @@ impl BufferPoolManager {
             if let Some(frame_id) = free_list.pop() {
                 frame_id
             } else {
-                let mut replacer = self.replacer.write(); // Acquire write lock
+                let replacer = self.replacer.write(); // Acquire write lock
                 replacer.evict().unwrap_or(-1)
             }
         };
@@ -369,7 +363,7 @@ impl BufferPoolManager {
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
 
-                    let mut ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
+                    let ds = self.disk_scheduler.write(); // Acquire write lock for the disk scheduler
 
                     // Schedule the write-back operation synchronously
                     ds.schedule(
@@ -406,7 +400,7 @@ impl BufferPoolManager {
         debug!("Loaded page {} from disk into frame ID: {}", page_id, frame_id);
 
         {
-            let mut replacer = self.replacer.write(); // Acquire write lock
+            let replacer = self.replacer.write(); // Acquire write lock
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, AccessType::Lookup);
         }
@@ -492,7 +486,7 @@ impl BufferPoolManager {
         debug!("Step 3: Make the page evictable if needed, outside of the main locks");
         // Step 3: Make the page evictable if needed, outside of the main locks
         if should_make_evictable {
-            let mut replacer = self.replacer.write();
+            let replacer = self.replacer.write();
             replacer.set_evictable(frame_id, true);
             replacer.record_access(frame_id, access_type);
         }
@@ -643,7 +637,7 @@ impl BufferPoolManager {
 
         // Remove the frame ID from the replacer
         {
-            let mut replacer = self.replacer.write();
+            let replacer = self.replacer.write();
             replacer.remove(frame_id);
         }
 
@@ -735,7 +729,7 @@ impl BufferPoolManager {
     fn get_available_frame(&self) -> Option<FrameId> {
         let mut free_list = self.free_list.write();
         free_list.pop().or_else(|| {
-            let mut replacer = self.replacer.write();
+            let replacer = self.replacer.write();
             replacer.evict()
         })
     }
@@ -783,7 +777,7 @@ impl BufferPoolManager {
             page_table.insert(page_id, frame_id);
         }
 
-        let mut replacer = self.replacer.write();
+        let replacer = self.replacer.write();
         replacer.set_evictable(frame_id, false);
         replacer.record_access(frame_id, AccessType::Lookup);
     }
@@ -843,14 +837,8 @@ impl Drop for TestContext {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::common::logger::initialize_logger;
-    use chrono::Utc;
     use log::{error, info};
     use rand::Rng;
-    use spin::RwLock;
-    use std::any::Any;
-    use std::sync::{Arc, Mutex};
-    use std::thread;
 
     #[test]
     fn buffer_pool_manager_initialization() {
@@ -900,7 +888,7 @@ mod unit_tests {
         let context = TestContext::new("test_page_replacement_with_eviction");
 
         // Fill the buffer pool to capacity
-        for i in 0..context.buffer_pool_size {
+        for _i in 0..context.buffer_pool_size {
             let page = context.bpm.new_page(NewPageType::Basic).unwrap();
             info!("Created page with ID: {}", page.read().as_page_trait().get_page_id());
 
@@ -1046,7 +1034,8 @@ mod basic_behaviour {}
 
 #[cfg(test)]
 mod concurrency {
-    use super::*;
+    use parking_lot::Mutex;
+use super::*;
     use rand::Rng;
 
     #[test]
@@ -1075,12 +1064,12 @@ mod concurrency {
                     // Then, modify the page with a write lock on the page itself
                     {
                         let mut page_guard = page.write(); // Acquire write lock on the Page
-                        let mut data = page_guard.as_page_trait_mut().get_data_mut();
+                        let data = page_guard.as_page_trait_mut().get_data_mut();
                         data[0] = i as u8; // Each thread writes its index as the first byte
                     }
 
                     // Finally, unpin the page
-                    let mut bpm = bpm.write();
+                    let bpm = bpm.write();
                     bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
                 }
             });
@@ -1122,7 +1111,7 @@ mod concurrency {
 
         // Mutex for synchronizing test completion
         let done = Arc::new(Mutex::new(false));
-        let done_clone = Arc::clone(&done);
+        let _done_clone = Arc::clone(&done);
 
         // Create a list to hold thread handles
         let mut handles = vec![];
@@ -1165,8 +1154,6 @@ mod concurrency {
 #[cfg(test)]
 mod edge_cases {
     use super::*;
-    use std::thread::sleep;
-    use std::time::Duration;
 
     #[test]
     fn eviction_policy() {
@@ -1175,10 +1162,10 @@ mod edge_cases {
 
         // Fill the buffer pool completely
         let mut last_page_id = 0;
-        for i in 0..ctx.buffer_pool_size {
+        for _i in 0..ctx.buffer_pool_size {
             // Create a new page within a narrow lock scope
             let page_id = {
-                let mut bpm = bpm.write(); // Acquire write lock
+                let bpm = bpm.write(); // Acquire write lock
                 let page = bpm.new_page(NewPageType::Basic);
 
                 let page_id = page.unwrap().read().as_page_trait().get_page_id();
@@ -1192,12 +1179,12 @@ mod edge_cases {
 
         // Access the first page to make it recently used
         info!("Accessing page 0 to mark it as recently used");
-        let page_0 = bpm.write().fetch_page(0);
+        let _page_0 = bpm.write().fetch_page(0);
         bpm.write().unpin_page(0, true, AccessType::Lookup);
 
         // Create a new page, forcing an eviction
         info!("Creating a new page to trigger eviction");
-        let new_page = bpm.write().new_page(NewPageType::Basic);
+        let _new_page = bpm.write().new_page(NewPageType::Basic);
 
         // Verify that the last page was evicted
         info!("Verify that the last page was evicted");
@@ -1240,7 +1227,7 @@ mod edge_cases {
                 }
 
                 // Unpin the page
-                let mut bpm = bpm.write(); // Acquire write lock to unpin the page
+                let bpm = bpm.write(); // Acquire write lock to unpin the page
                 bpm.unpin_page(page_id, true, AccessType::Lookup); // Mark the page as dirty
             } // The locks are dropped here to prevent deadlocks
         }

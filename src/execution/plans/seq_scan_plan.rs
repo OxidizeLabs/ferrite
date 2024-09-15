@@ -1,18 +1,12 @@
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
-use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
-use crate::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
-use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SeqScanNode {
+pub struct SeqScanPlanNode {
     output_schema: Schema,
     table_oid: TableOidT,
     table_name: String,
@@ -20,7 +14,7 @@ pub struct SeqScanNode {
     children: Vec<PlanNode>,
 }
 
-impl SeqScanNode {
+impl SeqScanPlanNode {
     pub fn new(
         output_schema: Schema,
         table_oid: TableOidT,
@@ -55,7 +49,7 @@ impl SeqScanNode {
     }
 }
 
-impl AbstractPlanNode for SeqScanNode {
+impl AbstractPlanNode for SeqScanPlanNode {
     fn get_output_schema(&self) -> &Schema {
         &self.output_schema
     }
@@ -84,19 +78,23 @@ impl AbstractPlanNode for SeqScanNode {
         }
     }
 
-    fn children_to_string(&self, indent: usize) -> String {
+    fn children_to_string(&self, _indent: usize) -> String {
         String::new()
     }
 }
 
-impl From<SeqScanNode> for PlanNode {
-    fn from(node: SeqScanNode) -> Self {
+impl From<SeqScanPlanNode> for PlanNode {
+    fn from(node: SeqScanPlanNode) -> Self {
         PlanNode::SeqScan(node)
     }
 }
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::catalogue::column::Column;
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
     use super::*;
 
     fn create_test_schema() -> Schema {
@@ -114,7 +112,7 @@ mod unit_tests {
         let table_name = "test_table".to_string();
         let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
 
-        let seq_scan_node = SeqScanNode::new(
+        let seq_scan_node = SeqScanPlanNode::new(
             schema,
             table_oid,
             table_name.clone(),
@@ -142,7 +140,7 @@ mod unit_tests {
         let table_oid = 1;
         let table_name = "test_table".to_string();
 
-        let seq_scan_node = SeqScanNode::new(
+        let seq_scan_node = SeqScanPlanNode::new(
             schema,
             table_oid,
             table_name.clone(),
@@ -165,7 +163,7 @@ mod unit_tests {
         let table_oid = 42;
         let table_name = "employees".to_string();
 
-        let seq_scan_node = SeqScanNode::new(
+        let seq_scan_node = SeqScanPlanNode::new(
             schema.clone(),
             table_oid,
             table_name.clone(),
@@ -185,7 +183,7 @@ mod unit_tests {
         let table_oid = 200;
         let table_name = "products".to_string();
 
-        let seq_scan_node = SeqScanNode::new(
+        let seq_scan_node = SeqScanPlanNode::new(
             schema,
             table_oid,
             table_name,
@@ -214,7 +212,7 @@ mod unit_tests {
             vec![],
         ));
 
-        let seq_scan_node = SeqScanNode::new(
+        let seq_scan_node = SeqScanPlanNode::new(
             schema,
             table_oid,
             table_name.clone(),
@@ -236,6 +234,12 @@ mod unit_tests {
 
 #[cfg(test)]
 mod seq_scan_string_tests {
+    use crate::catalogue::column::Column;
+    use crate::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
     use super::*;
 
 
@@ -263,7 +267,7 @@ mod seq_scan_string_tests {
         let table_oid = 1;
         let table_name = "employees".to_string();
 
-        let seq_scan_node = SeqScanNode::new(schema, table_oid, table_name.clone(), None);
+        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone(), None);
 
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);
@@ -278,7 +282,7 @@ mod seq_scan_string_tests {
         let table_oid = 2;
         let table_name = "complex_table".to_string();
 
-        let seq_scan_node = SeqScanNode::new(schema, table_oid, table_name.clone(), None);
+        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone(), None);
 
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);
@@ -303,7 +307,7 @@ mod seq_scan_string_tests {
             vec![],
         )));
 
-        let seq_scan_node = SeqScanNode::new(schema, table_oid, table_name.clone(), Some(filter));
+        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone(), Some(filter));
 
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);

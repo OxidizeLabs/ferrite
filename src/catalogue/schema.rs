@@ -1,5 +1,4 @@
 use crate::catalogue::column::Column;
-use crate::types_db::type_id::TypeId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -140,6 +139,7 @@ impl Default for Schema {
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::types_db::type_id::TypeId;
     use super::*;
 
     #[test]

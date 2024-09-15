@@ -1,10 +1,7 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{AsAny, Page, PageTrait, PageType};
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::{ExtendableHTableDirectoryPage, HTABLE_DIRECTORY_ARRAY_SIZE};
-use log::{debug, info, warn};
-use std::any::Any;
+use crate::storage::page::page::{Page, PageTrait, PageType};
+use log::{debug, info};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::size_of;
@@ -246,16 +243,13 @@ mod basic_behavior {
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::info;
-    use spin::RwLock;
     use std::sync::Arc;
-
-    const PAGE_ID_SIZE: usize = size_of::<PageId>();
+    use parking_lot::RwLock;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         db_file: String,
-        db_log_file: String,
-        buffer_pool_size: usize,
+        db_log_file: String
     }
 
     impl TestContext {
@@ -272,17 +266,16 @@ mod basic_behavior {
                 &disk_manager,
             ))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
-            let bpm = Arc::new((BufferPoolManager::new(
+            let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
                 disk_manager.clone(),
                 replacer.clone(),
-            )));
+            ));
             Self {
                 bpm,
                 db_file,
-                db_log_file,
-                buffer_pool_size,
+                db_log_file
             }
         }
 
@@ -353,7 +346,7 @@ mod basic_behavior {
                 // Test with max_depth 31 (maximum allowed)
                 ext_guard.access_mut(|page| {
                     page.init(31);
-                    for (i, &hash) in hashes.iter().enumerate() {
+                    for (_i, &hash) in hashes.iter().enumerate() {
                         let index = page.hash_to_directory_index(hash);
                         info!("With max_depth 31, hash {:#034b} mapped to index {}", hash, index);
                         assert_eq!(index, hash >> 1, "With max_depth 31, hash {:#034b} should map to index {}", hash, hash >> 1);

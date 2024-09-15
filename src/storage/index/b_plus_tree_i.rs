@@ -1,6 +1,6 @@
 use log::{debug, info};
-use spin::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
+use parking_lot::RwLock;
 
 #[derive(Debug, Clone, PartialEq)]
 enum NodeType {
@@ -16,6 +16,11 @@ pub struct BPlusTreeNode<K: Ord + Clone, V: Clone> {
     values: Vec<V>,                                  // for leaf nodes
 }
 
+pub struct BPlusTree<K: Ord + Clone, V: Clone> {
+    root: Arc<RwLock<BPlusTreeNode<K, V>>>,
+    order: usize, // Max number of children per node
+}
+
 impl<K: Ord + Clone, V: Clone> BPlusTreeNode<K, V> {
     fn new(node_type: NodeType) -> Self {
         BPlusTreeNode {
@@ -25,11 +30,6 @@ impl<K: Ord + Clone, V: Clone> BPlusTreeNode<K, V> {
             values: Vec::new(),
         }
     }
-}
-
-pub struct BPlusTree<K: Ord + Clone, V: Clone> {
-    root: Arc<RwLock<BPlusTreeNode<K, V>>>,
-    order: usize, // Max number of children per node
 }
 
 impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, V> {
@@ -45,6 +45,42 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     pub fn search(&self, key: &K) -> Option<V> {
         let root = self.root.read();
         self.search_node(&root, key)
+    }
+
+    /// Inserts a key-value pair into the B+Tree.
+    pub fn insert(&self, key: K, value: V) {
+        let mut root_guard = self.root.write();
+        let root_clone = (*root_guard).clone();
+        if root_guard.keys.len() == self.order - 1 {
+            let mut new_root = BPlusTreeNode::new(NodeType::Internal);
+            new_root.children.push(Arc::new(RwLock::new(root_clone)));
+            self.split_child(&mut new_root, 0);
+            *root_guard = new_root;
+        }
+        self.insert_non_full(&mut root_guard, key, value);
+    }
+
+    /// Returns a string representation of the B+Tree.
+    pub fn to_string(&self) -> String {
+        let root = self.root.read();
+        self.node_to_string(&root, 0)
+    }
+
+    /// Deletes a key-value pair from the B+Tree.
+    pub fn delete(&mut self, key: &K) {
+        info!("Starting deletion of key: {:?}", key);
+        if let Some((node, index)) = self.find_node_for_key(key) {
+            let mut node_guard = node.write();
+            if self.delete_from_node(&mut node_guard, key, index) && node_guard.keys.is_empty() {
+                if node_guard.node_type == NodeType::Internal && !node_guard.children.is_empty() {
+                    self.root = node_guard.children.remove(0);
+                } else {
+                    self.root = Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf)));
+                }
+            }
+        } else {
+            info!("Key not found: {:?}", key);
+        }
     }
 
     fn search_node(&self, node: &BPlusTreeNode<K, V>, key: &K) -> Option<V> {
@@ -73,107 +109,6 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
             .iter()
             .position(|k| key < k)
             .unwrap_or(node.keys.len())
-    }
-
-    /// Inserts a key-value pair into the B+Tree.
-    pub fn insert(&self, key: K, value: V) {
-        let mut root_guard = self.root.write();
-        let root_clone = (*root_guard).clone();
-        if root_guard.keys.len() == self.order - 1 {
-            let mut new_root = BPlusTreeNode::new(NodeType::Internal);
-            new_root.children.push(Arc::new(RwLock::new(root_clone)));
-            self.split_child(&mut new_root, 0);
-            *root_guard = new_root;
-        }
-        self.insert_non_full(&mut root_guard, key, value);
-    }
-
-    fn insert_non_full(&self, node: &mut BPlusTreeNode<K, V>, key: K, value: V) {
-        match node.node_type {
-            NodeType::Leaf => {
-                let i = node
-                    .keys
-                    .iter()
-                    .position(|k| k > &key)
-                    .unwrap_or(node.keys.len());
-                info!("Inserting key: {:?} at position: {}", key, i);
-                node.keys.insert(i, key);
-                node.values.insert(i, value);
-            }
-            NodeType::Internal => {
-                let i = node
-                    .keys
-                    .iter()
-                    .position(|k| k > &key)
-                    .unwrap_or(node.keys.len());
-                info!("Traversing to child index: {}", i);
-
-                if node.children[i].read().keys.len() == self.order - 1 {
-                    self.split_child(node, i);
-                }
-
-                let mut child = node.children[i].write();
-                self.insert_non_full(&mut child, key, value);
-            }
-        }
-    }
-
-    fn split_child(&self, parent: &mut BPlusTreeNode<K, V>, index: usize) {
-        let order = self.order;
-        let mut new_child;
-        {
-            let mut full_child = parent.children[index].write();
-            let mid_index = order / 2;
-            let mid_key = full_child.keys[mid_index].clone();
-            info!("Splitting node at index: {}, mid_key: {:?}", index, mid_key);
-
-            new_child = BPlusTreeNode::new(full_child.node_type.clone());
-
-            new_child.keys = full_child.keys.split_off(mid_index);
-            if let NodeType::Leaf = full_child.node_type {
-                new_child.values = full_child.values.split_off(mid_index);
-            } else {
-                new_child.children = full_child.children.split_off(mid_index + 1);
-            }
-
-            full_child.keys.truncate(mid_index);
-            if let NodeType::Leaf = full_child.node_type {
-                full_child.values.truncate(mid_index);
-            }
-
-            parent.keys.insert(index, mid_key);
-        } // `full_child` is dropped here
-
-        parent
-            .children
-            .insert(index + 1, Arc::new(RwLock::new(new_child)));
-
-        info!("Parent node after split: {:?}", parent.keys);
-        info!(
-            "Left child keys after split: {:?}",
-            parent.children[index].read().keys
-        );
-        info!(
-            "Right child keys after split: {:?}",
-            parent.children[index + 1].read().keys
-        );
-    }
-
-    /// Deletes a key-value pair from the B+Tree.
-    pub fn delete(&mut self, key: &K) {
-        info!("Starting deletion of key: {:?}", key);
-        if let Some((node, index)) = self.find_node_for_key(key) {
-            let mut node_guard = node.write();
-            if self.delete_from_node(&mut node_guard, key, index) && node_guard.keys.is_empty() {
-                if node_guard.node_type == NodeType::Internal && !node_guard.children.is_empty() {
-                    self.root = node_guard.children.remove(0);
-                } else {
-                    self.root = Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf)));
-                }
-            }
-        } else {
-            info!("Key not found: {:?}", key);
-        }
     }
 
     fn find_node_for_key(&self, key: &K) -> Option<(Arc<RwLock<BPlusTreeNode<K, V>>>, usize)> {
@@ -220,7 +155,7 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         info!("Deleting from internal node: {:?}", node.keys);
 
         // Find the predecessor key and value
-        let (predecessor_key, predecessor_value) = {
+        let (predecessor_key, _predecessor_value) = {
             let mut current = node.children[index].clone();
             loop {
                 let current_guard = current.read();
@@ -451,12 +386,6 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         }
     }
 
-    /// Returns a string representation of the B+Tree.
-    pub fn to_string(&self) -> String {
-        let root = self.root.read();
-        self.node_to_string(&root, 0)
-    }
-
     fn node_to_string(&self, node: &BPlusTreeNode<K, V>, level: usize) -> String {
         let mut result = String::new();
         if node.node_type == NodeType::Internal {
@@ -480,49 +409,121 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         }
         result
     }
+
+    fn insert_non_full(&self, node: &mut BPlusTreeNode<K, V>, key: K, value: V) {
+        match node.node_type {
+            NodeType::Leaf => {
+                let i = node
+                    .keys
+                    .iter()
+                    .position(|k| k > &key)
+                    .unwrap_or(node.keys.len());
+                info!("Inserting key: {:?} at position: {}", key, i);
+                node.keys.insert(i, key);
+                node.values.insert(i, value);
+            }
+            NodeType::Internal => {
+                let i = node
+                    .keys
+                    .iter()
+                    .position(|k| k > &key)
+                    .unwrap_or(node.keys.len());
+                info!("Traversing to child index: {}", i);
+
+                if node.children[i].read().keys.len() == self.order - 1 {
+                    self.split_child(node, i);
+                }
+
+                let mut child = node.children[i].write();
+                self.insert_non_full(&mut child, key, value);
+            }
+        }
+    }
+
+    fn split_child(&self, parent: &mut BPlusTreeNode<K, V>, index: usize) {
+        let order = self.order;
+        let mut new_child;
+        {
+            let mut full_child = parent.children[index].write();
+            let mid_index = order / 2;
+            let mid_key = full_child.keys[mid_index].clone();
+            info!("Splitting node at index: {}, mid_key: {:?}", index, mid_key);
+
+            new_child = BPlusTreeNode::new(full_child.node_type.clone());
+
+            new_child.keys = full_child.keys.split_off(mid_index);
+            if let NodeType::Leaf = full_child.node_type {
+                new_child.values = full_child.values.split_off(mid_index);
+            } else {
+                new_child.children = full_child.children.split_off(mid_index + 1);
+            }
+
+            full_child.keys.truncate(mid_index);
+            if let NodeType::Leaf = full_child.node_type {
+                full_child.values.truncate(mid_index);
+            }
+
+            parent.keys.insert(index, mid_key);
+        } // `full_child` is dropped here
+
+        parent
+            .children
+            .insert(index + 1, Arc::new(RwLock::new(new_child)));
+
+        info!("Parent node after split: {:?}", parent.keys);
+        info!(
+            "Left child keys after split: {:?}",
+            parent.children[index].read().keys
+        );
+        info!(
+            "Right child keys after split: {:?}",
+            parent.children[index + 1].read().keys
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::logger::initialize_logger;
+    use std::thread;
 
-    // #[test]
-    // fn test_insert_and_search() {
-    //     initialize_logger();
-    //     let bpt: BPlusTree<i32, &str> = BPlusTree::new(4);
-    //
-    //     bpt.insert(1, "value1");
-    //     bpt.insert(2, "value2");
-    //     bpt.insert(3, "value3");
-    //     bpt.insert(4, "value4");
-    //
-    //     assert_eq!(bpt.search(&1), Some("value1"));
-    //     assert_eq!(bpt.search(&2), Some("value2"));
-    //     assert_eq!(bpt.search(&3), Some("value3"));
-    //     assert_eq!(bpt.search(&4), Some("value4"));
-    //     assert_eq!(bpt.search(&5), None);
-    // }
-    //
-    // #[test]
-    // fn test_delete_leaf_node() {
-    //     initialize_logger();
-    //     let mut bpt: BPlusTree<i32, &str> = BPlusTree::new(4);
-    //
-    //     bpt.insert(1, "value1");
-    //     bpt.insert(2, "value2");
-    //     bpt.insert(3, "value3");
-    //     bpt.insert(4, "value4");
-    //
-    //     bpt.delete(&2);
-    //     assert_eq!(bpt.search(&2), None);
-    //     assert_eq!(bpt.search(&1), Some("value1"));
-    //     assert_eq!(bpt.search(&3), Some("value3"));
-    //     assert_eq!(bpt.search(&4), Some("value4"));
-    //
-    //     bpt.delete(&1);
-    //     assert_eq!(bpt.search(&1), None);
-    // }
+    #[test]
+    fn test_insert_and_search() {
+        initialize_logger();
+        let bpt: BPlusTree<i32, &str> = BPlusTree::new(4);
+
+        bpt.insert(1, "value1");
+        bpt.insert(2, "value2");
+        bpt.insert(3, "value3");
+        bpt.insert(4, "value4");
+
+        assert_eq!(bpt.search(&1), Some("value1"));
+        assert_eq!(bpt.search(&2), Some("value2"));
+        assert_eq!(bpt.search(&3), Some("value3"));
+        assert_eq!(bpt.search(&4), Some("value4"));
+        assert_eq!(bpt.search(&5), None);
+    }
+
+    #[test]
+    fn test_delete_leaf_node() {
+        initialize_logger();
+        let mut bpt: BPlusTree<i32, &str> = BPlusTree::new(4);
+
+        bpt.insert(1, "value1");
+        bpt.insert(2, "value2");
+        bpt.insert(3, "value3");
+        bpt.insert(4, "value4");
+
+        bpt.delete(&2);
+        assert_eq!(bpt.search(&2), None);
+        assert_eq!(bpt.search(&1), Some("value1"));
+        assert_eq!(bpt.search(&3), Some("value3"));
+        assert_eq!(bpt.search(&4), Some("value4"));
+
+        bpt.delete(&1);
+        assert_eq!(bpt.search(&1), None);
+    }
 
     #[test]
     fn test_delete_internal_node() {
@@ -653,68 +654,69 @@ mod tests {
         }
     }
 
-    // #[tokio::test]
-    // async fn concurrent_operations() {
-    //     initialize_logger();
-    //
-    //     let bpt = Arc::new(RwLock::new(BPlusTree::new(4)));
-    //
-    //     let handles: Vec<_> = (0..10)
-    //         .map(|i| {
-    //             let bpt_clone = Arc::clone(&bpt);
-    //             task::spawn(async move {
-    //                 for j in 0..10 {
-    //                     let key = i * 10 + j;
-    //                     let value = format!("value{}", key);
-    //                     info!("Inserting key: {}, value: {}", key, value);
-    //                     bpt_clone.write().insert(key, value);
-    //                 }
-    //             })
-    //         })
-    //         .collect();
-    //
-    //     for handle in handles {
-    //         handle.await.unwrap();
-    //     }
-    //
-    //     let bpt_guard = bpt.read();
-    //     debug!("{}", bpt_guard.to_string());
-    //
-    //     for i in 0..10 {
-    //         for j in 0..10 {
-    //             let key = i * 10 + j;
-    //             let expected_value = format!("value{}", key);
-    //             info!("Searching for key: {}", key);
-    //             assert_eq!(bpt_guard.search(&key), Some(expected_value));
-    //         }
-    //     }
-    //
-    //     let delete_handles: Vec<_> = (0..10)
-    //         .map(|i| {
-    //             let bpt_clone = Arc::clone(&bpt);
-    //             task::spawn(async move {
-    //                 for j in 0..10 {
-    //                     let key = i * 10 + j;
-    //                     info!("Deleting key: {}", key);
-    //                     bpt_clone.write().delete(&key);
-    //                 }
-    //             })
-    //         })
-    //         .collect();
-    //
-    //     for handle in delete_handles {
-    //         handle.await.unwrap();
-    //     }
-    //
-    //     let bpt_guard = bpt.read();
-    //     debug!("{}", bpt_guard.to_string());
-    //
-    //     for i in 0..10 {
-    //         for j in 0..10 {
-    //             let key = i * 10 + j;
-    //             info!("Searching for key: {}", key);
-    //             assert_eq!(bpt_guard.search(&key), None);
-    //         }
-    //     }
-    // }
+    #[test]
+    #[ignore]
+    fn concurrent_operations() {
+        initialize_logger();
+
+        let bpt = Arc::new(RwLock::new(BPlusTree::new(4)));
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let bpt_clone = Arc::clone(&bpt);
+                thread::spawn(move || {
+                    for j in 0..10 {
+                        let key = i * 10 + j;
+                        let value = format!("value{}", key);
+                        info!("Inserting key: {}, value: {}", key, value);
+                        bpt_clone.write().insert(key, value);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("Failed to join handle");
+        }
+
+        let bpt_guard = bpt.read();
+        debug!("{}", bpt_guard.to_string());
+
+        for i in 0..10 {
+            for j in 0..10 {
+                let key = i * 10 + j;
+                let expected_value = format!("value{}", key);
+                info!("Searching for key: {}", key);
+                assert_eq!(bpt_guard.search(&key), Some(expected_value));
+            }
+        }
+
+        let delete_handles: Vec<_> = (0..10)
+            .map(|i| {
+                let bpt_clone = Arc::clone(&bpt);
+                thread::spawn(move || {
+                    for j in 0..10 {
+                        let key = i * 10 + j;
+                        info!("Deleting key: {}", key);
+                        bpt_clone.write().delete(&key);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in delete_handles {
+            handle.join().expect("Failed to join handle");
+        }
+
+        let bpt_guard = bpt.read();
+        debug!("{}", bpt_guard.to_string());
+
+        for i in 0..10 {
+            for j in 0..10 {
+                let key = i * 10 + j;
+                info!("Searching for key: {}", key);
+                assert_eq!(bpt_guard.search(&key), None);
+            }
+        }
+    }
 }

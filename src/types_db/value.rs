@@ -1,12 +1,9 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{get_type_size, CmpBool, Type};
-use serde::de::{SeqAccess, Visitor};
-use serde::ser::{SerializeSeq, SerializeStruct};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Val {

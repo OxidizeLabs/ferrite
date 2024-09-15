@@ -1,4 +1,3 @@
-use crate::catalogue::schema::Schema;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
@@ -7,7 +6,7 @@ use crate::storage::page::page::PageTrait;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use bincode::{deserialize, serialize};
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
+use std::hash::BuildHasherDefault;
 use std::mem;
 
 // Create a type alias for our custom hasher
@@ -230,6 +229,7 @@ mod tests {
     use crate::types_db::type_id::TypeId::Integer;
     use crate::types_db::value::Value;
     use log::info;
+    use crate::catalogue::schema::Schema;
 
     #[test]
     fn new_table_page() {
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn serialize_deserialize_tuple() {
-        let mut page = TablePage::new(1);
+        let page = TablePage::new(1);
         let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
         let rid = RID::new(0, 0);

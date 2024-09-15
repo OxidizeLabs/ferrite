@@ -1,7 +1,7 @@
 use crate::common::config::{PageId, INVALID_PAGE_ID};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 /// Represents a Record ID (RID) in the table.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
