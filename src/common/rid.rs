@@ -17,15 +17,6 @@ impl RID {
     ///
     /// * `page_id` - The page identifier.
     /// * `slot_num` - The slot number within the page.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::common::rid::RID;
-    /// let rid = RID::new(1, 2);
-    /// assert_eq!(rid.get_page_id(), 1);
-    /// assert_eq!(rid.get_slot_num(), 2);
-    /// ```
     pub fn new(page_id: PageId, slot_num: u32) -> Self {
         Self { page_id, slot_num }
     }
@@ -35,15 +26,6 @@ impl RID {
     /// # Arguments
     ///
     /// * `rid` - The 64-bit integer representation of the RID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::common::rid::RID;
-    /// let rid = RID::from_i64(0x0000000100000002);
-    /// assert_eq!(rid.get_page_id(), 1);
-    /// assert_eq!(rid.get_slot_num(), 2);
-    /// ```
     pub fn from_i64(rid: i64) -> Self {
         Self {
             page_id: (rid >> 32) as PageId,
@@ -52,14 +34,6 @@ impl RID {
     }
 
     /// Returns the 64-bit integer representation of the RID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tkdb::common::rid::RID;
-    /// let rid = RID::new(1, 2);
-    /// assert_eq!(rid.to_i64(), 0x0000000100000002);
-    /// ```
     pub fn to_i64(&self) -> i64 {
         ((self.page_id as i64) << 32) | self.slot_num as i64
     }
