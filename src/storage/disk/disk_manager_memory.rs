@@ -65,8 +65,7 @@ pub struct DiskManagerUnlimitedMemory {
 }
 
 struct ProtectedPage {
-    page: Mutex<Page>,
-    rwlock: RwLock<()>,
+    page: Mutex<Page>
 }
 
 impl DiskManagerUnlimitedMemory {
@@ -131,8 +130,7 @@ impl DiskIO for DiskManagerUnlimitedMemory {
 
         let page = data.entry(page_id).or_insert_with(|| {
             Arc::new(ProtectedPage {
-                page: Mutex::new([0; DB_PAGE_SIZE]),
-                rwlock: RwLock::new(()),
+                page: Mutex::new([0; DB_PAGE_SIZE])
             })
         }).clone();
 

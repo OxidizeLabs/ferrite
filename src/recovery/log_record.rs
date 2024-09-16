@@ -214,7 +214,7 @@ impl LogRecord {
     ///
     /// # Returns
     /// A new `LogRecord` instance.
-    pub fn new_newpage_record(
+    pub fn new_page_record(
         txn_id: TxnId,
         prev_lsn: Lsn,
         log_record_type: LogRecordType,
@@ -238,6 +238,10 @@ impl LogRecord {
             prev_page_id: Some(prev_page_id),
             page_id: Some(page_id),
         }
+    }
+    /// Returns the page id
+    pub fn get_page_id(&self) -> Option<&PageId> {
+        self.page_id.as_ref()
     }
 
     /// Returns the delete tuple.

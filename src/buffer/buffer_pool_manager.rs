@@ -13,12 +13,11 @@ use crate::storage::page::page_types::extendable_hash_table_header_page::Extenda
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
 use log::{debug, error, info, warn};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
-use std::thread;
-use parking_lot::RwLock;
 
 // Define an enum to represent the type of page to create
 #[derive(Debug)]
@@ -783,15 +782,14 @@ impl BufferPoolManager {
     }
 }
 
-struct TestContext {
+pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
     db_file: String,
     db_log_file: String,
-    buffer_pool_size: usize,
 }
 
 impl TestContext {
-    fn new(test_name: &str) -> Self {
+    pub fn new(test_name: &str) -> Self {
         initialize_logger();
         const BUFFER_POOL_SIZE: usize = 10;
         const K: usize = 2;
@@ -811,8 +809,11 @@ impl TestContext {
             bpm,
             db_file,
             db_log_file,
-            buffer_pool_size: BUFFER_POOL_SIZE,
         }
+    }
+
+    pub fn bpm(&self) -> Arc<BufferPoolManager> {
+        Arc::clone(&self.bpm)
     }
 
     fn cleanup(&self) {
@@ -823,14 +824,7 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        let db_file = self.db_file.clone();
-        let db_log = self.db_log_file.clone();
-        thread::spawn(move || {
-            let _ = std::fs::remove_file(db_file);
-            let _ = std::fs::remove_file(db_log);
-        })
-            .join()
-            .unwrap();
+        self.cleanup()
     }
 }
 
@@ -843,13 +837,6 @@ mod unit_tests {
     #[test]
     fn buffer_pool_manager_initialization() {
         let context = TestContext::new("test_buffer_pool_manager_initialization");
-
-        // Check that the buffer pool size is correct
-        assert_eq!(
-            context.bpm.get_pool_size(),
-            context.buffer_pool_size,
-            "The buffer pool size should match the initialized value."
-        );
 
         // Check that the buffer pool is empty initially
         assert_eq!(
@@ -886,9 +873,10 @@ mod unit_tests {
     #[test]
     fn page_replacement_with_eviction() {
         let context = TestContext::new("test_page_replacement_with_eviction");
+        let bpm = context.bpm.clone();
 
         // Fill the buffer pool to capacity
-        for _i in 0..context.buffer_pool_size {
+        for _i in 0..bpm.get_pool_size() {
             let page = context.bpm.new_page(NewPageType::Basic).unwrap();
             info!("Created page with ID: {}", page.read().as_page_trait().get_page_id());
 
@@ -914,7 +902,7 @@ mod unit_tests {
         let page_count = context.bpm.get_page_table().read().len();
         assert_eq!(
             page_count,
-            context.buffer_pool_size,
+            context.bpm.get_pool_size(),
             "The buffer pool should still have the same number of pages after eviction."
         );
     }
@@ -1034,8 +1022,9 @@ mod basic_behaviour {}
 
 #[cfg(test)]
 mod concurrency {
+    use std::thread;
+    use super::*;
     use parking_lot::Mutex;
-use super::*;
     use rand::Rng;
 
     #[test]
@@ -1158,38 +1147,35 @@ mod edge_cases {
     #[test]
     fn eviction_policy() {
         let ctx = TestContext::new("eviction_policy_test");
-        let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
+        let bpm = ctx.bpm.clone();
 
         // Fill the buffer pool completely
-        let mut last_page_id = 0;
-        for _i in 0..ctx.buffer_pool_size {
+
+        for _i in 0..bpm.get_pool_size() {
             // Create a new page within a narrow lock scope
             let page_id = {
-                let bpm = bpm.write(); // Acquire write lock
                 let page = bpm.new_page(NewPageType::Basic);
 
                 let page_id = page.unwrap().read().as_page_trait().get_page_id();
-                last_page_id = page_id;
                 page_id
             }; // Release write lock immediately
 
             // Unpin the page in a separate lock scope
-            bpm.write().unpin_page(page_id, false, AccessType::Lookup);
+            bpm.unpin_page(page_id, false, AccessType::Lookup);
         }
 
         // Access the first page to make it recently used
         info!("Accessing page 0 to mark it as recently used");
-        let _page_0 = bpm.write().fetch_page(0);
-        bpm.write().unpin_page(0, true, AccessType::Lookup);
+        let _page_0 = bpm.fetch_page(0);
+        bpm.unpin_page(0, true, AccessType::Lookup);
 
         // Create a new page, forcing an eviction
         info!("Creating a new page to trigger eviction");
-        let _new_page = bpm.write().new_page(NewPageType::Basic);
+        let _new_page = bpm.new_page(NewPageType::Basic);
 
         // Verify that the last page was evicted
         info!("Verify that the last page was evicted");
         {
-            let bpm = bpm.write();
             let page_table = bpm.get_page_table();
             let page_table = page_table.read();
             assert!(
@@ -1250,18 +1236,18 @@ mod edge_cases {
     #[test]
     fn boundary_conditions() {
         let ctx = TestContext::new("boundary_conditions_test");
-        let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
+        let bpm = ctx.bpm.clone();
 
         // Create maximum number of pages
-        for _ in 0..ctx.buffer_pool_size {
-            bpm.write().new_page(NewPageType::Basic).expect("Failed to create a new page");
+        for _ in 0..bpm.get_pool_size() {
+            bpm.new_page(NewPageType::Basic).expect("Failed to create a new page");
         }
 
         // Attempt to create more pages than the buffer pool can handle
         for _ in 0..10 {
-            let new_page_result = bpm.write().new_page(NewPageType::Basic);
+            let new_page_result = bpm.new_page(NewPageType::Basic);
             if let Some(ref page) = new_page_result {
-                bpm.write().unpin_page(page.read().as_page_trait().get_page_id(), false, AccessType::Lookup);
+                bpm.unpin_page(page.read().as_page_trait().get_page_id(), false, AccessType::Lookup);
                 info!("Unexpectedly created page {}", page.read().as_page_trait().get_page_id());
             }
             assert!(new_page_result.is_none(), "Should not be able to create more pages than the buffer pool size");

@@ -40,7 +40,7 @@ impl PageGuard {
         self.page_id
     }
 
-    fn get_pin_count(&self) -> i32 {
+    pub fn get_pin_count(&self) -> i32 {
         self.page.read().as_page_trait().get_pin_count()
     }
 
@@ -175,7 +175,6 @@ impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageReadGuard<'a, T,
 
 pub struct SpecificPageWriteGuard<'a, T: 'static, const KEY_SIZE: usize>(RwLockWriteGuard<'a, PageType>, PhantomData<T>);
 
-
 impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageWriteGuard<'a, T, KEY_SIZE> {
     pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
     where
@@ -203,14 +202,14 @@ impl<T: 'static, const KEY_SIZE: usize> Drop for SpecificPageGuard<T, KEY_SIZE> 
     }
 }
 
-struct TestContext {
+pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
     db_file: String,
     db_log_file: String,
 }
 
 impl TestContext {
-    fn new(test_name: &str) -> Self {
+    pub fn new(test_name: &str) -> Self {
         initialize_logger();
         const BUFFER_POOL_SIZE: usize = 5;
         const K: usize = 2;
@@ -236,9 +235,14 @@ impl TestContext {
         }
     }
 
+    pub fn bpm(&self) -> Arc<BufferPoolManager> {
+        Arc::clone(&self.bpm)
+    }
+
     fn cleanup(&self) {
         let _ = std::fs::remove_file(&self.db_file);
         let _ = std::fs::remove_file(&self.db_log_file);
+
     }
 }
 
@@ -258,7 +262,7 @@ mod unit_tests {
     #[test]
     fn basic_page_guard() {
         let ctx = TestContext::new("basic_page_guard");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
@@ -276,7 +280,7 @@ mod unit_tests {
     #[test]
     fn convert_into() {
         let ctx = TestContext::new("basic_page_guard");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
@@ -305,7 +309,7 @@ mod basic_behaviour {
     #[test]
     fn create_and_drop() {
         let ctx = TestContext::new("create_and_drop");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
@@ -342,7 +346,7 @@ mod basic_behaviour {
     #[test]
     fn modify_data() {
         let ctx = TestContext::new("modify_data");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
         let page0 = bpm.new_page(NewPageType::Basic).unwrap();
@@ -351,7 +355,7 @@ mod basic_behaviour {
             let basic_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
 
             // Ensure page0 is pinned and the guard works as expected
-            assert_eq!(page0.read().as_page_trait().get_pin_count(), 1); // Pin count should be 1 after creation
+            assert_eq!(basic_guard.get_pin_count(), 1); // Pin count should be 1 after creation
             assert_eq!(page0.read().as_page_trait().get_page_id(), basic_guard.get_page_id());
 
 
@@ -384,7 +388,7 @@ mod concurrency {
     #[ignore]
     fn reads() {
         let ctx = TestContext::new("concurrent_reads");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a shared page
         let page = Arc::new(bpm.new_page(NewPageType::Basic).unwrap());
@@ -419,7 +423,7 @@ mod concurrency {
     #[ignore]
     fn reads_and_writes() {
         let ctx = TestContext::new("concurrent_reads_and_writes");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
     
         // Create a shared page
         let page = bpm.new_page(NewPageType::Basic).unwrap();
@@ -435,9 +439,9 @@ mod concurrency {
 
             writer_threads.push(thread::spawn(move || {
                 // Perform the write operation
-                let mut write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
+                let write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
                 let mut binding = write_guard.write();
-                let mut data_mut = binding.as_page_trait_mut().get_data_mut();
+                let data_mut = binding.as_page_trait_mut().get_data_mut();
     
                 // Each writer thread writes a value
                 data_mut[i] = (i + 1) as u8;
@@ -488,7 +492,7 @@ mod edge_cases {
     #[test]
     fn page_eviction_under_pressure() {
         let ctx = TestContext::new("page_eviction_under_pressure");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Fill the buffer pool to force eviction
         let mut pages = Vec::new();
@@ -527,7 +531,7 @@ mod edge_cases {
     #[test]
     fn invalid_page_access_after_drop() {
         let ctx = TestContext::new("invalid_page_access_after_drop");
-        let bpm = Arc::clone(&ctx.bpm);
+        let bpm = ctx.bpm();
 
         // Create a page and drop the guard
         let page = bpm.new_page(NewPageType::Basic).unwrap();

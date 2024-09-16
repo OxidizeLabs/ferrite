@@ -25,7 +25,7 @@ impl IntComparator {
     /// - `1` if `lhs` > `rhs`
     /// - `-1` if `lhs` < `rhs`
     /// - `0` if `lhs` == `rhs`
-    fn compare(&self, lhs: i32, rhs: i32) -> Ordering {
+    pub fn compare(&self, lhs: i32, rhs: i32) -> Ordering {
         lhs.cmp(&rhs)
     }
 }

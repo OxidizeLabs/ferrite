@@ -8,13 +8,34 @@ use bincode::{deserialize, serialize};
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::mem;
+use std::ops::{Deref, DerefMut};
 
 // Create a type alias for our custom hasher
 type XxHashBuilder = BuildHasherDefault<Xxh3Hasher>;
 
+/// Slotted page format:
+///  -------------------------------------------------------------
+///  | HEADER | ... FREE SPACE ... | ... INSERTED TUPLES ... |
+///  -------------------------------------------------------------
+///
+///  Header format (size in bytes):
+///  -------------------------------------------------------------
+///  | NextPageId (4)| NumTuples(2) | NumDeletedTuples(2) |
+///  -------------------------------------------------------------
+///  -------------------------------------------------------------
+///  | Tuple_1 offset+size (4) | Tuple_2 offset+size (4) | ... |
+///  -------------------------------------------------------------
+///
+/// Tuple format:
+/// | meta | data |
+///
 /// Represents a table page using a slotted page format.
 #[derive(Debug, Clone)]
 pub struct TablePage {
+    data: Box<[u8; DB_PAGE_SIZE]>,
+    page_id: PageId,
+    pin_count: i32,
+    is_dirty: bool,
     page_start: Vec<u8>,
     next_page_id: PageId,
     num_tuples: u32,
@@ -27,17 +48,26 @@ impl TablePage {
     pub fn new(page_id: PageId) -> Self {
         let map = HashMap::with_hasher(BuildHasherDefault::<Xxh3Hasher>::default());
         Self {
+            data: Box::new([0; DB_PAGE_SIZE]),
             page_start: vec![],
+            page_id,
+            pin_count: 0,
             next_page_id: page_id,
             num_tuples: 0,
             num_deleted_tuples: 0,
             tuple_info: map,
+            is_dirty: false,
         }
     }
 
     /// Returns the number of tuples in this page.
     pub fn get_num_tuples(&self) -> u32 {
-        self.num_tuples as u32
+        self.num_tuples
+    }
+
+    /// Returns the number of deleted tuples in this page.
+    pub fn get_num_deleted_tuples(&self) -> u32 {
+        self.num_deleted_tuples
     }
 
     /// Returns the page ID of the next table page.
@@ -122,6 +152,20 @@ impl TablePage {
         }
     }
 
+    pub fn calculate_free_space(&self) -> usize {
+        // Calculate the remaining free space in the page
+        self.page_start.capacity() - self.page_start.len()
+    }
+
+    pub fn serialize_tuple(&self, meta: &TupleMeta, tuple: &Tuple) -> Vec<u8> {
+        serialize(&(meta, tuple)).unwrap_or_else(|_| Vec::new())
+    }
+
+    pub fn deserialize_tuple(&self, data: &[u8]) -> Option<(TupleMeta, Tuple)> {
+        // Deserialize the tuple and its metadata from bytes using bincode
+        deserialize(data).ok()
+    }
+
     /// Updates a tuple in place.
     ///
     /// # Safety
@@ -147,20 +191,6 @@ impl TablePage {
         serialized.len()
     }
 
-    fn calculate_free_space(&self) -> usize {
-        // Calculate the remaining free space in the page
-        self.page_start.capacity() - self.page_start.len()
-    }
-
-    fn serialize_tuple(&self, meta: &TupleMeta, tuple: &Tuple) -> Vec<u8> {
-        serialize(&(meta, tuple)).unwrap_or_else(|_| Vec::new())
-    }
-
-    fn deserialize_tuple(&self, data: &[u8]) -> Option<(TupleMeta, Tuple)> {
-        // Deserialize the tuple and its metadata from bytes using bincode
-        deserialize(data).ok()
-    }
-
     // Helper method to serialize metadata
     fn serialize_meta(&self, meta: &TupleMeta) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -178,47 +208,47 @@ impl TablePage {
 
 impl PageTrait for TablePage {
     fn get_page_id(&self) -> PageId {
-        todo!()
+        self.page_id
     }
 
     fn is_dirty(&self) -> bool {
-        todo!()
+        self.is_dirty
     }
 
     fn set_dirty(&mut self, is_dirty: bool) {
-        todo!()
+        self.is_dirty  = is_dirty
     }
 
     fn get_pin_count(&self) -> i32 {
-        todo!()
+        self.pin_count
     }
 
     fn increment_pin_count(&mut self) {
-        todo!()
+        self.pin_count += 1;
     }
 
     fn decrement_pin_count(&mut self) {
-        todo!()
+        self.pin_count -= 1;
     }
 
     fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
-        todo!()
+        self.data.deref()
     }
 
     fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
-        todo!()
+        self.data.deref_mut()
     }
 
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
-        todo!()
+        Ok(self.data.deref_mut()[offset..offset + new_data.len()].copy_from_slice(new_data))
     }
 
     fn set_pin_count(&mut self, pin_count: i32) {
-        todo!()
+        self.pin_count = pin_count
     }
 
     fn reset_memory(&mut self) {
-        todo!()
+        self.page_start = Vec::with_capacity(DB_PAGE_SIZE);
     }
 }
 
@@ -226,10 +256,10 @@ impl PageTrait for TablePage {
 mod tests {
     use super::*;
     use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
     use crate::types_db::type_id::TypeId::Integer;
     use crate::types_db::value::Value;
     use log::info;
-    use crate::catalogue::schema::Schema;
 
     #[test]
     fn new_table_page() {
