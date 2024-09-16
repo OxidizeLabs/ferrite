@@ -27,8 +27,6 @@ pub trait DiskIO: Send + Sync {
 /// The `FileDiskManager` is responsible for managing disk I/O operations,
 /// including reading and writing pages and managing log files.
 pub struct FileDiskManager {
-    file_name: String,
-    log_name: String,
     db_io: Arc<RwLock<BufWriter<File>>>,
     log_io: Arc<RwLock<BufReader<File>>>,
     num_flushes: AtomicI32,
@@ -63,8 +61,6 @@ impl FileDiskManager {
             .unwrap();
 
         Self {
-            file_name: db_file,
-            log_name: log_file,
             db_io: Arc::new(RwLock::new(BufWriter::with_capacity(buffer_size, db_io))),
             log_io: Arc::new(RwLock::new(BufReader::new(log_io))),
             num_flushes: AtomicI32::new(0),
@@ -232,14 +228,14 @@ impl DiskIO for FileDiskManager {
     }
 }
 
-struct TestContext {
+pub struct TestContext {
     disk_manager: Arc<RwLock<FileDiskManager>>,
     db_file: String,
     db_log: String,
 }
 
 impl TestContext {
-    fn new(test_name: &str) -> Self {
+    pub fn new(test_name: &str) -> Self {
         initialize_logger();
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);

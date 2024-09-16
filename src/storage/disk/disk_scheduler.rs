@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::{fs, thread};
 use parking_lot::RwLock;
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
@@ -181,7 +182,7 @@ impl DiskScheduler {
     }
 }
 
-struct TestContext {
+pub struct TestContext {
     disk_manager: Arc<FileDiskManager>,
     disk_scheduler: Arc<RwLock<DiskScheduler>>,
     db_file: String,
@@ -189,7 +190,7 @@ struct TestContext {
 }
 
 impl TestContext {
-    fn new(test_name: &str) -> Self {
+    pub fn new(test_name: &str) -> Self {
         initialize_logger();
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
@@ -202,6 +203,10 @@ impl TestContext {
             db_file,
             db_log: db_log_file,
         }
+    }
+
+    pub fn disk_manager(&self) -> Arc<FileDiskManager> {
+        Arc::clone(&self.disk_manager)
     }
 
     fn cleanup(&self) {

@@ -24,7 +24,7 @@ pub struct BPlusTreePage<KeyType, ValueType, KeyComparator> {
 
 impl<KeyType, ValueType, KeyComparator> BPlusTreePage<KeyType, ValueType, KeyComparator> {
     /// Prevents creating BPlusTreePage instances directly.
-    fn new(page_type: IndexPageType, max_size: usize) -> Self {
+    pub fn new(page_type: IndexPageType, max_size: usize) -> Self {
         Self {
             page_type,
             size: 0,
