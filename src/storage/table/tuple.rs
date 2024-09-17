@@ -6,7 +6,7 @@ use bincode;
 use serde::{Deserialize, Serialize};
 
 /// Metadata associated with a tuple.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TupleMeta {
     timestamp: u64,
     is_deleted: bool,
@@ -33,7 +33,7 @@ impl TupleMeta {
 }
 
 /// Represents a tuple in the database.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tuple {
     values: Vec<Value>,
     schema: Schema,
