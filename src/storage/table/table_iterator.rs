@@ -31,6 +31,8 @@ impl TableIterator {
                         info!("TablePage ID: {}", page.get_page_id());
                         if rid.get_slot_num() >= page.get_num_tuples() {
                             let _rid = RID::new(INVALID_PAGE_ID, 0);
+                        } else {
+                            Self.rid = rid.clone();
                         }
                     });
 
@@ -44,11 +46,10 @@ impl TableIterator {
                 }
             }
         }
-        Self {
-            table_heap,
-            rid,
-            stop_at_rid,
-        }
+
+        Self.table_heap = table_heap;
+        Self.stop_at_rid = stop_at_rid;
+        Self
     }
 
     pub fn get_tuple(&self) -> (TupleMeta, Tuple) {
