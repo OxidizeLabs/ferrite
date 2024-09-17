@@ -10,6 +10,8 @@ use log::{error, info};
 use spin::RwLock;
 use std::sync::atomic::AtomicI32;
 use std::sync::{Arc, Mutex};
+use crate::common::rid;
+use crate::storage::table::table_iterator::TableIterator;
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -94,6 +96,10 @@ impl TableHeap {
         unimplemented!()
     }
 
+    pub fn get_bpm(&self) -> Arc<BufferPoolManager> {
+        self.bpm.clone()
+    }
+
     /// Reads a tuple from the table.
     ///
     /// # Parameters
@@ -130,10 +136,10 @@ impl TableHeap {
     /// # Returns
     ///
     /// A `TableIterator`.
-    // pub fn make_iterator(&self) -> TableIterator {
-    //     // Implementation of make iterator logic here
-    //     unimplemented!()
-    // }
+    pub fn make_iterator(&self) -> TableIterator {
+        // Implementation of make iterator logic here
+        unimplemented!()
+    }
 
     /// Returns an eager iterator of this table. The iterator will stop at the last tuple
     /// at the time of iterating.
@@ -190,7 +196,7 @@ impl TableHeap {
     /// A `ReadPageGuard`.
     pub fn acquire_table_page_read_lock(&self, rid: RID) -> PageGuard {
         // Implementation of acquire table page read lock logic here
-        unimplemented!()
+        self.bpm.fetch_page_guarded(rid.get_page_id()).unwrap()
     }
 
     /// Acquires a write lock on a table page.

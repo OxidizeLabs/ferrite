@@ -12,6 +12,15 @@ use std::convert::TryInto;
 // Constants
 const OFFSET_LSN: usize = 4;
 
+#[derive(Debug)]
+pub enum PageType {
+    Basic(Page),
+    Table(TablePage),
+    ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
+    ExtendedHashTableHeader(ExtendableHTableHeaderPage),
+    ExtendedHashTableBucket(TypeErasedBucketPage),
+}
+
 /// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
 /// held in main memory. Page also contains book-keeping information that is used by the buffer pool manager, e.g.
 /// pin count, dirty flag, page id, etc.
@@ -25,6 +34,25 @@ pub struct Page {
     pin_count: i32,
     /// True if the page is dirty.
     is_dirty: bool,
+}
+
+pub trait PageTrait {
+    fn get_page_id(&self) -> PageId;
+    fn is_dirty(&self) -> bool;
+    fn set_dirty(&mut self, is_dirty: bool);
+    fn get_pin_count(&self) -> i32;
+    fn increment_pin_count(&mut self);
+    fn decrement_pin_count(&mut self);
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE];
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE];
+    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError>;
+    fn set_pin_count(&mut self, pin_count: i32);
+    fn reset_memory(&mut self);
+}
+
+pub trait AsAny {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl Page {
@@ -55,20 +83,6 @@ impl Page {
         self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
         info!("Set LSN for Page ID {}", self.page_id);
     }
-}
-
-pub trait PageTrait {
-    fn get_page_id(&self) -> PageId;
-    fn is_dirty(&self) -> bool;
-    fn set_dirty(&mut self, is_dirty: bool);
-    fn get_pin_count(&self) -> i32;
-    fn increment_pin_count(&mut self);
-    fn decrement_pin_count(&mut self);
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE];
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE];
-    fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError>;
-    fn set_pin_count(&mut self, pin_count: i32);
-    fn reset_memory(&mut self);
 }
 
 impl PageTrait for Page {
@@ -164,15 +178,6 @@ impl PageTrait for Page {
     }
 }
 
-#[derive(Debug)]
-pub enum PageType {
-    Basic(Page),
-    Table(TablePage),
-    ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
-    ExtendedHashTableHeader(ExtendableHTableHeaderPage),
-    ExtendedHashTableBucket(TypeErasedBucketPage),
-}
-
 impl PageType {
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
         unimplemented!()
@@ -240,12 +245,6 @@ impl From<TypeErasedBucketPage> for PageType {
         ExtendedHashTableBucket(page)
     }
 }
-
-pub trait AsAny {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
-
 
 // Unit Tests
 #[cfg(test)]

@@ -4,12 +4,11 @@ use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use chrono::Utc;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{error, info};
+use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::{fs, thread};
-use parking_lot::RwLock;
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
 
 // Define DiskRequest struct
 pub struct DiskRequest {
@@ -24,8 +23,8 @@ pub struct DiskScheduler {
     disk_manager: Arc<FileDiskManager>,
     request_queue: Arc<RwLock<VecDeque<DiskRequest>>>,
     stop_flag: Arc<RwLock<bool>>,
-    pub notifier: Sender<()>,
-    pub worker_thread: Option<thread::JoinHandle<()>>,
+    notifier: Sender<()>,
+    worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl DiskScheduler {
@@ -207,6 +206,10 @@ impl TestContext {
 
     pub fn disk_manager(&self) -> Arc<FileDiskManager> {
         Arc::clone(&self.disk_manager)
+    }
+
+    pub fn disk_scheduler(&self) -> Arc<RwLock<DiskScheduler>> {
+        Arc::clone(&self.disk_scheduler)
     }
 
     fn cleanup(&self) {
