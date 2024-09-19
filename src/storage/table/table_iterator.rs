@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(iterator.next(), None);
     }
 
-    // #[test]
+    // #[tests]
     // fn test_table_iterator_multiple_tuples() {
     //     let table_heap = setup_test_table();
     //     let tuples = vec![

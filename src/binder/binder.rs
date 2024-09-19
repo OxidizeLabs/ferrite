@@ -21,8 +21,6 @@ use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::{ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value, WindowSpec, With};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use std::any::Any;
-use std::fmt::Display;
 use std::sync::Arc;
 
 pub struct Binder {

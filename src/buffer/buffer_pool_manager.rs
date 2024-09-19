@@ -1090,15 +1090,15 @@ mod concurrency {
 
     #[test]
     fn write_page_deadlock() {
-        // Initialize the test context
+        // Initialize the tests context
         let ctx = TestContext::new("test_write_page_deadlock");
         let bpm = Arc::clone(&ctx.bpm);
 
         // Generate random data for writing
         let mut rng = rand::thread_rng();
-        let data: [u8; DB_PAGE_SIZE] = rng.gen();
+        let data: [u8; DB_PAGE_SIZE] = rng.random();
 
-        // Mutex for synchronizing test completion
+        // Mutex for synchronizing tests completion
         let done = Arc::new(Mutex::new(false));
         let _done_clone = Arc::clone(&done);
 
@@ -1131,11 +1131,11 @@ mod concurrency {
             handle.join().expect("Thread failed");
         }
 
-        // Check if the test finished without deadlocks
+        // Check if the tests finished without deadlocks
         let done = done.lock();
         assert!(*done, "Test did not complete successfully, possible deadlock detected");
 
-        // Cleanup the test context
+        // Cleanup the tests context
         ctx.cleanup();
     }
 }

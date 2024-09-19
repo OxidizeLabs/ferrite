@@ -58,7 +58,7 @@
 //     }
 // }
 //
-// #[cfg(test)]
+// #[cfg(tests)]
 // mod tests {
 //     use super::*;
 //     use crate::buffer::buffer_pool_manager::BufferPoolManager;
@@ -92,7 +92,7 @@
 //         let rid2 = RID::new(1, 2);
 //         let rid3 = RID::new(1, 3);
 //
-//         // Insert some test data
+//         // Insert some tests data
 //         let tuples = vec![
 //             Tuple::new(vec![Value::from(1), Value::from("Alice")], schema, rid1),
 //             Tuple::new(vec![Value::from(2), Value::from("Bob")], schema.clone(), rid2),
@@ -106,7 +106,7 @@
 //         (table_oid, *table_heap)
 //     }
 //
-//     #[test]
+//     #[tests]
 //     fn test_seq_scan_executor() {
 //         let transaction = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 //         let transaction_manager = TransactionManager::new();

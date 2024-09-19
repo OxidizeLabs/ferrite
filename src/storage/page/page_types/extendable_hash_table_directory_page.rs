@@ -3,7 +3,7 @@ use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType};
 use log::{debug, info, warn};
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub const HTABLE_DIRECTORY_MAX_DEPTH: u64 = 9;
@@ -13,7 +13,7 @@ pub const HTABLE_DIRECTORY_ARRAY_SIZE: u64 = 1 << HTABLE_DIRECTORY_MAX_DEPTH;
 static INSTANCE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ACCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExtendableHTableDirectoryPage {
     base: Page,
     max_depth: u32,
@@ -495,12 +495,6 @@ impl PageTrait for ExtendableHTableDirectoryPage {
     }
 }
 
-impl Debug for ExtendableHTableDirectoryPage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
 impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
     type Error = ();
 
@@ -516,7 +510,7 @@ impl TryFrom<PageType> for ExtendableHTableDirectoryPage {
 mod basic_behavior {
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::config::{PageId, INVALID_PAGE_ID};
+    use crate::common::config::INVALID_PAGE_ID;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -527,20 +521,16 @@ mod basic_behavior {
     use std::sync::Arc;
     use parking_lot::RwLock;
 
-    const PAGE_ID_SIZE: usize = size_of::<PageId>();
-
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         db_file: String,
         db_log_file: String,
-        buffer_pool_size: usize,
     }
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
             initialize_logger();
-            let buffer_pool_size: usize = 5;
-            const K: usize = 2;
+            let buffer_pool_size= 5;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
@@ -549,7 +539,7 @@ mod basic_behavior {
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
                 &disk_manager,
             ))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, 2)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
@@ -560,7 +550,6 @@ mod basic_behavior {
                 bpm,
                 db_file,
                 db_log_file,
-                buffer_pool_size,
             }
         }
 
@@ -608,7 +597,7 @@ mod basic_behavior {
         let ctx = TestContext::new("test_max_depth");
         let bpm = &ctx.bpm;
 
-        info!("Starting max depth test");
+        info!("Starting max depth tests");
 
         let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
         let directory_page_id = directory_guard.get_page_id();
@@ -632,7 +621,7 @@ mod basic_behavior {
                 directory_page.incr_global_depth();
                 assert_eq!(directory_page.get_global_depth(), 2, "Global depth should remain 2 after attempting to exceed max depth");
 
-                info!("Max depth test completed successfully");
+                info!("Max depth tests completed successfully");
             });
         } else {
             panic!("Failed to convert to ExtendableHTableDirectoryPage");
@@ -644,7 +633,7 @@ mod basic_behavior {
         let ctx = TestContext::new("test_empty_directory");
         let bpm = &ctx.bpm;
 
-        info!("Starting empty directory test");
+        info!("Starting empty directory tests");
 
         let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
         let directory_page_id = directory_guard.get_page_id();
@@ -663,7 +652,7 @@ mod basic_behavior {
                 directory_page.decr_global_depth();
                 assert_eq!(directory_page.get_global_depth(), 0, "Global depth should remain 0 after attempted decrement");
 
-                info!("Empty directory test completed successfully");
+                info!("Empty directory tests completed successfully");
             });
         } else {
             panic!("Failed to convert to ExtendableHTableDirectoryPage");

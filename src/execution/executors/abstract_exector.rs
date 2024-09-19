@@ -50,7 +50,7 @@
 //     }
 // }
 //
-// #[cfg(test)]
+// #[cfg(tests)]
 // mod tests {
 //     use super::*;
 //
@@ -96,7 +96,7 @@
 //         }
 //     }
 //
-//     // #[test]
+//     // #[tests]
 //     // fn test_mock_executor() {
 //     //     let transaction = Arc::new(Transaction::default());
 //     //     let transaction_manager = Arc::new(TransactionManager::default());

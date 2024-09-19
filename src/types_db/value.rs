@@ -433,7 +433,7 @@ mod unit_tests {
 
     #[test]
     fn round_trip_val() {
-        // Round-trip test for Val serialization and deserialization
+        // Round-trip tests for Val serialization and deserialization
         let original_val = Val::BigInt(123456789);
         let serialized = bincode::serialize(&original_val).expect("Serialization failed");
         let deserialized: Val = bincode::deserialize(&serialized).expect("Deserialization failed");
@@ -508,7 +508,7 @@ mod unit_tests {
 
     #[test]
     fn round_trip_value() {
-        // Round-trip test for Value serialization and deserialization
+        // Round-trip tests for Value serialization and deserialization
         let original_value = Value {
             value_: Val::Decimal(123.456),
             size_: Size::Length(8),

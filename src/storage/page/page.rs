@@ -180,11 +180,23 @@ impl PageTrait for Page {
 
 impl PageType {
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
-        unimplemented!()
+        match self {
+            Basic(page) => unimplemented!(),
+            ExtendedHashTableDirectory(page) => page.serialize(),
+            ExtendedHashTableHeader(page) => unimplemented!(),
+            ExtendedHashTableBucket(page) => unimplemented!(),
+            Table(page) => unimplemented!()
+        }
     }
 
     pub fn deserialize(&mut self, buffer: &[u8; DB_PAGE_SIZE]) {
-        unimplemented!()
+        match self {
+            Basic(page) => unimplemented!(),
+            ExtendedHashTableDirectory(page) => page.deserialize(buffer),
+            ExtendedHashTableHeader(page) => unimplemented!(),
+            ExtendedHashTableBucket(page) => unimplemented!(),
+            Table(page) => unimplemented!()
+        }
     }
 
     pub fn as_page_trait(&self) -> &dyn PageTrait {
