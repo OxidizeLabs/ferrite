@@ -28,9 +28,9 @@ pub struct TypeErasedBucketPage {
 
 pub trait BucketPageTrait: PageTrait + AsAny + Send + Sync {
     fn get_key_size(&self) -> usize;
-    fn lookup(&self, key: &[u8], comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> Option<PageId>;
-    fn insert(&mut self, key: &[u8], value: PageId, comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> bool;
-    fn remove(&mut self, key: &[u8], comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> bool;
+    fn lookup(&self, key: &[u8]) -> Option<PageId>;
+    fn insert(&mut self, key: &[u8], value: PageId) -> bool;
+    fn remove(&mut self, key: &[u8]) -> bool;
     fn is_full(&self) -> bool;
     fn is_empty(&self) -> bool;
     fn get_size(&self) -> u16;
@@ -42,7 +42,7 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> ExtendableHTableBucketPage<T, KE
     pub fn new(page_id: PageId) -> Self {
         let entry_size = KEY_SIZE + size_of::<PageId>();
         let max_entries = (DB_PAGE_SIZE - BUCKET_HEADER_SIZE) / entry_size;
-        let mut instance = Self {
+        let instance = Self {
             base: Page::new(page_id),
             size: 0,
             max_size: max_entries as u16,
@@ -184,7 +184,7 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait for ExtendableHT
         KEY_SIZE
     }
 
-    fn lookup(&self, key: &[u8], comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> Option<PageId> {
+    fn lookup(&self, key: &[u8]) -> Option<PageId> {
         let mut generic_key = GenericKey::<T, KEY_SIZE>::new();
         generic_key.set_from_bytes(key);
         let generic_comparator = GenericKeyComparator::<T, KEY_SIZE>::new();
@@ -192,7 +192,7 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait for ExtendableHT
         self.lookup(&generic_key, &generic_comparator)
     }
 
-    fn insert(&mut self, key: &[u8], value: PageId, comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> bool {
+    fn insert(&mut self, key: &[u8], value: PageId) -> bool {
         let mut generic_key = GenericKey::<T, KEY_SIZE>::new();
         generic_key.set_from_bytes(key);
         let generic_comparator = GenericKeyComparator::<T, KEY_SIZE>::new();
@@ -200,7 +200,7 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait for ExtendableHT
         self.insert(generic_key, value, &generic_comparator)
     }
 
-    fn remove(&mut self, key: &[u8], comparator: &dyn Fn(&[u8], &[u8]) -> Ordering) -> bool {
+    fn remove(&mut self, key: &[u8]) -> bool {
         let mut generic_key = GenericKey::<T, KEY_SIZE>::new();
         generic_key.set_from_bytes(key);
         let generic_comparator = GenericKeyComparator::<T, KEY_SIZE>::new();
@@ -363,11 +363,10 @@ impl Display for TypeErasedBucketPage {
 mod basic_behavior {
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::config::{PageId, INVALID_PAGE_ID};
+    use crate::common::config::INVALID_PAGE_ID;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use crate::types_db::integer_type::IntegerType;
@@ -377,20 +376,16 @@ mod basic_behavior {
     use std::thread;
     use parking_lot::RwLock;
 
-    const PAGE_ID_SIZE: usize = size_of::<PageId>();
-
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         db_file: String,
         db_log_file: String,
-        buffer_pool_size: usize,
     }
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
             initialize_logger();
             let buffer_pool_size: usize = 5;
-            const K: usize = 2;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
@@ -399,7 +394,7 @@ mod basic_behavior {
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
                 &disk_manager,
             ))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, 2)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
@@ -409,8 +404,7 @@ mod basic_behavior {
             Self {
                 bpm,
                 db_file,
-                db_log_file,
-                buffer_pool_size,
+                db_log_file
             }
         }
 
@@ -459,7 +453,7 @@ mod basic_behavior {
         let ctx = TestContext::new("test_basic_behaviour");
         let bpm = &ctx.bpm;
 
-        info!("Starting basic behaviour test");
+        info!("Starting basic behaviour tests");
 
         let mut bucket_page_ids = [INVALID_PAGE_ID; 4];
 
@@ -636,7 +630,7 @@ mod basic_behavior {
                 assert_eq!(directory_page.get_size(), 4);
                 assert_eq!(directory_page.can_shrink(), false);
 
-                info!("Basic behaviour test completed successfully");
+                info!("Basic behaviour tests completed successfully");
             });
         } else {
             panic!("Failed to convert to ExtendableHTableDirectoryPage");
@@ -648,7 +642,7 @@ mod basic_behavior {
         let ctx = Arc::new(TestContext::new("test_concurrent_access"));
         let bpm = &ctx.bpm;
 
-        info!("Starting concurrent access test");
+        info!("Starting concurrent access tests");
 
         let num_threads = 4;
         let operations_per_thread = 100;
@@ -677,6 +671,6 @@ mod basic_behavior {
             handle.join().expect("Failed to join thread");
         }
 
-        info!("Concurrent access test completed successfully");
+        info!("Concurrent access tests completed successfully");
     }
 }

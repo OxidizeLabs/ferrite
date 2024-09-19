@@ -235,7 +235,6 @@ impl TryFrom<PageType> for ExtendableHTableHeaderPage {
 mod basic_behavior {
     use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::config::PageId;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -341,7 +340,7 @@ mod basic_behavior {
                         assert_eq!(index, 0, "With max_depth 0, all hashes should map to index 0");
                     }
                 });
-                info!("Max depth 0 test completed successfully");
+                info!("Max depth 0 tests completed successfully");
 
                 // Test with max_depth 31 (maximum allowed)
                 ext_guard.access_mut(|page| {
@@ -352,13 +351,13 @@ mod basic_behavior {
                         assert_eq!(index, hash >> 1, "With max_depth 31, hash {:#034b} should map to index {}", hash, hash >> 1);
                     }
                 });
-                info!("Max depth 31 test completed successfully");
+                info!("Max depth 31 tests completed successfully");
             }
             None => {
                 panic!("Failed to convert to ExtendableHTableHeaderPage");
             }
         }
 
-        info!("Header page test completed successfully");
+        info!("Header page tests completed successfully");
     }
 }

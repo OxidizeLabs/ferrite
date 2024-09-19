@@ -25,6 +25,10 @@ impl BoundSubqueryRef {
             alias,
         }
     }
+
+    pub fn get_select_list_name(&self) -> &Vec<Vec<String>> {
+        &self.select_list_name
+    }
 }
 
 impl BoundTableRef for BoundSubqueryRef {

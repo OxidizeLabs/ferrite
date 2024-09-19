@@ -198,7 +198,7 @@
 //     }
 // }
 //
-// #[cfg(test)]
+// #[cfg(tests)]
 // mod tests {
 //     use super::*;
 //     use crate::buffer::buffer_pool_manager::BufferPoolManager;
@@ -208,11 +208,11 @@
 //
 //     // Helper function to create a buffer pool manager for testing
 //     fn create_bpm() -> Arc<BufferPoolManager> {
-//         let disk_manager = Arc::new(RwLock::new(FileDiskManager::new("test.db".to_string(), "test.log".to_string(), 100)));
+//         let disk_manager = Arc::new(RwLock::new(FileDiskManager::new("tests.db".to_string(), "tests.log".to_string(), 100)));
 //         Arc::new(BufferPoolManager::new(10, disk_manager))
 //     }
 //
-//     #[test]
+//     #[tests]
 //     fn test_insert_and_get() {
 //         let bpm = create_bpm();
 //         let cmp = |a: &u32, b: &u32| a.cmp(b);
@@ -236,7 +236,7 @@
 //         assert_eq!(ht.get_value(&3, None), None);
 //     }
 //
-//     #[test]
+//     #[tests]
 //     fn test_remove() {
 //         let bpm = create_bpm();
 //         let cmp = |a: &u32, b: &u32| a.cmp(b);

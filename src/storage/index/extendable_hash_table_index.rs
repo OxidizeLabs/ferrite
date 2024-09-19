@@ -132,7 +132,7 @@
 //     }
 // }
 //
-// #[cfg(test)]
+// #[cfg(tests)]
 // mod tests {
 //     use super::*;
 //     use crate::common::config::PageId;
@@ -150,7 +150,7 @@
 //     }
 //
 //     fn create_test_index() -> ExtendableHashTableIndex<i32, RID, TestComparator> {
-//         let disk_manager = Arc::new(FileDiskManager::new("test.db".to_string()));
+//         let disk_manager = Arc::new(FileDiskManager::new("tests.db".to_string()));
 //         let buffer_pool_manager = Arc::new(BufferPoolManager::new(10, disk_manager));
 //         let metadata = Arc::new(IndexMetadata::new(
 //             "test_index".to_string(),
@@ -164,12 +164,12 @@
 //         ExtendableHashTableIndex::new(metadata, buffer_pool_manager, comparator, hash_fn)
 //     }
 //
-//     #[test]
+//     #[tests]
 //     fn test_insert_and_scan() {
 //         let index = create_test_index();
 //         let transaction = Transaction::new(0);
 //
-//         // Create test tuples
+//         // Create tests tuples
 //         let tuple1 = Tuple::new(vec![1i32.into()]);
 //         let tuple2 = Tuple::new(vec![2i32.into()]);
 //
@@ -189,12 +189,12 @@
 //         assert_eq!(result[0], RID::new(PageId::new(1), 2));
 //     }
 //
-//     #[test]
+//     #[tests]
 //     fn test_delete() {
 //         let index = create_test_index();
 //         let transaction = Transaction::new(0);
 //
-//         // Create test tuple
+//         // Create tests tuple
 //         let tuple = Tuple::new(vec![1i32.into()]);
 //
 //         // Insert and then delete an entry

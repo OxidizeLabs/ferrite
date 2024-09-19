@@ -191,7 +191,7 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
         }
     }
 
-    fn delete_from_node(&self, node: &mut BPlusTreeNode<K, V>, key: &K, index: usize) -> bool {
+    fn delete_from_node(&self, node: &mut BPlusTreeNode<K, V>, key: &K, _index: usize) -> bool {
         match node.node_type {
             NodeType::Leaf => {
                 if let Some(index) = node.keys.iter().position(|k| k == key) {
@@ -319,7 +319,7 @@ impl<K: Ord + Clone + std::fmt::Debug, V: Clone + std::fmt::Debug> BPlusTree<K, 
     }
 
     fn merge_nodes(&self, node: &mut BPlusTreeNode<K, V>, left_index: usize, right_index: usize) {
-        let (left_keys, left_values, right_keys, right_values) = {
+        let (_left_keys, left_values, right_keys, right_values) = {
             let mut left_child_guard = node.children[left_index].write();
             let mut right_child_guard = node.children[right_index].write();
 

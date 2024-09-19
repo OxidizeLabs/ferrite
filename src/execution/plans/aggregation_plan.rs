@@ -215,13 +215,13 @@ mod tests {
     #[test]
     fn test_aggregate_key_equality() {
         let key1 = AggregateKey {
-            group_bys: vec![Value::from(1), Value::from("test")],
+            group_bys: vec![Value::from(1), Value::from("tests")],
         };
         let key2 = AggregateKey {
-            group_bys: vec![Value::from(1), Value::from("test")],
+            group_bys: vec![Value::from(1), Value::from("tests")],
         };
         let key3 = AggregateKey {
-            group_bys: vec![Value::from(2), Value::from("test")],
+            group_bys: vec![Value::from(2), Value::from("tests")],
         };
 
         assert_eq!(key1, key2);
@@ -231,13 +231,13 @@ mod tests {
     #[test]
     fn test_aggregate_key_hash() {
         let key1 = AggregateKey {
-            group_bys: vec![Value::from(1), Value::from("test")],
+            group_bys: vec![Value::from(1), Value::from("tests")],
         };
         let key2 = AggregateKey {
-            group_bys: vec![Value::from(1), Value::from("test")],
+            group_bys: vec![Value::from(1), Value::from("tests")],
         };
 
-        let mut hasher = HashFunction::<AggregateKey>::new();
+        let hasher = HashFunction::<AggregateKey>::new();
 
         let hasher1 = hasher.get_hash(&key1);
         let hasher2 = hasher.get_hash(&key2);
