@@ -242,7 +242,6 @@ impl TestContext {
     fn cleanup(&self) {
         let _ = std::fs::remove_file(&self.db_file);
         let _ = std::fs::remove_file(&self.db_log_file);
-
     }
 }
 
@@ -418,20 +417,20 @@ mod concurrency {
             thread.join().unwrap();
         }
     }
-    
+
     #[test]
     #[ignore]
     fn reads_and_writes() {
         let ctx = TestContext::new("concurrent_reads_and_writes");
         let bpm = ctx.bpm();
-    
+
         // Create a shared page
         let page = bpm.new_page(NewPageType::Basic).unwrap();
-    
+
         // Spawn multiple threads for concurrent reads and writes
         let mut writer_threads = Vec::new();
         let mut reader_threads = Vec::new();
-    
+
         // Writer threads
         for i in 0..2 {
             let bpm_clone = Arc::clone(&bpm);
@@ -442,7 +441,7 @@ mod concurrency {
                 let write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
                 let mut binding = write_guard.write();
                 let data_mut = binding.as_page_trait_mut().get_data_mut();
-    
+
                 // Each writer thread writes a value
                 data_mut[i] = (i + 1) as u8;
             }));
@@ -456,13 +455,13 @@ mod concurrency {
         for i in 0..2 {
             let bpm_clone = Arc::clone(&bpm);
             let page_clone = Arc::clone(&page);
-    
+
             reader_threads.push(thread::spawn(move || {
                 // Perform the read operation
                 let read_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_clone.read().as_page_trait().get_page_id());
                 let binding = read_guard.read();
                 let data = binding.as_page_trait().get_data();
-    
+
                 // Simulate a read operation by checking if the page ID matches
                 assert_eq!(read_guard.get_page_id(), page_clone.read().as_page_trait().get_page_id());
                 // Reading values written by the writer threads
@@ -474,12 +473,12 @@ mod concurrency {
         for thread in reader_threads {
             thread.join().expect("Failed to join reader threads");
         }
-        
+
         // Verify the page's content after concurrent reads and writes
         let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page.read().as_page_trait().get_page_id());
         let binding = final_guard.read();
         let data = binding.as_page_trait().get_data();
-    
+
         assert!(data[0] <= 2 && data[1] <= 2, "Unexpected values in the data after concurrent operations");
     }
 }

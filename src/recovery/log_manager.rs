@@ -3,7 +3,7 @@ use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use log::{error, info};
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -12,8 +12,8 @@ const LOG_BUFFER_SIZE: usize = 4096;
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
 pub struct LogManager {
-    next_lsn: AtomicI32,
-    persistent_lsn: AtomicI32,
+    next_lsn: AtomicU64,
+    persistent_lsn: AtomicU64,
     log_buffer: Vec<u8>,
     flush_buffer: Vec<u8>,
     flush_thread: Option<thread::JoinHandle<()>>,
@@ -31,8 +31,8 @@ impl LogManager {
     /// A new `LogManager` instance.
     pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
         Self {
-            next_lsn: AtomicI32::new(0),
-            persistent_lsn: AtomicI32::new(INVALID_LSN),
+            next_lsn: AtomicU64::new(0),
+            persistent_lsn: AtomicU64::new(INVALID_LSN),
             log_buffer: vec![0; LOG_BUFFER_SIZE],
             flush_buffer: vec![0; LOG_BUFFER_SIZE],
             stop_flag: Arc::new(RwLock::new(false)),

@@ -10,7 +10,7 @@ pub struct NestedLoopJoinNode {
     left: Box<PlanNode>,
     right: Box<PlanNode>,
     predicate: Arc<Expression>,
-    join_type: JoinType
+    join_type: JoinType,
 }
 
 impl NestedLoopJoinNode {

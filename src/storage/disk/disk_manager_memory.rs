@@ -9,7 +9,7 @@ use std::thread;
 use std::thread::ThreadId;
 use std::time::Duration;
 
-type Page = [u8; DB_PAGE_SIZE];
+type Page = [u8; DB_PAGE_SIZE as usize];
 
 /// DiskManagerMemory replicates the utility of DiskManager on memory.
 /// It is primarily used for data structure performance testing.
@@ -20,33 +20,33 @@ pub struct DiskManagerMemory {
 impl DiskManagerMemory {
     pub fn new(num_pages: usize) -> Self {
         Self {
-            memory: RwLock::new(vec![0; num_pages * DB_PAGE_SIZE]),
+            memory: RwLock::new(vec![0; num_pages * DB_PAGE_SIZE as usize]),
         }
     }
 }
 
 impl DiskIO for DiskManagerMemory {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> IoResult<()> {
-        let offset = page_id as usize * DB_PAGE_SIZE;
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        let offset = (page_id as usize) * (DB_PAGE_SIZE as usize);
         info!("Writing page {} at offset {}", page_id, offset);
 
         let mut memory = self.memory.write().map_err(|_| {
             Error::new(ErrorKind::Other, "Failed to acquire write lock for memory")
         })?;
-        memory[offset..offset + DB_PAGE_SIZE].copy_from_slice(page_data);
+        memory[offset..offset + DB_PAGE_SIZE as usize].copy_from_slice(page_data);
 
         Ok(())
     }
 
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> IoResult<()> {
-        let offset = page_id as usize * DB_PAGE_SIZE;
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        let offset = (page_id as usize) * (DB_PAGE_SIZE as usize);
         info!("Reading page {} at offset {}", page_id, offset);
 
         let memory = self.memory.read().map_err(|_| {
             Error::new(ErrorKind::Other, "Failed to acquire read lock for memory")
         })?;
-        if offset + DB_PAGE_SIZE <= memory.len() {
-            page_data.copy_from_slice(&memory[offset..offset + DB_PAGE_SIZE]);
+        if offset + DB_PAGE_SIZE as usize <= memory.len() {
+            page_data.copy_from_slice(&memory[offset..offset + DB_PAGE_SIZE as usize]);
             Ok(())
         } else {
             Err(Error::new(ErrorKind::UnexpectedEof, "Page data exceeds memory bounds"))
@@ -65,7 +65,7 @@ pub struct DiskManagerUnlimitedMemory {
 }
 
 struct ProtectedPage {
-    page: Mutex<Page>
+    page: Mutex<Page>,
 }
 
 impl DiskManagerUnlimitedMemory {
@@ -73,7 +73,7 @@ impl DiskManagerUnlimitedMemory {
         Self {
             data: RwLock::new(HashMap::new()),
             latency_simulator_enabled: AtomicBool::new(false),
-            recent_access: Mutex::new(vec![-1; 4]),
+            recent_access: Mutex::new(vec![u32::MAX; 4]),
             access_ptr: AtomicUsize::new(0),
             thread_id: Mutex::new(None),
         }
@@ -121,7 +121,7 @@ impl DiskManagerUnlimitedMemory {
 }
 
 impl DiskIO for DiskManagerUnlimitedMemory {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> Result<(), Error> {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> Result<(), Error> {
         self.process_latency(page_id);
 
         let mut data = self.data.write().map_err(|_| {
@@ -130,7 +130,7 @@ impl DiskIO for DiskManagerUnlimitedMemory {
 
         let page = data.entry(page_id).or_insert_with(|| {
             Arc::new(ProtectedPage {
-                page: Mutex::new([0; DB_PAGE_SIZE])
+                page: Mutex::new([0; DB_PAGE_SIZE as usize])
             })
         }).clone();
 
@@ -145,7 +145,7 @@ impl DiskIO for DiskManagerUnlimitedMemory {
         Ok(())
     }
 
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> Result<(), Error> {
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> Result<(), Error> {
         self.process_latency(page_id);
 
         let data = self.data.read().map_err(|_| {

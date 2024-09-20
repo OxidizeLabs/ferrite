@@ -246,8 +246,8 @@ mod basic_behaviour {
     fn schedule_write_and_read_operations() {
         let ctx = TestContext::new("schedule_write_read_operations");
         let disk_scheduler = ctx.disk_scheduler.clone();
-        let buf = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
-        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
+        let buf = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
+        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
 
         // Preparing the data to be written
         {
@@ -280,7 +280,7 @@ mod basic_behaviour {
         let ctx = TestContext::new("scheduler_shutdown");
         let disk_scheduler = ctx.disk_scheduler.clone();
 
-        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
+        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
         let (tx, _rx) = mpsc::channel();
 
         disk_scheduler.write().shut_down();
@@ -307,8 +307,8 @@ mod concurrency {
         for i in 0..10 {
             let disk_scheduler = disk_scheduler.clone();
             threads.push(thread::spawn(move || {
-                let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
-                let buf = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
+                let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
+                let buf = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
                 let (write_tx, write_rx) = mpsc::channel();
                 let (read_tx, read_rx) = mpsc::channel();
 
@@ -338,7 +338,7 @@ mod concurrency {
         for i in 0..100 {
             let disk_scheduler = disk_scheduler.clone();
             handles.push(thread::spawn(move || {
-                let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
+                let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
                 let (tx, _rx) = mpsc::channel();
                 disk_scheduler
                     .write()
@@ -379,7 +379,7 @@ mod edge_cases {
         let ctx = TestContext::new("shutdown_while_processing");
         let disk_scheduler = ctx.disk_scheduler.clone();
 
-        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE]));
+        let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
         let (tx, _rx) = mpsc::channel();
 
         for i in 0..5 {

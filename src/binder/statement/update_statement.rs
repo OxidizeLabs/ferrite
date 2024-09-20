@@ -75,9 +75,9 @@ impl Debug for UpdateStatement {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::binder::bound_table_ref::TableReferenceType;
     use crate::binder::expressions::bound_constant::BoundConstant;
-    use super::*;
 
     struct MockBoundTableRef;
 

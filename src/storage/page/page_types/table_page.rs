@@ -32,7 +32,7 @@ type XxHashBuilder = BuildHasherDefault<Xxh3Hasher>;
 /// Represents a table page using a slotted page format.
 #[derive(Debug, Clone)]
 pub struct TablePage {
-    data: Box<[u8; DB_PAGE_SIZE]>,
+    data: Box<[u8; DB_PAGE_SIZE as usize]>,
     page_id: PageId,
     pin_count: i32,
     is_dirty: bool,
@@ -48,7 +48,7 @@ impl TablePage {
     pub fn new(page_id: PageId) -> Self {
         let map = HashMap::with_hasher(BuildHasherDefault::<Xxh3Hasher>::default());
         Self {
-            data: Box::new([0; DB_PAGE_SIZE]),
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
             page_start: vec![],
             page_id,
             pin_count: 0,
@@ -216,7 +216,7 @@ impl PageTrait for TablePage {
     }
 
     fn set_dirty(&mut self, is_dirty: bool) {
-        self.is_dirty  = is_dirty
+        self.is_dirty = is_dirty
     }
 
     fn get_pin_count(&self) -> i32 {
@@ -231,11 +231,11 @@ impl PageTrait for TablePage {
         self.pin_count -= 1;
     }
 
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         self.data.deref()
     }
 
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         self.data.deref_mut()
     }
 
@@ -248,7 +248,7 @@ impl PageTrait for TablePage {
     }
 
     fn reset_memory(&mut self) {
-        self.page_start = Vec::with_capacity(DB_PAGE_SIZE);
+        self.page_start = Vec::with_capacity(DB_PAGE_SIZE as usize);
     }
 }
 

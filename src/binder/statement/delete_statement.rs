@@ -45,9 +45,9 @@ impl Display for DeleteStatement {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use crate::binder::bound_table_ref::TableReferenceType;
     use crate::binder::expressions::bound_constant::BoundConstant;
-    use super::*;
 
     #[derive(Clone)]
     struct MockBoundBaseTableRef;

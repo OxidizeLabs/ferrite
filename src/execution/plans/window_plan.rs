@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
 use crate::binder::bound_order_by::OrderByType;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
 
 /// WindowFunctionType enumerates all the possible window functions in our system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

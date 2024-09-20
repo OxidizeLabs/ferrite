@@ -20,8 +20,8 @@ use std::sync::Arc;
 /// Implementers of this trait must provide methods to write and read pages.
 #[automock]
 pub trait DiskIO: Send + Sync {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> Result<(), std::io::Error>;
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> Result<(), std::io::Error>;
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error>;
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error>;
 }
 
 /// The `FileDiskManager` is responsible for managing disk I/O operations,
@@ -192,7 +192,7 @@ impl FileDiskManager {
 }
 
 impl DiskIO for FileDiskManager {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE]) -> Result<(), std::io::Error> {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error> {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
         trace!("Writing page {} at offset {}", page_id, offset);
 
@@ -205,7 +205,7 @@ impl DiskIO for FileDiskManager {
         Ok(())
     }
 
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE]) -> IoResult<()> {
+    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
         let mut db_io = self.db_io.write();
         let db_io_reader = db_io.get_mut();
@@ -285,9 +285,9 @@ mod unit_tests {
     #[test]
     fn write_and_read_page() -> Result<(), std::io::Error> {
         let ctx = TestContext::new("test_write_and_read_page");
-        let mut buf = [0u8; DB_PAGE_SIZE];
-        let mut data1 = [0u8; DB_PAGE_SIZE];
-        let mut data2 = [0u8; DB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE as usize];
+        let mut data1 = [0u8; DB_PAGE_SIZE as usize];
+        let mut data2 = [0u8; DB_PAGE_SIZE as usize];
         data1[..16].copy_from_slice(b"First page data.");
         data2[..17].copy_from_slice(b"Second page data."); // Adjusted slice length to match the source
 
@@ -346,7 +346,7 @@ mod unit_tests {
     #[test]
     fn number_of_writes_and_flushes() {
         let ctx = TestContext::new("test_number_of_writes_and_flushes");
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..16].copy_from_slice(b"Test write data.");
 
         // Write data to a page
@@ -371,7 +371,7 @@ mod basic_behaviour {
     #[test]
     fn shutdown_behavior_test() -> Result<(), std::io::Error> {
         let ctx = TestContext::new("test_shutdown_behavior");
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..14].copy_from_slice(b"Shutdown test.");
 
         // Write data to a page
@@ -387,7 +387,7 @@ mod basic_behaviour {
             .expect("Failed to flush and shut down the disk manager.");
 
         // Verify that the data was flushed and saved correctly by reading it back
-        let mut buf = [0u8; DB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE as usize];
         let reopened_manager = FileDiskManager::new(ctx.db_file.clone(), ctx.db_log.clone(), 100);
         reopened_manager
             .read_page(0, &mut buf)
@@ -442,7 +442,7 @@ mod basic_behaviour {
     #[test]
     fn file_size_test() -> Result<(), std::io::Error> {
         let ctx = TestContext::new("test_file_size");
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..15].copy_from_slice(b"File size test.");
 
         // Write data to multiple pages to increase file size
@@ -462,8 +462,8 @@ mod basic_behaviour {
     #[test]
     fn read_write_page() -> Result<(), std::io::Error> {
         let ctx = TestContext::new("test_read_write_page");
-        let mut buf = [0u8; DB_PAGE_SIZE];
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE as usize];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..14].copy_from_slice(b"A test string.");
 
         // Tolerate empty read - buffer should be filled with zeros if the page is unwritten.
@@ -545,7 +545,7 @@ mod concurrency {
             let barrier = Arc::clone(&barrier);
 
             thread::spawn(move || {
-                let mut data = [0u8; DB_PAGE_SIZE];
+                let mut data = [0u8; DB_PAGE_SIZE as usize];
                 let content = format!("Thread data {}", i);
                 data[..content.len()].copy_from_slice(content.as_bytes());
 
@@ -562,7 +562,7 @@ mod concurrency {
                 barrier.wait();
 
                 // Read the page back
-                let mut buf = [0u8; DB_PAGE_SIZE];
+                let mut buf = [0u8; DB_PAGE_SIZE as usize];
                 if let Err(e) = disk_manager.read().read_page(i as PageId, &mut buf) {
                     tx.send((i, false)).expect("Failed to send test result");
                     panic!("Failed to read page {}: {:?}", i, e);
@@ -694,13 +694,13 @@ mod edge_cases {
     #[test]
     fn reading_non_existent_page() -> Result<(), Error> {
         let ctx = TestContext::new("test_reading_non_existent_page");
-        let mut buf = [0u8; DB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE as usize];
 
         // Attempt to read a page that hasn't been written to (should return zero-filled buffer)
         ctx.disk_manager.read().read_page(10, &mut buf)?;
         assert_eq!(
             buf,
-            [0u8; DB_PAGE_SIZE],
+            [0u8; DB_PAGE_SIZE as usize],
             "Buffer should be filled with zeros when reading a non-existent page."
         );
 
@@ -708,7 +708,7 @@ mod edge_cases {
         ctx.disk_manager.read().read_page(10000, &mut buf)?;
         assert_eq!(
             buf,
-            [0u8; DB_PAGE_SIZE],
+            [0u8; DB_PAGE_SIZE as usize],
             "Buffer should be filled with zeros when reading past the end of the file."
         );
 
@@ -718,7 +718,7 @@ mod edge_cases {
     #[test]
     fn writing_beyond_file_capacity() -> Result<(), Error> {
         let ctx = TestContext::new("test_writing_beyond_file_capacity");
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..16].copy_from_slice(b"Beyond capacity.");
 
         // Attempt to write to a very large page ID
@@ -739,7 +739,7 @@ mod edge_cases {
     #[test]
     fn reading_with_corrupted_data() -> Result<(), Error> {
         let ctx = TestContext::new("test_reading_with_corrupted_data");
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[..14].copy_from_slice(b"Original data.");
 
         // Write data to a page
@@ -755,7 +755,7 @@ mod edge_cases {
         file.write_all(&[0xFF; 512])?; // Corrupt the first 512 bytes
 
         // Attempt to read the corrupted page
-        let mut buf = [0u8; DB_PAGE_SIZE];
+        let mut buf = [0u8; DB_PAGE_SIZE as usize];
         if let Err(e) = ctx.disk_manager.read().read_page(0, &mut buf) {
             eprintln!("Error reading corrupted page: {}", e);
         }

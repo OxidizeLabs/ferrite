@@ -96,11 +96,11 @@ impl Display for IndexStatement {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use crate::binder::bound_statement::AnyBoundStatement;
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
     use crate::types_db::type_id::TypeId;
-    use super::*;
 
     #[test]
     fn index_statement_creation() {

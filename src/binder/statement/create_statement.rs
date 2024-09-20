@@ -57,8 +57,8 @@ impl Display for CreateStatement {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::types_db::type_id::TypeId;
     use super::*;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn create_statement() {

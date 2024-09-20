@@ -111,7 +111,7 @@ impl Transaction {
 
     /// Returns the temporary timestamp of this transaction.
     pub fn temp_ts(&self) -> TimeStampOidT {
-        self.txn_id
+        self.txn_id.try_into().unwrap()
     }
 
     /// Returns the isolation level of this transaction.
