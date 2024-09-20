@@ -541,11 +541,6 @@ impl<'a> Drop for ContextGuard<'a> {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::types_db::type_id::TypeId;
-    use log::info;
-    use std::fs;
-    use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::schema::Schema;
@@ -555,6 +550,11 @@ mod unit_tests {
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use log::info;
+    use parking_lot::{Mutex, RwLock};
+    use std::fs;
 
     struct TestContext {
         db_file: String,

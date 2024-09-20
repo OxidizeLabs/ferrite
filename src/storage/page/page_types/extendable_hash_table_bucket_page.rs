@@ -41,7 +41,7 @@ pub trait BucketPageTrait: PageTrait + AsAny + Send + Sync {
 impl<T: Clone + 'static, const KEY_SIZE: usize> ExtendableHTableBucketPage<T, KEY_SIZE> {
     pub fn new(page_id: PageId) -> Self {
         let entry_size = KEY_SIZE + size_of::<PageId>();
-        let max_entries = (DB_PAGE_SIZE - BUCKET_HEADER_SIZE) / entry_size;
+        let max_entries = (DB_PAGE_SIZE as usize - BUCKET_HEADER_SIZE) / entry_size;
         let instance = Self {
             base: Page::new(page_id),
             size: 0,
@@ -156,7 +156,7 @@ impl TypeErasedBucketPage {
 
     pub fn with_data<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&[u8; DB_PAGE_SIZE]) -> R,
+        F: FnOnce(&[u8; DB_PAGE_SIZE as usize]) -> R,
     {
         let guard = self.inner.read();
         f(guard.get_data())
@@ -164,7 +164,7 @@ impl TypeErasedBucketPage {
 
     pub fn with_data_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut [u8; DB_PAGE_SIZE]) -> R,
+        F: FnOnce(&mut [u8; DB_PAGE_SIZE as usize]) -> R,
     {
         let mut guard = self.inner.write();
         f(guard.get_data_mut())
@@ -254,11 +254,11 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> PageTrait for ExtendableHTableBu
         self.base.decrement_pin_count()
     }
 
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         self.base.get_data()
     }
 
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         self.base.get_data_mut()
     }
 
@@ -300,14 +300,14 @@ impl PageTrait for TypeErasedBucketPage {
         self.inner.write().decrement_pin_count();
     }
 
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         // This method can't be implemented safely for TypeErasedBucketPage
         // because we can't return a reference that outlives the RwLockReadGuard.
         // Instead, we'll panic with an explanation.
         panic!("get_data() is not supported for TypeErasedBucketPage. Use with_data() instead.")
     }
 
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         // This method can't be implemented safely for TypeErasedBucketPage
         // because we can't return a reference that outlives the RwLockWriteGuard.
         // Instead, we'll panic with an explanation.
@@ -372,9 +372,9 @@ mod basic_behavior {
     use crate::types_db::integer_type::IntegerType;
     use chrono::Utc;
     use log::{error, info};
+    use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
-    use parking_lot::RwLock;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -404,7 +404,7 @@ mod basic_behavior {
             Self {
                 bpm,
                 db_file,
-                db_log_file
+                db_log_file,
             }
         }
 

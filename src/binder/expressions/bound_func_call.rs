@@ -58,8 +58,8 @@ impl Display for BoundFuncCall {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
+    use crate::binder::expressions::bound_constant::BoundConstant;
 
     #[test]
     fn bound_func_call() {

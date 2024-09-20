@@ -1,7 +1,7 @@
 use crate::catalogue::schema::Schema;
+use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
-use crate::common::config::TableOidT;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertNode {

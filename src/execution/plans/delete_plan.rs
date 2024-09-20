@@ -1,7 +1,7 @@
 use crate::catalogue::schema::Schema;
+use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
-use crate::common::config::TableOidT;
 
 /// Represents a delete operation in the query execution plan.
 ///
@@ -26,7 +26,7 @@ impl DeleteNode {
     /// # Returns
     ///
     /// A new instance of DeleteNode.
-    pub fn new(output_schema: Arc<Schema>, table_id: TableOidT,child: Box<PlanNode>) -> Self {
+    pub fn new(output_schema: Arc<Schema>, table_id: TableOidT, child: Box<PlanNode>) -> Self {
         DeleteNode {
             output_schema,
             table_id,
@@ -100,7 +100,7 @@ mod tests {
     fn create_mock_child() -> Box<PlanNode> {
         let schema = Arc::new(Schema::new(vec![]));
         let table = "mock_table".to_string();
-        Box::new(PlanNode::MockScan(MockScanNode::new(schema, table,vec![])))
+        Box::new(PlanNode::MockScan(MockScanNode::new(schema, table, vec![])))
     }
 
     #[test]
@@ -117,7 +117,7 @@ mod tests {
     fn test_delete_node_to_string() {
         let schema = Arc::new(Schema::new(vec![]));
         let child = create_mock_child();
-        let delete_node = DeleteNode::new(schema,0, child);
+        let delete_node = DeleteNode::new(schema, 0, child);
 
         assert_eq!(delete_node.to_string(false), "DeleteNode");
         assert!(delete_node.to_string(true).starts_with("DeleteNode ["));

@@ -154,22 +154,21 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId::Integer;
+    use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::sync::Arc;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
-    use crate::types_db::type_id::TypeId::Integer;
-    use crate::types_db::value::Value;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         db_file: String,
         db_log_file: String,
-        buffer_pool_size: usize,
     }
 
     impl TestContext {
@@ -196,7 +195,6 @@ mod tests {
                 bpm,
                 db_file,
                 db_log_file,
-                buffer_pool_size,
             }
         }
 
@@ -230,11 +228,10 @@ mod tests {
     #[test]
     fn test_table_iterator_single_tuple() {
         let table_heap = setup_test_table();
-        let meta = TupleMeta::new(123, false);
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
         let rid = RID::new(0, 0);
         let mut tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);
-        let meta = TupleMeta::new(123 ,false);
+        let meta = TupleMeta::new(123, false);
 
         table_heap.lock().insert_tuple(&meta, &mut tuple, None, None, 0).expect("failed to insert tuple");
 

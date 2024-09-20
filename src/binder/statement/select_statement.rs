@@ -138,9 +138,9 @@ fn clean_identifier(s: &str) -> String {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use crate::binder::bound_table_ref::TableReferenceType;
     use crate::binder::expressions::bound_constant::BoundConstant;
-    use super::*;
 
     struct MockBoundTableRef;
     impl BoundTableRef for MockBoundTableRef {

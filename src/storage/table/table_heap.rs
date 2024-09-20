@@ -5,13 +5,11 @@ use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
+use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{error, info};
 use spin::RwLock;
-use std::sync::atomic::AtomicI32;
-use std::sync::{Arc, Mutex};
-use crate::common::rid;
-use crate::storage::table::table_iterator::TableIterator;
+use std::sync::Arc;
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.

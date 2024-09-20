@@ -139,8 +139,8 @@ impl Default for Schema {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::types_db::type_id::TypeId;
     use super::*;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn schema_serialization() {

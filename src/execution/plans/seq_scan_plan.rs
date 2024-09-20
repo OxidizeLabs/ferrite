@@ -91,11 +91,11 @@ impl From<SeqScanPlanNode> for PlanNode {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
     use crate::catalogue::column::Column;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use super::*;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![
@@ -234,13 +234,13 @@ mod unit_tests {
 
 #[cfg(test)]
 mod seq_scan_string_tests {
+    use super::*;
     use crate::catalogue::column::Column;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use super::*;
 
 
     fn create_test_schema() -> Schema {

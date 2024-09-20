@@ -7,7 +7,6 @@ use crate::storage::page::page_types::extendable_hash_table_header_page::Extenda
 use crate::storage::page::page_types::table_page::TablePage;
 use log::{debug, error, info};
 use std::any::Any;
-use std::convert::TryInto;
 
 // Constants
 const OFFSET_LSN: usize = 4;
@@ -27,7 +26,7 @@ pub enum PageType {
 #[derive(Debug, Clone)]
 pub struct Page {
     /// The actual data that is stored within a page.
-    data: Box<[u8; DB_PAGE_SIZE]>,
+    data: Box<[u8; DB_PAGE_SIZE as usize]>,
     /// The ID of this page.
     page_id: PageId,
     /// The pin count of this page.
@@ -43,8 +42,8 @@ pub trait PageTrait {
     fn get_pin_count(&self) -> i32;
     fn increment_pin_count(&mut self);
     fn decrement_pin_count(&mut self);
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE];
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE];
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize];
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize];
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError>;
     fn set_pin_count(&mut self, pin_count: i32);
     fn reset_memory(&mut self);
@@ -59,7 +58,7 @@ impl Page {
     /// Constructor. Zeros out the page data.
     pub fn new(page_id: PageId) -> Self {
         let mut page = Page {
-            data: Box::new([0; DB_PAGE_SIZE]),
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
             page_id,
             pin_count: 1,
             is_dirty: false,
@@ -71,8 +70,8 @@ impl Page {
 
     /// Returns the page LSN.
     pub fn get_lsn(&self) -> Lsn {
-        let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 4];
-        let lsn = i32::from_ne_bytes(bytes.try_into().unwrap()).into();
+        let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 8];
+        let lsn = u64::from_ne_bytes(bytes.try_into().unwrap()).into();
         debug!("Fetching LSN for Page ID {}: {}", self.page_id, lsn);
         lsn
     }
@@ -80,7 +79,7 @@ impl Page {
     /// Sets the page LSN.
     pub fn set_lsn(&mut self, lsn: Lsn) {
         let lsn_bytes = lsn.to_ne_bytes();
-        self.data[OFFSET_LSN..OFFSET_LSN + 4].copy_from_slice(&lsn_bytes);
+        self.data[OFFSET_LSN..OFFSET_LSN + 8].copy_from_slice(&lsn_bytes);
         info!("Set LSN for Page ID {}", self.page_id);
     }
 }
@@ -124,14 +123,14 @@ impl PageTrait for Page {
     }
 
     /// Returns an immutable reference to the data. The data is protected by an internal read lock.
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         debug!("Fetching data for page ID {}", self.page_id);
         // Return a copy of the data.
         &*self.data
     }
 
     /// Returns a mutable reference to the data, marks the page as dirty, and returns a copy.
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         debug!("Fetching mutable data for page ID {}", self.page_id);
 
         // Return a copy of the mutable data.
@@ -179,7 +178,7 @@ impl PageTrait for Page {
 }
 
 impl PageType {
-    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
+    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
         match self {
             Basic(page) => unimplemented!(),
             ExtendedHashTableDirectory(page) => page.serialize(),
@@ -189,7 +188,7 @@ impl PageType {
         }
     }
 
-    pub fn deserialize(&mut self, buffer: &[u8; DB_PAGE_SIZE]) {
+    pub fn deserialize(&mut self, buffer: &[u8; DB_PAGE_SIZE as usize]) {
         match self {
             Basic(page) => unimplemented!(),
             ExtendedHashTableDirectory(page) => page.deserialize(buffer),
@@ -275,7 +274,7 @@ mod unit_tests {
     #[test]
     fn test_page_data_access() {
         let mut page = Page::new(2);
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[0] = 42;
         // Use the set_data method with the offset to update the page data
         if let Err(e) = page.set_data(0, &data) {
@@ -319,7 +318,7 @@ mod basic_behavior {
     #[test]
     fn test_reset_memory() {
         let mut page = Page::new(1);
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         data[0] = 255;
         if let Err(e) = page.set_data(0, &data) {
             panic!("Error setting data: {:?}", e);
@@ -361,7 +360,7 @@ mod concurrency {
                 // Perform the write operation.
                 {
                     let mut page = page.write(); // Acquire write lock on the entire Page.
-                    let mut data = [0u8; DB_PAGE_SIZE];
+                    let mut data = [0u8; DB_PAGE_SIZE as usize];
                     data[0] = (i + 1) as u8;
                     if let Err(e) = page.set_data(0, &data) {
                         panic!("Error setting data: {:?}", e);
@@ -454,7 +453,7 @@ mod edge_cases {
     #[test]
     fn test_page_with_large_lsn_value() {
         let mut page = Page::new(1);
-        let large_lsn: Lsn = i32::MAX.into();
+        let large_lsn: Lsn = u64::MAX.into();
         page.set_lsn(large_lsn);
         assert_eq!(page.get_lsn(), large_lsn);
     }

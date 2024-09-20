@@ -300,8 +300,8 @@ impl ExtendableHTableDirectoryPage {
         debug!("Bucket at index {} split. New bucket ID {} set at index {}", bucket_idx, new_page_id, split_image_index);
     }
 
-    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE] {
-        let mut buffer = [0u8; DB_PAGE_SIZE];
+    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
+        let mut buffer = [0u8; DB_PAGE_SIZE as usize];
         buffer[0..4].copy_from_slice(&self.global_depth.to_le_bytes());
         buffer[4..].copy_from_slice(self.base.get_data());
         buffer
@@ -472,11 +472,11 @@ impl PageTrait for ExtendableHTableDirectoryPage {
         self.base.decrement_pin_count()
     }
 
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         &*self.base.get_data()
     }
 
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         &mut *self.base.get_data_mut()
     }
 
@@ -518,8 +518,8 @@ mod basic_behavior {
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use chrono::Utc;
     use log::{error, info};
-    use std::sync::Arc;
     use parking_lot::RwLock;
+    use std::sync::Arc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -530,7 +530,7 @@ mod basic_behavior {
     impl TestContext {
         fn new(test_name: &str) -> Self {
             initialize_logger();
-            let buffer_pool_size= 5;
+            let buffer_pool_size = 5;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);

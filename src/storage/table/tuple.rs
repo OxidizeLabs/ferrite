@@ -156,8 +156,8 @@ impl Tuple {
 
 #[cfg(test)]
 mod tests {
-    use crate::catalogue::column::Column;
     use super::*;
+    use crate::catalogue::column::Column;
     use crate::types_db::type_id::TypeId;
 
     fn create_sample_schema() -> Schema {

@@ -1,6 +1,6 @@
 use log::{debug, info};
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 enum NodeType {

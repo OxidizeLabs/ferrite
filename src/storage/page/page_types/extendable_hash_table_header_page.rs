@@ -185,11 +185,11 @@ impl PageTrait for ExtendableHTableHeaderPage {
         self.base.decrement_pin_count()
     }
 
-    fn get_data(&self) -> &[u8; DB_PAGE_SIZE] {
+    fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         &*self.base.get_data()
     }
 
-    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE] {
+    fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
         &mut *self.base.get_data_mut()
     }
 
@@ -242,13 +242,13 @@ mod basic_behavior {
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::info;
-    use std::sync::Arc;
     use parking_lot::RwLock;
+    use std::sync::Arc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         db_file: String,
-        db_log_file: String
+        db_log_file: String,
     }
 
     impl TestContext {
@@ -274,7 +274,7 @@ mod basic_behavior {
             Self {
                 bpm,
                 db_file,
-                db_log_file
+                db_log_file,
             }
         }
 

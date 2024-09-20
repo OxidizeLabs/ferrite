@@ -16,7 +16,7 @@ use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc};
 
 // Define an enum to represent the type of page to create
@@ -33,7 +33,7 @@ pub enum NewPageType {
 /// including fetching and unpinning pages, and handling page replacement.
 pub struct BufferPoolManager {
     pool_size: usize,
-    next_page_id: AtomicI32,
+    next_page_id: AtomicU32,
     pages: Arc<RwLock<Vec<Option<Arc<RwLock<PageType>>>>>>,
     page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
     replacer: Arc<RwLock<LRUKReplacer>>,
@@ -63,7 +63,7 @@ impl BufferPoolManager {
         info!("BufferPoolManager initialized with pool size: {}", pool_size);
         Self {
             pool_size,
-            next_page_id: AtomicI32::new(0),
+            next_page_id: AtomicU32::new(0),
             pages: Arc::new(RwLock::new(vec![None; pool_size])),
             page_table: Arc::new(RwLock::new(HashMap::new())),
             replacer,
@@ -142,7 +142,7 @@ impl BufferPoolManager {
     /// # Parameters
     /// - `page_id`: The ID of the page to write to.
     /// - `data`: The data to write to the page.
-    pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE]) {
+    pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE as usize]) {
         info!("Writing to page with ID: {}", page_id);
 
         // Acquire read lock on the page collection
@@ -221,11 +221,11 @@ impl BufferPoolManager {
                 frame_id
             } else {
                 let replacer = self.replacer.write(); // Acquire write lock
-                replacer.evict().unwrap_or(-1)
+                replacer.evict().unwrap_or(u32::MAX)
             }
         };
 
-        if frame_id == -1 {
+        if frame_id == u32::MAX {
             error!("Failed to fetch page {}: no available frame", page_id);
             return None;
         }
@@ -336,11 +336,11 @@ impl BufferPoolManager {
                 frame_id
             } else {
                 let replacer = self.replacer.write(); // Acquire write lock
-                replacer.evict().unwrap_or(-1)
+                replacer.evict().unwrap_or(u32::MAX)
             }
         };
 
-        if frame_id == -1 {
+        if frame_id == u32::MAX {
             error!("Failed to fetch basic page guard for page {}: no available frame", page_id);
             return None;
         }
@@ -853,9 +853,7 @@ mod unit_tests {
         // Create a new page
 
         let new_page = context.bpm.new_page(NewPageType::Basic).unwrap();
-        let page_id = new_page.read().as_page_trait().get_page_id();
 
-        assert!(page_id >= 0, "The new page should have a valid page ID.");
         assert_eq!(
             new_page.read().as_page_trait().get_pin_count(),
             1,
@@ -934,7 +932,7 @@ mod unit_tests {
         // Create and write to a page
         let page = context.bpm.new_page(NewPageType::Basic).unwrap();
         let page_id = page.read().as_page_trait().get_page_id();
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         rand::thread_rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
 
@@ -990,7 +988,7 @@ mod unit_tests {
         // Create and write to a page
         let page = context.bpm.new_page(NewPageType::Basic).unwrap();
         let page_id = page.read().as_page_trait().get_page_id();
-        let mut data = [0u8; DB_PAGE_SIZE];
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
         rand::thread_rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
 
@@ -1022,10 +1020,10 @@ mod basic_behaviour {}
 
 #[cfg(test)]
 mod concurrency {
-    use std::thread;
     use super::*;
     use parking_lot::Mutex;
     use rand::Rng;
+    use std::thread;
 
     #[test]
     fn concurrent_page_access() {
@@ -1096,7 +1094,7 @@ mod concurrency {
 
         // Generate random data for writing
         let mut rng = rand::thread_rng();
-        let data: [u8; DB_PAGE_SIZE] = rng.random();
+        let data: [u8; DB_PAGE_SIZE as usize] = rng.random();
 
         // Mutex for synchronizing tests completion
         let done = Arc::new(Mutex::new(false));
@@ -1205,7 +1203,7 @@ mod edge_cases {
                 // Modify the page with a write lock on the page itself
                 {
                     let mut page_guard = page.write(); // Acquire write lock on the page
-                    let mut data = [0; DB_PAGE_SIZE];
+                    let mut data = [0; DB_PAGE_SIZE as usize];
                     data[0] = i as u8; // Modify the data
                     if let Err(e) = page_guard.as_page_trait_mut().set_data(0, &data) {
                         panic!("Error setting data: {:?}", e);

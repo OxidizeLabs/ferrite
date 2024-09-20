@@ -52,8 +52,8 @@ impl Display for BoundUnaryOp {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::binder::expressions::bound_constant::BoundConstant;
     use super::*;
+    use crate::binder::expressions::bound_constant::BoundConstant;
 
     #[test]
     fn bound_unary_op() {
