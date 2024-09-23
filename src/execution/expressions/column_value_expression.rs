@@ -36,8 +36,8 @@ impl ColumnRefExpression {
 }
 
 impl ExpressionOps for ColumnRefExpression {
-    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
-        todo!()
+    fn evaluate(&self, tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
+        Ok(tuple.get_value(self.column_index).clone())
     }
 
     fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
