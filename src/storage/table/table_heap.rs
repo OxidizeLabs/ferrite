@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
@@ -10,6 +10,9 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{error, info};
 use spin::RwLock;
 use std::sync::Arc;
+use futures::future::ok;
+use crate::storage::page::page::PageTrait;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -31,11 +34,22 @@ impl TableHeap {
     ///
     /// A new `TableHeap` instance.
     pub fn new(bpm: Arc<BufferPoolManager>) -> Self {
+
+        let table_page = bpm.new_page_guarded(NewPageType::Table);
+        let page_guard = table_page.unwrap();
+        let first_page_id = page_guard.get_page_id();
+        if let Some(ext_guard) = page_guard.into_specific_type::<TablePage, 8>() {
+            let read_guard = ext_guard.read();
+            read_guard.access(|page| {
+                info!("Create TablePage for TableHeap with PageId: {}", page.get_page_id())
+            });
+        }
+        let last_page_id = first_page_id;
         TableHeap {
             bpm,
-            first_page_id: INVALID_PAGE_ID,
+            first_page_id,
             latch: RwLock::new(()),
-            last_page_id: INVALID_PAGE_ID,
+            last_page_id
         }
     }
 
@@ -107,9 +121,17 @@ impl TableHeap {
     /// # Returns
     ///
     /// A pair containing the meta and tuple.
-    pub fn get_tuple(&self, rid: RID) -> (TupleMeta, Tuple) {
-        // Implementation of get tuple logic here
-        unimplemented!()
+    pub fn get_tuple(&self, rid: RID) -> Result<(TupleMeta, Tuple), String> {
+        let _write_guard = self.latch.write(); // Use RAII for the write lock
+
+        let page_guard = self.bpm.fetch_page_guarded(rid.get_page_id()).ok_or_else(|| "Failed to fetch page".to_string())?;
+
+        let mut table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
+            .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
+
+        table_page_guard.access_mut(|table_page| {
+            table_page.get_tuple(&rid).unwrap()
+        }).ok_or_else(|| "Failed to get tuple".to_string())
     }
 
     /// Reads a tuple meta from the table. Note: if you want to get the tuple and meta together,

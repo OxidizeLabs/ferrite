@@ -73,7 +73,7 @@ impl TableIterator {
         if self.is_end() {
             None
         } else {
-            Some(self.table_heap.lock().get_tuple(self.rid))
+            Some(self.table_heap.lock().get_tuple(self.rid).expect("Failed to get tuple"))
         }
     }
 
