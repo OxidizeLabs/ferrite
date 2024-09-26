@@ -1,4 +1,4 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::container::hash_function::Xxh3Hasher;
@@ -38,6 +38,7 @@ pub struct TablePage {
     is_dirty: bool,
     page_start: Vec<u8>,
     next_page_id: PageId,
+    prev_page_id: PageId,
     num_tuples: u32,
     num_deleted_tuples: u32,
     tuple_info: HashMap<RID, (TupleMeta, Tuple), XxHashBuilder>,
@@ -52,7 +53,8 @@ impl TablePage {
             page_start: vec![],
             page_id,
             pin_count: 0,
-            next_page_id: page_id,
+            next_page_id: INVALID_PAGE_ID,
+            prev_page_id: INVALID_PAGE_ID,
             num_tuples: 0,
             num_deleted_tuples: 0,
             tuple_info: map,
@@ -83,7 +85,7 @@ impl TablePage {
     /// Gets the next offset to insert a tuple.
     pub fn get_next_tuple_offset(&self, meta: &TupleMeta, tuple: &Tuple) -> Option<u32> {
         let tuple_size = self.serialize_tuple(meta, tuple).len() as u32;
-        if self.page_start.len() as u32 + tuple_size <= DB_PAGE_SIZE as u32 {
+        if self.page_start.len() as u32 + tuple_size <= DB_PAGE_SIZE {
             Some(self.page_start.len() as u32)
         } else {
             None
@@ -137,8 +139,8 @@ impl TablePage {
             // Move to the next tuple
             // Assuming the structure: RID + TupleMeta + TupleData
             let meta_size = mem::size_of::<TupleMeta>();
-            let tuple_size = self.read_tuple_size(&self.page_start[current_offset + mem::size_of::<RID>() + meta_size..]);
-            current_offset += mem::size_of::<RID>() + meta_size + tuple_size;
+            let tuple_size = self.read_tuple_size(&self.page_start[current_offset + size_of::<RID>() + meta_size..]);
+            current_offset += size_of::<RID>() + meta_size + tuple_size;
         }
         None
     }
@@ -265,7 +267,7 @@ mod tests {
     fn new_table_page() {
         let page = TablePage::new(1);
         assert_eq!(page.get_num_tuples(), 0);
-        assert_eq!(page.get_next_page_id(), 1);
+        assert_eq!(page.get_next_page_id(), INVALID_PAGE_ID);
     }
 
     #[test]
@@ -318,7 +320,6 @@ mod tests {
         let new_rid = tuple.get_rid();
         page.update_tuple_meta(&new_meta, &new_rid);
         let retrieved_meta = page.get_tuple(&new_rid).unwrap();
-        println!("Retrieved meta: {:?}", retrieved_meta);
         assert_eq!(retrieved_meta.0.get_timestamp(), new_meta.get_timestamp());
         assert_eq!(retrieved_meta.0.is_deleted(), new_meta.is_deleted());
     }

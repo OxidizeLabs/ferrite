@@ -3,13 +3,13 @@ use crate::common::rid::RID;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use log::{debug, error};
 use parking_lot::Mutex;
 use std::sync::Arc;
-use log::{debug, error};
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
-pub struct TableIterator<'a>{
+pub struct TableIterator<'a> {
     table_heap: &'a TableHeap,
     rid: RID,
     stop_at_rid: RID,

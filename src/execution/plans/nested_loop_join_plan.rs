@@ -1,8 +1,8 @@
+use crate::binder::table_ref::bound_join_ref::JoinType;
 use crate::catalogue::schema::Schema;
+use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
-use crate::binder::table_ref::bound_join_ref::JoinType;
-use crate::execution::expressions::abstract_expression::Expression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
