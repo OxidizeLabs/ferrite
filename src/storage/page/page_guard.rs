@@ -256,7 +256,8 @@ mod unit_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::NewPageType;
     use crate::storage::page::page::PageTrait;
-    use log::info;
+    use crate::types_db::integer_type::IntegerType;
+    use log::{debug, info};
 
     #[test]
     fn basic_page_guard() {
@@ -277,8 +278,8 @@ mod unit_tests {
     }
 
     #[test]
-    fn convert_into() {
-        let ctx = TestContext::new("basic_page_guard");
+    fn convert_into_extendable_htable_directory_page() {
+        let ctx = TestContext::new("convert_into_extendable_htable_directory_page");
         let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
@@ -289,7 +290,76 @@ mod unit_tests {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
                 let directory_size = page.get_size();
-                info!("Directory size: {}", directory_size);
+                debug!("Directory size: {}", directory_size);
+            });
+
+            let mut write_guard = ext_guard.write();
+            write_guard.access_mut(|page| {
+                page.set_dirty(true);
+            });
+        }
+    }
+
+    #[test]
+    fn convert_into_extendable_htable_header_page() {
+        let ctx = TestContext::new("convert_into_extendable_htable_header_page");
+        let bpm = ctx.bpm();
+
+        // Create a new guarded page with bpm
+        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        let page_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
+
+        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableHeaderPage, 8>() {
+            let read_guard = ext_guard.read();
+            read_guard.access(|page| {
+                let header_page_id = page.get_page_id();
+                debug!("Header page id: {}", header_page_id);
+            });
+
+            let mut write_guard = ext_guard.write();
+            write_guard.access_mut(|page| {
+                page.set_dirty(true);
+            });
+        }
+    }
+
+    #[test]
+    fn convert_into_extendable_htable_bucket_page() {
+        let ctx = TestContext::new("convert_into_extendable_htable_bucket_page");
+        let bpm = ctx.bpm();
+
+        // Create a new guarded page with bpm
+        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        let page_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
+
+        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
+            let read_guard = ext_guard.read();
+            read_guard.access(|page| {
+                let bucket_size = page.get_size();
+                info!("Bucket size: {}", bucket_size);
+            });
+
+            let mut write_guard = ext_guard.write();
+            write_guard.access_mut(|page| {
+                page.set_dirty(true);
+            });
+        }
+    }
+
+    #[test]
+    fn convert_into_table_page() {
+        let ctx = TestContext::new("convert_into_table_page");
+        let bpm = ctx.bpm();
+
+        // Create a new guarded page with bpm
+        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        let page_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0.read().as_page_trait().get_page_id());
+
+        if let Some(ext_guard) = page_guard.into_specific_type::<TablePage, 8>() {
+            let read_guard = ext_guard.read();
+            read_guard.access(|page| {
+                let table_page_id = page.get_page_id();
+                info!("Table size: {}", table_page_id);
             });
 
             let mut write_guard = ext_guard.write();
@@ -522,9 +592,6 @@ mod edge_cases {
         // Test if the evicted page is correctly unpinned
         drop(evict_guard);
         assert_eq!(page_evicted.read().as_page_trait().get_pin_count(), 0, "Evicted page should be unpinned");
-
-        // Verify the replacer can now evict this page since it should be marked as evictable
-        // assert!(bpm.unpin_page(page0_id, false, AccessType::Unknown), "Page should be unpinned and made evictable");
     }
 
     #[test]
