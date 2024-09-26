@@ -270,8 +270,8 @@ mod unit_tests {
         let ctx = TestContext::new("test_initialization");
 
         // Check that the files are created
-        assert!(std::path::Path::new(&ctx.db_file).exists(), "Database file was not created.");
-        assert!(std::path::Path::new(&ctx.db_log).exists(), "Log file was not created.");
+        assert!(Path::new(&ctx.db_file).exists(), "Database file was not created.");
+        assert!(Path::new(&ctx.db_log).exists(), "Log file was not created.");
 
         let disk_manager = ctx.disk_manager.read();
 

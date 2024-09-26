@@ -136,7 +136,6 @@ impl TableHeap {
         table_page_guard.access(|table_page| {
             table_page.get_tuple(&rid).unwrap()
         }).ok_or_else(|| "Failed to get tuple".to_string())
-
     }
 
     /// Reads a tuple meta from the table. Note: if you want to get the tuple and meta together,
@@ -387,7 +386,7 @@ impl Debug for TableHeap {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
@@ -396,7 +395,7 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use super::*;
+    use chrono::Utc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -519,7 +518,8 @@ mod tests {
     #[test]
     fn test_table_iterator() {
         let ctx = TestContext::new("test_table_iterator");
-        let bpm = ctx.bpm.clone();        let table_heap = TableHeap::new(bpm);
+        let bpm = ctx.bpm.clone();
+        let table_heap = TableHeap::new(bpm);
         let schema = create_test_schema();
 
         // Insert multiple tuples
@@ -551,7 +551,8 @@ mod tests {
     #[test]
     fn test_table_heap_debug() {
         let ctx = TestContext::new("test_table_heap_debug");
-        let bpm = ctx.bpm.clone();        let table_heap = TableHeap::new(bpm);
+        let bpm = ctx.bpm.clone();
+        let table_heap = TableHeap::new(bpm);
 
         let debug_output = format!("{:?}", table_heap);
         assert!(debug_output.contains("TableHeap"));
