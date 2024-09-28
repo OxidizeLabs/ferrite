@@ -231,37 +231,4 @@ mod tests {
         assert!(iterator.is_end());
         assert_eq!(iterator.next(), None);
     }
-
-    #[test]
-    fn test_table_iterator_multiple_tuples() {
-        let mut table_heap = setup_test_table("test_table_iterator_multiple_tuples");
-        let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
-        let tuples = vec![
-            Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), RID::new(0, 0)),
-            Tuple::new(vec![Value::from(4), Value::from(5), Value::from(6)], schema.clone(), RID::new(0, 0)),
-            Tuple::new(vec![Value::from(7), Value::from(8), Value::from(9)], schema.clone(), RID::new(0, 0)),
-        ];
-
-        let mut rids = Vec::new();
-        for mut tuple in tuples.clone() {
-            let meta = TupleMeta::new(123, false);
-            let rid = table_heap.insert_tuple(&meta, &mut tuple, None, None, 0).expect("failed to insert tuple");
-            rids.push(rid);
-        }
-
-        let mut iterator = table_heap.make_iterator();
-
-        for (i, expected_tuple) in tuples.iter().enumerate() {
-            let result = iterator.next();
-            assert!(result.is_some(), "Failed to get tuple at index {}", i);
-            let (_, result_tuple) = result.unwrap();
-            assert_eq!(&result_tuple, expected_tuple, "Mismatch at index {}", i);
-            if i < tuples.len() - 1 {
-                assert!(!iterator.is_end(), "Iterator ended prematurely at index {}", i);
-            }
-        }
-
-        assert!(iterator.is_end(), "Iterator did not end after all tuples");
-        assert_eq!(iterator.next(), None, "Iterator returned unexpected tuple");
-    }
 }

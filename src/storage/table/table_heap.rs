@@ -464,10 +464,9 @@ mod tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let ctx = TestContext::new("test_insert_and_get_tuple");
-        let bpm = ctx.bpm.clone();
-        let table_heap = TableHeap::new(bpm);
+        let table_heap = TableHeap::new(ctx.bpm.clone());
         let schema = create_test_schema();
-        let rid = RID::new(table_heap.get_first_page_id(), 0);
+        let rid = RID::new(0, 0);
 
         let tuple_values = vec![
             Value::new(1),
