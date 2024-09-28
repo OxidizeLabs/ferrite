@@ -95,7 +95,7 @@ impl TablePage {
     /// Inserts a tuple into the table.
     pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &mut Tuple) -> Option<RID> {
         if let Some(offset) = self.get_next_tuple_offset(meta, tuple) {
-            let rid = RID::new(self.next_page_id, offset);
+            let rid = RID::new(self.page_id, offset);
             tuple.set_rid(rid);
 
             self.tuple_info.insert(rid, (meta.clone(), tuple.clone()));
