@@ -36,7 +36,6 @@ impl TupleMeta {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tuple {
     values: Vec<Value>,
-    schema: Schema,
     rid: RID,
 }
 
@@ -55,7 +54,6 @@ impl Tuple {
 
         Self {
             values,
-            schema,
             rid,
         }
     }
@@ -82,10 +80,10 @@ impl Tuple {
     /// # Errors
     ///
     /// Returns a `TupleError` if deserialization fails.
-    pub fn deserialize_from(storage: &[u8], schema: Schema) -> Result<Self, TupleError> {
+    pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
         let (values, rid): (Vec<Value>, RID) = bincode::deserialize(storage)
             .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
-        Ok(Self { values, schema, rid })
+        Ok(Self { values, rid })
     }
 
     /// Returns the RID of the tuple.
@@ -128,10 +126,10 @@ impl Tuple {
     }
 
     /// Returns a string representation of the tuple.
-    pub fn to_string(&self) -> String {
+    pub fn to_string(&self, schema: Schema) -> String {
         self.values.iter().enumerate()
             .map(|(i, value)| {
-                let col_name = self.schema.get_column(i)
+                let col_name = schema.get_column(i)
                     .map(|col| col.get_name().to_string())
                     .unwrap_or_else(|| format!("Column_{}", i));
                 format!("{}: {}", col_name, value)
@@ -141,10 +139,10 @@ impl Tuple {
     }
 
     /// Returns a detailed string representation of the tuple.
-    pub fn to_string_detailed(&self) -> String {
+    pub fn to_string_detailed(&self, schema: Schema) -> String {
         self.values.iter().enumerate()
             .map(|(i, value)| {
-                let col_name = self.schema.get_column(i)
+                let col_name = schema.get_column(i)
                     .map(|col| col.get_name().to_string())
                     .unwrap_or_else(|| format!("Column_{}", i));
                 format!("{}: {:#}", col_name, value)
@@ -195,8 +193,9 @@ mod tests {
     #[test]
     fn test_tuple_to_string_detailed() {
         let (tuple, _) = create_sample_tuple();
+        let schema = create_sample_schema();
         let expected = "id: Integer(1), name: VarLen(\"Alice\"), age: Integer(30), is_student: Boolean(true)";
-        assert_eq!(tuple.to_string_detailed(), expected);
+        assert_eq!(tuple.to_string_detailed(schema), expected);
     }
 
     #[test]
@@ -206,7 +205,7 @@ mod tests {
         let mut storage = vec![0u8; 1000];
         let serialized_len = tuple.serialize_to(&mut storage)?;
 
-        let deserialized = Tuple::deserialize_from(&storage[..serialized_len], schema)?;
+        let deserialized = Tuple::deserialize_from(&storage[..serialized_len])?;
         assert_eq!(deserialized.get_rid(), tuple.get_rid());
         assert_eq!(deserialized.get_value(0), tuple.get_value(0));
         assert_eq!(deserialized.get_value(1), tuple.get_value(1));
@@ -235,8 +234,9 @@ mod tests {
     #[test]
     fn test_tuple_to_string() {
         let (tuple, _) = create_sample_tuple();
+        let schema = create_sample_schema();
         let expected = "id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(tuple.to_string(), expected);
+        assert_eq!(tuple.to_string(schema), expected);
     }
 
     #[test]

@@ -50,8 +50,13 @@
 //     }
 // }
 //
-// #[cfg(tests)]
+// #[cfg(test)]
 // mod tests {
+//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+//     use crate::catalogue::catalogue::Catalog;
+//     use crate::concurrency::lock_manager::LockManager;
+//     use crate::concurrency::transaction::Transaction;
+//     use crate::concurrency::transaction_manager::TransactionManager;
 //     use super::*;
 //
 //     struct MockExecutor {
@@ -96,36 +101,36 @@
 //         }
 //     }
 //
-//     // #[tests]
-//     // fn test_mock_executor() {
-//     //     let transaction = Arc::new(Transaction::default());
-//     //     let transaction_manager = Arc::new(TransactionManager::default());
-//     //     let catalog = Arc::new(Catalog::default());
-//     //     let buffer_pool_manager = Arc::new(BufferPoolManager::default());
-//     //     let lock_manager = Arc::new(LockManager::default());
-//     //
-//     //     let exec_ctx = Arc::new(ExecutorContext::new(
-//     //         transaction,
-//     //         transaction_manager,
-//     //         catalog,
-//     //         buffer_pool_manager,
-//     //         lock_manager,
-//     //     ));
-//     //
-//     //     let mut executor = MockExecutor::new(exec_ctx.clone());
-//     //
-//     //     executor.init();
-//     //     assert_eq!(executor.next(), None);
-//     //
-//     //     executor.data.push((Tuple::default(), RID::default()));
-//     //     executor.data.push((Tuple::default(), RID::default()));
-//     //
-//     //     executor.init();
-//     //     assert!(executor.next().is_some());
-//     //     assert!(executor.next().is_some());
-//     //     assert_eq!(executor.next(), None);
-//     //
-//     //     assert_eq!(executor.get_output_schema().column_count(), 0);
-//     //     assert!(Arc::ptr_eq(&executor.get_executor_context(), &exec_ctx));
-//     // }
+//     #[test]
+//     fn test_mock_executor() {
+//         let transaction = Arc::new(Transaction::default());
+//         let transaction_manager = Arc::new(TransactionManager::default());
+//         let catalog = Arc::new(Catalog::default());
+//         let buffer_pool_manager = Arc::new(BufferPoolManager::default());
+//         let lock_manager = Arc::new(LockManager::default());
+//
+//         let exec_ctx = Arc::new(ExecutorContext::new(
+//             transaction,
+//             transaction_manager,
+//             catalog,
+//             buffer_pool_manager,
+//             lock_manager,
+//         ));
+//
+//         let mut executor = MockExecutor::new(exec_ctx.clone());
+//
+//         executor.init();
+//         assert_eq!(executor.next(), None);
+//
+//         executor.data.push((Tuple::default(), RID::default()));
+//         executor.data.push((Tuple::default(), RID::default()));
+//
+//         executor.init();
+//         assert!(executor.next().is_some());
+//         assert!(executor.next().is_some());
+//         assert_eq!(executor.next(), None);
+//
+//         assert_eq!(executor.get_output_schema().column_count(), 0);
+//         assert!(Arc::ptr_eq(&executor.get_executor_context(), &exec_ctx));
+//     }
 // }

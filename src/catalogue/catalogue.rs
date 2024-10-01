@@ -29,7 +29,7 @@ pub struct TableInfo {
     /// The table name
     name: String,
     /// An owning pointer to the table heap
-    table: Arc<Mutex<TableHeap>>,
+    table: TableHeap,
     /// The table OID
     oid: TableOidT,
 }
@@ -77,7 +77,7 @@ impl TableInfo {
     /// - `name`: The table name.
     /// - `table`: An owning pointer to the table heap.
     /// - `oid`: The unique OID for the table.
-    pub fn new(schema: Schema, name: String, table: Arc<Mutex<TableHeap>>, oid: TableOidT) -> Self {
+    pub fn new(schema: Schema, name: String, table: TableHeap, oid: TableOidT) -> Self {
         TableInfo {
             schema,
             name,
@@ -94,9 +94,9 @@ impl TableInfo {
         self.oid
     }
 
-    // pub fn get_table_heap(&self) -> &TableHeap {
-    //     &self.table.lock()
-    // }
+    pub fn get_table_heap(&self) -> &TableHeap {
+        &self.table
+    }
 }
 
 impl IndexInfo {
@@ -186,7 +186,7 @@ impl Catalog {
             return None;
         }
 
-        let table = Arc::new(Mutex::new(TableHeap::new(self.bpm.clone())));
+        let table = TableHeap::new(self.bpm.clone());
         let table_oid = self.next_table_oid.add(1);
         let table_info = Box::new(TableInfo::new(
             schema,
