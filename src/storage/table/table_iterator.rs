@@ -4,8 +4,6 @@ use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
-use parking_lot::Mutex;
-use std::sync::Arc;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -35,7 +33,7 @@ impl<'a> TableIterator<'a> {
             if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
                 if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
                     table_page.access(|page| {
-                        if self.rid.get_slot_num() >= page.get_num_tuples() {
+                        if self.rid.get_slot_num() >= page.get_num_tuples() as u32 {
                             self.rid = RID::new(INVALID_PAGE_ID, 0);
                         }
                     });
@@ -72,7 +70,7 @@ impl<'a> TableIterator<'a> {
 
                     if self.rid == self.stop_at_rid {
                         self.rid = RID::new(INVALID_PAGE_ID, 0);
-                    } else if next_tuple_id >= page.get_num_tuples() {
+                    } else if next_tuple_id >= page.get_num_tuples() as u32 {
                         let next_page_id = page.get_next_page_id();
                         self.rid = RID::new(next_page_id, 0);
                     }
@@ -111,11 +109,16 @@ impl<'a> Iterator for TableIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_end() {
-            debug!("Iterator has reached the end.");
+            println!("Iterator has reached the end.");
             return None;
         }
 
+        println!("Attempting to get tuple with RID: {:?}", self.rid);
         let result = self.table_heap.get_tuple(self.rid);
+        match &result {
+            Ok(_) => println!("Successfully retrieved tuple"),
+            Err(e) => println!("Failed to retrieve tuple: {:?}", e),
+        }
         self.advance();
         Some(result.unwrap().clone())
     }
@@ -198,7 +201,6 @@ mod tests {
         assert_eq!(iterator.get_rid(), rid);
     }
 
-
     #[test]
     fn test_table_iterator_empty() {
         let table_heap = setup_test_table("test_table_iterator_empty");
@@ -211,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_table_iterator_single_tuple() {
-        let mut table_heap = setup_test_table("test_table_iterator_single_tuple");
+        let table_heap = setup_test_table("test_table_iterator_single_tuple");
         let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
         let rid = RID::new(0, 0);
         let mut tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);

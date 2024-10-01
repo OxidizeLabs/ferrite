@@ -3,29 +3,26 @@
 // use crate::concurrency::lock_manager::LockManager;
 // use crate::concurrency::transaction::Transaction;
 // use crate::execution::check_option::CheckOptions;
-// use crate::execution::executors::abstract_exector::AbstractExecutor;
-// use std::collections::VecDeque;
 // use std::fmt::Pointer;
 // use std::sync::Arc;
-// use parking_lot::Mutex;
 //
 // pub struct ExecutorContext {
-//     transaction: Arc<Mutex<Transaction>>,
-//     catalog: Arc<Mutex<Catalog>>,
+//     transaction: Transaction,
+//     catalog: Catalog,
 //     buffer_pool_manager: Arc<BufferPoolManager>,
 //     // transaction_manager: Arc<TransactionManager>,
-//     lock_manager: Arc<Mutex<LockManager>>,
+//     lock_manager: LockManager,
 //     // _nlj_check_exec_set: VecDeque<(dyn AbstractExecutor, dyn AbstractExecutor)>,
 //     _check_options: Arc<CheckOptions>,
 //     _is_delete: bool,
 // }
 //
 // impl ExecutorContext {
-//     pub fn new(transaction: Arc<Mutex<Transaction>>,
+//     pub fn new(transaction: Transaction,
 //                // transaction_manager: Arc<TransactionManager>,
-//                catalog: Arc<Mutex<Catalog>>,
+//                catalog: Catalog,
 //                buffer_pool_manager: Arc<BufferPoolManager>,
-//                lock_manager: Arc<Mutex<LockManager>>,
+//                lock_manager: LockManager,
 //     ) -> Self {
 //         Self {
 //             transaction,
@@ -40,11 +37,11 @@
 //     }
 //
 //     pub fn get_transaction(&self) -> &Transaction {
-//         &self.transaction.lock()
+//         &self.transaction
 //     }
 //
 //     pub fn get_catalogue(&self) -> &Catalog {
-//         &self.catalog.lock()
+//         &self.catalog
 //     }
 //
 //     pub fn get_buffer_pool_manager(&self) -> &BufferPoolManager {
@@ -56,7 +53,7 @@
 //     // }
 //
 //     pub fn get_lock_manager(&self) -> &LockManager {
-//         &self.lock_manager.lock()
+//         &self.lock_manager
 //     }
 //
 //     // pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(dyn AbstractExecutor, dyn AbstractExecutor)> {

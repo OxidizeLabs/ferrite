@@ -9,7 +9,7 @@ use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error, info};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -81,16 +81,8 @@ impl TableHeap {
             .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
 
         table_page_guard.access_mut(|table_page| {
-            table_page.insert_tuple(meta, tuple)
-                .map(|table_page_rid: RID| {
-                    debug!("Tuple inserted successfully");
-                    assert_ne!(table_page.get_next_tuple_offset(meta, tuple), None);
-                    assert_ne!(table_page.get_num_tuples(), 0);
-
-                    tuple.get_rid()
-                })
-                .ok_or_else(|| "Failed to insert tuple: Not enough space".to_string())
-        }).unwrap_or_else(|| Err("Failed to access table page".to_string()))
+            table_page.insert_tuple(meta, tuple).unwrap()
+        }).ok_or_else(|| "Failed to insert tuple".to_string())
     }
 
     /// Updates the meta of a tuple.
@@ -126,6 +118,7 @@ impl TableHeap {
     ///
     /// A pair containing the meta and tuple.
     pub fn get_tuple(&self, rid: RID) -> Result<(TupleMeta, Tuple), String> {
+        debug!("Attempting to get tuple with RID: {:?}", rid);
         let _read_guard = self.latch.read();
 
         let page_guard = self.bpm.fetch_page_guarded(rid.get_page_id()).ok_or_else(|| "Failed to fetch page".to_string())?;
@@ -181,7 +174,7 @@ impl TableHeap {
             if let Some(page_guard) = self.bpm.fetch_page_guarded(last_page_id) {
                 if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
                     table_page.access(|page| {
-                        RID::new(last_page_id, page.get_num_tuples())
+                        RID::new(last_page_id, page.get_num_tuples() as u32)
                     })
                 } else {
                     error!("Failed to convert to TablePage");
@@ -522,22 +515,29 @@ mod tests {
         let schema = create_test_schema();
 
         // Insert multiple tuples
+        let mut inserted_rids = Vec::new();
         for i in 0..5 {
             let tuple_values = vec![
                 Value::new(i),
                 Value::new(format!("Name{}", i)),
                 Value::new(20 + i),
             ];
-            let mut tuple = Tuple::new(tuple_values, schema.clone(), RID::new(0, 0));
+            let mut tuple = Tuple::new(tuple_values, schema.clone(), RID::new(0, i as u32));
             let meta = TupleMeta::new(0, false);
-            table_heap.insert_tuple(&meta, &mut tuple, None, None, 0)
+            let rid = table_heap.insert_tuple(&meta, &mut tuple, None, None, 0)
                 .expect("Failed to insert tuple");
+            inserted_rids.push(rid);
+            debug!("Inserted tuple with RID: {:?}", rid);
         }
 
-        let iterator = table_heap.make_iterator();
-        let tuples: Vec<(TupleMeta, Tuple)> = iterator.collect();
+        debug!("Table heap after insertions: {:?}", table_heap);
 
-        assert_eq!(tuples.len(), 5);
+        let iterator = table_heap.make_iterator();
+        let tuples = iterator.collect::<Vec<(TupleMeta, Tuple)>>();
+
+        debug!("Collected {} tuples", tuples.len());
+
+        assert_eq!(tuples.len(), 5, "Expected 5 tuples, but got {}", tuples.len());
         for (i, (meta, tuple)) in tuples.iter().enumerate() {
             assert_eq!(tuple.get_value(0), &Value::new(i as i32));
             assert_eq!(tuple.get_value(1), &Value::new(format!("Name{}", i)));

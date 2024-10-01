@@ -7,18 +7,18 @@
 // use crate::storage::table::table_heap::TableHeap;
 // use crate::storage::table::table_iterator::TableIterator;
 // use crate::storage::table::tuple::Tuple;
-// use std::sync::Arc;
 // use parking_lot::Mutex;
+// use std::sync::Arc;
 //
 // /// The SeqScanExecutor executor executes a sequential table scan.
-// pub struct SeqScanExecutor {
+// pub struct SeqScanExecutor<'a> {
 //     base: BaseExecutor,
 //     plan: Arc<SeqScanPlanNode>,
 //     table_heap: Option<TableHeap>,
-//     iter: Option<TableIterator>,
+//     iter: Option<TableIterator<'a>>,
 // }
 //
-// impl SeqScanExecutor {
+// impl SeqScanExecutor<'_> {
 //     /// Construct a new SeqScanExecutor instance.
 //     ///
 //     /// # Arguments
@@ -35,13 +35,13 @@
 //     }
 // }
 //
-// impl AbstractExecutor for SeqScanExecutor {
+// impl AbstractExecutor for SeqScanExecutor<'_> {
 //     fn init(&mut self) {
 //         let table_oid = self.plan.get_table_oid().to_string();
 //         let catalog = self.base.get_executor_context().get_catalogue();
 //         let table_info = catalog.get_table(table_oid.as_str()).expect("Table not found");
-//         self.table_heap = Some(*table_info.get_table_heap());
-//         self.iter = None
+//         self.table_heap = Some(table_info.get_table_heap());
+//         self.iter = TableIterator::new(self.table_heap)
 //     }
 //
 //     fn next(&mut self) -> Option<(Tuple, RID)> {
@@ -58,7 +58,7 @@
 //     }
 // }
 //
-// #[cfg(tests)]
+// #[cfg(test)]
 // mod tests {
 //     use super::*;
 //     use crate::buffer::buffer_pool_manager::BufferPoolManager;
@@ -72,10 +72,10 @@
 //     use crate::recovery::log_manager::LogManager;
 //     use crate::storage::disk::disk_manager::FileDiskManager;
 //     use crate::storage::disk::disk_scheduler::DiskScheduler;
+//     use crate::storage::table::tuple::TupleMeta;
 //     use crate::types_db::type_id::TypeId;
 //     use crate::types_db::value::Value;
-//     use parking_lot::{Mutex, RwLock};
-//     use crate::storage::table::tuple::TupleMeta;
+//     use parking_lot::RwLock;
 //
 //     fn create_test_table(catalog: &mut Catalog) -> (TableOidT, TableHeap) {
 //         let columns = vec![
@@ -106,7 +106,7 @@
 //         (table_oid, *table_heap)
 //     }
 //
-//     #[tests]
+//     #[test]
 //     fn test_seq_scan_executor() {
 //         let transaction = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 //         let transaction_manager = TransactionManager::new();

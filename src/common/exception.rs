@@ -28,6 +28,10 @@ pub enum TupleError {
     SerializationError(String),
     #[error("DeserializationError: {0}")]
     DeserializationError(String),
+    #[error("TupleID Out of Range")]
+    OutOfRange,
+    #[error("Tuple size mismatch")]
+    SizeMismatch,
 }
 
 #[derive(Error, Debug)]
@@ -56,6 +60,7 @@ pub enum PageError {
     DataTooLarge { data_size: usize, remaining_space: usize },
     InvalidOffset { offset: usize, page_size: usize },
     InvalidOperation,
+    TupleInvalid
 }
 
 #[derive(Error, Debug)]
@@ -120,6 +125,9 @@ impl Display for PageError {
             }
             PageError::InvalidOperation => {
                 write!(f, "Invalid Operation")
+            }
+            PageError::TupleInvalid => {
+                write!(f, "Invalid Tuple")
             }
         }
     }
