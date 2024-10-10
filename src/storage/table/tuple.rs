@@ -117,7 +117,7 @@ impl Tuple {
     }
 
     /// Creates a new tuple containing only the key attributes.
-    pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: &[u32]) -> Tuple {
+    pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: Vec<usize>) -> Tuple {
         let key_values: Vec<Value> = key_attrs.iter()
             .map(|&attr| self.get_value(attr as usize).clone())
             .collect();
@@ -224,7 +224,7 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
         let key_attrs = vec![0, 2];
-        let key_tuple = tuple.key_from_tuple(key_schema.clone(), &key_attrs);
+        let key_tuple = tuple.key_from_tuple(key_schema.clone(), key_attrs);
 
         assert_eq!(key_tuple.get_value(0), &Value::new(1));
         assert_eq!(key_tuple.get_value(1), &Value::new(30));
