@@ -1,151 +1,170 @@
-// use crate::catalogue::schema::Schema;
-// use crate::common::rid::RID;
-// use crate::execution::executor_context::ExecutorContext;
-// use crate::execution::executors::abstract_exector::{AbstractExecutor, BaseExecutor};
-// use crate::execution::plans::abstract_plan::AbstractPlanNode;
-// use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
-// use crate::storage::table::table_heap::TableHeap;
-// use crate::storage::table::table_iterator::TableIterator;
-// use crate::storage::table::tuple::Tuple;
-// use parking_lot::Mutex;
-// use std::sync::Arc;
-//
-// /// The SeqScanExecutor executor executes a sequential table scan.
-// pub struct SeqScanExecutor<'a> {
-//     base: BaseExecutor,
-//     plan: Arc<SeqScanPlanNode>,
-//     table_heap: Option<TableHeap>,
-//     iter: Option<TableIterator<'a>>,
-// }
-//
-// impl SeqScanExecutor<'_> {
-//     /// Construct a new SeqScanExecutor instance.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `exec_ctx` - The executor context
-//     /// * `plan` - The sequential scan plan to be executed
-//     pub fn new(exec_ctx: Arc<ExecutorContext>, plan: Arc<SeqScanPlanNode>) -> Self {
-//         Self {
-//             base: BaseExecutor::new(exec_ctx),
-//             plan,
-//             table_heap: None,
-//             iter: None,
-//         }
-//     }
-// }
-//
-// impl AbstractExecutor for SeqScanExecutor<'_> {
-//     fn init(&mut self) {
-//         let table_oid = self.plan.get_table_oid().to_string();
-//         let catalog = self.base.get_executor_context().get_catalogue();
-//         let table_info = catalog.get_table(table_oid.as_str()).expect("Table not found");
-//         self.table_heap = Some(table_info.get_table_heap());
-//         self.iter = TableIterator::new(self.table_heap)
-//     }
-//
-//     fn next(&mut self) -> Option<(Tuple, RID)> {
-//         unimplemented!()
-//         // self.iter.as_mut().and_then(|iter| iter.next())
-//     }
-//
-//     fn get_output_schema(&self) -> &Schema {
-//         self.plan.get_output_schema()
-//     }
-//
-//     fn get_executor_context(&self) -> &ExecutorContext {
-//         self.base.get_executor_context()
-//     }
-// }
-//
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
-//     use crate::buffer::lru_k_replacer::LRUKReplacer;
-//     use crate::catalogue::catalogue::Catalog;
-//     use crate::catalogue::column::Column;
-//     use crate::common::config::TableOidT;
-//     use crate::concurrency::lock_manager::LockManager;
-//     use crate::concurrency::transaction::{IsolationLevel, Transaction};
-//     use crate::concurrency::transaction_manager::TransactionManager;
-//     use crate::recovery::log_manager::LogManager;
-//     use crate::storage::disk::disk_manager::FileDiskManager;
-//     use crate::storage::disk::disk_scheduler::DiskScheduler;
-//     use crate::storage::table::tuple::TupleMeta;
-//     use crate::types_db::type_id::TypeId;
-//     use crate::types_db::value::Value;
-//     use parking_lot::RwLock;
-//
-//     fn create_test_table(catalog: &mut Catalog) -> (TableOidT, TableHeap) {
-//         let columns = vec![
-//             Column::new("id", TypeId::Integer),
-//             Column::new("name", TypeId::VarChar),
-//         ];
-//         let schema = Schema::new(columns);
-//         let transaction = Transaction::new(0, IsolationLevel::Serializable);
-//         let table_info = catalog.create_table(&transaction, "test_table", schema, true).unwrap();
-//         let table_oid = table_info.get_table_oidt();
-//         let table_heap = table_info.get_table_heap();
-//
-//         let rid1 = RID::new(1, 1);
-//         let rid2 = RID::new(1, 2);
-//         let rid3 = RID::new(1, 3);
-//
-//         // Insert some tests data
-//         let tuples = vec![
-//             Tuple::new(vec![Value::from(1), Value::from("Alice")], schema, rid1),
-//             Tuple::new(vec![Value::from(2), Value::from("Bob")], schema.clone(), rid2),
-//             Tuple::new(vec![Value::from(3), Value::from("Charlie")], schema, rid3),
-//         ];
-//         let tuple_meta = TupleMeta::new(0, false);
-//
-//         for mut tuple in tuples {
-//             table_heap.insert_tuple(&tuple_meta, &mut tuple, None, None, 0).expect("Failed to insert tuple");
-//         }
-//         (table_oid, *table_heap)
-//     }
-//
-//     #[test]
-//     fn test_seq_scan_executor() {
-//         let transaction = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
-//         let transaction_manager = TransactionManager::new();
-//         let disk_manager = Arc::new(FileDiskManager::new("seq_scan_executor.db".to_string(), "seq_scan_executor.log".to_string(), 100));
-//         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-//         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, 2)));
-//         let log_manager = Arc::new(Mutex::new(LogManager::new(disk_manager.clone())));
-//         let lock_manager = Arc::new(Mutex::new(LockManager::new(Arc::new(Mutex::new(transaction_manager)))));
-//         let bpm = Arc::new(BufferPoolManager::new(4, disk_scheduler, disk_manager, replacer));
-//         let mut catalog = Catalog::new(bpm.clone(), lock_manager.clone(), log_manager, 0, 0, Default::default(), Default::default(), Default::default(), Default::default());
-//
-//         let (table_oid, table_heap) = create_test_table(&mut catalog);
-//
-//         let exec_ctx = Arc::new(ExecutorContext::new(
-//             transaction,
-//             Arc::new(Mutex::new(catalog)),
-//             bpm,
-//             lock_manager,
-//         ));
-//
-//         let plan = Arc::new(SeqScanPlanNode::new(
-//             0,
-//             table_oid,
-//             None,
-//             table_heap.get_schema().clone(),
-//             None,
-//         ));
-//
-//         let mut executor = SeqScanExecutor::new(exec_ctx, plan);
-//
-//         executor.init();
-//
-//         let mut result_count = 0;
-//         while let Some((tuple, _)) = executor.next() {
-//             result_count += 1;
-//             assert!(tuple.get_value(executor.get_output_schema(), 0).is_integer());
-//             assert!(tuple.get_value(executor.get_output_schema(), 1).is_varchar());
-//         }
-//
-//         assert_eq!(result_count, 3);
-//     }
-// }
+use std::sync::Arc;
+use crate::execution::executor_context::ExecutorContext;
+use crate::execution::executors::abstract_exector::AbstractExecutor;
+use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
+use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::common::rid::RID;
+use crate::catalogue::schema::Schema;
+use crate::execution::plans::abstract_plan::AbstractPlanNode;
+
+pub struct SeqScanExecutor {
+    context: ExecutorContext,
+    plan: SeqScanPlanNode,
+    table_heap: Arc<TableHeap>,
+    initialized: bool,
+}
+
+impl SeqScanExecutor {
+    pub fn new(context: ExecutorContext, plan: SeqScanPlanNode) -> Self {
+        let table_oid = plan.get_table_oid();
+        let catalog = context.get_catalogue();
+        let table_info = catalog.get_table(table_oid.to_string().as_str()).expect("Table not found");
+        let table_heap = table_info.get_table_heap();
+
+        Self {
+            context,
+            plan,
+            table_heap,
+            initialized: false,
+        }
+    }
+
+    fn apply_predicate(&self, tuple: &Tuple) -> bool {
+        if let Some(predicate) = self.plan.get_filter_predicate() {
+            // Evaluate the predicate on the tuple
+            // This is a placeholder and should be replaced with actual predicate evaluation
+            true
+        } else {
+            true
+        }
+    }
+}
+
+impl AbstractExecutor for SeqScanExecutor {
+    fn init(&mut self) {
+        self.initialized = true;
+    }
+
+    fn next(&mut self) -> Option<(Tuple, RID)> {
+        if !self.initialized {
+            self.init();
+        }
+
+        let mut iter = self.table_heap.make_iterator();
+
+        while let Some((tuple_meta, tuple)) = iter.next() {
+            if self.apply_predicate(&tuple) {
+                return Some((tuple.clone(), tuple.get_rid()));
+            }
+        }
+
+        None
+    }
+
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
+    }
+
+    fn get_executor_context(&self) -> &ExecutorContext {
+        &self.context
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::types_db::type_id::TypeId;
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::execution::expressions::abstract_expression::Expression;
+    use crate::types_db::value::Value;
+    use crate::concurrency::transaction::{Transaction, IsolationLevel};
+    use crate::catalogue::catalogue::Catalog;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::recovery::log_manager::LogManager;
+    use std::sync::Arc;
+    use parking_lot::{RwLock, Mutex};
+
+    fn create_test_schema() -> Schema {
+        Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ])
+    }
+
+    #[test]
+    fn test_seq_scan_executor() {
+        let schema = create_test_schema();
+        let table_oid = 1;
+        let table_name = "test_table".to_string();
+        let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
+
+        let plan = SeqScanPlanNode::new(
+            schema,
+            table_oid,
+            table_name,
+            filter_predicate,
+        );
+
+        // Create mock objects for BufferPoolManager
+        let disk_manager = Arc::new(FileDiskManager::new("test_db.db".to_string(), "test_log.log".to_string(), 100));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
+
+        // Create BufferPoolManager
+        let buffer_pool_manager = Arc::new(BufferPoolManager::new(
+            10,  // pool_size
+            disk_scheduler,
+            disk_manager.clone(),
+            replacer,
+        ));
+
+        // Create TransactionManager and LockManager
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
+
+        // Create mock objects for ExecutorContext
+        let transaction = Transaction::new(0, IsolationLevel::Serializable);
+        let log_manager = Arc::new(parking_lot::Mutex::new(LogManager::new(disk_manager)));
+
+        let catalog = Catalog::new(
+            buffer_pool_manager.clone(),
+            lock_manager.clone(),
+            log_manager,
+            0, 0,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default()
+        );
+
+        // Create ExecutorContext with mock objects
+        let context = ExecutorContext::new(
+            transaction,
+            catalog,
+            buffer_pool_manager,
+            lock_manager,
+        );
+
+        let mut executor = SeqScanExecutor::new(context, plan);
+
+        executor.init();
+
+        // Test the executor
+        let mut result_count = 0;
+        while let Some((tuple, _)) = executor.next() {
+            // Add assertions to check the tuple contents
+            result_count += 1;
+        }
+
+        // Add assertions to check the result_count or other expected behaviors
+        assert!(result_count > 0, "Expected at least one tuple from the scan");
+    }
+}

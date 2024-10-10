@@ -29,7 +29,7 @@ pub struct TableInfo {
     /// The table name
     name: String,
     /// An owning pointer to the table heap
-    table: TableHeap,
+    table: Arc<TableHeap>,
     /// The table OID
     oid: TableOidT,
 }
@@ -59,7 +59,7 @@ pub struct IndexInfo {
 /// table creation, table lookup, index creation, and index lookup.
 pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
-    lock_manager: Arc<Mutex<LockManager>>,
+    lock_manager: Arc<LockManager>,
     log_manager: Arc<Mutex<LogManager>>,
     tables: HashMap<TableOidT, Box<TableInfo>>,
     table_names: HashMap<String, TableOidT>,
@@ -81,7 +81,7 @@ impl TableInfo {
         TableInfo {
             schema,
             name,
-            table,
+            table: Arc::new(table),
             oid,
         }
     }
@@ -94,8 +94,12 @@ impl TableInfo {
         self.oid
     }
 
-    pub fn get_table_heap(&self) -> &TableHeap {
-        &self.table
+    pub fn get_table_heap(&self) -> Arc<TableHeap> {
+        self.table.clone()
+    }
+
+    pub fn get_table_name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -143,7 +147,7 @@ impl Catalog {
     /// - `log_manager`: The log manager in use by the system.
     pub fn new(
         bpm: Arc<BufferPoolManager>,
-        lock_manager: Arc<Mutex<LockManager>>,
+        lock_manager: Arc<LockManager>,
         log_manager: Arc<Mutex<LogManager>>,
         next_index_oid: IndexOidT,
         next_table_oid: TableOidT,
