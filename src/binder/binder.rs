@@ -567,7 +567,7 @@ mod unit_tests {
             Arc<RwLock<DiskScheduler>>,
             Arc<BufferPoolManager>,
             Arc<Mutex<TransactionManager>>,
-            Arc<Mutex<LockManager>>,
+            Arc<LockManager>,
             Arc<Mutex<LogManager>>
         ) {
             const BUFFER_POOL_SIZE: usize = 10;
@@ -589,7 +589,7 @@ mod unit_tests {
 
             // Create TransactionManager with a placeholder Catalog
             let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
-            let lock_manager = Arc::new(Mutex::new(LockManager::new(Arc::clone(&transaction_manager))));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
             let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
 
             (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)

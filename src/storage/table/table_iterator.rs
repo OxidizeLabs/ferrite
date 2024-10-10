@@ -109,15 +109,15 @@ impl<'a> Iterator for TableIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_end() {
-            println!("Iterator has reached the end.");
+            debug!("Iterator has reached the end.");
             return None;
         }
 
-        println!("Attempting to get tuple with RID: {:?}", self.rid);
+        debug!("Attempting to get tuple with RID: {:?}", self.rid);
         let result = self.table_heap.get_tuple(self.rid);
         match &result {
-            Ok(_) => println!("Successfully retrieved tuple"),
-            Err(e) => println!("Failed to retrieve tuple: {:?}", e),
+            Ok(_) => debug!("Successfully retrieved tuple"),
+            Err(e) => debug!("Failed to retrieve tuple: {:?}", e),
         }
         self.advance();
         Some(result.unwrap().clone())
