@@ -230,20 +230,20 @@ impl Catalog {
         self.tables.get(&table_oid).map(|t| &**t)
     }
 
-    /// Creates a new index, populates existing data of the table, and returns its metadata.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction in which the table is being created.
-    /// - `index_name`: The name of the new index.
-    /// - `table_name`: The name of the table.
-    /// - `schema`: The schema of the table.
-    /// - `key_schema`: The schema of the key.
-    /// - `key_attrs`: Key attributes.
-    /// - `key_size`: Size of the key.
-    /// - `hash_function`: The hash function for the index.
-    ///
-    /// # Returns
-    /// A (non-owning) pointer to the metadata of the new table.
+    // /// Creates a new index, populates existing data of the table, and returns its metadata.
+    // ///
+    // /// # Parameters
+    // /// - `txn`: The transaction in which the table is being created.
+    // /// - `index_name`: The name of the new index.
+    // /// - `table_name`: The name of the table.
+    // /// - `schema`: The schema of the table.
+    // /// - `key_schema`: The schema of the key.
+    // /// - `key_attrs`: Key attributes.
+    // /// - `key_size`: Size of the key.
+    // /// - `hash_function`: The hash function for the index.
+    // ///
+    // /// # Returns
+    // /// A (non-owning) pointer to the metadata of the new table.
     // pub fn create_index<KeyType: Eq + Hash + Clone, ValueType, KeyComparator>(
     //     &mut self,
     //     txn: &Transaction,
@@ -268,7 +268,7 @@ impl Catalog {
     //
     //     let meta = Box::new(IndexMetadata::new(index_name.to_string(), table_name.to_string(), &schema, key_attrs, is_primary_key));
     //     let index: Box<dyn Index> = match index_type {
-    //         IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
+    //         // IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
     //         IndexType::BPlusTreeIndex => Box::new(BPlusTreeIndex::new(meta, self.bpm.clone(), ())),
     //         // IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
     //         // IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
@@ -278,8 +278,8 @@ impl Catalog {
     //     let table_meta = self.get_table(table_name)?;
     //     let mut iter = table_meta.table.make_iterator();
     //     while !iter.is_end() {
-    //         let (meta, tuple) = iter.get_tuple();
-    //         index.insert_entry(tuple.key_from_tuple(&schema, &key_schema, &key_attrs), tuple.get_rid(), txn);
+    //         let (meta, tuple) = iter.next().unwrap();
+    //         index.insert_entry(tuple.key_from_tuple(key_schema.clone(), key_attrs.clone()), tuple.get_rid(), txn);
     //         iter.next();
     //     }
     //
@@ -386,4 +386,172 @@ impl Display for IndexType {
         };
         write!(f, "{}", name)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use parking_lot::{Mutex, RwLock};
+    use std::fs;
+
+    struct TestContext {
+        db_file: String,
+        db_log: String,
+    }
+
+    impl TestContext {
+        fn new(db_name: &str) -> (
+            Arc<FileDiskManager>,
+            Arc<RwLock<DiskScheduler>>,
+            Arc<BufferPoolManager>,
+            Arc<Mutex<TransactionManager>>,
+            Arc<LockManager>,
+            Arc<Mutex<LogManager>>
+        ) {
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
+
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", db_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", db_name, timestamp);
+
+            let disk_manager = Arc::new(FileDiskManager::new(db_file, db_log_file, 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler.clone(),
+                disk_manager.clone(),
+                replacer,
+            ));
+
+            // Create TransactionManager with a placeholder Catalog
+            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+            let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+
+            (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)
+        }
+
+        fn cleanup(&self) {
+            let _ = fs::remove_file(&self.db_file);
+            let _ = fs::remove_file(&self.db_log);
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup();
+        }
+    }
+
+    fn create_catalog(
+        bpm: Arc<BufferPoolManager>,
+        lock_manager: Arc<LockManager>,
+        log_manager: Arc<Mutex<LogManager>>,
+    ) -> Catalog {
+        Catalog::new(
+            bpm,
+            lock_manager,
+            log_manager,
+            0,
+            0,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        )
+    }
+
+    #[test]
+    fn test_create_table() {
+        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_create_table");
+        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+
+        let table_info = catalog.create_table(&txn, "test_table", schema.clone(), true);
+        assert!(table_info.is_some());
+
+        let retrieved_info = catalog.get_table("test_table");
+        assert!(retrieved_info.is_some());
+        assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
+        assert_eq!(retrieved_info.unwrap().get_table_schema(), schema);
+    }
+
+    #[test]
+    fn test_get_table_by_oid() {
+        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_by_oid");
+        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+
+        let table_info = catalog.create_table(&txn, "test_table", schema.clone(), true).unwrap();
+        let table_oid = table_info.get_table_oidt();
+
+        let retrieved_info = catalog.get_table_by_oid(table_oid);
+        assert!(retrieved_info.is_some());
+        assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
+    }
+
+    #[test]
+    fn test_get_table_names() {
+        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_names");
+        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+
+        catalog.create_table(&txn, "table1", schema.clone(), true);
+        catalog.create_table(&txn, "table2", schema.clone(), true);
+
+        let table_names = catalog.get_table_names();
+        assert_eq!(table_names.len(), 2);
+        assert!(table_names.contains(&"table1".to_string()));
+        assert!(table_names.contains(&"table2".to_string()));
+    }
+
+    #[test]
+    fn test_get_table_schema() {
+        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_schema");
+        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+
+        catalog.create_table(&txn, "test_table", schema.clone(), true);
+
+        let retrieved_schema = catalog.get_table_schema("test_table");
+        assert!(retrieved_schema.is_some());
+        assert_eq!(retrieved_schema.unwrap(), schema);
+    }
+
+    // Additional tests for index-related functions can be added here
+    // once the create_index function is implemented
 }
