@@ -14,13 +14,31 @@ use crate::binder::statement::explain_statement::ExplainStatement;
 use crate::binder::statement::select_statement::SelectStatement;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
+use crate::catalogue::schema::Schema;
+use crate::common::logger::initialize_logger;
+use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::recovery::log_manager::LogManager;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value as DbValue;
+use chrono::Utc;
+use log::info;
+use parking_lot::{Mutex, RwLock};
 use sqlparser::ast::Value as SqlValue;
-use sqlparser::ast::{ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value, WindowSpec, With};
+use sqlparser::ast::{
+    ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr,
+    Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value, WindowSpec, With,
+};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
+use std::fs;
 use std::sync::Arc;
 
 pub struct Binder {
@@ -40,19 +58,28 @@ impl Binder {
         }
     }
 
-    pub fn parse_and_bind(&mut self, query: &str) -> Result<Vec<Box<dyn AnyBoundStatement>>, String> {
+    pub fn parse_and_bind(
+        &mut self,
+        query: &str,
+    ) -> Result<Vec<Box<dyn AnyBoundStatement>>, String> {
         let dialect = GenericDialect {};
         let ast = match Parser::parse_sql(&dialect, query) {
             Ok(ast) => ast,
             Err(e) => return Err(format!("SQL parsing error: {}", e)),
         };
 
-        ast.iter().map(|stmt| {
-            self.bind_statement(stmt).map_err(|e| format!("Statement binding error: {}", e))
-        }).collect()
+        ast.iter()
+            .map(|stmt| {
+                self.bind_statement(stmt)
+                    .map_err(|e| format!("Statement binding error: {}", e))
+            })
+            .collect()
     }
 
-    pub fn bind_statement(&mut self, stmt: &Statement) -> Result<Box<dyn AnyBoundStatement>, String> {
+    pub fn bind_statement(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<dyn AnyBoundStatement>, String> {
         match stmt {
             Statement::Query(query) => Ok(Box::new(self.bind_select(query)?)),
             Statement::Insert { .. } => Ok(Box::new(self.bind_insert(stmt)?)),
@@ -79,12 +106,18 @@ impl Binder {
         unimplemented!()
     }
 
-    pub fn bind_explain(&mut self, stmt: &ExplainStatement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_explain(
+        &mut self,
+        stmt: &ExplainStatement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implementation here
         unimplemented!("bind_explain not implemented")
     }
 
-    pub fn bind_create(&mut self, stmt: &CreateStatement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_create(
+        &mut self,
+        stmt: &CreateStatement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implementation here
         unimplemented!("bind_create not implemented")
     }
@@ -94,27 +127,43 @@ impl Binder {
         unimplemented!("bind_column_definition not implemented")
     }
 
-    pub fn bind_subquery(&mut self, node: &Query, alias: &str) -> Result<Box<BoundSubqueryRef>, String> {
+    pub fn bind_subquery(
+        &mut self,
+        node: &Query,
+        alias: &str,
+    ) -> Result<Box<BoundSubqueryRef>, String> {
         // Implementation here
         unimplemented!("bind_subquery not implemented")
     }
 
-    pub fn bind_where(&mut self, root: &Option<Expr>) -> Result<Option<Box<dyn BoundExpression>>, String> {
+    pub fn bind_where(
+        &mut self,
+        root: &Option<Expr>,
+    ) -> Result<Option<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_where not implemented")
     }
 
-    pub fn bind_group_by(&mut self, list: &[Expr]) -> Result<Vec<Box<dyn BoundExpression>>, String> {
+    pub fn bind_group_by(
+        &mut self,
+        list: &[Expr],
+    ) -> Result<Vec<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_group_by not implemented")
     }
 
-    pub fn bind_having(&mut self, root: &Option<Expr>) -> Result<Option<Box<dyn BoundExpression>>, String> {
+    pub fn bind_having(
+        &mut self,
+        root: &Option<Expr>,
+    ) -> Result<Option<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_having not implemented")
     }
 
-    pub fn bind_expression_list(&mut self, list: &[Expr]) -> Result<Vec<Box<dyn BoundExpression>>, String> {
+    pub fn bind_expression_list(
+        &mut self,
+        list: &[Expr],
+    ) -> Result<Vec<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_expression_list not implemented")
     }
@@ -129,7 +178,10 @@ impl Binder {
         unimplemented!("bind_column_ref not implemented")
     }
 
-    pub fn bind_res_target(&mut self, root: &SelectItem) -> Result<Box<dyn BoundExpression>, String> {
+    pub fn bind_res_target(
+        &mut self,
+        root: &SelectItem,
+    ) -> Result<Box<dyn BoundExpression>, String> {
         // Implementation here
         unimplemented!("bind_res_target not implemented")
     }
@@ -144,12 +196,21 @@ impl Binder {
         unimplemented!("bind_func_call not implemented")
     }
 
-    pub fn bind_window_frame(&mut self, window_spec: &WindowSpec, expr: Box<BoundWindow>) -> Result<Box<BoundWindow>, String> {
+    pub fn bind_window_frame(
+        &mut self,
+        window_spec: &WindowSpec,
+        expr: Box<BoundWindow>,
+    ) -> Result<Box<BoundWindow>, String> {
         // Implementation here
         unimplemented!("bind_window_frame not implemented")
     }
 
-    pub fn bind_window_expression(&mut self, func_name: &str, children: Vec<Box<dyn BoundExpression>>, node: &WindowSpec) -> Result<Box<BoundWindow>, String> {
+    pub fn bind_window_expression(
+        &mut self,
+        func_name: &str,
+        children: Vec<Box<dyn BoundExpression>>,
+        node: &WindowSpec,
+    ) -> Result<Box<BoundWindow>, String> {
         // Implementation here
         unimplemented!("bind_window_expression not implemented")
     }
@@ -164,7 +225,10 @@ impl Binder {
         unimplemented!("bind_bool_expr not implemented")
     }
 
-    pub fn bind_range_var(&mut self, table_ref: &TableFactor) -> Result<Box<dyn BoundTableRef>, String> {
+    pub fn bind_range_var(
+        &mut self,
+        table_ref: &TableFactor,
+    ) -> Result<Box<dyn BoundTableRef>, String> {
         // Implementation here
         unimplemented!("bind_range_var not implemented")
     }
@@ -179,42 +243,72 @@ impl Binder {
         unimplemented!("bind_join not implemented")
     }
 
-    pub fn get_all_columns(&self, scope: &dyn BoundTableRef) -> Result<Vec<Box<dyn BoundExpression>>, String> {
+    pub fn get_all_columns(
+        &self,
+        scope: &dyn BoundTableRef,
+    ) -> Result<Vec<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("get_all_columns not implemented")
     }
 
-    pub fn resolve_column(&self, scope: &dyn BoundTableRef, col_name: &[String]) -> Result<Box<dyn BoundExpression>, String> {
+    pub fn resolve_column(
+        &self,
+        scope: &dyn BoundTableRef,
+        col_name: &[String],
+    ) -> Result<Box<dyn BoundExpression>, String> {
         // Implementation here
         unimplemented!("resolve_column not implemented")
     }
 
-    pub fn resolve_column_internal(&self, table_ref: &dyn BoundTableRef, col_name: &[String]) -> Result<Box<dyn BoundExpression>, String> {
+    pub fn resolve_column_internal(
+        &self,
+        table_ref: &dyn BoundTableRef,
+        col_name: &[String],
+    ) -> Result<Box<dyn BoundExpression>, String> {
         // Implementation here
         unimplemented!("resolve_column_internal not implemented")
     }
 
-    pub fn resolve_column_ref_from_select_list(&self, subquery_select_list: &[Vec<String>], col_name: &[String]) -> Result<Box<BoundColumnRef>, String> {
+    pub fn resolve_column_ref_from_select_list(
+        &self,
+        subquery_select_list: &[Vec<String>],
+        col_name: &[String],
+    ) -> Result<Box<BoundColumnRef>, String> {
         // Implementation here
         unimplemented!("resolve_column_ref_from_select_list not implemented")
     }
 
-    pub fn resolve_column_ref_from_base_table_ref(&self, table_ref: &BoundBaseTableRef, col_name: &[String]) -> Result<Box<BoundColumnRef>, String> {
+    pub fn resolve_column_ref_from_base_table_ref(
+        &self,
+        table_ref: &BoundBaseTableRef,
+        col_name: &[String],
+    ) -> Result<Box<BoundColumnRef>, String> {
         // Implementation here
         unimplemented!("resolve_column_ref_from_base_table_ref not implemented")
     }
 
-    pub fn resolve_column_ref_from_subquery_ref(&self, subquery_ref: &BoundSubqueryRef, alias: &str, col_name: &[String]) -> Result<Box<BoundColumnRef>, String> {
+    pub fn resolve_column_ref_from_subquery_ref(
+        &self,
+        subquery_ref: &BoundSubqueryRef,
+        alias: &str,
+        col_name: &[String],
+    ) -> Result<Box<BoundColumnRef>, String> {
         // Implementation here
         unimplemented!("resolve_column_ref_from_subquery_ref not implemented")
     }
 
-    pub fn bind_limit_count(&mut self, root: &Option<Expr>) -> Result<Option<Box<dyn BoundExpression>>, String> {
+    pub fn bind_limit_count(
+        &mut self,
+        root: &Option<Expr>,
+    ) -> Result<Option<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_limit_count not implemented")
     }
 
-    pub fn bind_limit_offset(&mut self, root: &Option<Expr>) -> Result<Option<Box<dyn BoundExpression>>, String> {
+    pub fn bind_limit_offset(
+        &mut self,
+        root: &Option<Expr>,
+    ) -> Result<Option<Box<dyn BoundExpression>>, String> {
         // Implementation here
         unimplemented!("bind_limit_offset not implemented")
     }
@@ -234,17 +328,26 @@ impl Binder {
         unimplemented!("bind_cte not implemented")
     }
 
-    pub fn bind_variable_set(&mut self, stmt: &Statement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_variable_set(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implementation here
         unimplemented!("bind_variable_set not implemented")
     }
 
-    pub fn bind_variable_show(&mut self, stmt: &Statement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_variable_show(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implementation here
         unimplemented!("bind_variable_show not implemented")
     }
 
-    pub fn bind_transaction(&mut self, stmt: &Statement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_transaction(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implementation here
         unimplemented!("bind_transaction not implemented")
     }
@@ -262,25 +365,32 @@ impl Binder {
         let select_list = self.bind_select_list(&select.projection)?;
 
         // Bind the WHERE clause
-        let where_clause = select.selection.as_ref().map(|expr| self.bind_expression(expr)).transpose()?;
+        let where_clause = select
+            .selection
+            .as_ref()
+            .map(|expr| self.bind_expression(expr))
+            .transpose()?;
 
         // Bind the GROUP BY clause
         let group_by = match &select.group_by {
-            GroupByExpr::All(modifiers) => {
-                self.bind_group_by_all(modifiers)?
-            }
-            GroupByExpr::Expressions(exprs, ..) => {
-                exprs.iter().map(|expr| self.bind_expression(expr)).collect::<Result<Vec<_>, _>>()?
-            }
+            GroupByExpr::All(modifiers) => self.bind_group_by_all(modifiers)?,
+            GroupByExpr::Expressions(exprs, ..) => exprs
+                .iter()
+                .map(|expr| self.bind_expression(expr))
+                .collect::<Result<Vec<_>, _>>()?,
         };
 
         // Bind the HAVING clause
-        let having = select.having.as_ref().map(|expr| self.bind_expression(expr)).transpose()?;
+        let having = select
+            .having
+            .as_ref()
+            .map(|expr| self.bind_expression(expr))
+            .transpose()?;
 
         // Bind the ORDER BY clause
         let sort = match &query.order_by {
             Some(order_by) => self.bind_order_by(&order_by.exprs)?,
-            None => vec![]
+            None => vec![],
         };
 
         // Bind the LIMIT and OFFSET
@@ -331,7 +441,10 @@ impl Binder {
         unimplemented!()
     }
 
-    pub fn bind_create_table(&mut self, stmt: &Statement) -> Result<Box<dyn BoundStatement>, String> {
+    pub fn bind_create_table(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<dyn BoundStatement>, String> {
         // Implement create table binding logic
         unimplemented!()
     }
@@ -356,8 +469,14 @@ impl Binder {
         }
     }
 
-    fn bind_select_list(&mut self, projection: &[SelectItem]) -> Result<Vec<Box<dyn BoundExpression>>, String> {
-        projection.iter().map(|item| self.bind_select_item(item)).collect()
+    fn bind_select_list(
+        &mut self,
+        projection: &[SelectItem],
+    ) -> Result<Vec<Box<dyn BoundExpression>>, String> {
+        projection
+            .iter()
+            .map(|item| self.bind_select_item(item))
+            .collect()
     }
 
     fn bind_select_item(&mut self, item: &SelectItem) -> Result<Box<dyn BoundExpression>, String> {
@@ -421,28 +540,31 @@ impl Binder {
         self.bind_expression(&offset.value)
     }
 
-    fn bind_base_table_ref(&mut self, table_name: String, alias: Option<String>) -> Result<Box<dyn BoundTableRef>, String> {
+    fn bind_base_table_ref(
+        &mut self,
+        table_name: String,
+        alias: Option<String>,
+    ) -> Result<Box<dyn BoundTableRef>, String> {
         // Look up the table in the catalog
-        let table_info = self.catalog.get_table(&table_name)
+        let table_info = self
+            .catalog
+            .get_table(&table_name)
             .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))?;
 
         let table_oid = table_info.get_table_oidt();
 
         let schema = table_info.get_table_schema();
 
-
         // Create a BoundBaseTableRef
-        let bound_table = BoundBaseTableRef::new(
-            table_name,
-            table_oid,
-            alias,
-            schema,
-        );
+        let bound_table = BoundBaseTableRef::new(table_name, table_oid, alias, schema);
 
         Ok(Box::new(bound_table))
     }
 
-    fn bind_group_by_all(&mut self, modifiers: &[GroupByWithModifier]) -> Result<Vec<Box<dyn BoundExpression>>, String> {
+    fn bind_group_by_all(
+        &mut self,
+        modifiers: &[GroupByWithModifier],
+    ) -> Result<Vec<Box<dyn BoundExpression>>, String> {
         let mut bound_exprs = Vec::new();
 
         for modifier in modifiers {
@@ -462,11 +584,20 @@ impl Binder {
         Ok(bound_exprs)
     }
 
-    fn bind_order_by(&mut self, order_by: &[OrderByExpr]) -> Result<Vec<Box<BoundOrderBy>>, String> {
-        order_by.iter().map(|expr| self.bind_single_order_by(expr)).collect()
+    fn bind_order_by(
+        &mut self,
+        order_by: &[OrderByExpr],
+    ) -> Result<Vec<Box<BoundOrderBy>>, String> {
+        order_by
+            .iter()
+            .map(|expr| self.bind_single_order_by(expr))
+            .collect()
     }
 
-    fn bind_single_order_by(&mut self, order_by_expr: &OrderByExpr) -> Result<Box<BoundOrderBy>, String> {
+    fn bind_single_order_by(
+        &mut self,
+        order_by_expr: &OrderByExpr,
+    ) -> Result<Box<BoundOrderBy>, String> {
         let bound_expr = self.bind_expression(&order_by_expr.expr)?;
         let order_type = if order_by_expr.asc.unwrap_or(true) {
             OrderByType::Asc
@@ -479,11 +610,14 @@ impl Binder {
 
     fn bind_ctes(&mut self, with: &Option<With>) -> Result<CTEList, String> {
         match with {
-            Some(with) => {
-                with.cte_tables.iter().map(|cte| {
+            Some(with) => with
+                .cte_tables
+                .iter()
+                .map(|cte| {
                     let bound_stmt = self.bind_select(&cte.query)?;
 
-                    let subquery = bound_stmt.as_any()
+                    let subquery = bound_stmt
+                        .as_any()
                         .downcast_ref::<SelectStatement>()
                         .ok_or_else(|| "Expected a SELECT statement for CTE".to_string())?;
 
@@ -492,13 +626,16 @@ impl Binder {
                         vec![],
                         cte.alias.to_string(),
                     )))
-                }).collect()
-            }
+                })
+                .collect(),
             None => Ok(vec![]),
         }
     }
 
-    fn bind_table_reference(&mut self, table_ref: &TableWithJoins) -> Result<Box<dyn BoundTableRef>, String> {
+    fn bind_table_reference(
+        &mut self,
+        table_ref: &TableWithJoins,
+    ) -> Result<Box<dyn BoundTableRef>, String> {
         // Implement table reference binding logic
         unimplemented!()
     }
@@ -538,94 +675,106 @@ impl<'a> Drop for ContextGuard<'a> {
     }
 }
 
+pub struct TestContext {
+    bpm: Arc<BufferPoolManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
+    lock_manager: Arc<LockManager>,
+    log_manager: Arc<Mutex<LogManager>>,
+    db_file: String,
+    db_log_file: String,
+}
+
+impl TestContext {
+    pub fn new(test_name: &str) -> Self {
+        initialize_logger();
+        const BUFFER_POOL_SIZE: usize = 5;
+        const K: usize = 2;
+
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+        let disk_manager = Arc::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        ));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+        let bpm = Arc::new(BufferPoolManager::new(
+            BUFFER_POOL_SIZE,
+            disk_scheduler,
+            disk_manager.clone(),
+            replacer.clone(),
+        ));
+
+        // Create TransactionManager with a placeholder Catalog
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+
+        Self {
+            bpm,
+            transaction_manager,
+            lock_manager,
+            log_manager,
+            db_file,
+            db_log_file,
+        }
+    }
+
+    pub fn bpm(&self) -> Arc<BufferPoolManager> {
+        Arc::clone(&self.bpm)
+    }
+
+    pub fn lock_manager(&self) -> Arc<LockManager> {
+        Arc::clone(&self.lock_manager)
+    }
+
+    pub fn log_manager(&self) -> Arc<Mutex<LogManager>> {
+        Arc::clone(&self.log_manager)
+    }
+
+    fn cleanup(&self) {
+        let _ = fs::remove_file(&self.db_file);
+        let _ = fs::remove_file(&self.db_log_file);
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::schema::Schema;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
-    use log::info;
-    use parking_lot::{Mutex, RwLock};
-    use std::fs;
-
-    struct TestContext {
-        db_file: String,
-        db_log: String,
-    }
-
-    impl TestContext {
-        fn new(db_name: &str) -> (
-            Arc<FileDiskManager>,
-            Arc<RwLock<DiskScheduler>>,
-            Arc<BufferPoolManager>,
-            Arc<Mutex<TransactionManager>>,
-            Arc<LockManager>,
-            Arc<Mutex<LogManager>>
-        ) {
-            const BUFFER_POOL_SIZE: usize = 10;
-            const K: usize = 2;
-
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", db_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", db_name, timestamp);
-
-            let disk_manager = Arc::new(FileDiskManager::new(db_file, db_log_file, 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_scheduler.clone(),
-                disk_manager.clone(),
-                replacer,
-            ));
-
-            // Create TransactionManager with a placeholder Catalog
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-            let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
-
-            (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
 
     #[test]
     fn parse_and_bind_select() {
         let ctx = TestContext::new("parse_and_bind_select");
-        let (
-            disk_manager,
-            disk_scheduler,
-            bpm,
-            transaction_manager,
-            lock_manager,
-            log_manager
-        ) = ctx;
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
 
         // Create the real Catalog
         let txn = Transaction::new(0, IsolationLevel::Serializable);
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar)
+            Column::new("name", TypeId::VarChar),
         ]);
-        let mut catalog = Catalog::new(bpm, lock_manager.clone(), log_manager, 0, 0, Default::default(), Default::default(), Default::default(), Default::default());
+        let mut catalog = Catalog::new(
+            bpm,
+            lock_manager.clone(),
+            log_manager,
+            0,
+            0,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
         catalog.create_table(&txn, "users", schema, true);
 
         // Now we can create the Binder with the Catalog

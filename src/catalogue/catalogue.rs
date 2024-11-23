@@ -1,19 +1,26 @@
-use core::fmt;
-use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::hash::Hash;
-use std::ops::Add;
-use std::sync::Arc;
-
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::lru_k_replacer::LRUKReplacer;
+use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
+use crate::common::logger::initialize_logger;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::Transaction;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
+use crate::types_db::type_id::TypeId;
+use chrono::Utc;
+use core::fmt;
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::fs;
+use std::ops::Add;
+use std::sync::Arc;
 
 pub enum IndexType {
     BPlusTreeIndex,
@@ -77,11 +84,11 @@ impl TableInfo {
     /// - `name`: The table name.
     /// - `table`: An owning pointer to the table heap.
     /// - `oid`: The unique OID for the table.
-    pub fn new(schema: Schema, name: String, table: TableHeap, oid: TableOidT) -> Self {
+    pub fn new(schema: Schema, name: String, table: Arc<TableHeap>, oid: TableOidT) -> Self {
         TableInfo {
             schema,
             name,
-            table: Arc::new(table),
+            table,
             oid,
         }
     }
@@ -186,22 +193,30 @@ impl Catalog {
         schema: Schema,
         create_table_heap: bool,
     ) -> Option<&TableInfo> {
+        // Check if table already exists
         if self.table_names.contains_key(table_name) {
             return None;
         }
 
-        let table = TableHeap::new(self.bpm.clone());
+        // Create new table heap
+        let table = Arc::new(TableHeap::new(self.bpm.clone()));
+
+        // Generate new table OID
         let table_oid = self.next_table_oid.add(1);
+
+        // Create table info
         let table_info = Box::new(TableInfo::new(
             schema,
             table_name.to_string(),
             table,
-            table_oid.into(),
+            table_oid,
         ));
 
+        // Add to catalog maps
         self.table_names.insert(table_name.to_string(), table_oid);
         self.tables.insert(table_oid, table_info);
 
+        // Return reference to the newly created table info
         self.tables.get(&table_oid).map(|t| &**t)
     }
 
@@ -346,7 +361,7 @@ impl Catalog {
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&IndexInfo> {
         self.table_names
             .get(table_name)
-            .and_then(|&table_oid| {
+            .and_then(|&_table_oid| {
                 self.index_names.get(table_name).map(|table_indexes| {
                     table_indexes
                         .values()
@@ -367,11 +382,11 @@ impl Catalog {
     }
 
     pub fn get_table_schema(&self, table_name: &str) -> Option<Schema> {
-        self.table_names
-            .get(table_name)
-            .and_then(|&table_oid| {
-                self.tables.get(&table_oid).map(|table_schema| table_schema.get_table_schema())
-            })
+        self.table_names.get(table_name).and_then(|&table_oid| {
+            self.tables
+                .get(&table_oid)
+                .map(|table_schema| table_schema.get_table_schema())
+        })
     }
 }
 
@@ -388,74 +403,81 @@ impl Display for IndexType {
     }
 }
 
+pub struct TestContext {
+    bpm: Arc<BufferPoolManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
+    lock_manager: Arc<LockManager>,
+    log_manager: Arc<Mutex<LogManager>>,
+    db_file: String,
+    db_log_file: String,
+}
+
+impl TestContext {
+    pub fn new(test_name: &str) -> Self {
+        initialize_logger();
+        const BUFFER_POOL_SIZE: usize = 5;
+        const K: usize = 2;
+
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+        let disk_manager = Arc::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        ));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+        let bpm = Arc::new(BufferPoolManager::new(
+            BUFFER_POOL_SIZE,
+            disk_scheduler,
+            disk_manager.clone(),
+            replacer.clone(),
+        ));
+
+        // Create TransactionManager with a placeholder Catalog
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+
+        Self {
+            bpm,
+            transaction_manager,
+            lock_manager,
+            log_manager,
+            db_file,
+            db_log_file,
+        }
+    }
+
+    pub fn bpm(&self) -> Arc<BufferPoolManager> {
+        Arc::clone(&self.bpm)
+    }
+
+    pub fn lock_manager(&self) -> Arc<LockManager> {
+        Arc::clone(&self.lock_manager)
+    }
+
+    pub fn log_manager(&self) -> Arc<Mutex<LogManager>> {
+        Arc::clone(&self.log_manager)
+    }
+
+    fn cleanup(&self) {
+        let _ = fs::remove_file(&self.db_file);
+        let _ = fs::remove_file(&self.db_log_file);
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
-    use std::fs;
-
-    struct TestContext {
-        db_file: String,
-        db_log: String,
-    }
-
-    impl TestContext {
-        fn new(db_name: &str) -> (
-            Arc<FileDiskManager>,
-            Arc<RwLock<DiskScheduler>>,
-            Arc<BufferPoolManager>,
-            Arc<Mutex<TransactionManager>>,
-            Arc<LockManager>,
-            Arc<Mutex<LogManager>>
-        ) {
-            const BUFFER_POOL_SIZE: usize = 10;
-            const K: usize = 2;
-
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", db_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", db_name, timestamp);
-
-            let disk_manager = Arc::new(FileDiskManager::new(db_file, db_log_file, 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_scheduler.clone(),
-                disk_manager.clone(),
-                replacer,
-            ));
-
-            // Create TransactionManager with a placeholder Catalog
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-            let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
-
-            (disk_manager, disk_scheduler, bpm, transaction_manager, lock_manager, log_manager)
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
 
     fn create_catalog(
         bpm: Arc<BufferPoolManager>,
@@ -477,7 +499,11 @@ mod tests {
 
     #[test]
     fn test_create_table() {
-        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_create_table");
+        let ctx = TestContext::new("test_create_table");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
+
         let mut catalog = create_catalog(bpm, lock_manager, log_manager);
 
         let schema = Schema::new(vec![
@@ -497,7 +523,11 @@ mod tests {
 
     #[test]
     fn test_get_table_by_oid() {
-        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_by_oid");
+        let ctx = TestContext::new("test_get_table_by_oid");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
+
         let mut catalog = create_catalog(bpm, lock_manager, log_manager);
 
         let schema = Schema::new(vec![
@@ -506,17 +536,26 @@ mod tests {
         ]);
         let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
 
-        let table_info = catalog.create_table(&txn, "test_table", schema.clone(), true).unwrap();
+        let table_info = catalog
+            .create_table(&txn, "test_get_table_by_oid", schema.clone(), true)
+            .unwrap();
         let table_oid = table_info.get_table_oidt();
 
         let retrieved_info = catalog.get_table_by_oid(table_oid);
         assert!(retrieved_info.is_some());
-        assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
+        assert_eq!(
+            retrieved_info.unwrap().get_table_name(),
+            "test_get_table_by_oid"
+        );
     }
 
     #[test]
     fn test_get_table_names() {
-        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_names");
+        let ctx = TestContext::new("test_get_table_names");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
+
         let mut catalog = create_catalog(bpm, lock_manager, log_manager);
 
         let schema = Schema::new(vec![
@@ -525,18 +564,22 @@ mod tests {
         ]);
         let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
 
-        catalog.create_table(&txn, "table1", schema.clone(), true);
-        catalog.create_table(&txn, "table2", schema.clone(), true);
+        catalog.create_table(&txn, "test_get_table_names_a", schema.clone(), true);
+        catalog.create_table(&txn, "test_get_table_names_b", schema.clone(), true);
 
         let table_names = catalog.get_table_names();
         assert_eq!(table_names.len(), 2);
-        assert!(table_names.contains(&"table1".to_string()));
-        assert!(table_names.contains(&"table2".to_string()));
+        assert!(table_names.contains(&"test_get_table_names_a".to_string()));
+        assert!(table_names.contains(&"test_get_table_names_b".to_string()));
     }
 
     #[test]
     fn test_get_table_schema() {
-        let (_, _, bpm, _, lock_manager, log_manager) = TestContext::new("test_get_table_schema");
+        let ctx = TestContext::new("test_get_table_schema");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
+
         let mut catalog = create_catalog(bpm, lock_manager, log_manager);
 
         let schema = Schema::new(vec![
@@ -545,9 +588,9 @@ mod tests {
         ]);
         let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
 
-        catalog.create_table(&txn, "test_table", schema.clone(), true);
+        catalog.create_table(&txn, "test_get_table_schema", schema.clone(), true);
 
-        let retrieved_schema = catalog.get_table_schema("test_table");
+        let retrieved_schema = catalog.get_table_schema("test_get_table_schema");
         assert!(retrieved_schema.is_some());
         assert_eq!(retrieved_schema.unwrap(), schema);
     }
