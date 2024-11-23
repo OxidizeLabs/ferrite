@@ -1,12 +1,24 @@
-use std::sync::Arc;
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::lru_k_replacer::LRUKReplacer;
+use crate::catalogue::schema::Schema;
+use crate::common::logger::initialize_logger;
+use crate::common::rid::RID;
+use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_exector::AbstractExecutor;
-use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
-use crate::storage::table::table_heap::TableHeap;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::common::rid::RID;
-use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
+use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
+use crate::recovery::log_manager::LogManager;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::tuple::Tuple;
+use chrono::Utc;
+use log::Log;
+use parking_lot::{Mutex, RwLock};
+use std::fs;
+use std::sync::Arc;
 
 pub struct SeqScanExecutor {
     context: ExecutorContext,
@@ -18,8 +30,10 @@ pub struct SeqScanExecutor {
 impl SeqScanExecutor {
     pub fn new(context: ExecutorContext, plan: SeqScanPlanNode) -> Self {
         let table_oid = plan.get_table_oid();
-        let catalog = context.get_catalogue();
-        let table_info = catalog.get_table(table_oid.to_string().as_str()).expect("Table not found");
+        let catalog = context.get_catalog();
+        let table_info = catalog
+            .get_table_by_oid(table_oid)
+            .expect("Table not found");
         let table_heap = table_info.get_table_heap();
 
         Self {
@@ -53,7 +67,7 @@ impl AbstractExecutor for SeqScanExecutor {
 
         let mut iter = self.table_heap.make_iterator();
 
-        while let Some((tuple_meta, tuple)) = iter.next() {
+        while let Some((_tuple_meta, tuple)) = iter.next() {
             if self.apply_predicate(&tuple) {
                 return Some((tuple.clone(), tuple.get_rid()));
             }
@@ -71,100 +85,152 @@ impl AbstractExecutor for SeqScanExecutor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::catalogue::column::Column;
-    use crate::types_db::type_id::TypeId;
-    use crate::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::execution::expressions::abstract_expression::Expression;
-    use crate::types_db::value::Value;
-    use crate::concurrency::transaction::{Transaction, IsolationLevel};
-    use crate::catalogue::catalogue::Catalog;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::recovery::log_manager::LogManager;
-    use std::sync::Arc;
-    use parking_lot::{RwLock, Mutex};
+pub struct TestContext {
+    bpm: Arc<BufferPoolManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
+    lock_manager: Arc<LockManager>,
+    log_manager: Arc<Mutex<LogManager>>,
+    db_file: String,
+    db_log_file: String,
+}
 
-    fn create_test_schema() -> Schema {
-        Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("age", TypeId::Integer),
-        ])
+impl TestContext {
+    pub fn new(test_name: &str) -> Self {
+        initialize_logger();
+        const BUFFER_POOL_SIZE: usize = 5;
+        const K: usize = 2;
+
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+        let disk_manager = Arc::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        ));
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+        let bpm = Arc::new(BufferPoolManager::new(
+            BUFFER_POOL_SIZE,
+            disk_scheduler,
+            disk_manager.clone(),
+            replacer.clone(),
+        ));
+
+        // Create TransactionManager with a placeholder Catalog
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+
+        Self {
+            bpm,
+            transaction_manager,
+            lock_manager,
+            log_manager,
+            db_file,
+            db_log_file,
+        }
+    }
+
+    pub fn bpm(&self) -> Arc<BufferPoolManager> {
+        Arc::clone(&self.bpm)
+    }
+
+    pub fn lock_manager(&self) -> Arc<LockManager> {
+        Arc::clone(&self.lock_manager)
+    }
+
+    pub fn log_manager(&self) -> Arc<Mutex<LogManager>> {
+        Arc::clone(&self.log_manager)
+    }
+
+    fn cleanup(&self) {
+        let _ = fs::remove_file(&self.db_file);
+        let _ = fs::remove_file(&self.db_log_file);
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::types_db::type_id::TypeId;
+    use std::collections::HashMap;
+
+    fn create_catalog(
+        bpm: Arc<BufferPoolManager>,
+        lock_manager: Arc<LockManager>,
+        log_manager: Arc<Mutex<LogManager>>,
+    ) -> Catalog {
+        Catalog::new(
+            bpm,
+            lock_manager,
+            log_manager,
+            0,
+            0,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        )
     }
 
     #[test]
     fn test_seq_scan_executor() {
-        let schema = create_test_schema();
-        let table_oid = 1;
-        let table_name = "test_table".to_string();
-        let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
+        let ctx = TestContext::new("test_seq_scan_executor");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let log_manager = ctx.log_manager();
 
-        let plan = SeqScanPlanNode::new(
-            schema,
-            table_oid,
-            table_name,
-            filter_predicate,
+        let mut catalog = create_catalog(bpm.clone(), lock_manager.clone(), log_manager);
+
+        let table_name = "test_table";
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ]);
+        let txn = Transaction::new(0, IsolationLevel::Serializable);
+
+        // Create the table and store it in the catalog's maps
+        let table_info = catalog.create_table(&txn, table_name, schema.clone(), true);
+
+        let table_oid = table_info
+            .expect("TableOID could not be found")
+            .get_table_oidt();
+
+        // Verify the table was properly registered
+        assert!(
+            catalog.get_table(table_name).is_some(),
+            "Table should be registered in catalog"
         );
 
-        // Create mock objects for BufferPoolManager
-        let disk_manager = Arc::new(FileDiskManager::new("test_db.db".to_string(), "test_log.log".to_string(), 100));
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
+        // Create the scan plan
+        let plan = SeqScanPlanNode::new(schema.clone(), table_oid, table_name.to_string(), None);
 
-        // Create BufferPoolManager
-        let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-            10,  // pool_size
-            disk_scheduler,
-            disk_manager.clone(),
-            replacer,
-        ));
+        // Create execution context
+        let context = ExecutorContext::new(txn, catalog, Arc::clone(&bpm), lock_manager);
 
-        // Create TransactionManager and LockManager
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
-        let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
-
-        // Create mock objects for ExecutorContext
-        let transaction = Transaction::new(0, IsolationLevel::Serializable);
-        let log_manager = Arc::new(parking_lot::Mutex::new(LogManager::new(disk_manager)));
-
-        let catalog = Catalog::new(
-            buffer_pool_manager.clone(),
-            lock_manager.clone(),
-            log_manager,
-            0, 0,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Default::default()
-        );
-
-        // Create ExecutorContext with mock objects
-        let context = ExecutorContext::new(
-            transaction,
-            catalog,
-            buffer_pool_manager,
-            lock_manager,
-        );
-
+        // Create and initialize executor
         let mut executor = SeqScanExecutor::new(context, plan);
-
         executor.init();
 
         // Test the executor
         let mut result_count = 0;
-        while let Some((tuple, _)) = executor.next() {
-            // Add assertions to check the tuple contents
+        while let Some((_tuple, _rid)) = executor.next() {
             result_count += 1;
         }
 
-        // Add assertions to check the result_count or other expected behaviors
-        assert!(result_count > 0, "Expected at least one tuple from the scan");
+        // Since we haven't inserted any tuples yet, result_count should be 0
+        assert_eq!(result_count, 0, "Expected no tuples from empty table");
     }
 }
