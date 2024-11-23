@@ -28,10 +28,12 @@ impl ArrayExpression {
         F: FnMut(&Expression) -> Result<Value, ExpressionError>,
     {
         // Collect the evaluated values into a Vec<Value>
-        let values: Result<Vec<Value>, ArrayExpressionError> = self.children
+        let values: Result<Vec<Value>, ArrayExpressionError> = self
+            .children
             .iter()
             .map(|expr| {
-                let val = eval_func(expr).map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))?;
+                let val = eval_func(expr)
+                    .map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))?;
                 match val.get_value() {
                     Val::Decimal(d) => {
                         // Convert f64 to i32, handling potential loss of precision
@@ -54,9 +56,17 @@ impl ExpressionOps for ArrayExpression {
             .map_err(|e| ExpressionError::Array(e))
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        self.evaluate_children(|child| child.evaluate_join(left_tuple, left_schema, right_tuple, right_schema))
-            .map_err(|e| ExpressionError::Array(e))
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        self.evaluate_children(|child| {
+            child.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+        })
+        .map_err(|e| ExpressionError::Array(e))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -93,7 +103,6 @@ impl Display for ArrayExpression {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,9 +113,21 @@ mod tests {
     #[test]
     fn array_expression() {
         let children = vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(2.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(3.0)), Column::new("const", TypeId::Decimal), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Decimal(1.0)),
+                Column::new("const", TypeId::Decimal),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Decimal(2.0)),
+                Column::new("const", TypeId::Decimal),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Decimal(3.0)),
+                Column::new("const", TypeId::Decimal),
+                vec![],
+            ))),
         ];
         let expr = Expression::Array(ArrayExpression::new(children));
 
@@ -114,7 +135,9 @@ mod tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![], schema.clone(), rid);
 
-        let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
+        let result = expr
+            .evaluate(&tuple, &schema)
+            .expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
         if let Val::Vector(vec) = result.get_value() {
             assert_eq!(vec.len(), 3);
@@ -129,8 +152,16 @@ mod tests {
     #[test]
     fn array_expression_invalid_type() {
         let children = vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Decimal(1.0)), Column::new("const", TypeId::Decimal), vec![]))),
-            Arc::new(Expression::Constant(ConstantExpression::new(Value::new(Val::Integer(2)), Column::new("const", TypeId::Integer), vec![]))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Decimal(1.0)),
+                Column::new("const", TypeId::Decimal),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Integer(2)),
+                Column::new("const", TypeId::Integer),
+                vec![],
+            ))),
         ];
         let expr = Expression::Array(ArrayExpression::new(children));
 

@@ -18,7 +18,11 @@ pub struct BoundSubqueryRef {
 
 impl BoundSubqueryRef {
     /// Creates a new BoundSubqueryRef.
-    pub fn new(subquery: Box<SelectStatement>, select_list_name: Vec<Vec<String>>, alias: String) -> Self {
+    pub fn new(
+        subquery: Box<SelectStatement>,
+        select_list_name: Vec<Vec<String>>,
+        alias: String,
+    ) -> Self {
         Self {
             subquery,
             select_list_name,
@@ -80,7 +84,10 @@ mod unit_tests {
             "subq".to_string(),
         );
 
-        assert_eq!(subquery_ref.table_reference_type(), TableReferenceType::Subquery);
+        assert_eq!(
+            subquery_ref.table_reference_type(),
+            TableReferenceType::Subquery
+        );
         assert_eq!(
             subquery_ref.to_string(),
             "(SELECT column1 FROM mock_table) AS subq"

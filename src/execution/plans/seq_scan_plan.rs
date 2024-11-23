@@ -72,7 +72,10 @@ impl AbstractPlanNode for SeqScanPlanNode {
 
     fn plan_node_to_string(&self) -> String {
         if let Some(filter) = &self.filter_predicate {
-            format!("SeqScan {{ table: {}, filter: {} }}", self.table_name, filter)
+            format!(
+                "SeqScan {{ table: {}, filter: {} }}",
+                self.table_name, filter
+            )
         } else {
             format!("SeqScan {{ table: {} }}", self.table_name)
         }
@@ -110,14 +113,14 @@ mod unit_tests {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let table_oid = 1;
         let table_name = "test_table".to_string();
-        let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("test_column", TypeId::Integer), vec![]))));
+        let filter_predicate = Some(Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("test_column", TypeId::Integer),
+            vec![],
+        ))));
 
-        let seq_scan_node = SeqScanPlanNode::new(
-            schema,
-            table_oid,
-            table_name.clone(),
-            filter_predicate,
-        );
+        let seq_scan_node =
+            SeqScanPlanNode::new(schema, table_oid, table_name.clone(), filter_predicate);
 
         assert_eq!(seq_scan_node.get_type(), PlanType::SeqScan);
         assert_eq!(seq_scan_node.get_table_oid(), table_oid);
@@ -140,12 +143,7 @@ mod unit_tests {
         let table_oid = 1;
         let table_name = "test_table".to_string();
 
-        let seq_scan_node = SeqScanPlanNode::new(
-            schema,
-            table_oid,
-            table_name.clone(),
-            None,
-        );
+        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone(), None);
 
         assert_eq!(seq_scan_node.get_type(), PlanType::SeqScan);
         assert_eq!(seq_scan_node.get_table_oid(), table_oid);
@@ -163,12 +161,8 @@ mod unit_tests {
         let table_oid = 42;
         let table_name = "employees".to_string();
 
-        let seq_scan_node = SeqScanPlanNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            None,
-        );
+        let seq_scan_node =
+            SeqScanPlanNode::new(schema.clone(), table_oid, table_name.clone(), None);
 
         assert_eq!(seq_scan_node.get_output_schema(), &schema);
         assert_eq!(seq_scan_node.get_table_oid(), table_oid);
@@ -183,12 +177,7 @@ mod unit_tests {
         let table_oid = 200;
         let table_name = "products".to_string();
 
-        let seq_scan_node = SeqScanPlanNode::new(
-            schema,
-            table_oid,
-            table_name,
-            None,
-        );
+        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name, None);
 
         let plan_node: PlanNode = seq_scan_node.clone().into();
 
@@ -237,11 +226,12 @@ mod seq_scan_string_tests {
     use super::*;
     use crate::catalogue::column::Column;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![
@@ -272,8 +262,17 @@ mod seq_scan_string_tests {
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);
 
-        assert_eq!(without_schema, format!("SeqScan {{ table: {} }}", table_name));
-        assert_eq!(with_schema, format!("SeqScan {{ table: {} }}\nSchema: Schema (id, name, age)", table_name));
+        assert_eq!(
+            without_schema,
+            format!("SeqScan {{ table: {} }}", table_name)
+        );
+        assert_eq!(
+            with_schema,
+            format!(
+                "SeqScan {{ table: {} }}\nSchema: Schema (id, name, age)",
+                table_name
+            )
+        );
     }
 
     #[test]
@@ -287,8 +286,17 @@ mod seq_scan_string_tests {
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);
 
-        assert_eq!(without_schema, format!("SeqScan {{ table: {} }}", table_name));
-        assert_eq!(with_schema, format!("SeqScan {{ table: {} }}\nSchema: Schema (id, name, age, salary, is_active)", table_name));
+        assert_eq!(
+            without_schema,
+            format!("SeqScan {{ table: {} }}", table_name)
+        );
+        assert_eq!(
+            with_schema,
+            format!(
+                "SeqScan {{ table: {} }}\nSchema: Schema (id, name, age, salary, is_active)",
+                table_name
+            )
+        );
     }
 
     #[test]
@@ -298,8 +306,17 @@ mod seq_scan_string_tests {
         let table_name = "filtered_employees".to_string();
 
         let age_column = schema.get_column(1).unwrap().clone();
-        let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 2, age_column, vec![])));
-        let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(30), Column::new("const", TypeId::Integer), vec![])));
+        let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            2,
+            age_column,
+            vec![],
+        )));
+        let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(30),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
         let filter = Arc::new(Expression::Comparison(ComparisonExpression::new(
             age_expr,
             const_expr,
@@ -307,7 +324,8 @@ mod seq_scan_string_tests {
             vec![],
         )));
 
-        let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone(), Some(filter));
+        let seq_scan_node =
+            SeqScanPlanNode::new(schema, table_oid, table_name.clone(), Some(filter));
 
         let with_schema = seq_scan_node.to_string(true);
         let without_schema = seq_scan_node.to_string(false);

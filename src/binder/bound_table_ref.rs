@@ -35,7 +35,9 @@ pub trait BoundTableRef: Display {
 impl DefaultBoundTableRef {
     /// Creates a new DefaultBoundTableRef with the given TableReferenceType.
     pub fn new(table_reference_type: TableReferenceType) -> Self {
-        Self { table_reference_type }
+        Self {
+            table_reference_type,
+        }
     }
 }
 
@@ -113,6 +115,9 @@ mod unit_tests {
 
         let base_table_ref = DefaultBoundTableRef::new(TableReferenceType::BaseTable);
         assert!(!base_table_ref.is_invalid());
-        assert_eq!(base_table_ref.to_string(), "DefaultBoundTableRef(BaseTable)");
+        assert_eq!(
+            base_table_ref.to_string(),
+            "DefaultBoundTableRef(BaseTable)"
+        );
     }
 }

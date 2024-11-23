@@ -30,7 +30,6 @@ impl IntComparator {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

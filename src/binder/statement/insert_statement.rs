@@ -81,7 +81,10 @@ mod unit_tests {
     fn insert_statement() {
         let select_stmt = SelectStatement::new(
             Box::new(MockBoundTableRef),
-            vec![Box::new(BoundConstant::new("column1")), Box::new(BoundConstant::new("column2"))],
+            vec![
+                Box::new(BoundConstant::new("column1")),
+                Box::new(BoundConstant::new("column2")),
+            ],
             None,
             vec![],
             None,
@@ -92,10 +95,7 @@ mod unit_tests {
             false,
         );
 
-        let insert_stmt = InsertStatement::new(
-            Box::new(MockBoundTableRef),
-            Box::new(select_stmt),
-        );
+        let insert_stmt = InsertStatement::new(Box::new(MockBoundTableRef), Box::new(select_stmt));
 
         assert_eq!(insert_stmt.statement_type(), StatementType::InsertStatement);
         assert_eq!(

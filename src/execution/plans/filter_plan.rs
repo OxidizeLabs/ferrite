@@ -11,11 +11,7 @@ pub struct FilterNode {
 }
 
 impl FilterNode {
-    pub fn new(
-        output_schema: Schema,
-        predicate: Arc<Expression>,
-        child: PlanNode,
-    ) -> Self {
+    pub fn new(output_schema: Schema, predicate: Arc<Expression>, child: PlanNode) -> Self {
         Self {
             output_schema,
             predicate,
@@ -62,7 +58,15 @@ impl AbstractPlanNode for FilterNode {
         self.children
             .iter()
             .enumerate()
-            .map(|(i, child)| format!("\n{:indent$}Child {}: {}", "", i + 1, AbstractPlanNode::to_string(child, false), indent = indent))
+            .map(|(i, child)| {
+                format!(
+                    "\n{:indent$}Child {}: {}",
+                    "",
+                    i + 1,
+                    AbstractPlanNode::to_string(child, false),
+                    indent = indent
+                )
+            })
             .collect()
     }
 }
@@ -72,7 +76,9 @@ mod tests {
     use super::*;
     use crate::catalogue::column::Column;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
     use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::types_db::type_id::TypeId;
 
@@ -83,13 +89,33 @@ mod tests {
             Column::new("col2", TypeId::Integer),
         ]);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![])));
-        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, schema.get_column(1).unwrap().clone(), vec![])));
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
+        )));
 
-        let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
+        let less_than_expr = Expression::Comparison(ComparisonExpression::new(
+            col1.clone(),
+            col2.clone(),
+            ComparisonType::LessThan,
+            vec![],
+        ));
 
         let predicate = Arc::new(less_than_expr);
-        let child = PlanNode::SeqScan(SeqScanPlanNode::new(schema.clone(), 0, "test_table".to_string(), None));
+        let child = PlanNode::SeqScan(SeqScanPlanNode::new(
+            schema.clone(),
+            0,
+            "test_table".to_string(),
+            None,
+        ));
 
         let filter_node = FilterNode::new(schema.clone(), predicate.clone(), child);
 
@@ -105,6 +131,7 @@ mod tests {
         assert!(expected_string.contains("Child 1: SeqScan { table: test_table }"));
 
         // Check that the schema is not repeated for the child node
-        assert!(!expected_string.contains("Child 1: SeqScan { table: test_table }\nSchema: Schema (col1, col2)"));
+        assert!(!expected_string
+            .contains("Child 1: SeqScan { table: test_table }\nSchema: Schema (col1, col2)"));
     }
 }

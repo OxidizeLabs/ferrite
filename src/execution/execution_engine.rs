@@ -10,7 +10,11 @@ pub struct ExecutorEngine {
 }
 
 impl ExecutorEngine {
-    pub fn new(buffer_pool_manager: Arc<BufferPoolManager>, catalog: Arc<Catalog>, transaction_manager: Arc<TransactionManager>) -> Self {
+    pub fn new(
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        catalog: Arc<Catalog>,
+        transaction_manager: Arc<TransactionManager>,
+    ) -> Self {
         Self {
             buffer_pool_manager,
             catalog,

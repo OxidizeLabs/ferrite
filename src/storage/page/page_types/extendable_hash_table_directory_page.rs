@@ -31,7 +31,11 @@ impl ExtendableHTableDirectoryPage {
             local_depths: [0; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
             bucket_page_ids: [INVALID_PAGE_ID; HTABLE_DIRECTORY_ARRAY_SIZE as usize],
         };
-        debug!("New ExtendableHTableDirectoryPage created with page id: {} at address {:p}", instance.get_page_id(), &instance);
+        debug!(
+            "New ExtendableHTableDirectoryPage created with page id: {} at address {:p}",
+            instance.get_page_id(),
+            &instance
+        );
         instance
     }
 
@@ -45,7 +49,10 @@ impl ExtendableHTableDirectoryPage {
         self.local_depths = [0; HTABLE_DIRECTORY_ARRAY_SIZE as usize];
         self.bucket_page_ids = [INVALID_PAGE_ID; HTABLE_DIRECTORY_ARRAY_SIZE as usize];
         debug!("ExtendableHTableDirectoryPage initialized with page id: {}, max depth: {} at address {:p}", self.get_page_id(), max_depth, self);
-        assert_eq!(self.max_depth, max_depth, "max_depth should match the initialized value.");
+        assert_eq!(
+            self.max_depth, max_depth,
+            "max_depth should match the initialized value."
+        );
     }
 
     /// Returns the bucket index that the key is hashed to.
@@ -84,24 +91,26 @@ impl ExtendableHTableDirectoryPage {
     /// - `bucket_idx`: The directory index at which to insert the page ID.
     /// - `bucket_page_id`: The page ID to insert.
     pub fn set_bucket_page_id(&mut self, bucket_idx: usize, bucket_page_id: PageId) {
-
         // Increment the instance counter
         ACCESS_COUNT.fetch_add(1, Ordering::SeqCst);
         // assert!(self.max_depth > 0, "max_depth should be initialized and greater than 0");
 
         debug!(
-        "Before setting: max_depth = {}, bucket_idx = {}, bucket_page_id = {}",
-        self.max_depth, bucket_idx, bucket_page_id
-    );
+            "Before setting: max_depth = {}, bucket_idx = {}, bucket_page_id = {}",
+            self.max_depth, bucket_idx, bucket_page_id
+        );
 
         self.bucket_page_ids[bucket_idx] = bucket_page_id;
 
         debug!(
-        "After setting: max_depth = {}, bucket_idx = {}, bucket_page_id = {}",
-        self.max_depth, bucket_idx, bucket_page_id
-    );
+            "After setting: max_depth = {}, bucket_idx = {}, bucket_page_id = {}",
+            self.max_depth, bucket_idx, bucket_page_id
+        );
 
-        info!("Bucket page ID at index {} set to {}", bucket_idx, bucket_page_id);
+        info!(
+            "Bucket page ID at index {} set to {}",
+            bucket_idx, bucket_page_id
+        );
     }
 
     /// Method to get the current instance count
@@ -171,7 +180,10 @@ impl ExtendableHTableDirectoryPage {
     /// Increments the global depth of the directory.
     pub fn incr_global_depth(&mut self) {
         if self.global_depth == self.max_depth {
-            warn!("Cannot increase global depth past max_depth: {}", self.max_depth);
+            warn!(
+                "Cannot increase global depth past max_depth: {}",
+                self.max_depth
+            );
             return;
         }
 
@@ -186,7 +198,10 @@ impl ExtendableHTableDirectoryPage {
             self.set_local_depth(i as usize + old_size as usize, local_depth);
         }
 
-        debug!("Global depth increased. New size of the directory: {}", self.get_size());
+        debug!(
+            "Global depth increased. New size of the directory: {}",
+            self.get_size()
+        );
     }
 
     /// Decrements the global depth of the directory.
@@ -216,7 +231,11 @@ impl ExtendableHTableDirectoryPage {
     /// # Returns
     /// The current directory size.
     pub fn get_size(&self) -> u32 {
-        assert!(self.global_depth < 32, "Global depth {} is too large!", self.global_depth);
+        assert!(
+            self.global_depth < 32,
+            "Global depth {} is too large!",
+            self.global_depth
+        );
         1 << self.global_depth
     }
 
@@ -284,7 +303,10 @@ impl ExtendableHTableDirectoryPage {
 
         self.set_bucket_page_id(split_image_index as usize, new_page_id);
         self.incr_local_depth(bucket_idx);
-        self.set_local_depth(split_image_index as usize, self.get_local_depth(bucket_idx as u32));
+        self.set_local_depth(
+            split_image_index as usize,
+            self.get_local_depth(bucket_idx as u32),
+        );
 
         let mask = self.get_local_depth_mask(bucket_idx as u32);
         let size = self.get_size();
@@ -297,7 +319,10 @@ impl ExtendableHTableDirectoryPage {
             }
         }
 
-        debug!("Bucket at index {} split. New bucket ID {} set at index {}", bucket_idx, new_page_id, split_image_index);
+        debug!(
+            "Bucket at index {} split. New bucket ID {} set at index {}",
+            bucket_idx, new_page_id, split_image_index
+        );
     }
 
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
@@ -309,7 +334,9 @@ impl ExtendableHTableDirectoryPage {
 
     pub fn deserialize(&mut self, buffer: &[u8]) {
         self.global_depth = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        self.base.set_data(0, &buffer[8..]).expect("Failed to set data");
+        self.base
+            .set_data(0, &buffer[8..])
+            .expect("Failed to set data");
     }
 
     /// Verifies the integrity of the directory.
@@ -323,7 +350,10 @@ impl ExtendableHTableDirectoryPage {
         debug!("Verifying integrity of directory with size: {}", size);
 
         // Ensure all local depths are less than or equal to the global depth
-        debug!("Ensure all local depths are less than or equal to the global depth: {}", self.global_depth);
+        debug!(
+            "Ensure all local depths are less than or equal to the global depth: {}",
+            self.global_depth
+        );
         assert_eq!(
             size,
             1 << self.global_depth,
@@ -335,9 +365,9 @@ impl ExtendableHTableDirectoryPage {
         for bucket_idx in 0..size {
             let local_depth = self.get_local_depth(bucket_idx);
             debug!(
-            "Bucket idx: {}, Local depth: {}, Global depth: {}",
-            bucket_idx, local_depth, self.global_depth
-        );
+                "Bucket idx: {}, Local depth: {}, Global depth: {}",
+                bucket_idx, local_depth, self.global_depth
+            );
             assert!(
                 local_depth <= self.global_depth,
                 "Local depth {} exceeds global depth {} at bucket_idx: {}",
@@ -365,9 +395,9 @@ impl ExtendableHTableDirectoryPage {
             let local_depth = self.get_local_depth(correct_bucket_idx.try_into().unwrap());
             let expected_count = 1 << (self.global_depth - local_depth);
             debug!(
-            "Page ID: {}, Expected count: {}, Actual count: {}",
-            page_id, expected_count, count
-        );
+                "Page ID: {}, Expected count: {}, Actual count: {}",
+                page_id, expected_count, count
+            );
             assert_eq!(
                 count, expected_count,
                 "Count mismatch for page_id: {}. Expected: {}, Found: {}",
@@ -409,8 +439,24 @@ impl ExtendableHTableDirectoryPage {
         let header_local_depth = "local_depth";
 
         let max_bucket_idx_width = std::cmp::max(header_bucket_idx.len(), size.to_string().len());
-        let max_page_id_width = std::cmp::max(header_page_id.len(), self.bucket_page_ids.iter().take(size as usize).map(|&page_id| page_id.to_string().len()).max().unwrap_or(0));
-        let max_local_depth_width = std::cmp::max(header_local_depth.len(), self.local_depths.iter().take(size as usize).map(|&local_depth| local_depth.to_string().len()).max().unwrap_or(0));
+        let max_page_id_width = std::cmp::max(
+            header_page_id.len(),
+            self.bucket_page_ids
+                .iter()
+                .take(size as usize)
+                .map(|&page_id| page_id.to_string().len())
+                .max()
+                .unwrap_or(0),
+        );
+        let max_local_depth_width = std::cmp::max(
+            header_local_depth.len(),
+            self.local_depths
+                .iter()
+                .take(size as usize)
+                .map(|&local_depth| local_depth.to_string().len())
+                .max()
+                .unwrap_or(0),
+        );
 
         println!(
             "======== DIRECTORY (size: {} | global_depth: {} | max_depth: {} | local_depths: {}) ========",
@@ -418,16 +464,26 @@ impl ExtendableHTableDirectoryPage {
         );
         println!(
             "| {:<width_bucket_idx$} | {:<width_page_id$} | {:<width_local_depth$} |",
-            header_bucket_idx, header_page_id, header_local_depth,
+            header_bucket_idx,
+            header_page_id,
+            header_local_depth,
             width_bucket_idx = max_bucket_idx_width,
             width_page_id = max_page_id_width,
             width_local_depth = max_local_depth_width
         );
 
-        for ((idx, &page_id), &local_depth) in self.bucket_page_ids.iter().take(size as usize).enumerate().zip(self.local_depths.iter().take(size as usize)) {
+        for ((idx, &page_id), &local_depth) in self
+            .bucket_page_ids
+            .iter()
+            .take(size as usize)
+            .enumerate()
+            .zip(self.local_depths.iter().take(size as usize))
+        {
             println!(
                 "| {:<width_bucket_idx$} | {:<width_page_id$} | {:<width_local_depth$} |",
-                idx, page_id, local_depth,
+                idx,
+                page_id,
+                local_depth,
                 width_bucket_idx = max_bucket_idx_width,
                 width_page_id = max_page_id_width,
                 width_local_depth = max_local_depth_width
@@ -487,7 +543,11 @@ impl PageTrait for ExtendableHTableDirectoryPage {
     /// Sets the pin count of this page.
     fn set_pin_count(&mut self, pin_count: i32) {
         self.base.set_pin_count(pin_count);
-        debug!("Setting pin count for Page ID {}: {}", self.get_page_id(), pin_count);
+        debug!(
+            "Setting pin count for Page ID {}: {}",
+            self.get_page_id(),
+            pin_count
+        );
     }
 
     fn reset_memory(&mut self) {
@@ -534,11 +594,13 @@ mod basic_behavior {
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
-                &disk_manager,
-            ))));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, 2)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -571,7 +633,9 @@ mod basic_behavior {
         let bpm = &ctx.bpm;
 
         // DIRECTORY PAGE TEST
-        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_guard = bpm
+            .new_page_guarded(NewPageType::ExtendedHashTableDirectory)
+            .unwrap();
         match directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
             Some(mut ext_guard) => {
                 info!("Successfully converted to ExtendableHTableDirectoryPage");
@@ -582,7 +646,10 @@ mod basic_behavior {
 
                 ext_guard.access_mut(|page| {
                     page.init(3);
-                    info!("Initialized directory page with global depth: {}", page.get_global_depth());
+                    info!(
+                        "Initialized directory page with global depth: {}",
+                        page.get_global_depth()
+                    );
                 });
             }
             None => {
@@ -599,27 +666,51 @@ mod basic_behavior {
 
         info!("Starting max depth tests");
 
-        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_guard = bpm
+            .new_page_guarded(NewPageType::ExtendedHashTableDirectory)
+            .unwrap();
         let directory_page_id = directory_guard.get_page_id();
         info!("Created directory page with ID: {}", directory_page_id);
 
-        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+        if let Some(mut ext_dir_guard) =
+            directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>()
+        {
             ext_dir_guard.access_mut(|directory_page| {
                 directory_page.init(2);
-                assert_eq!(directory_page.get_max_depth(), 2, "Initial max depth should be 2");
-                assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
+                assert_eq!(
+                    directory_page.get_max_depth(),
+                    2,
+                    "Initial max depth should be 2"
+                );
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    0,
+                    "Initial global depth should be 0"
+                );
 
                 // Try to increment beyond the maximum depth
                 directory_page.incr_global_depth();
-                assert_eq!(directory_page.get_global_depth(), 1, "Global depth should be 1 after increment");
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    1,
+                    "Global depth should be 1 after increment"
+                );
 
                 // This should increase the global depth further
                 directory_page.incr_global_depth();
-                assert_eq!(directory_page.get_global_depth(), 2, "Global depth should be 2 after increment");
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    2,
+                    "Global depth should be 2 after increment"
+                );
 
                 // This should not increase the global depth further
                 directory_page.incr_global_depth();
-                assert_eq!(directory_page.get_global_depth(), 2, "Global depth should remain 2 after attempting to exceed max depth");
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    2,
+                    "Global depth should remain 2 after attempting to exceed max depth"
+                );
 
                 info!("Max depth tests completed successfully");
             });
@@ -635,22 +726,42 @@ mod basic_behavior {
 
         info!("Starting empty directory tests");
 
-        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_guard = bpm
+            .new_page_guarded(NewPageType::ExtendedHashTableDirectory)
+            .unwrap();
         let directory_page_id = directory_guard.get_page_id();
         info!("Created directory page with ID: {}", directory_page_id);
 
-        if let Some(mut ext_dir_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+        if let Some(mut ext_dir_guard) =
+            directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>()
+        {
             ext_dir_guard.access_mut(|directory_page| {
                 directory_page.init(0);
-                assert_eq!(directory_page.get_global_depth(), 0, "Initial global depth should be 0");
-                assert_eq!(directory_page.get_size(), 1, "Empty directory should have size 1");
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    0,
+                    "Initial global depth should be 0"
+                );
+                assert_eq!(
+                    directory_page.get_size(),
+                    1,
+                    "Empty directory should have size 1"
+                );
 
                 // Try to access a bucket
-                assert_eq!(directory_page.get_bucket_page_id(0), Some(INVALID_PAGE_ID), "Empty directory should return INVALID_PAGE_ID");
+                assert_eq!(
+                    directory_page.get_bucket_page_id(0),
+                    Some(INVALID_PAGE_ID),
+                    "Empty directory should return INVALID_PAGE_ID"
+                );
 
                 // Try to decrement global depth (should not change)
                 directory_page.decr_global_depth();
-                assert_eq!(directory_page.get_global_depth(), 0, "Global depth should remain 0 after attempted decrement");
+                assert_eq!(
+                    directory_page.get_global_depth(),
+                    0,
+                    "Global depth should remain 0 after attempted decrement"
+                );
 
                 info!("Empty directory tests completed successfully");
             });

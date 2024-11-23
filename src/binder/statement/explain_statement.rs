@@ -91,7 +91,12 @@ mod unit_tests {
             ExplainOptions::BINDER | ExplainOptions::PLANNER,
         );
 
-        assert_eq!(explain_stmt.statement_type(), StatementType::ExplainStatement);
-        assert!(explain_stmt.to_string().starts_with("EXPLAIN BINDER PLANNER SELECT"));
+        assert_eq!(
+            explain_stmt.statement_type(),
+            StatementType::ExplainStatement
+        );
+        assert!(explain_stmt
+            .to_string()
+            .starts_with("EXPLAIN BINDER PLANNER SELECT"));
     }
 }

@@ -133,7 +133,12 @@ impl AbstractPlanNode for AggregationPlanNode {
         }
 
         write!(&mut result, "aggregates=[").unwrap();
-        for (i, (expr, agg_type)) in self.aggregates.iter().zip(self.agg_types.iter()).enumerate() {
+        for (i, (expr, agg_type)) in self
+            .aggregates
+            .iter()
+            .zip(self.agg_types.iter())
+            .enumerate()
+        {
             if i > 0 {
                 write!(&mut result, ", ").unwrap();
             }
@@ -148,7 +153,15 @@ impl AbstractPlanNode for AggregationPlanNode {
         self.children
             .iter()
             .enumerate()
-            .map(|(i, child)| format!("\n{:indent$}Child {}: {}", "", i + 1, AbstractPlanNode::to_string(child, false), indent = indent))
+            .map(|(i, child)| {
+                format!(
+                    "\n{:indent$}Child {}: {}",
+                    "",
+                    i + 1,
+                    AbstractPlanNode::to_string(child, false),
+                    indent = indent
+                )
+            })
             .collect()
     }
 }
@@ -163,8 +176,12 @@ impl Hash for AggregateKey {
 
 impl PartialEq for AggregateKey {
     fn eq(&self, other: &Self) -> bool {
-        self.group_bys.len() == other.group_bys.len() &&
-            self.group_bys.iter().zip(&other.group_bys).all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
+        self.group_bys.len() == other.group_bys.len()
+            && self
+                .group_bys
+                .iter()
+                .zip(&other.group_bys)
+                .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
     }
 }
 
@@ -193,23 +210,25 @@ mod tests {
     fn test_aggregation_plan_node_creation() {
         let schema = Arc::new(Schema::new(vec![]));
         let table = "mock_table".to_string();
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table, vec![]))];
+        let children = vec![PlanNode::MockScan(MockScanNode::new(
+            schema.clone(),
+            table,
+            vec![],
+        ))];
         let group_bys = vec![];
         let aggregates = vec![];
         let agg_types = vec![AggregationType::CountStar];
 
-        let agg_node = AggregationPlanNode::new(
-            schema,
-            children,
-            group_bys,
-            aggregates,
-            agg_types.clone(),
-        );
+        let agg_node =
+            AggregationPlanNode::new(schema, children, group_bys, aggregates, agg_types.clone());
 
         assert_eq!(agg_node.get_group_bys().len(), 0);
         assert_eq!(agg_node.get_aggregates().len(), 0);
         assert_eq!(agg_node.get_aggregate_types().len(), 1);
-        assert_eq!(agg_node.get_aggregate_types()[0], AggregationType::CountStar);
+        assert_eq!(
+            agg_node.get_aggregate_types()[0],
+            AggregationType::CountStar
+        );
     }
 
     #[test]
@@ -242,20 +261,33 @@ mod tests {
         let hasher1 = hasher.get_hash(&key1);
         let hasher2 = hasher.get_hash(&key2);
 
-
         assert_eq!(hasher1, hasher2);
     }
 
     fn test_aggregation_plan_node_to_string() {
         let schema = Arc::new(Schema::new(vec![]));
         let table = "mock_table".to_string();
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table, vec![]))];
+        let children = vec![PlanNode::MockScan(MockScanNode::new(
+            schema.clone(),
+            table,
+            vec![],
+        ))];
 
         let col1 = Column::new("col1", TypeId::Integer);
         let col2 = Column::new("col2", TypeId::Integer);
 
-        let group_by = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, col1, vec![])));
-        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, col2, vec![])));
+        let group_by = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            col1,
+            vec![],
+        )));
+        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            col2,
+            vec![],
+        )));
 
         let agg_node = AggregationPlanNode::new(
             schema,
@@ -276,11 +308,20 @@ mod tests {
     fn test_aggregation_plan_node_to_string_no_group_by() {
         let schema = Arc::new(Schema::new(vec![]));
         let table = "mock_table".to_string();
-        let children = vec![PlanNode::MockScan(MockScanNode::new(schema.clone(), table, vec![]))];
+        let children = vec![PlanNode::MockScan(MockScanNode::new(
+            schema.clone(),
+            table,
+            vec![],
+        ))];
 
         let col1 = Column::new("col1", TypeId::Integer);
 
-        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, col1, vec![])));
+        let aggregate = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            col1,
+            vec![],
+        )));
 
         let agg_node = AggregationPlanNode::new(
             schema,
@@ -291,9 +332,6 @@ mod tests {
         );
 
         let result = agg_node.plan_node_to_string();
-        assert_eq!(
-            result,
-            "Aggregation { aggregates=[COUNT(*)(#0.0)] }"
-        );
+        assert_eq!(result, "Aggregation { aggregates=[COUNT(*)(#0.0)] }");
     }
 }

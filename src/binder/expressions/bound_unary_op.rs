@@ -18,7 +18,6 @@ impl BoundUnaryOp {
     }
 }
 
-
 impl BoundExpression for BoundUnaryOp {
     fn expression_type(&self) -> ExpressionType {
         ExpressionType::UnaryOp
@@ -57,10 +56,7 @@ mod unit_tests {
 
     #[test]
     fn bound_unary_op() {
-        let unary_op = BoundUnaryOp::new(
-            UnaryOperator::Minus,
-            Box::new(BoundConstant::new(42)),
-        );
+        let unary_op = BoundUnaryOp::new(UnaryOperator::Minus, Box::new(BoundConstant::new(42)));
 
         assert_eq!(unary_op.expression_type(), ExpressionType::UnaryOp);
         assert!(!unary_op.has_aggregation());

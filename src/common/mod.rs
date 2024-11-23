@@ -5,5 +5,5 @@ pub mod hash_util;
 pub mod logger;
 pub mod macros;
 pub mod rid;
-pub mod util;
 pub(crate) mod statement_type;
+pub mod util;

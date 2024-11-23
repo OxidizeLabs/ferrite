@@ -4,7 +4,6 @@ use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct HashJoinNode {
     output_schema: Arc<Schema>,

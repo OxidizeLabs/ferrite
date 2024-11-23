@@ -78,9 +78,12 @@ impl BoundExpression for BoundWindow {
     }
 
     fn has_aggregation(&self) -> bool {
-        self.args.iter().any(|expr| expr.has_aggregation()) ||
-            self.partition_by.iter().any(|expr| expr.has_aggregation()) ||
-            self.order_bys.iter().any(|expr| expr.expr.has_aggregation())
+        self.args.iter().any(|expr| expr.has_aggregation())
+            || self.partition_by.iter().any(|expr| expr.has_aggregation())
+            || self
+                .order_bys
+                .iter()
+                .any(|expr| expr.expr.has_aggregation())
     }
 
     fn has_window_function(&self) -> bool {
@@ -95,7 +98,11 @@ impl BoundExpression for BoundWindow {
         Box::new(Self {
             func_name: self.func_name.clone(),
             args: self.args.iter().map(|expr| expr.clone_box()).collect(),
-            partition_by: self.partition_by.iter().map(|expr| expr.clone_box()).collect(),
+            partition_by: self
+                .partition_by
+                .iter()
+                .map(|expr| expr.clone_box())
+                .collect(),
             order_bys: self.order_bys.iter().map(|expr| expr.clone()).collect(),
             start_offset: self.start_offset.as_ref().map(|expr| expr.clone_box()),
             end_offset: self.end_offset.as_ref().map(|expr| expr.clone_box()),

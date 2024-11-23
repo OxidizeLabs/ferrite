@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::storage::table::tuple::Tuple;
+use std::sync::Arc;
 
 /// The AbstractExecutor implements the Volcano tuple-at-a-time iterator model.
 /// This is the base trait from which all executors in the BusTub execution

@@ -79,7 +79,11 @@ impl TablePage {
     /// Inserts a tuple into the table.
     pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &Tuple) -> Option<RID> {
         if let Some(tuple_offset) = self.get_next_tuple_offset(tuple) {
-            self.tuple_info.push((tuple_offset, tuple.get_length().unwrap() as u16, meta.clone()));
+            self.tuple_info.push((
+                tuple_offset,
+                tuple.get_length().unwrap() as u16,
+                meta.clone(),
+            ));
             self.num_tuples += 1;
 
             let start = tuple_offset as usize;
@@ -151,7 +155,12 @@ impl TablePage {
     /// # Safety
     ///
     /// This method is unsafe because it doesn't perform any bounds checking.
-    pub unsafe fn update_tuple_in_place_unsafe(&mut self, meta: &TupleMeta, tuple: &Tuple, rid: RID) -> Result<(), PageError> {
+    pub unsafe fn update_tuple_in_place_unsafe(
+        &mut self,
+        meta: &TupleMeta,
+        tuple: &Tuple,
+        rid: RID,
+    ) -> Result<(), PageError> {
         let tuple_id = rid.get_slot_num() as usize;
         if tuple_id >= self.num_tuples as usize {
             return Err(PageError::TupleInvalid);
@@ -244,10 +253,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let values = vec![
-            Value::from(id),
-            Value::from("Test".to_string()),
-        ];
+        let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(values, schema, rid);
         let meta = TupleMeta::new(123, false);
@@ -287,7 +293,7 @@ mod tests {
     #[test]
     fn test_page_full() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
         let mut inserted_count = 0;
         while page.insert_tuple(&meta, &tuple).is_some() {
@@ -306,10 +312,11 @@ mod tests {
         let tuple_id = page.insert_tuple(&meta, &tuple).unwrap();
 
         let new_meta = TupleMeta::new(789, false);
-        let mut new_tuple = create_test_tuple(2).1;
+        let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, tuple_id).unwrap();
+            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, tuple_id)
+                .unwrap();
         }
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();

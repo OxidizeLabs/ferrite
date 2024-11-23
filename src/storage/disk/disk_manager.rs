@@ -20,8 +20,16 @@ use std::sync::Arc;
 /// Implementers of this trait must provide methods to write and read pages.
 #[automock]
 pub trait DiskIO: Send + Sync {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error>;
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error>;
+    fn write_page(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> Result<(), std::io::Error>;
+    fn read_page(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> Result<(), std::io::Error>;
 }
 
 /// The `FileDiskManager` is responsible for managing disk I/O operations,
@@ -32,7 +40,7 @@ pub struct FileDiskManager {
     num_flushes: AtomicI32,
     num_writes: AtomicI32,
     flush_log: Arc<Mutex<bool>>,
-    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output=()> + Send>>>>,
+    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output = ()> + Send>>>>,
 }
 
 impl FileDiskManager {
@@ -162,7 +170,7 @@ impl FileDiskManager {
     /// # Arguments
     ///
     /// * `f` - A future to be executed when a log flush occurs.
-    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output=()> + Send>) {
+    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output = ()> + Send>) {
         let mut flush_log_f = self.flush_log_f.lock();
         *flush_log_f = Some(f);
     }
@@ -192,7 +200,11 @@ impl FileDiskManager {
 }
 
 impl DiskIO for FileDiskManager {
-    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> Result<(), std::io::Error> {
+    fn write_page(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> Result<(), std::io::Error> {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
         trace!("Writing page {} at offset {}", page_id, offset);
 
@@ -205,7 +217,11 @@ impl DiskIO for FileDiskManager {
         Ok(())
     }
 
-    fn read_page(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+    fn read_page(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
         let offset = page_id as u64 * DB_PAGE_SIZE as u64;
         let mut db_io = self.db_io.write();
         let db_io_reader = db_io.get_mut();
@@ -240,7 +256,11 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(RwLock::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100)));
+        let disk_manager = Arc::new(RwLock::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        )));
         Self {
             disk_manager,
             db_file,
@@ -251,7 +271,10 @@ impl TestContext {
     fn cleanup(&self) {
         let _ = fs::remove_file(&self.db_file);
         let _ = fs::remove_file(&self.db_log);
-        self.disk_manager.write().shut_down().expect("Failed to shut down disk manager.");
+        self.disk_manager
+            .write()
+            .shut_down()
+            .expect("Failed to shut down disk manager.");
     }
 }
 
@@ -270,16 +293,33 @@ mod unit_tests {
         let ctx = TestContext::new("test_initialization");
 
         // Check that the files are created
-        assert!(Path::new(&ctx.db_file).exists(), "Database file was not created.");
+        assert!(
+            Path::new(&ctx.db_file).exists(),
+            "Database file was not created."
+        );
         assert!(Path::new(&ctx.db_log).exists(), "Log file was not created.");
 
         let disk_manager = ctx.disk_manager.read();
 
         // Check initial state of internal fields
-        assert_eq!(disk_manager.get_num_flushes(), 0, "Initial number of flushes should be 0.");
-        assert_eq!(disk_manager.get_num_writes(), 0, "Initial number of writes should be 0.");
-        assert!(!disk_manager.get_flush_state(), "Flush state should initially be false.");
-        assert!(!disk_manager.has_flush_log_future(), "There should be no flush log future initially.");
+        assert_eq!(
+            disk_manager.get_num_flushes(),
+            0,
+            "Initial number of flushes should be 0."
+        );
+        assert_eq!(
+            disk_manager.get_num_writes(),
+            0,
+            "Initial number of writes should be 0."
+        );
+        assert!(
+            !disk_manager.get_flush_state(),
+            "Flush state should initially be false."
+        );
+        assert!(
+            !disk_manager.has_flush_log_future(),
+            "There should be no flush log future initially."
+        );
     }
 
     #[test]
@@ -292,17 +332,35 @@ mod unit_tests {
         data2[..17].copy_from_slice(b"Second page data."); // Adjusted slice length to match the source
 
         // Write to page 0 and page 5
-        ctx.disk_manager.write().write_page(0, &data1).expect("Failed to write data to page 0");
-        ctx.disk_manager.write().write_page(5, &data2).expect("Failed to write data to page 5");
+        ctx.disk_manager
+            .write()
+            .write_page(0, &data1)
+            .expect("Failed to write data to page 0");
+        ctx.disk_manager
+            .write()
+            .write_page(5, &data2)
+            .expect("Failed to write data to page 5");
 
         // Read back and verify data for page 0
-        ctx.disk_manager.read().read_page(0, &mut buf).expect("Failed to read data from page 0");
-        assert_eq!(buf, data1, "Data read from page 0 does not match expected data.");
+        ctx.disk_manager
+            .read()
+            .read_page(0, &mut buf)
+            .expect("Failed to read data from page 0");
+        assert_eq!(
+            buf, data1,
+            "Data read from page 0 does not match expected data."
+        );
 
         // Read back and verify data for page 5
         buf.fill(0); // Clear buffer before reading the next page
-        ctx.disk_manager.read().read_page(5, &mut buf).expect("Failed to read data from page 5");
-        assert_eq!(buf, data2, "Data read from page 5 does not match expected data.");
+        ctx.disk_manager
+            .read()
+            .read_page(5, &mut buf)
+            .expect("Failed to read data from page 5");
+        assert_eq!(
+            buf, data2,
+            "Data read from page 5 does not match expected data."
+        );
 
         Ok(())
     }
@@ -315,16 +373,29 @@ mod unit_tests {
         data[..20].copy_from_slice(b"Test log data entry.");
 
         // Write log data
-        ctx.disk_manager.write().write_log(&data).expect("TODO: panic message");
+        ctx.disk_manager
+            .write()
+            .write_log(&data)
+            .expect("TODO: panic message");
 
         // Read back the log data from offset 0
-        ctx.disk_manager.read().read_log(&mut buf, 0).expect("TODO: panic message");
+        ctx.disk_manager
+            .read()
+            .read_log(&mut buf, 0)
+            .expect("TODO: panic message");
         assert_eq!(buf, data, "Log data read does not match expected data.");
 
         // Test reading from an offset within the log
         let mut partial_buf = [0u8; 10];
-        ctx.disk_manager.read().read_log(&mut partial_buf, 10).expect("TODO: panic message");
-        assert_eq!(&partial_buf[..], &data[10..20], "Partial log data read does not match expected data.");
+        ctx.disk_manager
+            .read()
+            .read_log(&mut partial_buf, 10)
+            .expect("TODO: panic message");
+        assert_eq!(
+            &partial_buf[..],
+            &data[10..20],
+            "Partial log data read does not match expected data."
+        );
     }
 
     #[test]
@@ -333,14 +404,20 @@ mod unit_tests {
         let disk_manager = ctx.disk_manager.write();
 
         // Initially, there should be no flush log future
-        assert!(!disk_manager.has_flush_log_future(), "There should be no flush log future initially.");
+        assert!(
+            !disk_manager.has_flush_log_future(),
+            "There should be no flush log future initially."
+        );
 
         // Set a flush log future
         let future = Box::new(async { () });
         disk_manager.set_flush_log_future(future);
 
         // Verify the future is now set
-        assert!(disk_manager.has_flush_log_future(), "Flush log future should be set.");
+        assert!(
+            disk_manager.has_flush_log_future(),
+            "Flush log future should be set."
+        );
     }
 
     #[test]
@@ -350,17 +427,34 @@ mod unit_tests {
         data[..16].copy_from_slice(b"Test write data.");
 
         // Write data to a page
-        ctx.disk_manager.write().write_page(0, &data).expect("TODO: panic message");
-        ctx.disk_manager.write().write_page(1, &data).expect("TODO: panic message");
+        ctx.disk_manager
+            .write()
+            .write_page(0, &data)
+            .expect("TODO: panic message");
+        ctx.disk_manager
+            .write()
+            .write_page(1, &data)
+            .expect("TODO: panic message");
 
         // Write log data
         let log_data = b"Test log entry.";
-        ctx.disk_manager.write().write_log(log_data).expect("TODO: panic message");
+        ctx.disk_manager
+            .write()
+            .write_log(log_data)
+            .expect("TODO: panic message");
 
         // Verify the number of writes and flushes
         let disk_manager = ctx.disk_manager.read();
-        assert_eq!(disk_manager.get_num_writes(), 2, "Number of page writes should be 2.");
-        assert_eq!(disk_manager.get_num_flushes(), 1, "Number of flushes should be 1 after log write.");
+        assert_eq!(
+            disk_manager.get_num_writes(),
+            2,
+            "Number of page writes should be 2."
+        );
+        assert_eq!(
+            disk_manager.get_num_flushes(),
+            1,
+            "Number of flushes should be 1 after log write."
+        );
     }
 }
 
@@ -454,7 +548,10 @@ mod basic_behaviour {
 
         // The expected file size should be 2 * DB_PAGE_SIZE
         let expected_size = 2 * DB_PAGE_SIZE as u64;
-        assert_eq!(file_size, expected_size, "File size does not match the expected size after writing pages.");
+        assert_eq!(
+            file_size, expected_size,
+            "File size does not match the expected size after writing pages."
+        );
 
         Ok(())
     }
@@ -468,7 +565,12 @@ mod basic_behaviour {
 
         // Tolerate empty read - buffer should be filled with zeros if the page is unwritten.
         if let Err(e) = ctx.disk_manager.read().read_page(0, &mut buf) {
-            assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof, "Unexpected error during empty read: {:?}", e);
+            assert_eq!(
+                e.kind(),
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected error during empty read: {:?}",
+                e
+            );
             buf.fill(0); // Simulate expected behavior of filling with zeros
         }
 
@@ -623,18 +725,15 @@ mod concurrency {
                     .expect(&format!("Failed to read log for thread {}", i));
 
                 // Send the result back
-                tx.send((i, log_data == buf)).expect("Failed to send test result");
+                tx.send((i, log_data == buf))
+                    .expect("Failed to send test result");
             });
         }
 
         // Collect and verify results
         for _ in 0..num_threads {
             let (i, result) = rx.recv().expect("Failed to receive test result");
-            assert!(
-                result,
-                "Log data integrity check failed for thread {}",
-                i
-            );
+            assert!(result, "Log data integrity check failed for thread {}", i);
         }
 
         Ok(())
@@ -642,9 +741,9 @@ mod concurrency {
 
     #[test]
     fn concurrent_flush_log_future_handling() {
+        use futures::future::ready;
         use std::sync::{mpsc::channel, Arc, Barrier};
         use std::thread;
-        use futures::future::ready;
 
         let ctx = TestContext::new("test_concurrent_flush_log_future_handling");
         let disk_manager = Arc::clone(&ctx.disk_manager);
@@ -663,14 +762,15 @@ mod concurrency {
                 // Wait for all threads to reach this point
                 barrier.wait();
 
-                let future = Box::new(ready(())) as Box<dyn Future<Output=()> + Send>;
+                let future = Box::new(ready(())) as Box<dyn Future<Output = ()> + Send>;
                 disk_manager.write().set_flush_log_future(future);
 
                 // Verify that the flush log future is set
                 let has_future = disk_manager.read().has_flush_log_future();
 
                 // Send the result back
-                tx.send((i, has_future)).expect("Failed to send test result");
+                tx.send((i, has_future))
+                    .expect("Failed to send test result");
 
                 // Additional barrier wait to ensure all threads have finished setting/checking before exiting
                 barrier.wait();
@@ -680,7 +780,11 @@ mod concurrency {
         // Collect and verify results
         for _ in 0..num_threads {
             let (i, result) = rx.recv().expect("Failed to receive test result");
-            assert!(result, "Flush log future was not set correctly in thread {}", i);
+            assert!(
+                result,
+                "Flush log future was not set correctly in thread {}",
+                i
+            );
         }
     }
 }
@@ -699,16 +803,14 @@ mod edge_cases {
         // Attempt to read a page that hasn't been written to (should return zero-filled buffer)
         ctx.disk_manager.read().read_page(10, &mut buf)?;
         assert_eq!(
-            buf,
-            [0u8; DB_PAGE_SIZE as usize],
+            buf, [0u8; DB_PAGE_SIZE as usize],
             "Buffer should be filled with zeros when reading a non-existent page."
         );
 
         // Attempt to read from a very high page ID, which is beyond the current file size
         ctx.disk_manager.read().read_page(10000, &mut buf)?;
         assert_eq!(
-            buf,
-            [0u8; DB_PAGE_SIZE as usize],
+            buf, [0u8; DB_PAGE_SIZE as usize],
             "Buffer should be filled with zeros when reading past the end of the file."
         );
 
@@ -761,7 +863,10 @@ mod edge_cases {
         }
 
         // Verify that the read does not panic and the result is either corrupted or handled gracefully
-        assert_ne!(buf, data, "The read data should not match the original data after corruption.");
+        assert_ne!(
+            buf, data,
+            "The read data should not match the original data after corruption."
+        );
 
         // Optionally check for specific corrupted content (like the 0xFF bytes)
         assert!(
@@ -786,7 +891,10 @@ mod edge_cases {
         let result = mock_disk_io.write_page(0, &[0u8; 4096]);
 
         // Ensure the result is an error
-        assert!(result.is_err(), "Expected a disk full error but got a successful result.");
+        assert!(
+            result.is_err(),
+            "Expected a disk full error but got a successful result."
+        );
 
         // Ensure the error kind is correct
         if let Err(e) = result {
@@ -796,7 +904,12 @@ mod edge_cases {
                 "Expected WriteZero error kind but got {:?}.",
                 e.kind()
             );
-            assert_eq!(e.to_string(), "Disk full", "Unexpected error message: {}", e);
+            assert_eq!(
+                e.to_string(),
+                "Disk full",
+                "Unexpected error message: {}",
+                e
+            );
         }
     }
 }

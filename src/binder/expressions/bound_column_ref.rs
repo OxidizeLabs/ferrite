@@ -13,14 +13,18 @@ pub struct BoundColumnRef {
 impl BoundColumnRef {
     /// Creates a new BoundColumnRef.
     pub fn new(col_names: Vec<String>) -> Self {
-        Self { col_name: col_names }
+        Self {
+            col_name: col_names,
+        }
     }
 
     /// Prepends a prefix to the column name.
     pub fn prepend(mut self, prefix: String) -> Self {
         let mut new_col_name = vec![prefix];
         new_col_name.append(&mut self.col_name);
-        Self { col_name: new_col_name }
+        Self {
+            col_name: new_col_name,
+        }
     }
 }
 

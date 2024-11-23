@@ -3,11 +3,7 @@ use crate::catalogue::catalogue::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::execution::check_option::CheckOptions;
-use std::fmt::Pointer;
-use std::ops::Deref;
 use std::sync::Arc;
-use parking_lot::{Mutex, RawMutex};
-use parking_lot::lock_api::MutexGuard;
 
 pub struct ExecutorContext {
     transaction: Transaction,
@@ -21,11 +17,12 @@ pub struct ExecutorContext {
 }
 
 impl ExecutorContext {
-    pub fn new(transaction: Transaction,
-               // transaction_manager: Arc<TransactionManager>,
-               catalog: Catalog,
-               buffer_pool_manager: Arc<BufferPoolManager>,
-               lock_manager: Arc<LockManager>,
+    pub fn new(
+        transaction: Transaction,
+        // transaction_manager: Arc<TransactionManager>,
+        catalog: Catalog,
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        lock_manager: Arc<LockManager>,
     ) -> Self {
         Self {
             transaction,
@@ -43,7 +40,7 @@ impl ExecutorContext {
         &self.transaction
     }
 
-    pub fn get_catalogue(&self) -> &Catalog {
+    pub fn get_catalog(&self) -> &Catalog {
         &self.catalog
     }
 
@@ -79,4 +76,3 @@ impl ExecutorContext {
         self._is_delete
     }
 }
-

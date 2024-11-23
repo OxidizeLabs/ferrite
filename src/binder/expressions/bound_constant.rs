@@ -24,7 +24,9 @@ impl BoundConstant {
         I: IntoIterator,
         I::Item: Into<Value>,
     {
-        Self { val: Value::new_vector(iter) }
+        Self {
+            val: Value::new_vector(iter),
+        }
     }
 }
 
@@ -63,7 +65,6 @@ impl Display for BoundConstant {
     }
 }
 
-
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -85,13 +86,18 @@ mod unit_tests {
         assert_eq!(float_constant.to_string(), "3.14");
 
         let int_vector_constant = BoundConstant::new_vector(vec![1, 2, 3]);
-        assert!(int_vector_constant.to_string().contains("1") &&
-            int_vector_constant.to_string().contains("2") &&
-            int_vector_constant.to_string().contains("3"));
+        assert!(
+            int_vector_constant.to_string().contains("1")
+                && int_vector_constant.to_string().contains("2")
+                && int_vector_constant.to_string().contains("3")
+        );
 
-        let mixed_vector_constant = BoundConstant::new_vector(vec![Value::new(1), Value::new("two"), Value::new(3.0)]);
-        assert!(mixed_vector_constant.to_string().contains("1") &&
-            mixed_vector_constant.to_string().contains("\"two\"") &&
-            mixed_vector_constant.to_string().contains("3"));
+        let mixed_vector_constant =
+            BoundConstant::new_vector(vec![Value::new(1), Value::new("two"), Value::new(3.0)]);
+        assert!(
+            mixed_vector_constant.to_string().contains("1")
+                && mixed_vector_constant.to_string().contains("\"two\"")
+                && mixed_vector_constant.to_string().contains("3")
+        );
     }
 }

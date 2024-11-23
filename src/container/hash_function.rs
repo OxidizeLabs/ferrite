@@ -42,9 +42,13 @@ where
         match key as &dyn Any {
             key if key.is::<i32>() => hasher.write_i32(*key.downcast_ref::<i32>().unwrap()),
             key if key.is::<u32>() => hasher.write_u32(*key.downcast_ref::<u32>().unwrap()),
-            key if key.is::<String>() => hasher.write(key.downcast_ref::<String>().unwrap().as_bytes()),
+            key if key.is::<String>() => {
+                hasher.write(key.downcast_ref::<String>().unwrap().as_bytes())
+            }
             key if key.is::<&str>() => hasher.write(key.downcast_ref::<&str>().unwrap().as_bytes()),
-            key if key.is::<&Value>() => hasher.write(&key.downcast_ref::<Value>().unwrap().as_bytes()),
+            key if key.is::<&Value>() => {
+                hasher.write(&key.downcast_ref::<Value>().unwrap().as_bytes())
+            }
             _ => {
                 // Fallback for types that implement `Hash`
                 key.hash(&mut hasher);
@@ -64,7 +68,6 @@ impl Hasher for Xxh3Hasher {
         self.hasher.update(bytes);
     }
 }
-
 
 #[cfg(test)]
 mod unit_tests {

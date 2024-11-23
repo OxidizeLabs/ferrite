@@ -4,10 +4,14 @@ use crate::common::exception::DeletePageError;
 use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::page::page::PageType::{ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
+use crate::storage::page::page::PageType::{
+    ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table,
+};
 use crate::storage::page::page::{Page, PageType};
 use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::{ExtendableHTableBucketPage, TypeErasedBucketPage};
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::{
+    ExtendableHTableBucketPage, TypeErasedBucketPage,
+};
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
@@ -60,7 +64,10 @@ impl BufferPoolManager {
         replacer: Arc<RwLock<LRUKReplacer>>,
     ) -> Self {
         let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
-        info!("BufferPoolManager initialized with pool size: {}", pool_size);
+        info!(
+            "BufferPoolManager initialized with pool size: {}",
+            pool_size
+        );
         Self {
             pool_size,
             next_page_id: AtomicU32::new(0),
@@ -92,7 +99,10 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional new page.
     pub fn new_page(&self, new_page_type: NewPageType) -> Option<Arc<RwLock<PageType>>> {
-        debug!("Attempting to create a new page of type: {:?}", new_page_type);
+        debug!(
+            "Attempting to create a new page of type: {:?}",
+            new_page_type
+        );
 
         // Step 1: Acquire a frame ID
         let frame_id = self.get_available_frame()?;
@@ -252,14 +262,15 @@ impl BufferPoolManager {
 
                     // Schedule the write-back operation synchronously
                     ds.schedule(
-                        true, // Write operation
+                        true,                                                           // Write operation
                         Arc::new(RwLock::new(page.as_page_trait().get_data().clone())), // Data to write
-                        old_page_id, // Page ID
+                        old_page_id,                                                    // Page ID
                         tx, // Sender for the completion signal
                     );
 
                     // Wait for the write-back operation to complete
-                    rx.recv().expect("Failed to complete the write-back operation");
+                    rx.recv()
+                        .expect("Failed to complete the write-back operation");
 
                     // Mark the page as not dirty
                     page.as_page_trait_mut().set_dirty(false);
@@ -272,7 +283,9 @@ impl BufferPoolManager {
 
         // Step 5: Load the new page from disk
         let mut new_page = PageType::Basic(Page::new(page_id));
-        self.disk_manager.read_page(page_id, &mut new_page.as_page_trait_mut().get_data_mut()).expect("Failed to read page");
+        self.disk_manager
+            .read_page(page_id, &mut new_page.as_page_trait_mut().get_data_mut())
+            .expect("Failed to read page");
 
         let new_page_arc = Arc::new(RwLock::new(new_page)); // Wrap the page in RwLock and Arc
 
@@ -284,7 +297,10 @@ impl BufferPoolManager {
 
         let mut page_table = self.page_table.write(); // Acquire write lock
         page_table.insert(page_id, frame_id);
-        debug!("Loaded page {} from disk into frame ID: {}", page_id, frame_id);
+        debug!(
+            "Loaded page {} from disk into frame ID: {}",
+            page_id, frame_id
+        );
 
         // Step 7: Update the replacer with the new page
         {
@@ -303,10 +319,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<BasicPageGuard>>`.
-    pub fn fetch_page_guarded(
-        self: &Arc<Self>,
-        page_id: PageId,
-    ) -> Option<PageGuard> {
+    pub fn fetch_page_guarded(self: &Arc<Self>, page_id: PageId) -> Option<PageGuard> {
         debug!("Fetching basic page guard for page ID: {}", page_id);
 
         let frame_id = {
@@ -341,7 +354,10 @@ impl BufferPoolManager {
         };
 
         if frame_id == u32::MAX {
-            error!("Failed to fetch basic page guard for page {}: no available frame", page_id);
+            error!(
+                "Failed to fetch basic page guard for page {}: no available frame",
+                page_id
+            );
             return None;
         }
 
@@ -366,14 +382,15 @@ impl BufferPoolManager {
 
                     // Schedule the write-back operation synchronously
                     ds.schedule(
-                        true, // Write operation
+                        true,                                                           // Write operation
                         Arc::new(RwLock::new(page.as_page_trait().get_data().clone())), // Data to write
-                        old_page_id, // Page ID
+                        old_page_id,                                                    // Page ID
                         tx, // Sender for the completion signal
                     );
 
                     // Wait for the write-back operation to complete
-                    rx.recv().expect("Failed to complete the write-back operation");
+                    rx.recv()
+                        .expect("Failed to complete the write-back operation");
 
                     // Mark the page as not dirty
                     page.as_page_trait_mut().set_dirty(false);
@@ -385,7 +402,9 @@ impl BufferPoolManager {
         }
 
         let mut new_page = PageType::Basic(Page::new(page_id));
-        self.disk_manager.read_page(page_id, &mut new_page.as_page_trait_mut().get_data_mut()).expect("Failed to read page");
+        self.disk_manager
+            .read_page(page_id, &mut new_page.as_page_trait_mut().get_data_mut())
+            .expect("Failed to read page");
 
         let new_page_arc = Arc::new(RwLock::new(new_page));
 
@@ -396,7 +415,10 @@ impl BufferPoolManager {
 
         let mut page_table = self.page_table.write(); // Acquire write lock
         page_table.insert(page_id, frame_id);
-        debug!("Loaded page {} from disk into frame ID: {}", page_id, frame_id);
+        debug!(
+            "Loaded page {} from disk into frame ID: {}",
+            page_id, frame_id
+        );
 
         {
             let replacer = self.replacer.write(); // Acquire write lock
@@ -404,11 +426,7 @@ impl BufferPoolManager {
             replacer.record_access(frame_id, AccessType::Lookup);
         }
 
-        Some(PageGuard::new(
-            Arc::clone(&self),
-            new_page_arc,
-            page_id,
-        ))
+        Some(PageGuard::new(Arc::clone(&self), new_page_arc, page_id))
     }
 
     /// Unpins a page with the given page ID.
@@ -450,10 +468,10 @@ impl BufferPoolManager {
                 let mut page = page_arc.write();
 
                 info!(
-            "Unpinning page {} with current pin count {}",
-            page_id,
-            page.as_page_trait().get_pin_count()
-        );
+                    "Unpinning page {} with current pin count {}",
+                    page_id,
+                    page.as_page_trait().get_pin_count()
+                );
 
                 if page.as_page_trait().get_pin_count() > 0 {
                     page.as_page_trait_mut().decrement_pin_count();
@@ -480,7 +498,6 @@ impl BufferPoolManager {
                 return false;
             }
         };
-
 
         debug!("Step 3: Make the page evictable if needed, outside of the main locks");
         // Step 3: Make the page evictable if needed, outside of the main locks
@@ -527,7 +544,9 @@ impl BufferPoolManager {
                         info!("Page data before flushing: {:?}", &data[..64]);
 
                         // Perform the disk write
-                        self.disk_manager.write_page(page_id, &data).expect("Failed to write page");
+                        self.disk_manager
+                            .write_page(page_id, &data)
+                            .expect("Failed to write page");
 
                         info!("Page data written to disk: {:?}", &data[..64]);
 
@@ -572,7 +591,9 @@ impl BufferPoolManager {
                     let data = page.as_page_trait().get_data().clone(); // Clone the data for writing
 
                     // Write the page data to disk asynchronously
-                    self.disk_manager.write_page(page_id, &data).expect("Failed to write page");
+                    self.disk_manager
+                        .write_page(page_id, &data)
+                        .expect("Failed to write page");
 
                     page.as_page_trait_mut().set_dirty(false); // Reset the dirty flag after successful write
                     debug!("Flushed page {} from frame {}", page_id, frame_id);
@@ -660,7 +681,10 @@ impl BufferPoolManager {
         self.remove_page_from_table(page_id);
         self.reset_frame(frame_id)?;
 
-        debug!("Successfully deleted page {} from frame {}", page_id, frame_id);
+        debug!(
+            "Successfully deleted page {} from frame {}",
+            page_id, frame_id
+        );
         Ok(())
     }
 
@@ -680,7 +704,8 @@ impl BufferPoolManager {
     fn reset_frame(&self, frame_id: FrameId) -> Result<(), DeletePageError> {
         let mut pages = self.pages.write();
 
-        let page_slot = pages.get_mut(frame_id as usize)
+        let page_slot = pages
+            .get_mut(frame_id as usize)
             .ok_or(DeletePageError::FrameNotFound(frame_id))?;
 
         if let Some(page_arc) = page_slot.take() {
@@ -742,7 +767,8 @@ impl BufferPoolManager {
 
     fn get_page_id_for_frame(&self, frame_id: FrameId) -> Option<PageId> {
         let page_table = self.page_table.read();
-        page_table.iter()
+        page_table
+            .iter()
             .find_map(|(&page_id, &fid)| if fid == frame_id { Some(page_id) } else { None })
     }
 
@@ -750,22 +776,35 @@ impl BufferPoolManager {
         self.next_page_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    fn create_page_of_type(&self, new_page_type: NewPageType, page_id: PageId) -> Arc<RwLock<PageType>> {
+    fn create_page_of_type(
+        &self,
+        new_page_type: NewPageType,
+        page_id: PageId,
+    ) -> Arc<RwLock<PageType>> {
         let new_page = match new_page_type {
             NewPageType::Basic => PageType::Basic(Page::new(page_id)),
-            NewPageType::ExtendedHashTableDirectory => ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id)),
-            NewPageType::ExtendedHashTableHeader => ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id)),
+            NewPageType::ExtendedHashTableDirectory => {
+                ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))
+            }
+            NewPageType::ExtendedHashTableHeader => {
+                ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id))
+            }
             NewPageType::ExtendedHashTableBucket => {
                 let bucket_page = ExtendableHTableBucketPage::<i32, 8>::new(page_id);
                 ExtendedHashTableBucket(TypeErasedBucketPage::new(bucket_page))
             }
-            NewPageType::Table => Table(TablePage::new(page_id))
+            NewPageType::Table => Table(TablePage::new(page_id)),
         };
 
         Arc::new(RwLock::new(new_page))
     }
 
-    fn update_page_metadata(&self, frame_id: FrameId, page_id: PageId, new_page: &Arc<RwLock<PageType>>) {
+    fn update_page_metadata(
+        &self,
+        frame_id: FrameId,
+        page_id: PageId,
+        new_page: &Arc<RwLock<PageType>>,
+    ) {
         {
             let mut pages = self.pages.write();
             pages[frame_id as usize] = Some(new_page.clone());
@@ -796,7 +835,11 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
+        let disk_manager = Arc::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        ));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
         let bpm = Arc::new(BufferPoolManager::new(
@@ -876,7 +919,10 @@ mod unit_tests {
         // Fill the buffer pool to capacity
         for _i in 0..bpm.get_pool_size() {
             let page = context.bpm.new_page(NewPageType::Basic).unwrap();
-            info!("Created page with ID: {}", page.read().as_page_trait().get_page_id());
+            info!(
+                "Created page with ID: {}",
+                page.read().as_page_trait().get_page_id()
+            );
 
             // Explicitly mark the newly created page as evictable
             let page_id = page.read().as_page_trait().get_page_id();
@@ -1111,7 +1157,9 @@ mod concurrency {
             let handle = thread::spawn(move || {
                 // Create a new page
                 let page_id = i as u32;
-                bpm_clone.new_page(NewPageType::Basic).expect("Failed to create a new page");
+                bpm_clone
+                    .new_page(NewPageType::Basic)
+                    .expect("Failed to create a new page");
 
                 // Write data to the page
                 bpm_clone.write_page(page_id as PageId, data);
@@ -1131,7 +1179,10 @@ mod concurrency {
 
         // Check if the tests finished without deadlocks
         let done = done.lock();
-        assert!(*done, "Test did not complete successfully, possible deadlock detected");
+        assert!(
+            *done,
+            "Test did not complete successfully, possible deadlock detected"
+        );
 
         // Cleanup the tests context
         ctx.cleanup();
@@ -1178,7 +1229,8 @@ mod edge_cases {
             let page_table = page_table.read();
             assert!(
                 !page_table.contains_key(&(1 as PageId)),
-                "Last page should have been evicted: {}", &(1 as PageId)
+                "Last page should have been evicted: {}",
+                &(1 as PageId)
             );
         }
     }
@@ -1189,7 +1241,10 @@ mod edge_cases {
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
 
         // Create and modify a page repeatedly
-        let page = bpm.write().new_page(NewPageType::Basic).expect("Failed to create a new page");
+        let page = bpm
+            .write()
+            .new_page(NewPageType::Basic)
+            .expect("Failed to create a new page");
         let page_id = page.read().as_page_trait().get_page_id(); // Store page_id for later use
 
         for i in 0..100 {
@@ -1238,17 +1293,28 @@ mod edge_cases {
 
         // Create maximum number of pages
         for _ in 0..bpm.get_pool_size() {
-            bpm.new_page(NewPageType::Basic).expect("Failed to create a new page");
+            bpm.new_page(NewPageType::Basic)
+                .expect("Failed to create a new page");
         }
 
         // Attempt to create more pages than the buffer pool can handle
         for _ in 0..10 {
             let new_page_result = bpm.new_page(NewPageType::Basic);
             if let Some(ref page) = new_page_result {
-                bpm.unpin_page(page.read().as_page_trait().get_page_id(), false, AccessType::Lookup);
-                info!("Unexpectedly created page {}", page.read().as_page_trait().get_page_id());
+                bpm.unpin_page(
+                    page.read().as_page_trait().get_page_id(),
+                    false,
+                    AccessType::Lookup,
+                );
+                info!(
+                    "Unexpectedly created page {}",
+                    page.read().as_page_trait().get_page_id()
+                );
             }
-            assert!(new_page_result.is_none(), "Should not be able to create more pages than the buffer pool size");
+            assert!(
+                new_page_result.is_none(),
+                "Should not be able to create more pages than the buffer pool size"
+            );
         }
     }
 }

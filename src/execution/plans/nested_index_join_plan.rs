@@ -37,8 +37,10 @@ impl AbstractPlanNode for NestedIndexJoinNode {
             result.push_str(&format!(" [{{ type={}, key_predicate={}, index={}, index_table={}, inner_table_schema={} }}]", self.join_type,
                                      self.key_predicate, self.index_name, self.index_table_name, self.inner_table_schema));
         } else {
-            result.push_str(&format!(" [{{ type={}, key_predicate={}, index={}, index_table={}}}]", self.join_type,
-                                     self.key_predicate, self.index_name, self.index_table_name));
+            result.push_str(&format!(
+                " [{{ type={}, key_predicate={}, index={}, index_table={}}}]",
+                self.join_type, self.key_predicate, self.index_name, self.index_table_name
+            ));
         }
         result
     }

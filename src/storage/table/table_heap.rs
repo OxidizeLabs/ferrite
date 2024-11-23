@@ -39,7 +39,10 @@ impl TableHeap {
         if let Some(ext_guard) = page_guard.into_specific_type::<TablePage, 8>() {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
-                info!("Create TablePage for TableHeap with PageId: {}", page.get_page_id())
+                info!(
+                    "Create TablePage for TableHeap with PageId: {}",
+                    page.get_page_id()
+                )
             });
         }
         let last_page_id = first_page_id;
@@ -74,15 +77,18 @@ impl TableHeap {
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write(); // Use RAII for the write lock
 
-        let page_guard = self.bpm.fetch_page_guarded(self.last_page_id)
+        let page_guard = self
+            .bpm
+            .fetch_page_guarded(self.last_page_id)
             .ok_or_else(|| "Failed to fetch page".to_string())?;
 
-        let mut table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
+        let mut table_page_guard = page_guard
+            .into_specific_type::<TablePage, 8>()
             .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
 
-        table_page_guard.access_mut(|table_page| {
-            table_page.insert_tuple(meta, tuple).unwrap()
-        }).ok_or_else(|| "Failed to insert tuple".to_string())
+        table_page_guard
+            .access_mut(|table_page| table_page.insert_tuple(meta, tuple).unwrap())
+            .ok_or_else(|| "Failed to insert tuple".to_string())
     }
 
     /// Updates the meta of a tuple.
@@ -94,14 +100,20 @@ impl TableHeap {
     pub fn update_tuple_meta(&self, meta: &TupleMeta, rid: RID) {
         let _write_guard = self.latch.write(); // Use RAII for the write lock
 
-        let page_guard = self.bpm.fetch_page_guarded(rid.get_page_id()).ok_or_else(|| "Failed to fetch page".to_string()).unwrap();
+        let page_guard = self
+            .bpm
+            .fetch_page_guarded(rid.get_page_id())
+            .ok_or_else(|| "Failed to fetch page".to_string())
+            .unwrap();
 
-        let mut table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
-            .ok_or_else(|| "Failed to convert to TablePage".to_string()).unwrap();
+        let mut table_page_guard = page_guard
+            .into_specific_type::<TablePage, 8>()
+            .ok_or_else(|| "Failed to convert to TablePage".to_string())
+            .unwrap();
 
-        table_page_guard.access_mut(|table_page| {
-            table_page.update_tuple_meta(meta, &rid)
-        }).expect("Failed to update tuple metadata");
+        table_page_guard
+            .access_mut(|table_page| table_page.update_tuple_meta(meta, &rid))
+            .expect("Failed to update tuple metadata");
     }
 
     pub fn get_bpm(&self) -> Arc<BufferPoolManager> {
@@ -121,14 +133,18 @@ impl TableHeap {
         debug!("Attempting to get tuple with RID: {:?}", rid);
         let _read_guard = self.latch.read();
 
-        let page_guard = self.bpm.fetch_page_guarded(rid.get_page_id()).ok_or_else(|| "Failed to fetch page".to_string())?;
+        let page_guard = self
+            .bpm
+            .fetch_page_guarded(rid.get_page_id())
+            .ok_or_else(|| "Failed to fetch page".to_string())?;
 
-        let table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
+        let table_page_guard = page_guard
+            .into_specific_type::<TablePage, 8>()
             .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
 
-        table_page_guard.access(|table_page| {
-            table_page.get_tuple(&rid).unwrap()
-        }).ok_or_else(|| "Failed to get tuple".to_string())
+        table_page_guard
+            .access(|table_page| table_page.get_tuple(&rid).unwrap())
+            .ok_or_else(|| "Failed to get tuple".to_string())
     }
 
     /// Reads a tuple meta from the table. Note: if you want to get the tuple and meta together,
@@ -144,14 +160,18 @@ impl TableHeap {
     pub fn get_tuple_meta(&self, rid: RID) -> Result<TupleMeta, String> {
         let _write_guard = self.latch.write();
 
-        let page_guard = self.bpm.fetch_page_guarded(rid.get_page_id()).ok_or_else(|| "Failed to fetch page".to_string())?;
+        let page_guard = self
+            .bpm
+            .fetch_page_guarded(rid.get_page_id())
+            .ok_or_else(|| "Failed to fetch page".to_string())?;
 
-        let mut table_page_guard = page_guard.into_specific_type::<TablePage, 8>()
+        let mut table_page_guard = page_guard
+            .into_specific_type::<TablePage, 8>()
             .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
 
-        table_page_guard.access_mut(|table_page| {
-            table_page.get_tuple(&rid).unwrap().0
-        }).ok_or_else(|| "Failed to get tuple metadata".to_string())
+        table_page_guard
+            .access_mut(|table_page| table_page.get_tuple(&rid).unwrap().0)
+            .ok_or_else(|| "Failed to get tuple metadata".to_string())
     }
 
     /// Returns an iterator of this table. When this iterator is created, it will record the
@@ -173,9 +193,7 @@ impl TableHeap {
         let stop_at_rid = if last_page_id != INVALID_PAGE_ID {
             if let Some(page_guard) = self.bpm.fetch_page_guarded(last_page_id) {
                 if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                    table_page.access(|page| {
-                        RID::new(last_page_id, page.get_num_tuples() as u32)
-                    })
+                    table_page.access(|page| RID::new(last_page_id, page.get_num_tuples() as u32))
                 } else {
                     error!("Failed to convert to TablePage");
                     Option::from(RID::new(INVALID_PAGE_ID, 0))
@@ -188,7 +206,11 @@ impl TableHeap {
             Option::from(RID::new(INVALID_PAGE_ID, 0))
         };
 
-        debug!("Creating iterator: start_rid = {:?}, stop_at_rid = {:?}", start_rid, stop_at_rid.unwrap());
+        debug!(
+            "Creating iterator: start_rid = {:?}, stop_at_rid = {:?}",
+            start_rid,
+            stop_at_rid.unwrap()
+        );
         TableIterator::new(self, start_rid, stop_at_rid.unwrap())
     }
 
@@ -404,11 +426,13 @@ mod tests {
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
-                &disk_manager,
-            ))));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -461,19 +485,16 @@ mod tests {
         let schema = create_test_schema();
         let rid = RID::new(0, 0);
 
-        let tuple_values = vec![
-            Value::new(1),
-            Value::new("Alice"),
-            Value::new(30),
-        ];
+        let tuple_values = vec![Value::new(1), Value::new("Alice"), Value::new(30)];
         let mut tuple = Tuple::new(tuple_values, schema.clone(), rid);
         let meta = TupleMeta::new(0, false);
 
-        let rid = table_heap.insert_tuple(&meta, &mut tuple, None, None, 0)
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, None, None, 0)
             .expect("Failed to insert tuple");
 
-        let (retrieved_meta, retrieved_tuple) = table_heap.get_tuple(rid)
-            .expect("Failed to get tuple");
+        let (retrieved_meta, retrieved_tuple) =
+            table_heap.get_tuple(rid).expect("Failed to get tuple");
 
         assert_eq!(retrieved_meta, meta);
         assert_eq!(retrieved_tuple, tuple);
@@ -487,21 +508,19 @@ mod tests {
         let table_heap = TableHeap::new(bpm);
         let schema = create_test_schema();
 
-        let tuple_values = vec![
-            Value::new(1),
-            Value::new("Bob"),
-            Value::new(25),
-        ];
+        let tuple_values = vec![Value::new(1), Value::new("Bob"), Value::new(25)];
         let mut tuple = Tuple::new(tuple_values, schema.clone(), RID::new(0, 0));
         let meta = TupleMeta::new(0, false);
 
-        let rid = table_heap.insert_tuple(&meta, &mut tuple, None, None, 0)
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, None, None, 0)
             .expect("Failed to insert tuple");
 
         let updated_meta = TupleMeta::new(1, true);
         table_heap.update_tuple_meta(&updated_meta, rid);
 
-        let retrieved_meta = table_heap.get_tuple_meta(rid)
+        let retrieved_meta = table_heap
+            .get_tuple_meta(rid)
             .expect("Failed to get tuple meta");
 
         assert_eq!(retrieved_meta, updated_meta);
@@ -524,7 +543,8 @@ mod tests {
             ];
             let mut tuple = Tuple::new(tuple_values, schema.clone(), RID::new(0, i as u32));
             let meta = TupleMeta::new(0, false);
-            let rid = table_heap.insert_tuple(&meta, &mut tuple, None, None, 0)
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, None, None, 0)
                 .expect("Failed to insert tuple");
             inserted_rids.push(rid);
             debug!("Inserted tuple with RID: {:?}", rid);
@@ -537,7 +557,12 @@ mod tests {
 
         debug!("Collected {} tuples", tuples.len());
 
-        assert_eq!(tuples.len(), 5, "Expected 5 tuples, but got {}", tuples.len());
+        assert_eq!(
+            tuples.len(),
+            5,
+            "Expected 5 tuples, but got {}",
+            tuples.len()
+        );
         for (i, (meta, tuple)) in tuples.iter().enumerate() {
             assert_eq!(tuple.get_value(0), &Value::new(i as i32));
             assert_eq!(tuple.get_value(1), &Value::new(format!("Name{}", i)));

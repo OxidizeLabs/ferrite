@@ -113,10 +113,10 @@ impl Schema {
 
 impl PartialEq for Schema {
     fn eq(&self, other: &Self) -> bool {
-        self.columns == other.columns &&
-            self.length == other.length &&
-            self.tuple_is_inlined == other.tuple_is_inlined &&
-            self.unlined_columns == other.unlined_columns
+        self.columns == other.columns
+            && self.length == other.length
+            && self.tuple_is_inlined == other.tuple_is_inlined
+            && self.unlined_columns == other.unlined_columns
     }
 }
 

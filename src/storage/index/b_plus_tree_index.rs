@@ -59,7 +59,11 @@ where
     ///
     /// # Returns
     /// A new `BPlusTreeIndex` instance.
-    pub fn new(metadata: Box<IndexMetadata>, buffer_pool_manager: Arc<BufferPoolManager>, comparator: C) -> Self {
+    pub fn new(
+        metadata: Box<IndexMetadata>,
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        comparator: C,
+    ) -> Self {
         unimplemented!()
     }
 
@@ -128,7 +132,10 @@ where
 pub const TWO_INTEGER_SIZE_B_TREE: usize = 8;
 pub type IntegerKeyTypeBTree = GenericKey<IntegerType, TWO_INTEGER_SIZE_B_TREE>;
 pub type IntegerValueTypeBTree = RID;
-pub type IntegerComparatorTypeBTree<'a> = GenericKeyComparator<IntegerType, TWO_INTEGER_SIZE_B_TREE>;
-pub type BPlusTreeIndexForTwoIntegerColumn<'a> = BPlusTreeIndex<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
-pub type BPlusTreeIndexIteratorForTwoIntegerColumn<'a> = IndexIterator<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
+pub type IntegerComparatorTypeBTree<'a> =
+    GenericKeyComparator<IntegerType, TWO_INTEGER_SIZE_B_TREE>;
+pub type BPlusTreeIndexForTwoIntegerColumn<'a> =
+    BPlusTreeIndex<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
+pub type BPlusTreeIndexIteratorForTwoIntegerColumn<'a> =
+    IndexIterator<IntegerKeyTypeBTree, IntegerValueTypeBTree, IntegerComparatorTypeBTree<'a>>;
 pub type IntegerHashFunctionType = HashFunction<IntegerKeyTypeBTree>;

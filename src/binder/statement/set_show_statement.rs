@@ -35,7 +35,11 @@ impl BoundStatement for VariableSetStatement {
 
 impl Display for VariableSetStatement {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "BoundVariableSet {{ variable={}, value={} }}", self.variable, self.value)
+        write!(
+            f,
+            "BoundVariableSet {{ variable={}, value={} }}",
+            self.variable, self.value
+        )
     }
 }
 
@@ -113,7 +117,10 @@ mod unit_tests {
     fn variable_set_statement() {
         let stmt = VariableSetStatement::new("my_var".to_string(), "42".to_string());
         assert_eq!(stmt.statement_type(), StatementType::VariableSetStatement);
-        assert_eq!(stmt.to_string(), "BoundVariableSet { variable=my_var, value=42 }");
+        assert_eq!(
+            stmt.to_string(),
+            "BoundVariableSet { variable=my_var, value=42 }"
+        );
     }
 
     #[test]
