@@ -159,7 +159,10 @@ mod tests {
 
     #[test]
     fn test_window_function_type_display() {
-        assert_eq!(WindowFunctionType::CountStarAggregate.to_string(), "count_star");
+        assert_eq!(
+            WindowFunctionType::CountStarAggregate.to_string(),
+            "count_star"
+        );
         assert_eq!(WindowFunctionType::SumAggregate.to_string(), "sum");
         assert_eq!(WindowFunctionType::Rank.to_string(), "rank");
     }

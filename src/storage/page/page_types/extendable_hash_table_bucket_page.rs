@@ -60,7 +60,11 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> ExtendableHTableBucketPage<T, KE
         self.array.resize(self.max_size as usize, None);
     }
 
-    pub fn lookup(&self, key: &GenericKey<T, KEY_SIZE>, comparator: &GenericKeyComparator<T, KEY_SIZE>) -> Option<PageId> {
+    pub fn lookup(
+        &self,
+        key: &GenericKey<T, KEY_SIZE>,
+        comparator: &GenericKeyComparator<T, KEY_SIZE>,
+    ) -> Option<PageId> {
         for entry in self.array.iter().take(self.size as usize) {
             if let Some((k, v)) = entry {
                 if comparator.compare(k, key) == Ordering::Equal {
@@ -71,7 +75,12 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> ExtendableHTableBucketPage<T, KE
         None
     }
 
-    pub fn insert(&mut self, key: GenericKey<T, KEY_SIZE>, value: PageId, comparator: &GenericKeyComparator<T, KEY_SIZE>) -> bool {
+    pub fn insert(
+        &mut self,
+        key: GenericKey<T, KEY_SIZE>,
+        value: PageId,
+        comparator: &GenericKeyComparator<T, KEY_SIZE>,
+    ) -> bool {
         if self.is_full() {
             return false;
         }
@@ -83,10 +92,16 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> ExtendableHTableBucketPage<T, KE
         true
     }
 
-    pub fn remove(&mut self, key: &GenericKey<T, KEY_SIZE>, comparator: &GenericKeyComparator<T, KEY_SIZE>) -> bool {
-        if let Some(index) = (0..self.size as usize)
-            .find(|&i| self.array[i].as_ref().map_or(false, |(k, _)| comparator.compare(k, key) == Ordering::Equal))
-        {
+    pub fn remove(
+        &mut self,
+        key: &GenericKey<T, KEY_SIZE>,
+        comparator: &GenericKeyComparator<T, KEY_SIZE>,
+    ) -> bool {
+        if let Some(index) = (0..self.size as usize).find(|&i| {
+            self.array[i].as_ref().map_or(false, |(k, _)| {
+                comparator.compare(k, key) == Ordering::Equal
+            })
+        }) {
             self.array[index] = None;
             self.array[index..self.size as usize].rotate_left(1);
             self.size -= 1;
@@ -138,7 +153,10 @@ impl TypeErasedBucketPage {
         T: Clone + 'static,
     {
         let read_guard = self.inner.read();
-        read_guard.as_any().downcast_ref::<ExtendableHTableBucketPage<T, KEY_SIZE>>().map(f)
+        read_guard
+            .as_any()
+            .downcast_ref::<ExtendableHTableBucketPage<T, KEY_SIZE>>()
+            .map(f)
     }
 
     pub fn with_downcast_mut<T, const KEY_SIZE: usize, F, R>(&self, f: F) -> Option<R>
@@ -147,7 +165,10 @@ impl TypeErasedBucketPage {
         T: std::clone::Clone + 'static,
     {
         let mut write_guard = self.inner.write();
-        write_guard.as_any_mut().downcast_mut::<ExtendableHTableBucketPage<T, KEY_SIZE>>().map(f)
+        write_guard
+            .as_any_mut()
+            .downcast_mut::<ExtendableHTableBucketPage<T, KEY_SIZE>>()
+            .map(f)
     }
 
     pub fn get_key_size(&self) -> usize {
@@ -176,10 +197,18 @@ unsafe impl Send for TypeErasedBucketPage {}
 unsafe impl Sync for TypeErasedBucketPage {}
 
 // Update ExtendableHTableBucketPage to implement Send and Sync
-unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Send for ExtendableHTableBucketPage<T, KEY_SIZE> {}
-unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Sync for ExtendableHTableBucketPage<T, KEY_SIZE> {}
+unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Send
+    for ExtendableHTableBucketPage<T, KEY_SIZE>
+{
+}
+unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Sync
+    for ExtendableHTableBucketPage<T, KEY_SIZE>
+{
+}
 
-impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait for ExtendableHTableBucketPage<T, KEY_SIZE> {
+impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait
+    for ExtendableHTableBucketPage<T, KEY_SIZE>
+{
     fn get_key_size(&self) -> usize {
         KEY_SIZE
     }
@@ -229,7 +258,9 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait for ExtendableHT
     }
 }
 
-impl<T: Clone + 'static, const KEY_SIZE: usize> PageTrait for ExtendableHTableBucketPage<T, KEY_SIZE> {
+impl<T: Clone + 'static, const KEY_SIZE: usize> PageTrait
+    for ExtendableHTableBucketPage<T, KEY_SIZE>
+{
     fn get_page_id(&self) -> PageId {
         self.base.get_page_id()
     }
@@ -389,11 +420,13 @@ mod basic_behavior {
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
-                &disk_manager,
-            ))));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, 2)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -432,7 +465,9 @@ mod basic_behavior {
                 panic!("Failed to create new bucket page");
             }
         };
-        if let Some(ext_guard) = bucket_page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
+        if let Some(ext_guard) =
+            bucket_page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>()
+        {
             let read_guard = ext_guard.read();
             read_guard.access(|page| {
                 let bucket_page_size = page.get_size();
@@ -459,7 +494,8 @@ mod basic_behavior {
 
         // Create bucket pages
         for i in 0..4 {
-            let bucket_page_guard = match bpm.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
+            let bucket_page_guard = match bpm.new_page_guarded(NewPageType::ExtendedHashTableBucket)
+            {
                 Some(guard) => guard,
                 None => {
                     error!("Failed to create new bucket page");
@@ -467,7 +503,9 @@ mod basic_behavior {
                 }
             };
             bucket_page_ids[i] = bucket_page_guard.get_page_id();
-            if let Some(ext_guard) = bucket_page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>() {
+            if let Some(ext_guard) = bucket_page_guard
+                .into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>()
+            {
                 let mut write_guard = ext_guard.write();
                 write_guard.access_mut(|page| {
                     page.init(10);
@@ -478,15 +516,22 @@ mod basic_behavior {
         }
 
         // Create directory page
-        let directory_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableDirectory).unwrap();
+        let directory_guard = bpm
+            .new_page_guarded(NewPageType::ExtendedHashTableDirectory)
+            .unwrap();
         let directory_page_id = directory_guard.get_page_id();
         info!("Created directory page with ID: {}", directory_page_id);
 
-        if let Some(ext_guard) = directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>() {
+        if let Some(ext_guard) =
+            directory_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>()
+        {
             let mut write_guard = ext_guard.write();
             write_guard.access_mut(|directory_page| {
                 directory_page.init(3);
-                info!("Initialized bucket page with max size: {}", directory_page.get_size());
+                info!(
+                    "Initialized bucket page with max size: {}",
+                    directory_page.get_size()
+                );
 
                 directory_page.set_bucket_page_id(0, bucket_page_ids[0]);
 
@@ -499,7 +544,10 @@ mod basic_behavior {
                 directory_page.print_directory();
                 directory_page.verify_integrity();
                 assert_eq!(directory_page.get_size(), 1);
-                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
+                assert_eq!(
+                    directory_page.get_bucket_page_id(0),
+                    Some(bucket_page_ids[0])
+                );
 
                 // grow the directory, local depths should change!
                 directory_page.set_local_depth(0, 1);
@@ -518,8 +566,14 @@ mod basic_behavior {
                 directory_page.print_directory();
                 directory_page.verify_integrity();
                 assert_eq!(directory_page.get_size(), 2);
-                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
-                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
+                assert_eq!(
+                    directory_page.get_bucket_page_id(0),
+                    Some(bucket_page_ids[0])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(1),
+                    Some(bucket_page_ids[1])
+                );
 
                 for i in 0..100 {
                     assert_eq!(directory_page.hash_to_bucket_index(i), i % 2);
@@ -542,10 +596,22 @@ mod basic_behavior {
                 directory_page.print_directory();
                 directory_page.verify_integrity();
                 assert_eq!(directory_page.get_size(), 4);
-                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
-                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
-                assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
-                assert_eq!(directory_page.get_bucket_page_id(3), Some(bucket_page_ids[1]));
+                assert_eq!(
+                    directory_page.get_bucket_page_id(0),
+                    Some(bucket_page_ids[0])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(1),
+                    Some(bucket_page_ids[1])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(2),
+                    Some(bucket_page_ids[2])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(3),
+                    Some(bucket_page_ids[1])
+                );
 
                 for i in 0..100 {
                     assert_eq!(directory_page.hash_to_bucket_index(i), i % 4);
@@ -572,14 +638,38 @@ mod basic_behavior {
                 directory_page.print_directory();
                 directory_page.verify_integrity();
                 assert_eq!(directory_page.get_size(), 8);
-                assert_eq!(directory_page.get_bucket_page_id(0), Some(bucket_page_ids[0]));
-                assert_eq!(directory_page.get_bucket_page_id(1), Some(bucket_page_ids[1]));
-                assert_eq!(directory_page.get_bucket_page_id(2), Some(bucket_page_ids[2]));
-                assert_eq!(directory_page.get_bucket_page_id(3), Some(bucket_page_ids[1]));
-                assert_eq!(directory_page.get_bucket_page_id(4), Some(bucket_page_ids[3]));
-                assert_eq!(directory_page.get_bucket_page_id(5), Some(bucket_page_ids[1]));
-                assert_eq!(directory_page.get_bucket_page_id(6), Some(bucket_page_ids[2]));
-                assert_eq!(directory_page.get_bucket_page_id(7), Some(bucket_page_ids[1]));
+                assert_eq!(
+                    directory_page.get_bucket_page_id(0),
+                    Some(bucket_page_ids[0])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(1),
+                    Some(bucket_page_ids[1])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(2),
+                    Some(bucket_page_ids[2])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(3),
+                    Some(bucket_page_ids[1])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(4),
+                    Some(bucket_page_ids[3])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(5),
+                    Some(bucket_page_ids[1])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(6),
+                    Some(bucket_page_ids[2])
+                );
+                assert_eq!(
+                    directory_page.get_bucket_page_id(7),
+                    Some(bucket_page_ids[1])
+                );
 
                 for i in 0..100 {
                     assert_eq!(directory_page.hash_to_bucket_index(i), i % 8);
@@ -653,15 +743,19 @@ mod basic_behavior {
             let bpm_clone = Arc::clone(&bpm);
             let handle = thread::spawn(move || {
                 for j in 0..operations_per_thread {
-                    let bucket_page_guard = match bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
-                        Some(guard) => guard,
-                        None => {
-                            error!("Failed to create new bucket page");
-                            panic!("Failed to create new bucket page");
-                        }
-                    };
+                    let bucket_page_guard =
+                        match bpm_clone.new_page_guarded(NewPageType::ExtendedHashTableBucket) {
+                            Some(guard) => guard,
+                            None => {
+                                error!("Failed to create new bucket page");
+                                panic!("Failed to create new bucket page");
+                            }
+                        };
                     let bucket_page_id = bucket_page_guard.get_page_id();
-                    info!("Thread {} created bucket page with ID: {} (operation {})", i, bucket_page_id, j);
+                    info!(
+                        "Thread {} created bucket page with ID: {} (operation {})",
+                        i, bucket_page_id, j
+                    );
                 }
             });
             handles.push(handle);

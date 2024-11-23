@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::common::config::TxnId;
 use crate::common::rid::RID;
-use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog};
+use crate::concurrency::transaction::{
+    IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
+};
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use parking_lot::{Mutex, RwLock};
@@ -70,7 +72,10 @@ impl TransactionManager {
     pub fn begin(&self, isolation_level: IsolationLevel) -> Arc<Mutex<Transaction>> {
         let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
 
-        let txn = Arc::new(Mutex::new(Transaction::new(txn_id as TxnId, isolation_level)));
+        let txn = Arc::new(Mutex::new(Transaction::new(
+            txn_id as TxnId,
+            isolation_level,
+        )));
         self.txn_map.write().insert(txn_id, txn.clone());
 
         // TODO: set the timestamps here. Watermark updated below.

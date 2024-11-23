@@ -81,6 +81,9 @@ mod unit_tests {
             ],
         );
 
-        assert_eq!(multi_arg_func_call.to_string(), "concat(\"Hello\", \", \", \"World!\")");
+        assert_eq!(
+            multi_arg_func_call.to_string(),
+            "concat(\"Hello\", \", \", \"World!\")"
+        );
     }
 }

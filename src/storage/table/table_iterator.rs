@@ -59,9 +59,9 @@ impl<'a> TableIterator<'a> {
 
                     if self.stop_at_rid.get_page_id() != INVALID_PAGE_ID {
                         assert!(
-                            self.rid.get_page_id() < self.stop_at_rid.get_page_id() ||
-                                (self.rid.get_page_id() == self.stop_at_rid.get_page_id() &&
-                                    next_tuple_id <= self.stop_at_rid.get_slot_num()),
+                            self.rid.get_page_id() < self.stop_at_rid.get_page_id()
+                                || (self.rid.get_page_id() == self.stop_at_rid.get_page_id()
+                                    && next_tuple_id <= self.stop_at_rid.get_slot_num()),
                             "iterator out of bound"
                         );
                     }
@@ -154,11 +154,13 @@ mod tests {
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
-                &disk_manager,
-            ))));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -208,18 +210,32 @@ mod tests {
 
         let mut iterator = TableIterator::new(&table_heap, rid, rid);
         assert!(iterator.is_end());
-        assert_eq!(None, iterator.next(), "Testing TableIterator returns none on empty table");
+        assert_eq!(
+            None,
+            iterator.next(),
+            "Testing TableIterator returns none on empty table"
+        );
     }
 
     #[test]
     fn test_table_iterator_single_tuple() {
         let table_heap = setup_test_table("test_table_iterator_single_tuple");
-        let schema = Schema::new(vec![Column::new("col_1", Integer), Column::new("col_2", Integer), Column::new("col_3", Integer)]);
+        let schema = Schema::new(vec![
+            Column::new("col_1", Integer),
+            Column::new("col_2", Integer),
+            Column::new("col_3", Integer),
+        ]);
         let rid = RID::new(0, 0);
-        let mut tuple = Tuple::new(vec![Value::from(1), Value::from(2), Value::from(3)], schema.clone(), rid);
+        let mut tuple = Tuple::new(
+            vec![Value::from(1), Value::from(2), Value::from(3)],
+            schema.clone(),
+            rid,
+        );
         let meta = TupleMeta::new(123, false);
 
-        table_heap.insert_tuple(&meta, &mut tuple, None, None, 0).expect("failed to insert tuple");
+        table_heap
+            .insert_tuple(&meta, &mut tuple, None, None, 0)
+            .expect("failed to insert tuple");
 
         let mut iterator = TableIterator::new(&table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
         assert!(!iterator.is_end());

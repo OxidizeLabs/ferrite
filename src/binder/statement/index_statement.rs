@@ -104,7 +104,10 @@ mod unit_tests {
 
     #[test]
     fn index_statement_creation() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
 
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
@@ -123,7 +126,10 @@ mod unit_tests {
 
     #[test]
     fn index_statement_display() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
             Box::new(BoundBaseTableRef::new("users".to_string(), 0, None, schema)),
@@ -136,13 +142,17 @@ mod unit_tests {
             vec![("fillfactor".to_string(), 90)],
         );
 
-        let expected = "CREATE INDEX idx_test ON users (id, name) USING btree (DESC) WITH (fillfactor = 90)";
+        let expected =
+            "CREATE INDEX idx_test ON users (id, name) USING btree (DESC) WITH (fillfactor = 90)";
         assert_eq!(stmt.to_string(), expected);
     }
 
     #[test]
     fn index_statement_bound_statement() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)]);
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
         let stmt = IndexStatement::new(
             "idx_test".to_string(),
             Box::new(BoundBaseTableRef::new("users".to_string(), 0, None, schema)),
@@ -156,6 +166,9 @@ mod unit_tests {
 
         // Test that we can use it as AnyBoundStatement
         let any_stmt: &dyn AnyBoundStatement = &stmt;
-        assert_eq!(any_stmt.as_bound_statement().statement_type(), StatementType::IndexStatement);
+        assert_eq!(
+            any_stmt.as_bound_statement().statement_type(),
+            StatementType::IndexStatement
+        );
     }
 }

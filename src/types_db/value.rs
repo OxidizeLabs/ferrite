@@ -47,7 +47,7 @@ impl Value {
             Val::Timestamp(_) => TypeId::Timestamp,
             Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
             Val::Vector(_) => TypeId::Vector,
-            Val::Null => TypeId::Invalid
+            Val::Null => TypeId::Invalid,
         };
         Value {
             value_: val,
@@ -86,7 +86,7 @@ impl Value {
             Val::Timestamp(_) => 8,
             Val::VarLen(s) | Val::ConstVarLen(s) => s.len() as u32,
             Val::Vector(v) => 4 + v.len() as u32 * 4,
-            Val::Null => 1
+            Val::Null => 1,
         }
     }
 
@@ -222,7 +222,7 @@ impl From<CmpBool> for Val {
         match cmp_bool {
             CmpBool::CmpTrue => Val::Boolean(true),
             CmpBool::CmpFalse => Val::Boolean(false),
-            CmpBool::CmpNull => Val::Null
+            CmpBool::CmpNull => Val::Null,
         }
     }
 }
@@ -400,34 +400,57 @@ mod unit_tests {
 
         let val_string = Val::VarLen("Hello".to_string());
         let serialized_string = bincode::serialize(&val_string).expect("Serialization failed");
-        assert_eq!(serialized_string, vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]); // Binary format for the string
+        assert_eq!(
+            serialized_string,
+            vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]
+        ); // Binary format for the string
 
-        let val_vector = Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]);
+        let val_vector = Val::Vector(vec![
+            Value::from(Val::Integer(1)),
+            Value::from(Val::Integer(2)),
+        ]);
         let serialized_vector = bincode::serialize(&val_vector).expect("Serialization failed");
-        assert_eq!(serialized_vector, vec![9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0]);
+        assert_eq!(
+            serialized_vector,
+            vec![
+                9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0,
+                0, 0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0,
+                0, 0, 3, 0, 0, 0
+            ]
+        );
     }
 
     #[test]
     fn deserialize_val() {
         // Test deserialization of binary data into Val variants
         let binary_boolean = vec![0, 0, 0, 0, 1];
-        let deserialized_boolean: Val = bincode::deserialize(&binary_boolean).expect("Deserialization failed");
+        let deserialized_boolean: Val =
+            bincode::deserialize(&binary_boolean).expect("Deserialization failed");
         assert_eq!(deserialized_boolean, Val::Boolean(true));
 
         let binary_integer = vec![3, 0, 0, 0, 42, 0, 0, 0];
-        let deserialized_integer: Val = bincode::deserialize(&binary_integer).expect("Deserialization failed");
+        let deserialized_integer: Val =
+            bincode::deserialize(&binary_integer).expect("Deserialization failed");
         assert_eq!(deserialized_integer, Val::Integer(42));
 
         let binary_string = vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111];
-        let deserialized_string: Val = bincode::deserialize(&binary_string).expect("Deserialization failed");
+        let deserialized_string: Val =
+            bincode::deserialize(&binary_string).expect("Deserialization failed");
         assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
 
-        let binary_vector = bincode::serialize(&Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))]))
-            .expect("Serialization failed");
-        let deserialized_vector: Val = bincode::deserialize(&binary_vector).expect("Deserialization failed");
+        let binary_vector = bincode::serialize(&Val::Vector(vec![
+            Value::from(Val::Integer(1)),
+            Value::from(Val::Integer(2)),
+        ]))
+        .expect("Serialization failed");
+        let deserialized_vector: Val =
+            bincode::deserialize(&binary_vector).expect("Deserialization failed");
         assert_eq!(
             deserialized_vector,
-            Val::Vector(vec![Value::from(Val::Integer(1)), Value::from(Val::Integer(2))])
+            Val::Vector(vec![
+                Value::from(Val::Integer(1)),
+                Value::from(Val::Integer(2))
+            ])
         );
     }
 
@@ -502,7 +525,8 @@ mod unit_tests {
             type_id_: TypeId::Integer, // Replace with an appropriate variant
         };
         let serialized = bincode::serialize(&value).expect("Serialization failed");
-        let deserialized_value: Value = bincode::deserialize(&serialized).expect("Deserialization failed");
+        let deserialized_value: Value =
+            bincode::deserialize(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized_value, value);
     }
 
@@ -516,7 +540,8 @@ mod unit_tests {
             type_id_: TypeId::Decimal, // Replace with an appropriate variant
         };
         let serialized = bincode::serialize(&original_value).expect("Serialization failed");
-        let deserialized: Value = bincode::deserialize(&serialized).expect("Deserialization failed");
+        let deserialized: Value =
+            bincode::deserialize(&serialized).expect("Deserialization failed");
         assert_eq!(original_value, deserialized);
     }
 
@@ -526,11 +551,8 @@ mod unit_tests {
         let float_value = Value::new(3.14);
         let bool_value = Value::new(true);
         let string_value = Value::new("Hello");
-        let vector_value = Value::new_vector(vec![
-            Value::new(1),
-            Value::new("two"),
-            Value::new(3.0),
-        ]);
+        let vector_value =
+            Value::new_vector(vec![Value::new(1), Value::new("two"), Value::new(3.0)]);
 
         assert_eq!(format!("{}", int_value), "42");
         assert_eq!(format!("{}", float_value), "3.14");

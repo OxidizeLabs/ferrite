@@ -56,15 +56,8 @@ impl BoundTableRef for BoundBaseTableRef {
 impl Display for BoundBaseTableRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.alias {
-            Some(alias) => write!(
-                f,
-                "{} AS {}",
-                self.table, alias
-            ),
-            None => write!(
-                f,
-                "{}", self.table
-            ),
+            Some(alias) => write!(f, "{} AS {}", self.table, alias),
+            None => write!(f, "{}", self.table),
         }
     }
 }
@@ -87,31 +80,20 @@ mod unit_tests {
     #[test]
     fn bound_base_table_ref() {
         let schema = Schema::new(vec![]);
-        let table_ref = BoundBaseTableRef::new(
-            "users".to_string(),
-            1,
-            Some("u".to_string()),
-            schema,
-        );
+        let table_ref =
+            BoundBaseTableRef::new("users".to_string(), 1, Some("u".to_string()), schema);
 
-        assert_eq!(table_ref.table_reference_type(), TableReferenceType::BaseTable);
-        assert_eq!(table_ref.get_bound_table_name(), "u");
         assert_eq!(
-            table_ref.to_string(),
-            "users AS u"
+            table_ref.table_reference_type(),
+            TableReferenceType::BaseTable
         );
+        assert_eq!(table_ref.get_bound_table_name(), "u");
+        assert_eq!(table_ref.to_string(), "users AS u");
 
-        let table_ref_no_alias = BoundBaseTableRef::new(
-            "products".to_string(),
-            2,
-            None,
-            Schema::new(vec![]),
-        );
+        let table_ref_no_alias =
+            BoundBaseTableRef::new("products".to_string(), 2, None, Schema::new(vec![]));
 
         assert_eq!(table_ref_no_alias.get_bound_table_name(), "products");
-        assert_eq!(
-            table_ref_no_alias.to_string(),
-            "products"
-        );
+        assert_eq!(table_ref_no_alias.to_string(), "products");
     }
 }

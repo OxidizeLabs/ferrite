@@ -24,6 +24,11 @@ impl BoundOrderBy {
 
 impl Display for BoundOrderBy {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "BoundOrderBy {{ type={}, expr={} }}", self.order_type.type_name(), self.expr)
+        write!(
+            f,
+            "BoundOrderBy {{ type={}, expr={} }}",
+            self.order_type.type_name(),
+            self.expr
+        )
     }
 }

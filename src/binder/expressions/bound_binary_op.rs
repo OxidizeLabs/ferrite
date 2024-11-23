@@ -12,11 +12,18 @@ pub struct BoundBinaryOp {
     right: Box<dyn BoundExpression>,
 }
 
-
 impl BoundBinaryOp {
     /// Creates a new BoundBinaryOp.
-    pub fn new(op: &BinaryOperator, left: Box<dyn BoundExpression>, right: Box<dyn BoundExpression>) -> Self {
-        Self { op: op.clone(), left, right }
+    pub fn new(
+        op: &BinaryOperator,
+        left: Box<dyn BoundExpression>,
+        right: Box<dyn BoundExpression>,
+    ) -> Self {
+        Self {
+            op: op.clone(),
+            left,
+            right,
+        }
     }
 }
 

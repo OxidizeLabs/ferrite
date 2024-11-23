@@ -269,7 +269,13 @@ impl LockManager {
     ///
     /// # Errors
     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
+    pub fn lock_row(
+        &self,
+        txn: &mut Transaction,
+        lock_mode: LockMode,
+        oid: TableOidT,
+        rid: RID,
+    ) -> bool {
         unimplemented!()
     }
 
@@ -341,7 +347,12 @@ impl LockManager {
     ///
     /// # Returns
     /// `true` if the upgrade is successful, `false` otherwise.
-    pub fn upgrade_lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
+    pub fn upgrade_lock_table(
+        &self,
+        txn: &mut Transaction,
+        lock_mode: LockMode,
+        oid: TableOidT,
+    ) -> bool {
         unimplemented!()
     }
 
@@ -355,7 +366,13 @@ impl LockManager {
     ///
     /// # Returns
     /// `true` if the upgrade is successful, `false` otherwise.
-    pub fn upgrade_lock_row(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT, rid: RID) -> bool {
+    pub fn upgrade_lock_row(
+        &self,
+        txn: &mut Transaction,
+        lock_mode: LockMode,
+        oid: TableOidT,
+        rid: RID,
+    ) -> bool {
         unimplemented!()
     }
 
@@ -399,7 +416,11 @@ impl LockManager {
     ///
     /// # Returns
     /// `true` if the lock can be upgraded, `false` otherwise.
-    pub fn can_lock_upgrade(&self, curr_lock_mode: LockMode, requested_lock_mode: LockMode) -> bool {
+    pub fn can_lock_upgrade(
+        &self,
+        curr_lock_mode: LockMode,
+        requested_lock_mode: LockMode,
+    ) -> bool {
         unimplemented!()
     }
 
@@ -412,7 +433,12 @@ impl LockManager {
     ///
     /// # Returns
     /// `true` if the transaction has an appropriate lock on the table, `false` otherwise.
-    pub fn check_appropriate_lock_on_table(&self, txn: &Transaction, oid: TableOidT, row_lock_mode: LockMode) -> bool {
+    pub fn check_appropriate_lock_on_table(
+        &self,
+        txn: &Transaction,
+        oid: TableOidT,
+        row_lock_mode: LockMode,
+    ) -> bool {
         unimplemented!()
     }
 

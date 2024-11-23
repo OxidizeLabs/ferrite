@@ -57,9 +57,10 @@ impl LogManager {
                 let stop_flag = stop_flag.read();
                 !*stop_flag
             } {
-
                 // Perform flush to disk
-                disk_manager.write_log(&flush_buffer).expect("Failed to write log");
+                disk_manager
+                    .write_log(&flush_buffer)
+                    .expect("Failed to write log");
             }
         }));
     }
@@ -92,7 +93,8 @@ impl LogManager {
 
         // Serialize log record and write to log buffer
         let log_record_bytes = log_record.to_string();
-        self.log_buffer.extend_from_slice((&log_record_bytes).as_ref());
+        self.log_buffer
+            .extend_from_slice((&log_record_bytes).as_ref());
 
         lsn
     }

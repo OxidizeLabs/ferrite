@@ -24,7 +24,11 @@ impl ExtendableHTableHeaderPage {
             directory_page_ids: vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE],
             global_depth: 0,
         };
-        debug!("New ExtendableHTableHeaderPage created with page id: {} at address {:p}", instance.get_page_id(), &instance);
+        debug!(
+            "New ExtendableHTableHeaderPage created with page id: {} at address {:p}",
+            instance.get_page_id(),
+            &instance
+        );
         instance
     }
 
@@ -33,7 +37,10 @@ impl ExtendableHTableHeaderPage {
     /// # Parameters
     /// - `max_depth`: The maximum depth in the header page.
     pub fn init(&mut self, global_depth: u32) {
-        info!("Initializing ExtendableHTableHeaderPage with global depth: {}", global_depth);
+        info!(
+            "Initializing ExtendableHTableHeaderPage with global depth: {}",
+            global_depth
+        );
         self.global_depth = global_depth;
         self.directory_page_ids = vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE];
         debug!("All directory page IDs initialized to INVALID_PAGE_ID: -1.");
@@ -53,9 +60,9 @@ impl ExtendableHTableHeaderPage {
         // Handle the case where max_depth is 0 explicitly
         if capped_max_depth == 0 {
             debug!(
-            "Max depth is 0, returning directory index 0 for hash {:#034b}",
-            hash
-        );
+                "Max depth is 0, returning directory index 0 for hash {:#034b}",
+                hash
+            );
             return 0;
         }
 
@@ -72,9 +79,9 @@ impl ExtendableHTableHeaderPage {
         // Apply mask to keep only max_depth bits
         let directory_index = upper_bits & ((1 << capped_max_depth) - 1);
         debug!(
-        "Computed directory index: hash={:#034b}, upper_bits={}, directory_index={}",
-        hash, upper_bits, directory_index
-    );
+            "Computed directory index: hash={:#034b}, upper_bits={}, directory_index={}",
+            hash, upper_bits, directory_index
+        );
 
         directory_index
     }
@@ -109,7 +116,10 @@ impl ExtendableHTableHeaderPage {
             directory_idx, directory_page_id
         );
         self.directory_page_ids.push(directory_page_id);
-        info!("Directory page ID at index {} set to {}", directory_idx, directory_page_id);
+        info!(
+            "Directory page ID at index {} set to {}",
+            directory_idx, directory_page_id
+        );
         self.print_header();
     }
 
@@ -138,20 +148,36 @@ impl ExtendableHTableHeaderPage {
         let header_pid = "page_id";
 
         // Calculate the maximum width for the directory index and page_id columns
-        let max_idx_width = std::cmp::max(header_idx.len(), self.directory_page_ids.len().to_string().len());
-        let max_page_id_width = std::cmp::max(header_pid.len(), self.directory_page_ids.iter().map(|&page_id| page_id.to_string().len()).max().unwrap_or(0));
+        let max_idx_width = std::cmp::max(
+            header_idx.len(),
+            self.directory_page_ids.len().to_string().len(),
+        );
+        let max_page_id_width = std::cmp::max(
+            header_pid.len(),
+            self.directory_page_ids
+                .iter()
+                .map(|&page_id| page_id.to_string().len())
+                .max()
+                .unwrap_or(0),
+        );
 
-        println!("======== HEADER (max_size: {}) (max_depth: {}) ========", self.max_size(), self.global_depth());
+        println!(
+            "======== HEADER (max_size: {}) (max_depth: {}) ========",
+            self.max_size(),
+            self.global_depth()
+        );
         println!(
             "| {:<width_idx$} | {:<width_pid$} |",
-            header_idx, header_pid,
+            header_idx,
+            header_pid,
             width_idx = max_idx_width,
             width_pid = max_page_id_width
         );
         for (idx, &page_id) in self.directory_page_ids.iter().enumerate() {
             println!(
                 "| {:<width_idx$} | {:<width_pid$} |",
-                idx, page_id,
+                idx,
+                page_id,
                 width_idx = max_idx_width,
                 width_pid = max_page_id_width
             );
@@ -200,7 +226,11 @@ impl PageTrait for ExtendableHTableHeaderPage {
     /// Sets the pin count of this page.
     fn set_pin_count(&mut self, pin_count: i32) {
         self.base.set_pin_count(pin_count);
-        debug!("Setting pin count for Page ID {}: {}", self.get_page_id(), pin_count);
+        debug!(
+            "Setting pin count for Page ID {}: {}",
+            self.get_page_id(),
+            pin_count
+        );
     }
 
     fn reset_memory(&mut self) {
@@ -259,11 +289,13 @@ mod basic_behavior {
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(
-                &disk_manager,
-            ))));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -290,14 +322,15 @@ mod basic_behavior {
         }
     }
 
-
     #[test]
     fn header_page_integrity() {
         let ctx = TestContext::new("header_page_integrity");
         let bpm = &ctx.bpm;
 
         info!("Creating ExtendedHashTableHeader page");
-        let header_guard = bpm.new_page_guarded(NewPageType::ExtendedHashTableHeader).unwrap();
+        let header_guard = bpm
+            .new_page_guarded(NewPageType::ExtendedHashTableHeader)
+            .unwrap();
         info!("Created page type: {}", header_guard.get_page_type());
 
         match header_guard.into_specific_type::<ExtendableHTableHeaderPage, 8>() {
@@ -311,7 +344,10 @@ mod basic_behavior {
                 // Initialize the header page with a max depth of 2
                 ext_guard.access_mut(|page| {
                     page.init(2);
-                    info!("Initialized header page with global depth: {}", page.global_depth());
+                    info!(
+                        "Initialized header page with global depth: {}",
+                        page.global_depth()
+                    );
                 });
 
                 // Test hashes that will produce different upper bits
@@ -326,7 +362,11 @@ mod basic_behavior {
                     ext_guard.access_mut(|page| {
                         let index = page.hash_to_directory_index(hash);
                         info!("Hash {:#034b} mapped to index {}", hash, index);
-                        assert_eq!(index, i as u32, "Hash {:#034b} should map to index {}", hash, i);
+                        assert_eq!(
+                            index, i as u32,
+                            "Hash {:#034b} should map to index {}",
+                            hash, i
+                        );
                     });
                 }
                 info!("All hash to index mappings verified successfully");
@@ -336,8 +376,14 @@ mod basic_behavior {
                     page.init(0);
                     for &hash in &hashes {
                         let index = page.hash_to_directory_index(hash);
-                        info!("With max_depth 0, hash {:#034b} mapped to index {}", hash, index);
-                        assert_eq!(index, 0, "With max_depth 0, all hashes should map to index 0");
+                        info!(
+                            "With max_depth 0, hash {:#034b} mapped to index {}",
+                            hash, index
+                        );
+                        assert_eq!(
+                            index, 0,
+                            "With max_depth 0, all hashes should map to index 0"
+                        );
                     }
                 });
                 info!("Max depth 0 tests completed successfully");
@@ -347,8 +393,17 @@ mod basic_behavior {
                     page.init(31);
                     for (_i, &hash) in hashes.iter().enumerate() {
                         let index = page.hash_to_directory_index(hash);
-                        info!("With max_depth 31, hash {:#034b} mapped to index {}", hash, index);
-                        assert_eq!(index, hash >> 1, "With max_depth 31, hash {:#034b} should map to index {}", hash, hash >> 1);
+                        info!(
+                            "With max_depth 31, hash {:#034b} mapped to index {}",
+                            hash, index
+                        );
+                        assert_eq!(
+                            index,
+                            hash >> 1,
+                            "With max_depth 31, hash {:#034b} should map to index {}",
+                            hash,
+                            hash >> 1
+                        );
                     }
                 });
                 info!("Max depth 31 tests completed successfully");

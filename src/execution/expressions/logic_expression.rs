@@ -26,7 +26,11 @@ pub struct LogicExpression {
 }
 
 impl LogicExpression {
-    pub fn new(left: Arc<Expression>, right: Arc<Expression>, logic_type: LogicType, children: Vec<Arc<Expression>>,
+    pub fn new(
+        left: Arc<Expression>,
+        right: Arc<Expression>,
+        logic_type: LogicType,
+        children: Vec<Arc<Expression>>,
     ) -> Self {
         Self {
             left,
@@ -100,9 +104,19 @@ impl ExpressionOps for LogicExpression {
         Ok(Value::new(comparison_result))
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        let lhs = self
+            .left
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let rhs = self
+            .right
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_computation(&lhs, &rhs);
         Ok(Value::new(comparison_result))
     }
@@ -134,7 +148,6 @@ impl ExpressionOps for LogicExpression {
     }
 }
 
-
 impl Display for LogicType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -153,8 +166,16 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_and() {
-        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(false),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
@@ -167,8 +188,16 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_or() {
-        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(false), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(false),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
 
         let schema = Schema::new(vec![]);
@@ -181,8 +210,16 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_with_null() {
-        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Boolean), vec![])));
-        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(1),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
         let expr = Expression::Logic(LogicExpression::new(left, right, LogicType::And, vec![]));
 
         let schema = Schema::new(vec![]);
@@ -195,8 +232,16 @@ mod unit_tests {
 
     #[test]
     fn logic_expression_invalid_types() {
-        let left = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(1), Column::new("const", TypeId::Integer), vec![])));
-        let right = Arc::new(Expression::Constant(ConstantExpression::new(Value::from(true), Column::new("const", TypeId::Boolean), vec![])));
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(1),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
         let result = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
         assert_eq!(result.get_return_type().get_type(), TypeId::Boolean);
     }

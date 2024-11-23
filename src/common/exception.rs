@@ -57,10 +57,16 @@ pub enum PageError {
     LockError,
     TypeTooLarge,
     InvalidCast,
-    DataTooLarge { data_size: usize, remaining_space: usize },
-    InvalidOffset { offset: usize, page_size: usize },
+    DataTooLarge {
+        data_size: usize,
+        remaining_space: usize,
+    },
+    InvalidOffset {
+        offset: usize,
+        page_size: usize,
+    },
     InvalidOperation,
-    TupleInvalid
+    TupleInvalid,
 }
 
 #[derive(Error, Debug)]
@@ -106,10 +112,21 @@ impl Display for PageError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PageError::InvalidOffset { offset, page_size } => {
-                write!(f, "Attempt to write out of bounds data at offset {} with length {}", offset, page_size)
+                write!(
+                    f,
+                    "Attempt to write out of bounds data at offset {} with length {}",
+                    offset, page_size
+                )
             }
-            PageError::DataTooLarge { data_size, remaining_space } => {
-                write!(f, "Attempt to write out of bounds data at offset {} with length {}", data_size, remaining_space)
+            PageError::DataTooLarge {
+                data_size,
+                remaining_space,
+            } => {
+                write!(
+                    f,
+                    "Attempt to write out of bounds data at offset {} with length {}",
+                    data_size, remaining_space
+                )
             }
             PageError::NoPageReference => {
                 write!(f, "No Page Reference")
@@ -143,10 +160,13 @@ impl Display for KeyConversionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             KeyConversionError::ColumnNotFound(msg) => write!(f, "Column not found: {}", msg),
-            KeyConversionError::OffsetConversionError(msg) => write!(f, "Offset conversion error: {}", msg),
-            KeyConversionError::DeserializationError(msg) => write!(f, "Deserialization error: {}", msg),
+            KeyConversionError::OffsetConversionError(msg) => {
+                write!(f, "Offset conversion error: {}", msg)
+            }
+            KeyConversionError::DeserializationError(msg) => {
+                write!(f, "Deserialization error: {}", msg)
+            }
             &KeyConversionError::OffsetOutOfBounds | &KeyConversionError::InvalidOffset => todo!(),
         }
     }
 }
-

@@ -77,37 +77,37 @@ pub trait AbstractPlanNode {
 impl AbstractPlanNode for PlanNode {
     fn get_output_schema(&self) -> &Schema {
         match self {
-            _ => self.as_abstract_plan_node().get_output_schema()
+            _ => self.as_abstract_plan_node().get_output_schema(),
         }
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
         match self {
-            _ => self.as_abstract_plan_node().get_children()
+            _ => self.as_abstract_plan_node().get_children(),
         }
     }
 
     fn get_type(&self) -> PlanType {
         match self {
-            _ => self.as_abstract_plan_node().get_type()
+            _ => self.as_abstract_plan_node().get_type(),
         }
     }
 
     fn to_string(&self, with_schema: bool) -> String {
         match self {
-            _ => self.as_abstract_plan_node().to_string(with_schema)
+            _ => self.as_abstract_plan_node().to_string(with_schema),
         }
     }
 
     fn plan_node_to_string(&self) -> String {
         match self {
-            _ => self.as_abstract_plan_node().plan_node_to_string()
+            _ => self.as_abstract_plan_node().plan_node_to_string(),
         }
     }
 
     fn children_to_string(&self, indent: usize) -> String {
         match self {
-            _ => self.as_abstract_plan_node().children_to_string(indent)
+            _ => self.as_abstract_plan_node().children_to_string(indent),
         }
     }
 }

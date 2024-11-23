@@ -1,6 +1,8 @@
 use crate::common::config::*;
 use crate::common::exception::PageError;
-use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
+use crate::storage::page::page::PageType::{
+    Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table,
+};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
@@ -109,16 +111,25 @@ impl PageTrait for Page {
     /// Increments the pin count of this page.
     fn increment_pin_count(&mut self) {
         self.pin_count += 1;
-        debug!("Incremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
+        debug!(
+            "Incremented pin count for Page ID {}: {}",
+            self.page_id, self.pin_count
+        );
     }
 
     /// Decrements the pin count of this page.
     fn decrement_pin_count(&mut self) {
         if self.pin_count > 0 {
             self.pin_count -= 1;
-            debug!("Decremented pin count for Page ID {}: {}", self.page_id, self.pin_count);
+            debug!(
+                "Decremented pin count for Page ID {}: {}",
+                self.page_id, self.pin_count
+            );
         } else {
-            error!("Attempted to decrement pin count below 0 for Page ID {}", self.page_id);
+            error!(
+                "Attempted to decrement pin count below 0 for Page ID {}",
+                self.page_id
+            );
         }
     }
 
@@ -139,7 +150,10 @@ impl PageTrait for Page {
 
     /// Method to modify the data
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
-        debug!("Attempting to modify data for Page ID {} at offset {}", self.page_id, offset);
+        debug!(
+            "Attempting to modify data for Page ID {} at offset {}",
+            self.page_id, offset
+        );
 
         if offset >= self.data.len() {
             return Err(PageError::InvalidOffset {
@@ -160,14 +174,20 @@ impl PageTrait for Page {
         self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
         self.is_dirty = true;
 
-        debug!("Successfully modified data for Page ID {} at offset {}", self.page_id, offset);
+        debug!(
+            "Successfully modified data for Page ID {} at offset {}",
+            self.page_id, offset
+        );
         Ok(())
     }
 
     /// Sets the pin count of this page.
     fn set_pin_count(&mut self, pin_count: i32) {
         self.pin_count = pin_count;
-        debug!("Setting pin count for Page ID {}: {}", self.page_id, pin_count);
+        debug!(
+            "Setting pin count for Page ID {}: {}",
+            self.page_id, pin_count
+        );
     }
 
     /// Zeroes out the data that is held within the page.
@@ -184,7 +204,7 @@ impl PageType {
             ExtendedHashTableDirectory(page) => page.serialize(),
             ExtendedHashTableHeader(page) => unimplemented!(),
             ExtendedHashTableBucket(page) => unimplemented!(),
-            Table(page) => unimplemented!()
+            Table(page) => unimplemented!(),
         }
     }
 
@@ -194,7 +214,7 @@ impl PageType {
             ExtendedHashTableDirectory(page) => page.deserialize(buffer),
             ExtendedHashTableHeader(page) => unimplemented!(),
             ExtendedHashTableBucket(page) => unimplemented!(),
-            Table(page) => unimplemented!()
+            Table(page) => unimplemented!(),
         }
     }
 
@@ -204,7 +224,7 @@ impl PageType {
             ExtendedHashTableDirectory(page) => page,
             ExtendedHashTableHeader(page) => page,
             ExtendedHashTableBucket(page) => page,
-            Table(page) => page
+            Table(page) => page,
         }
     }
 
@@ -224,7 +244,7 @@ impl PageType {
             ExtendedHashTableDirectory(page) => page as &dyn Any,
             ExtendedHashTableHeader(page) => page as &dyn Any,
             ExtendedHashTableBucket(page) => page as &dyn Any,
-            Table(page) => page as &dyn Any
+            Table(page) => page as &dyn Any,
         }
     }
 
@@ -386,7 +406,10 @@ mod concurrency {
                 // Perform the read operation.
                 let page = page.read(); // Acquire read lock on the entire Page.
                 let data = page.get_data(); // Safely access immutable data.
-                assert!(data[0] == 1 || data[0] == 2, "Unexpected values in the data");
+                assert!(
+                    data[0] == 1 || data[0] == 2,
+                    "Unexpected values in the data"
+                );
             }));
         }
 
@@ -398,7 +421,10 @@ mod concurrency {
         // Verify the final content of the page after all operations.
         let page = page.read(); // Acquire read lock on the entire Page.
         let data = page.get_data();
-        assert!(data[0] == 1 || data[0] == 2, "Unexpected values in the data after concurrent operations");
+        assert!(
+            data[0] == 1 || data[0] == 2,
+            "Unexpected values in the data after concurrent operations"
+        );
     }
 
     #[test]
@@ -442,7 +468,7 @@ mod edge_cases {
     #[test]
     fn test_pin_count_underflow_protection() {
         let mut page = Page::new(1);
-        page.decrement_pin_count();  // Pin count goes to 0
+        page.decrement_pin_count(); // Pin count goes to 0
         assert_eq!(page.get_pin_count(), 0);
 
         // Attempting to decrement below 0 should be prevented
@@ -475,4 +501,3 @@ mod edge_cases {
         assert_eq!(page.get_data()[0], 0);
     }
 }
-

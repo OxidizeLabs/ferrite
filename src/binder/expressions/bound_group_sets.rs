@@ -14,7 +14,9 @@ impl BoundExpression for BoundGroupingSets {
     }
 
     fn has_aggregation(&self) -> bool {
-        self.sets.iter().any(|set| set.iter().any(|expr| expr.has_aggregation()))
+        self.sets
+            .iter()
+            .any(|set| set.iter().any(|expr| expr.has_aggregation()))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -23,9 +25,11 @@ impl BoundExpression for BoundGroupingSets {
 
     fn clone_box(&self) -> Box<dyn BoundExpression> {
         Box::new(Self {
-            sets: self.sets.iter().map(|set| {
-                set.iter().map(|expr| expr.clone_box()).collect()
-            }).collect(),
+            sets: self
+                .sets
+                .iter()
+                .map(|set| set.iter().map(|expr| expr.clone_box()).collect())
+                .collect(),
         })
     }
 }

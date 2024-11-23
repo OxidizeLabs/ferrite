@@ -167,7 +167,10 @@ mod unit_tests {
     fn select_statement() {
         let select_stmt = SelectStatement::new(
             Box::new(MockBoundTableRef),
-            vec![Box::new(BoundConstant::new("column1")), Box::new(BoundConstant::new("column2"))],
+            vec![
+                Box::new(BoundConstant::new("column1")),
+                Box::new(BoundConstant::new("column2")),
+            ],
             Some(Box::new(BoundConstant::new(true))),
             vec![],
             None,

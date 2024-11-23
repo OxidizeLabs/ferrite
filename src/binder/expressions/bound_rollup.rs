@@ -4,4 +4,3 @@ use crate::binder::bound_expression::BoundExpression;
 pub struct BoundRollup {
     exprs: Vec<Box<dyn BoundExpression>>,
 }
-

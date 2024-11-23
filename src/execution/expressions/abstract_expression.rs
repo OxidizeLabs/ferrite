@@ -27,7 +27,13 @@ pub enum Expression {
 
 pub trait ExpressionOps {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError>;
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError>;
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError>;
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression>;
     fn get_children(&self) -> &Vec<Arc<Expression>>;
     fn get_return_type(&self) -> &Column;
@@ -47,15 +53,33 @@ impl ExpressionOps for Expression {
         }
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         match self {
             Self::Constant(expr) => Ok(expr.get_value().clone()),
-            Self::ColumnRef(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            Self::Arithmetic(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            Self::Comparison(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            Self::Logic(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            Self::String(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
-            Self::Array(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
+            Self::ColumnRef(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Arithmetic(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Comparison(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Logic(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::String(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Array(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
         }
     }
 
@@ -113,9 +137,27 @@ impl Display for Expression {
         match self {
             Self::Constant(expr) => write!(f, "{}", expr.to_string()),
             Self::ColumnRef(expr) => write!(f, "{}", expr.to_string()),
-            Self::Arithmetic(expr) => write!(f, "(Col{} {} Col{})", expr.get_left(), expr.get_op(), expr.get_right()),
-            Self::Comparison(expr) => write!(f, "(Col{} {} Col{})", expr.get_left(), expr.get_comp_type(), expr.get_right()),
-            Self::Logic(expr) => write!(f, "({} {} {})", expr.get_left(), expr.get_logic_type(), expr.get_right()),
+            Self::Arithmetic(expr) => write!(
+                f,
+                "(Col{} {} Col{})",
+                expr.get_left(),
+                expr.get_op(),
+                expr.get_right()
+            ),
+            Self::Comparison(expr) => write!(
+                f,
+                "(Col{} {} Col{})",
+                expr.get_left(),
+                expr.get_comp_type(),
+                expr.get_right()
+            ),
+            Self::Logic(expr) => write!(
+                f,
+                "({} {} {})",
+                expr.get_left(),
+                expr.get_logic_type(),
+                expr.get_right()
+            ),
             Self::String(expr) => write!(f, "{}({})", expr.get_expr_type(), expr.get_arg()),
             Self::Array(expr) => {
                 write!(f, "[")?;

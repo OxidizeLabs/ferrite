@@ -52,10 +52,7 @@ impl Tuple {
             "Values length does not match schema column count"
         );
 
-        Self {
-            values,
-            rid,
-        }
+        Self { values, rid }
     }
 
     /// Serializes the tuple into the given storage buffer.
@@ -118,7 +115,8 @@ impl Tuple {
 
     /// Creates a new tuple containing only the key attributes.
     pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: Vec<usize>) -> Tuple {
-        let key_values: Vec<Value> = key_attrs.iter()
+        let key_values: Vec<Value> = key_attrs
+            .iter()
             .map(|&attr| self.get_value(attr as usize).clone())
             .collect();
 
@@ -127,9 +125,12 @@ impl Tuple {
 
     /// Returns a string representation of the tuple.
     pub fn to_string(&self, schema: Schema) -> String {
-        self.values.iter().enumerate()
+        self.values
+            .iter()
+            .enumerate()
             .map(|(i, value)| {
-                let col_name = schema.get_column(i)
+                let col_name = schema
+                    .get_column(i)
                     .map(|col| col.get_name().to_string())
                     .unwrap_or_else(|| format!("Column_{}", i));
                 format!("{}: {}", col_name, value)
@@ -140,9 +141,12 @@ impl Tuple {
 
     /// Returns a detailed string representation of the tuple.
     pub fn to_string_detailed(&self, schema: Schema) -> String {
-        self.values.iter().enumerate()
+        self.values
+            .iter()
+            .enumerate()
             .map(|(i, value)| {
-                let col_name = schema.get_column(i)
+                let col_name = schema
+                    .get_column(i)
                     .map(|col| col.get_name().to_string())
                     .unwrap_or_else(|| format!("Column_{}", i));
                 format!("{}: {:#}", col_name, value)
@@ -194,13 +198,14 @@ mod tests {
     fn test_tuple_to_string_detailed() {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
-        let expected = "id: Integer(1), name: VarLen(\"Alice\"), age: Integer(30), is_student: Boolean(true)";
+        let expected =
+            "id: Integer(1), name: VarLen(\"Alice\"), age: Integer(30), is_student: Boolean(true)";
         assert_eq!(tuple.to_string_detailed(schema), expected);
     }
 
     #[test]
     fn test_tuple_serialization_deserialization() -> Result<(), TupleError> {
-        let (tuple, schema) = create_sample_tuple();
+        let (tuple, _schema) = create_sample_tuple();
 
         let mut storage = vec![0u8; 1000];
         let serialized_len = tuple.serialize_to(&mut storage)?;

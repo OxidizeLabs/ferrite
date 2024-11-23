@@ -65,7 +65,15 @@ impl AbstractPlanNode for MockScanNode {
         self.children
             .iter()
             .enumerate()
-            .map(|(i, child)| format!("\n{:indent$}Child {}: {}", "", i + 1, AbstractPlanNode::to_string(child, false), indent = indent))
+            .map(|(i, child)| {
+                format!(
+                    "\n{:indent$}Child {}: {}",
+                    "",
+                    i + 1,
+                    AbstractPlanNode::to_string(child, false),
+                    indent = indent
+                )
+            })
             .collect()
     }
 }

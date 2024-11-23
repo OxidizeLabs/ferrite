@@ -52,7 +52,10 @@ impl LRUKReplacer {
     ///
     /// A new `LRUKReplacer` instance.
     pub fn new(replacer_size: usize, k: usize) -> Self {
-        info!("Initializing LRUKReplacer with size {} and k {}", replacer_size, k);
+        info!(
+            "Initializing LRUKReplacer with size {} and k {}",
+            replacer_size, k
+        );
         Self {
             frame_store: Arc::new(Mutex::new(HashMap::with_capacity(replacer_size))),
             replacer_size,
@@ -99,7 +102,9 @@ impl LRUKReplacer {
             };
 
             // Eviction decision based on k_distance and earliest access time as a tie-breaker
-            if k_distance < min_k_distance || (k_distance == min_k_distance && frame.access_times[0] < earliest_access_time) {
+            if k_distance < min_k_distance
+                || (k_distance == min_k_distance && frame.access_times[0] < earliest_access_time)
+            {
                 min_k_distance = k_distance;
                 earliest_access_time = frame.access_times[0];
                 victim_frame_id = Some(id);
@@ -134,10 +139,16 @@ impl LRUKReplacer {
                 if frame.access_times.len() > self.k {
                     frame.access_times.remove(0); // Trim the vector to only keep the last `k` accesses
                 }
-                debug!("Updated access times for frame {}: {:?}", frame_id, frame.access_times);
+                debug!(
+                    "Updated access times for frame {}: {:?}",
+                    frame_id, frame.access_times
+                );
             })
             .or_insert_with(|| {
-                debug!("Inserting new frame {} with initial access time {}", frame_id, now);
+                debug!(
+                    "Inserting new frame {} with initial access time {}",
+                    frame_id, now
+                );
                 Frame {
                     is_evictable: true,
                     access_times: vec![now],
@@ -160,7 +171,10 @@ impl LRUKReplacer {
             frame.is_evictable = set_evictable;
             debug!("Set frame {} evictable: {}", frame_id, set_evictable);
         } else {
-            info!("Frame {} not found in frame_store, adding with evictable status {}", frame_id, set_evictable);
+            info!(
+                "Frame {} not found in frame_store, adding with evictable status {}",
+                frame_id, set_evictable
+            );
             frame_store.insert(
                 frame_id,
                 Frame {
@@ -255,10 +269,18 @@ mod unit_tests {
         replacer.set_evictable(2, true);
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(1), "Expected frame 1 to be evicted first");
+        assert_eq!(
+            evicted_frame,
+            Some(1),
+            "Expected frame 1 to be evicted first"
+        );
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(2), "Expected frame 2 to be evicted next");
+        assert_eq!(
+            evicted_frame,
+            Some(2),
+            "Expected frame 2 to be evicted next"
+        );
     }
 
     #[test]
@@ -269,7 +291,10 @@ mod unit_tests {
         replacer.set_evictable(1, false); // Make frame 1 non-evictable
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, None, "Expected no frame to be evicted since frame 1 is not evictable");
+        assert_eq!(
+            evicted_frame, None,
+            "Expected no frame to be evicted since frame 1 is not evictable"
+        );
     }
 
     #[test]
@@ -290,7 +315,11 @@ mod unit_tests {
 
         // Frame 2 should be evicted because it only has one access, while frame 1 has more recent accesses.
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(2), "Expected frame 2 to be evicted based on LRU-K policy");
+        assert_eq!(
+            evicted_frame,
+            Some(2),
+            "Expected frame 2 to be evicted based on LRU-K policy"
+        );
     }
 
     #[test]
@@ -304,7 +333,10 @@ mod unit_tests {
         replacer.set_evictable(2, false);
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, None, "Expected no frame to be evicted since all frames are non-evictable");
+        assert_eq!(
+            evicted_frame, None,
+            "Expected no frame to be evicted since all frames are non-evictable"
+        );
     }
 
     #[test]
@@ -320,13 +352,25 @@ mod unit_tests {
         replacer.set_evictable(3, true);
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(1), "Expected frame 1 to be evicted first");
+        assert_eq!(
+            evicted_frame,
+            Some(1),
+            "Expected frame 1 to be evicted first"
+        );
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(2), "Expected frame 2 to be evicted next");
+        assert_eq!(
+            evicted_frame,
+            Some(2),
+            "Expected frame 2 to be evicted next"
+        );
 
         let evicted_frame = replacer.evict();
-        assert_eq!(evicted_frame, Some(3), "Expected frame 3 to be evicted last");
+        assert_eq!(
+            evicted_frame,
+            Some(3),
+            "Expected frame 3 to be evicted last"
+        );
     }
 
     #[test]
@@ -345,8 +389,16 @@ mod unit_tests {
         replacer.set_evictable(4, true);
         replacer.set_evictable(5, true);
 
-        assert_eq!(replacer.total_evictable_frames(), 5, "Size should be 5 when 5 frames are evictable");
-        assert_eq!(replacer.total_frames(), 5, "Total frames should be 5 after adding all frames");
+        assert_eq!(
+            replacer.total_evictable_frames(),
+            5,
+            "Size should be 5 when 5 frames are evictable"
+        );
+        assert_eq!(
+            replacer.total_frames(),
+            5,
+            "Total frames should be 5 after adding all frames"
+        );
 
         // Evict 3 pages
         let mut evicted = replacer.evict();
@@ -358,26 +410,47 @@ mod unit_tests {
         evicted = replacer.evict();
         assert_eq!(evicted, Some(3), "Third evicted frame should be 3");
 
-        assert_eq!(replacer.total_evictable_frames(), 2, "Size should be 2 after three evictions");
+        assert_eq!(
+            replacer.total_evictable_frames(),
+            2,
+            "Size should be 2 after three evictions"
+        );
     }
 
     #[test]
     fn frame_removal() {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2)));
-        replacer.lock().unwrap().record_access(1, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(2, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(3, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(1, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(2, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(3, AccessType::Lookup);
         replacer.lock().unwrap().set_evictable(1, true);
         replacer.lock().unwrap().set_evictable(2, true);
         replacer.lock().unwrap().set_evictable(3, true);
 
         // Remove frame 2
         replacer.lock().unwrap().remove(2);
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 2, "Size should be 2 after removing frame 2");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            2,
+            "Size should be 2 after removing frame 2"
+        );
 
         // Ensure evicting does not remove the already-removed frame
         let evicted = replacer.lock().unwrap().evict();
-        assert_ne!(evicted, Some(2), "Frame 2 should not be evicted as it was removed");
+        assert_ne!(
+            evicted,
+            Some(2),
+            "Frame 2 should not be evicted as it was removed"
+        );
     }
 }
 
@@ -390,9 +463,18 @@ mod basic_behaviour {
     fn basic_eviction_order() {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2)));
 
-        replacer.lock().unwrap().record_access(1, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(2, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(3, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(1, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(2, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(3, AccessType::Lookup);
 
         replacer.lock().unwrap().set_evictable(1, true);
         replacer.lock().unwrap().set_evictable(2, true);
@@ -408,18 +490,37 @@ mod basic_behaviour {
         let evicted = replacer.lock().unwrap().evict().unwrap();
         assert_eq!(evicted, 3, "Third evicted frame should be 3");
 
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 0, "Size should be 0 after all evictions");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            0,
+            "Size should be 0 after all evictions"
+        );
     }
 
     #[test]
     fn mixed_access_pattern() {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2)));
 
-        replacer.lock().unwrap().record_access(1, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(2, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(3, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(4, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(5, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(1, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(2, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(3, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(4, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(5, AccessType::Lookup);
 
         replacer.lock().unwrap().set_evictable(1, true);
         replacer.lock().unwrap().set_evictable(2, true);
@@ -428,20 +529,42 @@ mod basic_behaviour {
         replacer.lock().unwrap().set_evictable(5, true);
 
         // Access frames multiple times in mixed order
-        replacer.lock().unwrap().record_access(5, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(3, AccessType::Lookup);
-        replacer.lock().unwrap().record_access(2, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(5, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(3, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(2, AccessType::Lookup);
 
         let evicted = replacer.lock().unwrap().evict().unwrap();
-        assert_eq!(evicted, 1, "First evicted frame should be 1 (least recently accessed)");
+        assert_eq!(
+            evicted, 1,
+            "First evicted frame should be 1 (least recently accessed)"
+        );
 
         let evicted = replacer.lock().unwrap().evict().unwrap();
-        assert_eq!(evicted, 4, "Second evicted frame should be 4 (due to its K-th access pattern)");
+        assert_eq!(
+            evicted, 4,
+            "Second evicted frame should be 4 (due to its K-th access pattern)"
+        );
 
         let evicted = replacer.lock().unwrap().evict().unwrap();
-        assert_eq!(evicted, 2, "Third evicted frame should be 2 (next in line by access pattern)");
+        assert_eq!(
+            evicted, 2,
+            "Third evicted frame should be 2 (next in line by access pattern)"
+        );
 
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 2, "Size should be 2 after three evictions");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            2,
+            "Size should be 2 after three evictions"
+        );
     }
 }
 
@@ -471,13 +594,21 @@ mod concurrency {
         }
 
         // Verify that all frames are added
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 10, "All frames should be present after concurrent access");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            10,
+            "All frames should be present after concurrent access"
+        );
 
         for _ in 0..10 {
             replacer.lock().unwrap().evict().unwrap();
         }
 
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 0, "Size should be 0 after all evictions");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            0,
+            "Size should be 0 after all evictions"
+        );
     }
 }
 
@@ -490,21 +621,50 @@ mod edge_cases {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2)));
 
         // Edge case: try to evict from an empty replacer
-        assert!(replacer.lock().unwrap().evict().is_none(), "Eviction from an empty replacer should return None");
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 0, "Size should be 0 when replacer is empty");
-        assert_eq!(replacer.lock().unwrap().total_frames(), 0, "Total frames should be 0 when replacer is empty");
+        assert!(
+            replacer.lock().unwrap().evict().is_none(),
+            "Eviction from an empty replacer should return None"
+        );
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            0,
+            "Size should be 0 when replacer is empty"
+        );
+        assert_eq!(
+            replacer.lock().unwrap().total_frames(),
+            0,
+            "Total frames should be 0 when replacer is empty"
+        );
 
         // Edge case: add an element, set it to non-evictable, then try to evict
-        replacer.lock().unwrap().record_access(1, AccessType::Lookup);
+        replacer
+            .lock()
+            .unwrap()
+            .record_access(1, AccessType::Lookup);
         replacer.lock().unwrap().set_evictable(1, false);
 
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 0, "Size should be 0 with non-evictable frame");
-        assert_eq!(replacer.lock().unwrap().total_frames(), 1, "Total frames should be 1 with non-evictable frame");
-        assert!(replacer.lock().unwrap().evict().is_none(), "Eviction of a non-evictable frame should return None");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            0,
+            "Size should be 0 with non-evictable frame"
+        );
+        assert_eq!(
+            replacer.lock().unwrap().total_frames(),
+            1,
+            "Total frames should be 1 with non-evictable frame"
+        );
+        assert!(
+            replacer.lock().unwrap().evict().is_none(),
+            "Eviction of a non-evictable frame should return None"
+        );
 
         // Edge case: set it back to evictable and evict
         replacer.lock().unwrap().set_evictable(1, true);
-        assert_eq!(replacer.lock().unwrap().evict().unwrap(), 1, "Eviction should return frame 1");
+        assert_eq!(
+            replacer.lock().unwrap().evict().unwrap(),
+            1,
+            "Eviction should return frame 1"
+        );
     }
 
     #[test]
@@ -513,7 +673,10 @@ mod edge_cases {
 
         // Add frames and set them all to evictable
         for i in 1..=5 {
-            replacer.lock().unwrap().record_access(i, AccessType::Lookup);
+            replacer
+                .lock()
+                .unwrap()
+                .record_access(i, AccessType::Lookup);
             replacer.lock().unwrap().set_evictable(i, true);
         }
 
@@ -527,6 +690,10 @@ mod edge_cases {
         evicted = replacer.lock().unwrap().evict().unwrap();
         assert_eq!(evicted, 3, "Third evicted frame should be 3");
 
-        assert_eq!(replacer.lock().unwrap().total_evictable_frames(), 2, "Size should be 2 after three evictions");
+        assert_eq!(
+            replacer.lock().unwrap().total_evictable_frames(),
+            2,
+            "Size should be 2 after three evictions"
+        );
     }
 }

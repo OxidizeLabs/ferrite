@@ -10,7 +10,6 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ComparisonType {
     Equal,
@@ -31,7 +30,12 @@ pub struct ComparisonExpression {
 }
 
 impl ComparisonExpression {
-    pub fn new(left: Arc<Expression>, right: Arc<Expression>, comp_type: ComparisonType, children: Vec<Arc<Expression>>) -> Self {
+    pub fn new(
+        left: Arc<Expression>,
+        right: Arc<Expression>,
+        comp_type: ComparisonType,
+        children: Vec<Arc<Expression>>,
+    ) -> Self {
         let ret_type = Column::new("<val>", TypeId::Boolean);
         Self {
             left,
@@ -74,9 +78,19 @@ impl ExpressionOps for ComparisonExpression {
         Ok(Value::new(comparison_result))
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        let lhs = self
+            .left
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let rhs = self
+            .right
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
         Ok(Value::new(comparison_result))
     }
@@ -137,16 +151,36 @@ mod unit_tests {
 
         let tuple = Tuple::new(vec![Value::new(5), Value::new(10)], schema.clone(), rid);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![])));
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
 
-        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(1, 1, schema.get_column(1).unwrap().clone(), vec![])));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            1,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
+        )));
 
-        let less_than_expr = Expression::Comparison(ComparisonExpression::new(col1.clone(), col2.clone(), ComparisonType::LessThan, vec![]));
+        let less_than_expr = Expression::Comparison(ComparisonExpression::new(
+            col1.clone(),
+            col2.clone(),
+            ComparisonType::LessThan,
+            vec![],
+        ));
 
         let result = less_than_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(true));
 
-        let equal_expr = Expression::Comparison(ComparisonExpression::new(col1, col2, ComparisonType::Equal, vec![]));
+        let equal_expr = Expression::Comparison(ComparisonExpression::new(
+            col1,
+            col2,
+            ComparisonType::Equal,
+            vec![],
+        ));
 
         let result = equal_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(false));

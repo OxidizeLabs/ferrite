@@ -194,7 +194,11 @@ impl TestContext {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
         let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
         let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 100));
+        let disk_manager = Arc::new(FileDiskManager::new(
+            db_file.clone(),
+            db_log_file.clone(),
+            100,
+        ));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
         Self {
             disk_manager,
@@ -287,7 +291,9 @@ mod basic_behaviour {
         assert!(disk_scheduler.write().worker_thread.is_none());
 
         // Attempting to schedule after shutdown
-        disk_scheduler.write().schedule(true, Arc::clone(&data), 0, tx);
+        disk_scheduler
+            .write()
+            .schedule(true, Arc::clone(&data), 0, tx);
         assert!(!disk_scheduler.read().is_request_queue_empty());
     }
 }
@@ -383,7 +389,9 @@ mod edge_cases {
         let (tx, _rx) = mpsc::channel();
 
         for i in 0..5 {
-            disk_scheduler.write().schedule(true, Arc::clone(&data), i, tx.clone());
+            disk_scheduler
+                .write()
+                .schedule(true, Arc::clone(&data), i, tx.clone());
         }
 
         // Initiate shutdown while requests are in the queue

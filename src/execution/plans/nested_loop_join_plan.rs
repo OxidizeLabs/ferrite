@@ -14,7 +14,13 @@ pub struct NestedLoopJoinNode {
 }
 
 impl NestedLoopJoinNode {
-    pub fn new(output_schema: Arc<Schema>, left: Box<PlanNode>, right: Box<PlanNode>, predicate: Arc<Expression>, join_type: JoinType) -> Self {
+    pub fn new(
+        output_schema: Arc<Schema>,
+        left: Box<PlanNode>,
+        right: Box<PlanNode>,
+        predicate: Arc<Expression>,
+        join_type: JoinType,
+    ) -> Self {
         Self {
             output_schema,
             left,
@@ -60,4 +66,3 @@ impl AbstractPlanNode for NestedLoopJoinNode {
         todo!()
     }
 }
-

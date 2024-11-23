@@ -17,7 +17,12 @@ pub struct ColumnRefExpression {
 }
 
 impl ColumnRefExpression {
-    pub fn new(tuple_index: usize, column_index: usize, ret_type: Column, children: Vec<Arc<Expression>>) -> Self {
+    pub fn new(
+        tuple_index: usize,
+        column_index: usize,
+        ret_type: Column,
+        children: Vec<Arc<Expression>>,
+    ) -> Self {
         Self {
             tuple_index,
             column_index,
@@ -40,7 +45,13 @@ impl ExpressionOps for ColumnRefExpression {
         Ok(tuple.get_value(self.column_index).clone())
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         let column_index = self.get_column_index();
         if column_index < left_schema.get_column_count() as usize {
             Ok(left_tuple.get_value(column_index).clone())

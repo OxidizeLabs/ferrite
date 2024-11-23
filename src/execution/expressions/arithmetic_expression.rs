@@ -28,8 +28,14 @@ pub struct ArithmeticExpression {
 }
 
 impl ArithmeticExpression {
-    pub fn new(left: Arc<Expression>, right: Arc<Expression>, op: ArithmeticOp, children: Vec<Arc<Expression>>) -> Self {
-        let ret_type = Self::infer_return_type(left.get_return_type(), right.get_return_type()).unwrap();
+    pub fn new(
+        left: Arc<Expression>,
+        right: Arc<Expression>,
+        op: ArithmeticOp,
+        children: Vec<Arc<Expression>>,
+    ) -> Self {
+        let ret_type =
+            Self::infer_return_type(left.get_return_type(), right.get_return_type()).unwrap();
         Self {
             left,
             right,
@@ -53,12 +59,19 @@ impl ArithmeticExpression {
 
     fn infer_return_type(left: &Column, right: &Column) -> Result<Column, String> {
         match (left.get_type(), right.get_type()) {
-            (TypeId::Integer, TypeId::Integer) => Ok(Column::new("arithmetic_result", TypeId::Integer)),
-            (TypeId::Decimal, TypeId::Decimal) => Ok(Column::new("arithmetic_result", TypeId::Decimal)),
+            (TypeId::Integer, TypeId::Integer) => {
+                Ok(Column::new("arithmetic_result", TypeId::Integer))
+            }
+            (TypeId::Decimal, TypeId::Decimal) => {
+                Ok(Column::new("arithmetic_result", TypeId::Decimal))
+            }
             (TypeId::Integer, TypeId::Decimal) | (TypeId::Decimal, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
             }
-            _ => Err(format!("Invalid types for arithmetic operation: {:?} and {:?}", left, right)),
+            _ => Err(format!(
+                "Invalid types for arithmetic operation: {:?} and {:?}",
+                left, right
+            )),
         }
     }
 }
@@ -76,7 +89,9 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Multiply => l.checked_mul(*r),
                     ArithmeticOp::Divide => l.checked_div(*r),
                 };
-                result.map(Value::from).ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -85,14 +100,22 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Multiply => l.checked_mul(*r),
                     ArithmeticOp::Divide => l.checked_div(*r),
                 };
-                result.map(Value::from).ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::Decimal(l), Val::Decimal(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => *l + *r,
                     ArithmeticOp::Subtract => *l - *r,
                     ArithmeticOp::Multiply => *l * *r,
-                    ArithmeticOp::Divide => if *r != 0.0 { Ok(*l / *r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(*l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -103,7 +126,13 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Add => l + r,
                     ArithmeticOp::Subtract => l - r,
                     ArithmeticOp::Multiply => l * r,
-                    ArithmeticOp::Divide => if r != 0.0 { Ok(l / r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -114,7 +143,13 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Add => l + r,
                     ArithmeticOp::Subtract => l - r,
                     ArithmeticOp::Multiply => l * r,
-                    ArithmeticOp::Divide => if r != 0.0 { Ok(l / r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -122,9 +157,21 @@ impl ExpressionOps for ArithmeticExpression {
         }
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        let left_value = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema).unwrap();
-        let right_value = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema).unwrap();
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        let left_value = self
+            .left
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            .unwrap();
+        let right_value = self
+            .right
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            .unwrap();
 
         match (left_value.get_value(), right_value.get_value()) {
             (Val::Integer(l), Val::Integer(r)) => {
@@ -134,7 +181,9 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Multiply => l.checked_mul(*r),
                     ArithmeticOp::Divide => l.checked_div(*r),
                 };
-                result.map(Value::from).ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -143,14 +192,22 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Multiply => l.checked_mul(*r),
                     ArithmeticOp::Divide => l.checked_div(*r),
                 };
-                result.map(Value::from).ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::Decimal(l), Val::Decimal(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l + *r,
                     ArithmeticOp::Subtract => l - *r,
                     ArithmeticOp::Multiply => l * *r,
-                    ArithmeticOp::Divide => if *r != 0.0 { Ok(l / *r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -161,7 +218,13 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Add => l + r,
                     ArithmeticOp::Subtract => l - r,
                     ArithmeticOp::Multiply => l * r,
-                    ArithmeticOp::Divide => if r != 0.0 { Ok(l / r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -172,7 +235,13 @@ impl ExpressionOps for ArithmeticExpression {
                     ArithmeticOp::Add => l + r,
                     ArithmeticOp::Subtract => l - r,
                     ArithmeticOp::Multiply => l * r,
-                    ArithmeticOp::Divide => if r != 0.0 { Ok(l / r) } else { Err(ExpressionError::ArithmeticError(DivisionByZero)) }?,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
                 };
                 Ok(Value::from(result))
             }
@@ -233,10 +302,18 @@ mod unit_tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
 
-        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 0, schema.get_column(0).unwrap().clone(), vec![]))
-        );
-        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(0, 1, schema.get_column(1).unwrap().clone(), vec![]))
-        );
+        let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+        let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
+        )));
 
         let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
             col1.clone(),

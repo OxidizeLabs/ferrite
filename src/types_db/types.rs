@@ -32,17 +32,28 @@ pub trait Type {
             | TypeId::SmallInt
             | TypeId::Integer
             | TypeId::BigInt
-            | TypeId::Decimal => matches!(type_id,
-                TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer |
-                TypeId::BigInt | TypeId::Decimal | TypeId::VarChar
+            | TypeId::Decimal => matches!(
+                type_id,
+                TypeId::TinyInt
+                    | TypeId::SmallInt
+                    | TypeId::Integer
+                    | TypeId::BigInt
+                    | TypeId::Decimal
+                    | TypeId::VarChar
             ),
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
-            TypeId::VarChar => matches!(type_id,
-                TypeId::Boolean | TypeId::TinyInt | TypeId::SmallInt |
-                TypeId::Integer | TypeId::BigInt | TypeId::Decimal |
-                TypeId::Timestamp | TypeId::VarChar
+            TypeId::VarChar => matches!(
+                type_id,
+                TypeId::Boolean
+                    | TypeId::TinyInt
+                    | TypeId::SmallInt
+                    | TypeId::Integer
+                    | TypeId::BigInt
+                    | TypeId::Decimal
+                    | TypeId::Timestamp
+                    | TypeId::VarChar
             ),
-            TypeId::Vector => matches!(type_id, TypeId::Vector)
+            TypeId::Vector => matches!(type_id, TypeId::Vector),
         }
     }
     fn get_min_value(type_id: TypeId) -> Value
@@ -228,16 +239,34 @@ mod unit_tests {
 
     #[test]
     fn test_get_min_value() {
-        assert_eq!(BooleanType::get_min_value(TypeId::Boolean), Value::from(false));
-        assert_eq!(TinyIntType::get_min_value(TypeId::TinyInt), Value::from(i8::MIN));
-        assert_eq!(IntegerType::get_min_value(TypeId::Integer), Value::from(i32::MIN));
+        assert_eq!(
+            BooleanType::get_min_value(TypeId::Boolean),
+            Value::from(false)
+        );
+        assert_eq!(
+            TinyIntType::get_min_value(TypeId::TinyInt),
+            Value::from(i8::MIN)
+        );
+        assert_eq!(
+            IntegerType::get_min_value(TypeId::Integer),
+            Value::from(i32::MIN)
+        );
     }
 
     #[test]
     fn test_get_max_value() {
-        assert_eq!(BooleanType::get_max_value(TypeId::Boolean), Value::from(true));
-        assert_eq!(TinyIntType::get_max_value(TypeId::TinyInt), Value::from(i8::MAX));
-        assert_eq!(IntegerType::get_max_value(TypeId::Integer), Value::from(i32::MAX));
+        assert_eq!(
+            BooleanType::get_max_value(TypeId::Boolean),
+            Value::from(true)
+        );
+        assert_eq!(
+            TinyIntType::get_max_value(TypeId::TinyInt),
+            Value::from(i8::MAX)
+        );
+        assert_eq!(
+            IntegerType::get_max_value(TypeId::Integer),
+            Value::from(i32::MAX)
+        );
     }
 
     #[test]

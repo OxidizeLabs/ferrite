@@ -24,7 +24,11 @@ pub struct StringExpression {
 }
 
 impl StringExpression {
-    pub fn new(arg: Arc<Expression>, expr_type: StringExpressionType, children: Vec<Arc<Expression>>) -> Self {
+    pub fn new(
+        arg: Arc<Expression>,
+        expr_type: StringExpressionType,
+        children: Vec<Arc<Expression>>,
+    ) -> Self {
         Self {
             arg,
             children,
@@ -61,8 +65,16 @@ impl ExpressionOps for StringExpression {
         }
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        let arg_value = self.arg.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        let arg_value =
+            self.arg
+                .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         match arg_value.get_value() {
             Val::VarLen(s) | Val::ConstVarLen(s) => {
                 let computed = self.perform_computation(s);
@@ -118,9 +130,13 @@ mod unit_tests {
         let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("HELLO".to_string())),
             Column::new("const", TypeId::VarChar),
-            vec![])
+            vec![],
+        )));
+        let expr = Expression::String(StringExpression::new(
+            arg,
+            StringExpressionType::Lower,
+            vec![],
         ));
-        let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
@@ -135,9 +151,13 @@ mod unit_tests {
         let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("hello".to_string())),
             Column::new("const", TypeId::VarChar),
-            vec![])
+            vec![],
+        )));
+        let expr = Expression::String(StringExpression::new(
+            arg,
+            StringExpressionType::Upper,
+            vec![],
         ));
-        let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Upper, vec![]));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
@@ -152,9 +172,13 @@ mod unit_tests {
         let arg = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(42)),
             Column::new("const", TypeId::Integer),
-            vec![])
+            vec![],
+        )));
+        let expr = Expression::String(StringExpression::new(
+            arg,
+            StringExpressionType::Lower,
+            vec![],
         ));
-        let expr = Expression::String(StringExpression::new(arg, StringExpressionType::Lower, vec![]));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
@@ -162,6 +186,9 @@ mod unit_tests {
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ExpressionError::InvalidStringExpressionType));
+        assert!(matches!(
+            result.unwrap_err(),
+            ExpressionError::InvalidStringExpressionType
+        ));
     }
 }
