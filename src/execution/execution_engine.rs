@@ -5,23 +5,22 @@ use crate::common::exception::DBError;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_exector::AbstractExecutor;
-// use crate::execution::executors::insert_executor::InsertExecutor;
-// use crate::execution::executors::delete_executor::DeleteExecutor;
-// use crate::execution::executors::nested_loop_join_executor::NestedLoopJoinExecutor;
-// use crate::execution::executors::aggregation_executor::AggregationExecutor;
 use crate::execution::executors::create_table_executor::CreateTableExecutor;
 use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
 use crate::planner::planner::QueryPlanner;
+use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::env;
 
 pub struct ExecutorEngine {
     buffer_pool_manager: Arc<BufferPoolManager>,
     catalog: Arc<RwLock<Catalog>>,
     planner: QueryPlanner,
     optimizer: Optimizer,
+    log_detailed: bool,
 }
 
 impl ExecutorEngine {
@@ -31,6 +30,7 @@ impl ExecutorEngine {
             catalog: catalog.clone(),
             planner: QueryPlanner::new(),
             optimizer: Optimizer::new(catalog),
+            log_detailed: env::var("RUST_TEST").is_ok(),
         }
     }
 
@@ -40,16 +40,30 @@ impl ExecutorEngine {
         sql: &str,
         check_options: Arc<CheckOptions>,
     ) -> Result<PlanNode, DBError> {
+        info!("Preparing statement: {}", sql);
+
         // Generate initial plan using our QueryPlanner
-        let initial_plan = self
-            .planner
-            .create_plan(sql)
-            .map_err(|e| DBError::PlanError(e))?;
+        let initial_plan = match self.planner.create_plan(sql) {
+            Ok(plan) => {
+                if self.log_detailed {
+                    debug!("Initial plan generated: {:?}", plan);
+                }
+                plan
+            }
+            Err(e) => {
+                warn!("Failed to create plan: {}", e);
+                return Err(DBError::PlanError(e));
+            }
+        };
 
         // Optimize the plan
         if check_options.is_modify() {
+            info!("Optimizing plan with modification checks");
             self.optimizer.optimize(initial_plan, check_options)
         } else {
+            if self.log_detailed {
+                debug!("Skipping optimization for read-only query");
+            }
             Ok(initial_plan)
         }
     }
@@ -61,43 +75,25 @@ impl ExecutorEngine {
         context: ExecutorContext,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
-        // Create root executor
-        let mut root_executor = self.create_executor(plan, context)?;
+        info!("Starting execution of plan: {:?}", plan.get_type());
 
-        // Initialize the executor
-        root_executor.init();
+        let result = self.execute_statement_internal(plan, context, writer);
 
-        let mut has_results = false;
-
-        // Get schema information before starting iteration
-        let column_count = root_executor.get_output_schema().get_column_count();
-        let column_names: Vec<String> = root_executor
-            .get_output_schema()
-            .get_columns()
-            .iter()
-            .map(|col| col.get_name().to_string())
-            .collect();
-
-        // Write column headers
-        writer.begin_table(true);
-        writer.begin_header();
-        for name in &column_names {
-            writer.write_header_cell(name);
-        }
-        writer.end_header();
-
-        // Execute and write results
-        while let Some((tuple, _rid)) = root_executor.next() {
-            has_results = true;
-            writer.begin_row();
-            for i in 0..column_count {
-                writer.write_cell(&tuple.get_value(i as usize).to_string());
+        match &result {
+            Ok(has_results) => {
+                info!("Statement execution completed successfully. Has results: {}", has_results);
+                debug!("Releasing all resources and returning control to CLI");
             }
-            writer.end_row();
+            Err(e) => {
+                warn!("Statement execution failed: {:?}", e);
+                debug!("Cleaning up after execution failure");
+            }
         }
 
-        writer.end_table();
-        Ok(has_results)
+        // Ensure proper cleanup happens even on success
+        self.cleanup_after_execution();
+
+        result
     }
 
     /// Creates appropriate executor for a plan node
@@ -106,81 +102,124 @@ impl ExecutorEngine {
         plan: &PlanNode,
         context: ExecutorContext,
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
+        if self.log_detailed {
+            debug!("Creating executor for plan type: {:?}", plan.get_type());
+        }
+
         match plan {
             PlanNode::SeqScan(scan_plan) => {
+                info!("Creating sequential scan executor");
                 Ok(Box::new(SeqScanExecutor::new(context, scan_plan.clone())))
             }
-            _ => Err(DBError::NotImplemented(format!(
-                "Executor type {:?} not implemented",
-                plan.get_type()
-            ))),
-            PlanNode::CreateTable(create_table_plan) => Ok(Box::new(CreateTableExecutor::new(
-                Arc::new(context),
-                create_table_plan.clone(),
-                false,
-            ))),
-
-            // PlanType::Insert => {
-            //     let insert_plan = plan.as_insert()?;
-            //     let table = self.catalog.get_table(insert_plan.get_table_name())?;
-            //     let child_executor = self.create_executor(insert_plan.get_child(), context)?;
-            //
-            //     Ok(Box::new(InsertExecutor::new(
-            //         context,
-            //         table,
-            //         child_executor,
-            //     )))
-            // }
-            //
-            // PlanType::Delete => {
-            //     let delete_plan = plan.as_delete()?;
-            //     let table = self.catalog.get_table(delete_plan.get_table_name())?;
-            //     let child_executor = self.create_executor(delete_plan.get_child(), context)?;
-            //
-            //     context.set_delete(true);
-            //     Ok(Box::new(DeleteExecutor::new(
-            //         context,
-            //         table,
-            //         child_executor,
-            //     )))
-            // }
-            //
-            // PlanType::NestedLoopJoin => {
-            //     let join_plan = plan.as_nested_loop_join()?;
-            //     let left_child = self.create_executor(join_plan.get_left_child(), context)?;
-            //     let right_child = self.create_executor(join_plan.get_right_child(), context)?;
-            //
-            //     if context.get_check_options().has_check(&CheckOption::EnableNljCheck) {
-            //         context.add_check_option(left_child.clone(), right_child.clone());
-            //     }
-            //
-            //     Ok(Box::new(NestedLoopJoinExecutor::new(
-            //         context,
-            //         join_plan.get_predicate().clone(),
-            //         left_child,
-            //         right_child,
-            //         join_plan.get_output_schema().clone(),
-            //     )))
-            // }
-            //
-            // PlanType::Aggregation => {
-            //     let agg_plan = plan.as_aggregation()?;
-            //     let child_executor = self.create_executor(agg_plan.get_child(), context)?;
-            //
-            //     Ok(Box::new(AggregationExecutor::new(
-            //         context,
-            //         agg_plan.get_group_bys().clone(),
-            //         agg_plan.get_aggregates().clone(),
-            //         child_executor,
-            //         agg_plan.get_output_schema().clone(),
-            //     )))
-            // }
-
-            // Add other executor types as needed
-            _ => Err(DBError::NotImplemented(format!(
-                "Executor type {:?} not implemented",
-                plan.get_type()
-            ))),
+            PlanNode::CreateTable(create_table_plan) => {
+                info!("Creating table creation executor");
+                Ok(Box::new(CreateTableExecutor::new(
+                    Arc::new(context),
+                    create_table_plan.clone(),
+                    false,
+                )))
+            }
+            _ => {
+                warn!("Unsupported plan type: {:?}", plan.get_type());
+                Err(DBError::NotImplemented(format!(
+                    "Executor type {:?} not implemented",
+                    plan.get_type()
+                )))
+            }
         }
+    }
+
+    fn execute_statement_internal(
+        &self,
+        plan: &PlanNode,
+        context: ExecutorContext,
+        writer: &mut impl ResultWriter,
+    ) -> Result<bool, DBError> {
+        // Create root executor
+        let mut root_executor = self.create_executor(plan, context)?;
+
+        info!("Initializing executor");
+        root_executor.init();
+        debug!("Executor initialization complete");
+
+        let mut has_results = false;
+        let mut row_count = 0;
+
+        // Get schema information
+        let column_count = root_executor.get_output_schema().get_column_count();
+        let column_names: Vec<String> = root_executor
+            .get_output_schema()
+            .get_columns()
+            .iter()
+            .map(|col| col.get_name().to_string())
+            .collect();
+
+        debug!("Writing output schema with {} columns", column_count);
+        writer.begin_table(true);
+        writer.begin_header();
+        for name in &column_names {
+            writer.write_header_cell(name);
+        }
+        writer.end_header();
+
+        debug!("Starting result processing");
+        while let Some((tuple, _rid)) = root_executor.next() {
+            has_results = true;
+            row_count += 1;
+
+            if row_count % 1000 == 0 {
+                debug!("Processed {} rows", row_count);
+            }
+
+            writer.begin_row();
+            for i in 0..column_count {
+                writer.write_cell(&tuple.get_value(i as usize).to_string());
+            }
+            writer.end_row();
+        }
+
+        debug!("Result processing complete");
+        writer.end_table();
+
+        info!("Statement execution finished. Processed {} rows", row_count);
+        Ok(has_results)
+    }
+
+    fn cleanup_after_execution(&self) {
+        debug!("Starting post-execution cleanup");
+
+        // Add any necessary cleanup logic here
+        // For example:
+        // - Release any held locks
+        // - Clear any temporary resources
+        // - Reset any execution state
+
+        debug!("Post-execution cleanup complete");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    // Add test setup helper
+    fn setup_test_engine() -> ExecutorEngine {
+        env::set_var("RUST_TEST", "1");
+        // Create necessary components for ExecutorEngine
+        // This is a placeholder - you'll need to provide actual implementations
+        unimplemented!("Need to implement test setup");
+    }
+
+    #[test]
+    fn test_prepare_statement() {
+        let engine = setup_test_engine();
+        // Add test implementation
+    }
+
+    #[test]
+    fn test_execute_statement() {
+        let engine = setup_test_engine();
+        // Add test implementation
     }
 }
