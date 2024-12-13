@@ -1,18 +1,17 @@
-
-use sqlparser::ast::{Statement, Query, SetExpr, TableFactor, TableWithJoins, Select};
-use sqlparser::parser::Parser;
-use sqlparser::dialect::GenericDialect;
-use std::sync::Arc;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
-use crate::execution::plans::abstract_plan::{PlanNode, AbstractPlanNode};
-use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
-use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
-use crate::types_db::value::Value;
+use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::execution::plans::filter_plan::FilterNode;
+use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
+use sqlparser::ast::{Query, Select, SetExpr, Statement, TableFactor, TableWithJoins};
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+use std::sync::Arc;
 
 pub struct QueryPlanner {
     // Add fields for catalog/metadata management
@@ -26,8 +25,8 @@ impl QueryPlanner {
     pub fn create_plan(&self, sql: &str) -> Result<PlanNode, String> {
         // Parse SQL using sqlparser
         let dialect = GenericDialect {};
-        let ast = Parser::parse_sql(&dialect, sql)
-            .map_err(|e| format!("Failed to parse SQL: {}", e))?;
+        let ast =
+            Parser::parse_sql(&dialect, sql).map_err(|e| format!("Failed to parse SQL: {}", e))?;
 
         if ast.len() != 1 {
             return Err("Expected exactly one statement".to_string());
@@ -156,10 +155,7 @@ mod tests {
 
         assert!(matches!(plan, PlanNode::Filter(_)));
         if let PlanNode::Filter(filter_node) = plan {
-            assert!(matches!(
-                filter_node.get_child_plan(),
-                PlanNode::SeqScan(_)
-            ));
+            assert!(matches!(filter_node.get_child_plan(), PlanNode::SeqScan(_)));
         }
     }
 }

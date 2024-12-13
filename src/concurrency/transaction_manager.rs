@@ -1,16 +1,16 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use crate::catalogue::catalogue::Catalog;
 use crate::common::config::TransactionId;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
 };
+use crate::concurrency::watermark::Watermark;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use parking_lot::{Mutex, RwLock};
-use crate::catalogue::catalogue::Catalog;
-use crate::concurrency::watermark::Watermark;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct PageVersionInfo {
     // Stores previous version info for all slots
@@ -48,10 +48,7 @@ impl TransactionManager {
     pub fn begin(&mut self, isolation_level: IsolationLevel) -> Arc<Mutex<Transaction>> {
         let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
 
-        let txn = Arc::new(Mutex::new(Transaction::new(
-            txn_id,
-            isolation_level,
-        )));
+        let txn = Arc::new(Mutex::new(Transaction::new(txn_id, isolation_level)));
         self.txn_map.write().insert(txn_id, txn.clone());
 
         {
@@ -101,13 +98,15 @@ impl TransactionManager {
     /// - `txn`: The transaction to abort.
     pub fn abort(&mut self, txn: Arc<Mutex<Transaction>>) {
         let txn_guard = txn.lock();
-        if txn_guard.get_state() != TransactionState::Running && txn_guard.get_state() != TransactionState::Tainted {
+        if txn_guard.get_state() != TransactionState::Running
+            && txn_guard.get_state() != TransactionState::Tainted
+        {
             panic!("txn not in running / tainted state");
         }
 
         {
             let mut txn_map = self.txn_map.write();
-            txn_map.insert(txn_guard.txn_id(),txn.clone());
+            txn_map.insert(txn_guard.txn_id(), txn.clone());
             txn_guard.set_state(TransactionState::Aborted);
             self.running_txns.remove_txn(txn_guard.read_ts());
         }

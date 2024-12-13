@@ -1,5 +1,6 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
+use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::schema::Schema;
 use crate::common::logger::initialize_logger;
 use crate::common::rid::RID;
@@ -15,10 +16,9 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::Tuple;
 use chrono::Utc;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::fs;
 use std::sync::Arc;
-use crate::catalogue::catalogue::Catalog;
 
 pub struct SeqScanExecutor {
     context: ExecutorContext,
@@ -118,7 +118,11 @@ impl TestContext {
             replacer.clone(),
         ));
 
-        let file_disk_manager = Arc::new(FileDiskManager::new("db_file.db".to_string(), "log_file.log".to_string(), 10));
+        let file_disk_manager = Arc::new(FileDiskManager::new(
+            "db_file.db".to_string(),
+            "log_file.log".to_string(),
+            10,
+        ));
         let log_manager = Arc::new(LogManager::new(file_disk_manager));
         let catalog = Catalog::new(
             bpm.clone(),
@@ -128,7 +132,7 @@ impl TestContext {
             Default::default(),
             Default::default(),
             Default::default(),
-            Default::default()
+            Default::default(),
         );
 
         // Create TransactionManager with a placeholder Catalog
@@ -231,7 +235,13 @@ mod unit_tests {
         let plan = SeqScanPlanNode::new(schema.clone(), table_oid, table_name.to_string(), None);
 
         // Create execution context
-        let context = ExecutorContext::new(txn, transaction_manager, Arc::new(catalog), Arc::clone(&bpm), lock_manager);
+        let context = ExecutorContext::new(
+            txn,
+            transaction_manager,
+            Arc::new(catalog),
+            Arc::clone(&bpm),
+            lock_manager,
+        );
 
         // Create and initialize executor
         let mut executor = SeqScanExecutor::new(context, plan);

@@ -1,12 +1,12 @@
-use std::collections::VecDeque;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::catalogue::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
-use crate::execution::check_option::{CheckOption, CheckOptions};
-use std::sync::Arc;
 use crate::concurrency::transaction_manager::TransactionManager;
+use crate::execution::check_option::{CheckOption, CheckOptions};
 use crate::execution::executors::abstract_exector::AbstractExecutor;
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub struct ExecutorContext {
     transaction: Transaction,
@@ -59,7 +59,9 @@ impl ExecutorContext {
         self.lock_manager.as_ref()
     }
 
-    pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)> {
+    pub fn get_nlj_check_exec_set(
+        &self,
+    ) -> &VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)> {
         &self.nlj_check_exec_set
     }
 
@@ -71,7 +73,11 @@ impl ExecutorContext {
         self.check_options = Arc::new(options);
     }
 
-    pub fn add_check_option(&mut self, left_exec: Box<dyn AbstractExecutor>, right_exec: Box<dyn AbstractExecutor>) {
+    pub fn add_check_option(
+        &mut self,
+        left_exec: Box<dyn AbstractExecutor>,
+        right_exec: Box<dyn AbstractExecutor>,
+    ) {
         self.nlj_check_exec_set.push_back((left_exec, right_exec));
     }
 

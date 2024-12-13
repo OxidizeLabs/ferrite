@@ -756,11 +756,11 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
-    use log::info;
+    use super::*;
     use crate::catalogue::schema::Schema;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::types_db::type_id::TypeId;
-    use super::*;
+    use log::info;
 
     #[test]
     fn parse_and_bind_select() {

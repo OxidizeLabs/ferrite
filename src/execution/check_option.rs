@@ -14,7 +14,7 @@ pub struct CheckOptions {
 impl CheckOptions {
     pub fn new() -> Self {
         Self {
-            check_options_set: HashSet::new()
+            check_options_set: HashSet::new(),
         }
     }
 
