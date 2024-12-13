@@ -3,14 +3,15 @@ use crate::common::exception::DBError;
 use crate::execution::check_option::{CheckOption, CheckOptions};
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::filter_plan::FilterNode;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct Optimizer {
-    catalog: Arc<Catalog>,
+    catalog: Arc<RwLock<Catalog>>,
 }
 
 impl Optimizer {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         Self { catalog }
     }
 
@@ -136,7 +137,8 @@ impl Optimizer {
                 // Check if we can use an index instead of sequential scan
                 // Look up available indexes in catalog
                 let table_name = scan_node.get_table_name();
-                if let indexes = self.catalog.get_table_indexes(table_name) {
+                let catalog_guard = self.catalog.read();
+                if let indexes = catalog_guard.get_table_indexes(table_name) {
                     // Evaluate if any index is beneficial
                     // For now, just return sequential scan
                 }
@@ -180,7 +182,8 @@ impl Optimizer {
         match plan {
             PlanNode::SeqScan(node) => {
                 let table_oid = node.get_table_oid();
-                if self.catalog.get_table_by_oid(table_oid).is_none() {
+                let catalog_guard = self.catalog.read();
+                if catalog_guard.get_table_by_oid(table_oid).is_none() {
                     return Err(DBError::TableNotFound(format!(
                         "Table {} not found",
                         node.get_table_name()

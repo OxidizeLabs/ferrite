@@ -130,6 +130,9 @@ pub enum DBError {
 
     #[error("Plan error: {0}")]
     PlanError(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 impl Error for PageError {}

@@ -13,7 +13,7 @@ use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
 use chrono::Utc;
 use core::fmt;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -403,7 +403,7 @@ impl Display for IndexType {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     log_manager: Arc<LogManager>,
     db_file: String,
@@ -439,7 +439,7 @@ impl TestContext {
             10,
         ));
         let log_manager = Arc::new(LogManager::new(file_disk_manager));
-        let catalog = Catalog::new(
+        let catalog = Arc::new(RwLock::new(Catalog::new(
             bpm.clone(),
             log_manager,
             0,
@@ -448,9 +448,9 @@ impl TestContext {
             Default::default(),
             Default::default(),
             Default::default(),
-        );
+        )));
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(TransactionManager::new(Arc::from(catalog)));
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new((catalog))));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
         let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 

@@ -16,7 +16,7 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::Tuple;
 use chrono::Utc;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::fs;
 use std::sync::Arc;
 
@@ -30,11 +30,14 @@ pub struct SeqScanExecutor {
 impl SeqScanExecutor {
     pub fn new(context: ExecutorContext, plan: SeqScanPlanNode) -> Self {
         let table_oid = plan.get_table_oid();
-        let catalog = context.get_catalog();
-        let table_info = catalog
-            .get_table_by_oid(table_oid)
-            .expect("Table not found");
-        let table_heap = table_info.get_table_heap();
+        let table_heap = {
+            let catalog = context.get_catalog();
+            let catalog_guard = catalog.read();
+            let table_info = catalog_guard
+                .get_table_by_oid(table_oid)
+                .expect("Table not found");
+            table_info.get_table_heap().clone()
+        }; // catalog_guard is dropped here
 
         Self {
             context,
@@ -87,7 +90,7 @@ impl AbstractExecutor for SeqScanExecutor {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     log_manager: Arc<LogManager>,
     db_file: String,
@@ -124,7 +127,7 @@ impl TestContext {
             10,
         ));
         let log_manager = Arc::new(LogManager::new(file_disk_manager));
-        let catalog = Catalog::new(
+        let catalog = Arc::new(RwLock::new(Catalog::new(
             bpm.clone(),
             log_manager,
             0,
@@ -133,10 +136,10 @@ impl TestContext {
             Default::default(),
             Default::default(),
             Default::default(),
-        );
+        )));
 
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(TransactionManager::new(Arc::from(catalog)));
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
         let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 
@@ -238,7 +241,7 @@ mod unit_tests {
         let context = ExecutorContext::new(
             txn,
             transaction_manager,
-            Arc::new(catalog),
+            Arc::new(RwLock::new(catalog)),
             Arc::clone(&bpm),
             lock_manager,
         );
