@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
 
-use crate::common::config::{TimeStampOidT, TxnId, INVALID_TS, INVALID_TXN_ID};
+use crate::common::config::{TimeStampOidT, Timestamp, TxnId, INVALID_TS, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
@@ -61,9 +61,8 @@ pub struct Transaction {
     isolation_level: IsolationLevel,
     thread_id: thread::ThreadId,
     state: Mutex<TransactionState>,
-    read_ts: Mutex<TimeStampOidT>,
-    commit_ts: Mutex<TimeStampOidT>,
-    latch: Mutex<()>,
+    read_ts: Mutex<Timestamp>,
+    commit_ts: Mutex<Timestamp>,
     undo_logs: Mutex<Vec<UndoLog>>,
     write_set: Mutex<HashMap<u32, HashSet<RID>>>,
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
@@ -86,7 +85,6 @@ impl Transaction {
             state: Mutex::new(TransactionState::Running),
             read_ts: Mutex::new(0),
             commit_ts: Mutex::new(INVALID_TS),
-            latch: Mutex::new(()),
             undo_logs: Mutex::new(Vec::new()),
             write_set: Mutex::new(HashMap::new()),
             scan_predicates: Mutex::new(HashMap::new()),
@@ -120,8 +118,12 @@ impl Transaction {
     }
 
     /// Returns the transaction state.
-    pub fn state(&self) -> TransactionState {
+    pub fn get_state(&self) -> TransactionState {
         *self.state.lock().unwrap()
+    }
+
+    pub fn set_state(&self, state: TransactionState) {
+        *self.state.lock().unwrap() = state;
     }
 
     /// Returns the read timestamp.
