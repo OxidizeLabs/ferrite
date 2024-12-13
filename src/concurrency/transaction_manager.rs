@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-use crate::common::config::TxnId;
+use crate::common::config::TransactionId;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
@@ -10,31 +9,10 @@ use crate::concurrency::transaction::{
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use parking_lot::{Mutex, RwLock};
-
-type TransactionId = u64;
-
-#[derive(Default)]
-pub struct RunningTransactions {
-    // Placeholder for running transactions management
-}
-
-impl RunningTransactions {
-    pub fn add_txn(&self, _read_ts: u64) {
-        unimplemented!()
-    }
-
-    pub fn update_commit_ts(&self, _commit_ts: u64) {
-        unimplemented!()
-    }
-
-    pub fn remove_txn(&self, _read_ts: u64) {
-        unimplemented!()
-    }
-}
+use crate::catalogue::catalogue::Catalog;
+use crate::concurrency::watermark::Watermark;
 
 pub struct PageVersionInfo {
-    // Protects the map
-    mutex: RwLock<()>,
     // Stores previous version info for all slots
     prev_link: HashMap<usize, UndoLink>,
 }
@@ -42,22 +20,20 @@ pub struct PageVersionInfo {
 pub struct TransactionManager {
     next_txn_id: AtomicU64,
     txn_map: RwLock<HashMap<TransactionId, Arc<Mutex<Transaction>>>>,
-    running_txns: RunningTransactions,
-    commit_mutex: Mutex<()>,
+    running_txns: Watermark,
     last_commit_ts: AtomicU64,
-    // catalog: Arc<Catalog>,
+    catalog: Arc<Catalog>,
     version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
 }
 
 impl TransactionManager {
-    pub fn new() -> Self {
+    pub fn new(catalog: Arc<Catalog>) -> Self {
         TransactionManager {
             next_txn_id: AtomicU64::new(0),
             txn_map: RwLock::new(HashMap::new()),
-            running_txns: RunningTransactions::default(),
-            commit_mutex: Mutex::new(()),
+            running_txns: Watermark::default(),
             last_commit_ts: AtomicU64::new(0),
-            // catalog,
+            catalog,
             version_info: RwLock::new(HashMap::new()),
         }
     }
@@ -69,23 +45,21 @@ impl TransactionManager {
     ///
     /// # Returns
     /// A reference to the new transaction.
-    pub fn begin(&self, isolation_level: IsolationLevel) -> Arc<Mutex<Transaction>> {
+    pub fn begin(&mut self, isolation_level: IsolationLevel) -> Arc<Mutex<Transaction>> {
         let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
 
         let txn = Arc::new(Mutex::new(Transaction::new(
-            txn_id as TxnId,
+            txn_id,
             isolation_level,
         )));
         self.txn_map.write().insert(txn_id, txn.clone());
 
-        // TODO: set the timestamps here. Watermark updated below.
-        // running_txns_.AddTxn(txn_ref->read_ts_);
+        {
+            let txn_guard = txn.lock();
+            self.running_txns.add_txn(txn_guard.read_ts());
+        }
 
         txn
-    }
-
-    fn verify_txn(&self, _txn: &Transaction) -> bool {
-        true
     }
 
     /// Commits the specified transaction.
@@ -95,36 +69,27 @@ impl TransactionManager {
     ///
     /// # Returns
     /// `true` if the transaction was successfully committed; otherwise, `false`.
-    pub fn commit(&self, _txn: Arc<Mutex<Transaction>>) -> bool {
-        let commit_lck = self.commit_mutex.lock();
-
-        // TODO: acquire commit ts!
-
-        let binding = _txn.clone();
-        let mut txn = binding.lock();
-        if txn.state() != TransactionState::Running {
-            drop(commit_lck);
+    pub fn commit(&mut self, txn: Arc<Mutex<Transaction>>) -> bool {
+        let binding = txn.clone();
+        let txn_guard = binding.lock();
+        if txn_guard.get_state() != TransactionState::Running {
             panic!("txn not in running state");
         }
 
-        if txn.isolation_level() == IsolationLevel::Serializable {
-            if !self.verify_txn(&txn) {
-                drop(commit_lck);
-                self.abort(_txn);
+        if txn_guard.isolation_level() == IsolationLevel::Serializable {
+            if !self.verify_txn(&txn_guard) {
+                self.abort(txn);
                 return false;
             }
         }
 
-        // TODO: Implement the commit logic!
-
         {
             let mut txn_map = self.txn_map.write();
 
-            // TODO: set commit timestamp + update last committed timestamp here.
-
-            // txn.state = TransactionState::Committed;
-            // running_txns_.UpdateCommitTs(txn->commit_ts_);
-            // running_txns_.RemoveTxn(txn->read_ts_);
+            txn_map.insert(txn_guard.txn_id(), txn.clone());
+            txn_guard.set_state(TransactionState::Committed);
+            self.running_txns.update_commit_ts(txn_guard.read_ts());
+            self.running_txns.remove_txn(txn_guard.read_ts());
         }
 
         true
@@ -134,18 +99,17 @@ impl TransactionManager {
     ///
     /// # Parameters
     /// - `txn`: The transaction to abort.
-    pub fn abort(&self, txn: Arc<Mutex<Transaction>>) {
-        let mut txn = txn.lock();
-        if txn.state() != TransactionState::Running && txn.state() != TransactionState::Tainted {
+    pub fn abort(&mut self, txn: Arc<Mutex<Transaction>>) {
+        let txn_guard = txn.lock();
+        if txn_guard.get_state() != TransactionState::Running && txn_guard.get_state() != TransactionState::Tainted {
             panic!("txn not in running / tainted state");
         }
 
-        // TODO: Implement the abort logic!
-
         {
             let mut txn_map = self.txn_map.write();
-            // txn.state = TransactionState::Aborted;
-            // running_txns_.RemoveTxn(txn->read_ts_);
+            txn_map.insert(txn_guard.txn_id(),txn.clone());
+            txn_guard.set_state(TransactionState::Aborted);
+            self.running_txns.remove_txn(txn_guard.read_ts());
         }
     }
 
@@ -210,7 +174,11 @@ impl TransactionManager {
     /// # Returns
     /// The watermark.
     pub fn get_watermark(&self) -> u64 {
-        unimplemented!()
+        self.running_txns.get_watermark()
+    }
+
+    fn verify_txn(&self, txn: &Transaction) -> bool {
+        txn.get_state() == TransactionState::Committed
     }
 }
 
