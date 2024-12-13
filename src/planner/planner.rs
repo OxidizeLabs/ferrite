@@ -6,9 +6,14 @@ use crate::execution::expressions::constant_value_expression::ConstantExpression
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
+
+use crate::execution::plans::create_plan::CreateTablePlanNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use sqlparser::ast::{Query, Select, SetExpr, Statement, TableFactor, TableWithJoins};
+use sqlparser::ast::{
+    ColumnDef, CreateTable, DataType, Query, Select, SetExpr, Statement, TableFactor,
+    TableWithJoins,
+};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
@@ -33,9 +38,22 @@ impl QueryPlanner {
         }
 
         match &ast[0] {
+            Statement::CreateTable(create_table) => self.plan_create_table(create_table),
             Statement::Query(query) => self.plan_query(query),
             _ => Err("Only SELECT statements are supported".to_string()),
         }
+    }
+
+    fn plan_create_table(&self, create_table: &CreateTable) -> Result<PlanNode, String> {
+        let table_name = create_table.name.to_string();
+        let columns = self.convert_column_defs(&create_table.columns)?;
+        let schema = Schema::new(columns);
+
+        Ok(PlanNode::CreateTable(CreateTablePlanNode::new(
+            schema,
+            table_name,
+            create_table.if_not_exists,
+        )))
     }
 
     fn plan_query(&self, query: &Query) -> Result<PlanNode, String> {
@@ -132,11 +150,89 @@ impl QueryPlanner {
             _ => Err("Unsupported expression type".to_string()),
         }
     }
+
+    fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
+        let mut columns = Vec::new();
+
+        for col_def in column_defs {
+            let column_name = col_def.name.to_string();
+            let type_id = self.convert_sql_type(&col_def.data_type)?;
+
+            // Handle VARCHAR/STRING types specifically with length
+            let column = match &col_def.data_type {
+                DataType::Varchar(_) | DataType::String(_) => {
+                    // Default length for variable length types
+                    Column::new_varlen(&column_name, type_id, 255)
+                }
+                _ => Column::new(&column_name, type_id),
+            };
+
+            columns.push(column);
+        }
+
+        Ok(columns)
+    }
+
+    fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
+        match sql_type {
+            DataType::Boolean => Ok(TypeId::Boolean),
+            DataType::TinyInt(_) => Ok(TypeId::TinyInt),
+            DataType::SmallInt(_) => Ok(TypeId::SmallInt),
+            DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
+            DataType::BigInt(_) => Ok(TypeId::BigInt),
+            DataType::Decimal(_) => Ok(TypeId::Decimal),
+            DataType::Varchar(_) | DataType::String(_) => Ok(TypeId::VarChar),
+            _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_create_table_plan() {
+        let planner = QueryPlanner::new();
+        let sql = "CREATE TABLE users (id INT, name VARCHAR(255), age INT)";
+        let plan = planner.create_plan(sql).unwrap();
+
+        match plan {
+            PlanNode::CreateTable(create_table) => {
+                assert_eq!(create_table.get_table_name(), "users");
+                assert_eq!(create_table.if_not_exists(), false);
+
+                let schema = create_table.get_output_schema();
+                assert_eq!(schema.get_column_count(), 3);
+
+                let columns = schema.get_columns();
+                assert_eq!(columns[0].get_name(), "id");
+                assert_eq!(columns[0].get_type(), TypeId::Integer);
+
+                assert_eq!(columns[1].get_name(), "name");
+                assert_eq!(columns[1].get_type(), TypeId::VarChar);
+
+                assert_eq!(columns[2].get_name(), "age");
+                assert_eq!(columns[2].get_type(), TypeId::Integer);
+            }
+            _ => panic!("Expected CreateTable plan node"),
+        }
+    }
+
+    #[test]
+    fn test_create_table_if_not_exists() {
+        let planner = QueryPlanner::new();
+        let sql = "CREATE TABLE IF NOT EXISTS users (id INT)";
+        let plan = planner.create_plan(sql).unwrap();
+
+        match plan {
+            PlanNode::CreateTable(create_table) => {
+                assert_eq!(create_table.get_table_name(), "users");
+                assert_eq!(create_table.if_not_exists(), true);
+            }
+            _ => panic!("Expected CreateTable plan node"),
+        }
+    }
 
     #[test]
     fn test_simple_select() {

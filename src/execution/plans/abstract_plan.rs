@@ -1,5 +1,6 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
+use crate::execution::plans::create_plan::CreateTablePlanNode;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::plans::hash_join_plan::HashJoinNode;
@@ -41,6 +42,7 @@ pub enum PlanType {
     MockScan,
     // InitCheck,
     Window,
+    CreateTable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +65,7 @@ pub enum PlanNode {
     TopNPerGroup(TopNPerGroupNode),
     MockScan(MockScanNode),
     Window(WindowNode),
+    CreateTable(CreateTablePlanNode),
 }
 
 pub trait AbstractPlanNode {
@@ -134,6 +137,7 @@ impl PlanNode {
             PlanNode::TopNPerGroup(node) => node,
             PlanNode::MockScan(node) => node,
             PlanNode::Window(node) => node,
+            PlanNode::CreateTable(node) => node,
         }
     }
 }

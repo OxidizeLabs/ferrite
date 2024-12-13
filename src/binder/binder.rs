@@ -26,7 +26,7 @@ use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::types_db::value::Value as DbValue;
 use chrono::Utc;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::{
     ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr,
@@ -673,7 +673,7 @@ impl<'a> Drop for ContextGuard<'a> {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     log_manager: Arc<LogManager>,
     db_file: String,
@@ -704,7 +704,7 @@ impl TestContext {
             replacer.clone(),
         ));
         let log_manager = Arc::new(LogManager::new(disk_manager.clone()));
-        let catalog = Catalog::new(
+        let catalog = RwLock::new(Catalog::new(
             bpm.clone(),
             log_manager,
             0,
@@ -713,10 +713,10 @@ impl TestContext {
             Default::default(),
             Default::default(),
             Default::default(),
-        );
+        ));
 
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(TransactionManager::new(Arc::from(catalog)));
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(Arc::from(catalog))));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
         let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 

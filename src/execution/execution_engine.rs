@@ -5,25 +5,27 @@ use crate::common::exception::DBError;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_exector::AbstractExecutor;
-use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 // use crate::execution::executors::insert_executor::InsertExecutor;
 // use crate::execution::executors::delete_executor::DeleteExecutor;
 // use crate::execution::executors::nested_loop_join_executor::NestedLoopJoinExecutor;
 // use crate::execution::executors::aggregation_executor::AggregationExecutor;
+use crate::execution::executors::create_table_executor::CreateTableExecutor;
+use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
+use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
 use crate::planner::planner::QueryPlanner;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct ExecutorEngine {
     buffer_pool_manager: Arc<BufferPoolManager>,
-    catalog: Arc<Catalog>,
+    catalog: Arc<RwLock<Catalog>>,
     planner: QueryPlanner,
     optimizer: Optimizer,
 }
 
 impl ExecutorEngine {
-    pub fn new(buffer_pool_manager: Arc<BufferPoolManager>, catalog: Arc<Catalog>) -> Self {
+    pub fn new(buffer_pool_manager: Arc<BufferPoolManager>, catalog: Arc<RwLock<Catalog>>) -> Self {
         Self {
             buffer_pool_manager,
             catalog: catalog.clone(),
@@ -56,7 +58,7 @@ impl ExecutorEngine {
     pub fn execute_statement(
         &self,
         plan: &PlanNode,
-        mut context: ExecutorContext,
+        context: ExecutorContext,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
         // Create root executor
@@ -111,6 +113,11 @@ impl ExecutorEngine {
             _ => Err(DBError::NotImplemented(format!(
                 "Executor type {:?} not implemented",
                 plan.get_type()
+            ))),
+            PlanNode::CreateTable(create_table_plan) => Ok(Box::new(CreateTableExecutor::new(
+                Arc::new(context),
+                create_table_plan.clone(),
+                false,
             ))),
 
             // PlanType::Insert => {

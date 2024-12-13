@@ -15,6 +15,7 @@ use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_manager_memory::DiskManagerMemory;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use parking_lot::{Mutex, RwLock};
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -48,10 +49,10 @@ pub struct DBInstance {
     disk_manager: Arc<FileDiskManager>,
     buffer_pool_manager: Option<Arc<BufferPoolManager>>,
     log_manager: Option<Arc<LogManager>>,
-    transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Option<Arc<LockManager>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
-    catalog: Arc<Catalog>,
+    catalog: Arc<RwLock<Catalog>>,
     execution_engine: Arc<ExecutorEngine>,
     config: DBConfig,
     current_txn: Option<Arc<Mutex<Transaction>>>,
@@ -76,9 +77,10 @@ impl DBInstance {
     pub fn new(config: DBConfig) -> Result<Self, DBError> {
         let disk_manager = Self::create_disk_manager(&config)?;
         let log_manager = Self::create_log_manager(&disk_manager)?;
+
         let buffer_pool_manager = Self::create_buffer_pool_manager(&config, &disk_manager)?;
 
-        let catalog = Arc::new(Catalog::new(
+        let catalog = Arc::new(RwLock::new(Catalog::new(
             buffer_pool_manager
                 .as_ref()
                 .map(Arc::clone)
@@ -90,9 +92,10 @@ impl DBInstance {
             Default::default(),
             Default::default(),
             Default::default(),
-        ));
+        )));
 
-        let transaction_manager = Arc::new(TransactionManager::new(catalog.clone()));
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
+        let lock_manager = Self::create_lock_manager(&transaction_manager)?;
 
         let execution_engine = Arc::new(ExecutorEngine::new(
             buffer_pool_manager.clone().unwrap(),
@@ -104,7 +107,7 @@ impl DBInstance {
             buffer_pool_manager,
             log_manager,
             transaction_manager,
-            lock_manager: None,
+            lock_manager,
             checkpoint_manager: None,
             catalog,
             execution_engine,
@@ -124,12 +127,10 @@ impl DBInstance {
             .as_ref()
             .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
 
-        let catalogue = self.catalog.clone();
-
         Ok(ExecutorContext::new(
             txn,
             self.transaction_manager.clone(),
-            catalogue,
+            self.catalog.clone(),
             Arc::clone(buffer_pool),
             Arc::clone(lock_manager),
         ))
@@ -167,10 +168,8 @@ impl DBInstance {
             executor_context.set_check_options(opts);
             executor_context.init_check_options();
         }
-
-        drop(txn_guard);
-
         let check_options = executor_context.get_check_options();
+
         // Parse and execute the SQL statement
         let plan = match self.execution_engine.prepare_statement(sql, check_options) {
             Ok(p) => p,
@@ -219,14 +218,9 @@ impl DBInstance {
         let txn = match is_local_txn {
             true => Arc::clone(self.current_txn.as_ref().unwrap()),
             false => {
-                // Get mutable reference to transaction manager for begin
-                let transaction_manager =
-                    Arc::get_mut(&mut self.transaction_manager).ok_or_else(|| {
-                        DBError::Transaction(
-                            "Failed to get mutable reference to transaction manager".to_string(),
-                        )
-                    })?;
-                transaction_manager.begin(IsolationLevel::ReadUncommitted)
+                // Get mutable access to transaction manager through Mutex
+                let mut txn_manager = self.transaction_manager.lock();
+                txn_manager.begin(IsolationLevel::ReadUncommitted)
             }
         };
 
@@ -235,15 +229,8 @@ impl DBInstance {
         match result {
             Ok(success) => {
                 if !is_local_txn {
-                    // Get mutable reference for commit
-                    let transaction_manager = Arc::get_mut(&mut self.transaction_manager)
-                        .ok_or_else(|| {
-                            DBError::Transaction(
-                                "Failed to get mutable reference to transaction manager"
-                                    .to_string(),
-                            )
-                        })?;
-                    if !transaction_manager.commit(txn) {
+                    let mut txn_manager = self.transaction_manager.lock();
+                    if !txn_manager.commit(txn) {
                         return Err(DBError::Transaction(
                             "Failed to commit transaction".to_string(),
                         ));
@@ -252,19 +239,16 @@ impl DBInstance {
                 Ok(success)
             }
             Err(e) => {
-                // Get mutable reference for abort
-                if let Some(transaction_manager) = Arc::get_mut(&mut self.transaction_manager) {
-                    transaction_manager.abort(txn);
-                }
+                let mut txn_manager = self.transaction_manager.lock();
+                txn_manager.abort(txn);
                 self.current_txn = None;
                 Err(e)
             }
         }
     }
 
-    // Command handlers
     pub fn handle_cmd_display_tables(&self, writer: &mut impl ResultWriter) -> Result<(), DBError> {
-        let catalog = self.catalog.clone();
+        let catalog = self.catalog.read();
         let table_names = catalog.get_table_names();
 
         writer.begin_table(false);
@@ -285,6 +269,22 @@ impl DBInstance {
         }
         writer.end_table();
         Ok(())
+    }
+
+    pub fn get_config(&self) -> &DBConfig {
+        &self.config
+    }
+
+    pub fn get_buffer_pool_manager(&self) -> Option<&Arc<BufferPoolManager>> {
+        self.buffer_pool_manager.as_ref()
+    }
+
+    pub fn get_log_manager(&self) -> Option<&Arc<LogManager>> {
+        self.log_manager.as_ref()
+    }
+
+    pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
+        self.checkpoint_manager.as_ref()
     }
 
     // Private helper methods
@@ -324,7 +324,7 @@ impl DBInstance {
     }
 
     fn create_lock_manager(
-        transaction_manager: &Arc<TransactionManager>,
+        transaction_manager: &Arc<Mutex<TransactionManager>>,
     ) -> Result<Option<Arc<LockManager>>, DBError> {
         Ok(if cfg!(not(feature = "disable-lock-manager")) {
             let lock_manager = Arc::new(LockManager::new(Arc::clone(transaction_manager)));

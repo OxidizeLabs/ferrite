@@ -5,14 +5,15 @@ use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::check_option::{CheckOption, CheckOptions};
 use crate::execution::executors::abstract_exector::AbstractExecutor;
+use parking_lot::{Mutex, RwLock};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub struct ExecutorContext {
     transaction: Transaction,
-    catalog: Arc<Catalog>,
+    catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
-    transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     nlj_check_exec_set: VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)>,
     check_options: Arc<CheckOptions>,
@@ -22,8 +23,8 @@ pub struct ExecutorContext {
 impl ExecutorContext {
     pub fn new(
         transaction: Transaction,
-        transaction_manager: Arc<TransactionManager>,
-        catalog: Arc<Catalog>,
+        transaction_manager: Arc<Mutex<TransactionManager>>,
+        catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         lock_manager: Arc<LockManager>,
     ) -> Self {
@@ -43,7 +44,7 @@ impl ExecutorContext {
         &self.transaction
     }
 
-    pub fn get_catalog(&self) -> &Catalog {
+    pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
         &self.catalog
     }
 
@@ -51,7 +52,7 @@ impl ExecutorContext {
         &self.buffer_pool_manager
     }
 
-    pub fn get_transaction_manager(&self) -> &TransactionManager {
+    pub fn get_transaction_manager(&self) -> &Arc<Mutex<TransactionManager>> {
         &self.transaction_manager
     }
 

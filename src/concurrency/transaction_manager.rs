@@ -22,12 +22,12 @@ pub struct TransactionManager {
     txn_map: RwLock<HashMap<TransactionId, Arc<Mutex<Transaction>>>>,
     running_txns: Watermark,
     last_commit_ts: AtomicU64,
-    catalog: Arc<Catalog>,
+    catalog: Arc<RwLock<Catalog>>,
     version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
 }
 
 impl TransactionManager {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         TransactionManager {
             next_txn_id: AtomicU64::new(0),
             txn_map: RwLock::new(HashMap::new()),
