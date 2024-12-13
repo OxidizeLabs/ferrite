@@ -18,6 +18,8 @@ use parking_lot::{Mutex, RwLock};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use colored::Colorize;
+use log::{debug, info, warn};
 
 /// Trait for writing query results in a tabular format
 pub trait ResultWriter {
@@ -143,17 +145,22 @@ impl DBInstance {
         txn: Arc<Mutex<Transaction>>,
         check_options: Option<CheckOptions>,
     ) -> Result<bool, DBError> {
-        // Ensure required components are available
+        debug!("Starting SQL transaction execution");
+        debug!("Transaction ID: {}", txn.lock().txn_id());
+
+        // Verify components
         let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
+            warn!("Buffer pool manager not available");
             DBError::NotImplemented("Buffer pool manager not available".to_string())
         })?;
 
-        let lock_manager = self
-            .lock_manager
-            .as_ref()
-            .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
+        let lock_manager = self.lock_manager.as_ref().ok_or_else(|| {
+            warn!("Lock manager not available");
+            DBError::NotImplemented("Lock manager not available".to_string())
+        })?;
 
         // Create execution context
+        debug!("Creating executor context");
         let txn_guard = txn.lock();
         let mut executor_context = ExecutorContext::new(
             Transaction::new(txn_guard.txn_id(), txn_guard.isolation_level()),
@@ -162,50 +169,62 @@ impl DBInstance {
             buffer_pool.clone(),
             lock_manager.clone(),
         );
+        drop(txn_guard);
 
-        // Set and initialize check options if provided
+        // Set up check options
         if let Some(opts) = check_options {
+            debug!("Initializing check options");
             executor_context.set_check_options(opts);
             executor_context.init_check_options();
         }
-        let check_options = executor_context.get_check_options();
 
-        // Parse and execute the SQL statement
-        let plan = match self.execution_engine.prepare_statement(sql, check_options) {
-            Ok(p) => p,
+        // Prepare and execute
+        debug!("Preparing statement");
+        let plan = match self.execution_engine.prepare_statement(sql, executor_context.get_check_options()) {
+            Ok(p) => {
+                debug!("Statement prepared successfully");
+                p
+            }
             Err(e) => {
+                warn!("Statement preparation failed: {:?}", e);
                 txn.lock().set_tainted();
                 return Err(e);
             }
         };
 
-        // Execute the plan
-        let result = self
-            .execution_engine
-            .execute_statement(&plan, executor_context, writer);
+        debug!("Executing prepared plan");
+        let result = self.execution_engine.execute_statement(&plan, executor_context, writer);
 
-        // Handle execution result
-        match result {
+        match &result {
             Ok(has_results) => {
+                debug!("Plan execution completed, checking transaction state");
                 let txn_guard = txn.lock();
                 match txn_guard.get_state() {
-                    TransactionState::Running => Ok(has_results),
-                    TransactionState::Tainted => {
-                        Err(DBError::Transaction("Transaction is tainted".to_string()))
+                    TransactionState::Running => {
+                        info!("Execution completed successfully. Results: {}", has_results);
                     }
-                    TransactionState::Aborted => {
-                        Err(DBError::Transaction("Transaction was aborted".to_string()))
+                    state => {
+                        warn!("Invalid transaction state after execution: {:?}", state);
+                        return Err(match state {
+                            TransactionState::Tainted =>
+                                DBError::Transaction("Transaction is tainted".to_string()),
+                            TransactionState::Aborted =>
+                                DBError::Transaction("Transaction was aborted".to_string()),
+                            TransactionState::Committed =>
+                                DBError::Transaction("Transaction already committed".to_string()),
+                            _ => unreachable!(),
+                        });
                     }
-                    TransactionState::Committed => Err(DBError::Transaction(
-                        "Transaction already committed".to_string(),
-                    )),
                 }
             }
             Err(e) => {
+                warn!("Plan execution failed: {:?}", e);
                 txn.lock().set_tainted();
-                Err(e)
             }
         }
+
+        info!("SQL transaction execution completed");
+        result
     }
 
     pub fn execute_sql(
@@ -214,37 +233,52 @@ impl DBInstance {
         writer: &mut impl ResultWriter,
         check_options: Option<CheckOptions>,
     ) -> Result<bool, DBError> {
+        info!("Starting SQL execution: {}", sql);
+
         let is_local_txn = self.current_txn.is_some();
+        debug!("Transaction status: {}", if is_local_txn { "using existing" } else { "creating new" });
+
         let txn = match is_local_txn {
-            true => Arc::clone(self.current_txn.as_ref().unwrap()),
+            true => {
+                debug!("Using existing transaction");
+                Arc::clone(self.current_txn.as_ref().unwrap())
+            }
             false => {
-                // Get mutable access to transaction manager through Mutex
+                debug!("Starting new transaction");
                 let mut txn_manager = self.transaction_manager.lock();
-                txn_manager.begin(IsolationLevel::ReadUncommitted)
+                let txn = txn_manager.begin(IsolationLevel::ReadUncommitted);
+                debug!("New transaction created with ID: {}", txn.lock().txn_id());
+                txn
             }
         };
 
+        debug!("Executing SQL in transaction context");
         let result = self.execute_sql_txn(sql, writer, txn.clone(), check_options);
 
-        match result {
+        match &result {
             Ok(success) => {
                 if !is_local_txn {
+                    debug!("Committing transaction");
                     let mut txn_manager = self.transaction_manager.lock();
                     if !txn_manager.commit(txn) {
-                        return Err(DBError::Transaction(
-                            "Failed to commit transaction".to_string(),
-                        ));
+                        warn!("Transaction commit failed");
+                        return Err(DBError::Transaction("Failed to commit transaction".to_string()));
                     }
+                    info!("Transaction committed successfully");
                 }
-                Ok(success)
+                info!("SQL execution completed successfully");
             }
             Err(e) => {
+                warn!("SQL execution failed: {:?}", e);
                 let mut txn_manager = self.transaction_manager.lock();
                 txn_manager.abort(txn);
                 self.current_txn = None;
-                Err(e)
+                info!("Transaction aborted due to error");
             }
         }
+
+        info!("SQL execution finished");
+        result
     }
 
     pub fn handle_cmd_display_tables(&self, writer: &mut impl ResultWriter) -> Result<(), DBError> {
@@ -285,6 +319,10 @@ impl DBInstance {
 
     pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
         self.checkpoint_manager.as_ref()
+    }
+
+    pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
+        &self.catalog
     }
 
     // Private helper methods

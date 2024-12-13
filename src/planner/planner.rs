@@ -1,3 +1,4 @@
+use std::env;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
@@ -17,36 +18,84 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
+use log::{debug, info};
 
 pub struct QueryPlanner {
-    // Add fields for catalog/metadata management
+    log_detailed: bool,
 }
 
 impl QueryPlanner {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            log_detailed: env::var("RUST_TEST").is_ok(),
+        }
+    }
+
+    pub fn with_detailed_logging(detailed: bool) -> Self {
+        Self {
+            log_detailed: detailed || env::var("RUST_TEST").is_ok(),
+        }
+    }
+
+    pub fn set_detailed_logging(&mut self, detailed: bool) {
+        self.log_detailed = detailed || env::var("RUST_TEST").is_ok();
     }
 
     pub fn create_plan(&self, sql: &str) -> Result<PlanNode, String> {
-        // Parse SQL using sqlparser
+        info!("Planning query: {}", sql);
+
         let dialect = GenericDialect {};
-        let ast =
-            Parser::parse_sql(&dialect, sql).map_err(|e| format!("Failed to parse SQL: {}", e))?;
+        let ast = match Parser::parse_sql(&dialect, sql) {
+            Ok(ast) => ast,
+            Err(e) => {
+                info!("Failed to parse SQL: {}", e);
+                return Err(format!("Failed to parse SQL: {}", e));
+            }
+        };
 
         if ast.len() != 1 {
+            info!("Error: Expected exactly one statement");
             return Err("Expected exactly one statement".to_string());
         }
 
+        if self.log_detailed {
+            debug!("Parsed AST: {:?}", ast[0]);
+        }
+
         match &ast[0] {
-            Statement::CreateTable(create_table) => self.plan_create_table(create_table),
-            Statement::Query(query) => self.plan_query(query),
-            _ => Err("Only SELECT statements are supported".to_string()),
+            Statement::CreateTable(create_table) => {
+                debug!("Planning CREATE TABLE statement");
+                self.plan_create_table(create_table)
+            }
+            Statement::Query(query) => {
+                debug!("Planning SELECT query");
+                self.plan_query(query)
+            }
+            _ => {
+                info!("Error: Unsupported statement type");
+                Err("Only SELECT statements are supported".to_string())
+            }
         }
     }
 
     fn plan_create_table(&self, create_table: &CreateTable) -> Result<PlanNode, String> {
+        if self.log_detailed {
+            debug!("Creating plan for table: {}", create_table.name);
+        }
+
         let table_name = create_table.name.to_string();
-        let columns = self.convert_column_defs(&create_table.columns)?;
+        let columns = match self.convert_column_defs(&create_table.columns) {
+            Ok(cols) => cols,
+            Err(e) => {
+                info!("Failed to convert column definitions: {}", e);
+                return Err(e);
+            }
+        };
+
+        if self.log_detailed {
+            debug!("Created {} columns", columns.len());
+        }
+
         let schema = Schema::new(columns);
 
         Ok(PlanNode::CreateTable(CreateTablePlanNode::new(
@@ -189,7 +238,48 @@ impl QueryPlanner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::env;
+    use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+    use crate::planner::planner::QueryPlanner;
+    use crate::types_db::type_id::TypeId;
+
+    #[test]
+    fn test_query_planner_logging() {
+            env::set_var("RUST_TEST", "1");
+
+            let planner = QueryPlanner::with_detailed_logging(true);
+
+            // Test CREATE TABLE logging
+            let create_sql = "CREATE TABLE users (id INT, name VARCHAR(255))";
+            let result = planner.create_plan(create_sql);
+            assert!(result.is_ok());
+
+            // Test SELECT logging
+            let select_sql = "SELECT * FROM users WHERE id > 10";
+            let result = planner.create_plan(select_sql);
+            assert!(result.is_ok());
+
+            // Test error logging
+            let invalid_sql = "INVALID SQL";
+            let result = planner.create_plan(invalid_sql);
+            assert!(result.is_err());
+        }
+
+    #[test]
+    fn test_log_level_changes() {
+            env::set_var("RUST_TEST", "1");
+
+            let mut planner = QueryPlanner::new();
+
+            // Test with basic logging
+            let sql = "SELECT * FROM users";
+            let _ = planner.create_plan(sql);
+
+            // Change to detailed logging
+            planner.set_detailed_logging(true);
+            let _ = planner.create_plan(sql);
+        }
+
 
     #[test]
     fn test_create_table_plan() {
