@@ -69,6 +69,9 @@ pub enum PageError {
     TupleInvalid,
 }
 
+#[derive(Debug)]
+pub struct PageGuardError;
+
 #[derive(Error, Debug)]
 pub enum ExpressionError {
     #[error("Invalid type for StringExpression: expected VARCHAR")]
@@ -99,8 +102,35 @@ pub enum ArithmeticExpressionError {
     DivisionByZero,
 }
 
-#[derive(Debug)]
-pub struct PageGuardError;
+#[derive(Debug, Error)]
+pub enum DBError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Lock acquisition failed")]
+    LockError,
+
+    #[error("Transaction error: {0}")]
+    Transaction(String),
+
+    #[error("Operation not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("Catalog error: {0}")]
+    Catalog(String),
+
+    #[error("Execution error: {0}")]
+    Execution(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
+
+    #[error("Table not found: {0}")]
+    TableNotFound(String),
+
+    #[error("Plan error: {0}")]
+    PlanError(String),
+}
 
 impl Error for PageError {}
 

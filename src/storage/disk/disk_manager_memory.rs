@@ -82,7 +82,7 @@ impl DiskManagerUnlimitedMemory {
         Self {
             data: RwLock::new(HashMap::new()),
             latency_simulator_enabled: AtomicBool::new(false),
-            recent_access: Mutex::new(vec![u32::MAX; 4]),
+            recent_access: Mutex::new(vec![u64::MAX; 4]),
             access_ptr: AtomicUsize::new(0),
             thread_id: Mutex::new(None),
         }
