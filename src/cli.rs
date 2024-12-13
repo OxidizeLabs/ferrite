@@ -199,7 +199,6 @@ impl DBCommandExecutor {
     }
 }
 
-
 pub fn run_cli() -> Result<(), Box<dyn Error>> {
     initialize_logger();
     let args = Args::parse();

@@ -66,7 +66,7 @@ pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
     // lock_manager: Arc<LockManager>,
     log_manager: Arc<LogManager>,
-    tables: HashMap<TableOidT, Box<TableInfo>>,
+    tables: HashMap<TableOidT, TableInfo>,
     table_names: HashMap<String, TableOidT>,
     next_table_oid: TableOidT,
     indexes: HashMap<IndexOidT, Box<IndexInfo>>,
@@ -156,7 +156,7 @@ impl Catalog {
         log_manager: Arc<LogManager>,
         next_index_oid: IndexOidT,
         next_table_oid: TableOidT,
-        tables: HashMap<TableOidT, Box<TableInfo>>,
+        tables: HashMap<TableOidT, TableInfo>,
         indexes: HashMap<IndexOidT, Box<IndexInfo>>,
         table_names: HashMap<String, TableOidT>,
         index_names: HashMap<String, HashMap<String, IndexOidT>>,
@@ -203,19 +203,19 @@ impl Catalog {
         let table_oid = self.next_table_oid.add(1);
 
         // Create table info
-        let table_info = Box::new(TableInfo::new(
+        let table_info = TableInfo::new(
             schema,
             table_name.to_string(),
             table,
             table_oid,
-        ));
+        );
 
         // Add to catalog maps
         self.table_names.insert(table_name.to_string(), table_oid);
         self.tables.insert(table_oid, table_info);
 
         // Return reference to the newly created table info
-        self.tables.get(&table_oid).map(|t| &**t)
+        self.tables.get(&table_oid)
     }
 
     /// Queries table metadata by name.
@@ -229,7 +229,6 @@ impl Catalog {
         self.table_names
             .get(table_name)
             .and_then(|&table_oid| self.tables.get(&table_oid))
-            .map(|t| &**t)
     }
 
     /// Queries table metadata by OID.
@@ -240,7 +239,7 @@ impl Catalog {
     /// # Returns
     /// A (non-owning) pointer to the metadata for the table.
     pub fn get_table_by_oid(&self, table_oid: TableOidT) -> Option<&TableInfo> {
-        self.tables.get(&table_oid).map(|t| &**t)
+        self.tables.get(&table_oid)
     }
 
     // /// Creates a new index, populates existing data of the table, and returns its metadata.

@@ -109,7 +109,7 @@ impl ExecutorEngine {
         match plan {
             PlanNode::SeqScan(scan_plan) => {
                 info!("Creating sequential scan executor");
-                Ok(Box::new(SeqScanExecutor::new(context, scan_plan.clone())))
+                Ok(Box::new(SeqScanExecutor::new(context, Arc::new(scan_plan.clone()))))
             }
             PlanNode::CreateTable(create_table_plan) => {
                 info!("Creating table creation executor");

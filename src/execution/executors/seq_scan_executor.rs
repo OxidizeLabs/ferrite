@@ -22,21 +22,21 @@ use std::sync::Arc;
 
 pub struct SeqScanExecutor {
     context: ExecutorContext,
-    plan: SeqScanPlanNode,
+    plan: Arc<SeqScanPlanNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
 }
 
 impl SeqScanExecutor {
-    pub fn new(context: ExecutorContext, plan: SeqScanPlanNode) -> Self {
-        let table_oid = plan.get_table_oid();
+    pub fn new(context: ExecutorContext, plan: Arc<SeqScanPlanNode>) -> Self {
+        let table_name = plan.get_table_name();
         let table_heap = {
             let catalog = context.get_catalog();
             let catalog_guard = catalog.read();
             let table_info = catalog_guard
-                .get_table_by_oid(table_oid)
+                .get_table(table_name)
                 .expect("Table not found");
-            table_info.get_table_heap().clone()
+            table_info.get_table_heap()
         }; // catalog_guard is dropped here
 
         Self {
@@ -235,7 +235,7 @@ mod unit_tests {
         );
 
         // Create the scan plan
-        let plan = SeqScanPlanNode::new(schema.clone(), table_oid, table_name.to_string(), None);
+        let plan = Arc::new(SeqScanPlanNode::new(schema.clone(), table_oid, table_name.to_string(), None));
 
         // Create execution context
         let context = ExecutorContext::new(
