@@ -3,7 +3,6 @@ use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
-use crate::execution::plans::insert_plan::InsertNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNNode {
@@ -25,7 +24,6 @@ impl TopNNode {
         &self.order_bys
     }
 }
-
 
 impl AbstractPlanNode for TopNNode {
     fn get_output_schema(&self) -> &Schema {

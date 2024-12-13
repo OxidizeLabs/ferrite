@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::common::config::Timestamp;
+use std::collections::HashMap;
 
 /// Tracks all read timestamps.
 pub struct Watermark {

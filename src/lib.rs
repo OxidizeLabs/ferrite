@@ -1,6 +1,7 @@
 pub mod binder;
 pub mod buffer;
 pub mod catalogue;
+pub mod cli;
 pub mod common;
 pub mod concurrency;
 pub mod container;
@@ -11,4 +12,3 @@ pub mod primer;
 pub mod recovery;
 pub mod storage;
 pub mod types_db;
-pub mod cli;

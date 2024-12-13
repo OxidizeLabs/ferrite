@@ -33,7 +33,8 @@ impl Optimizer {
             PlanNode::NestedLoopJoin(mut join_node) => {
                 // Optimize the children first
                 let left_child = self.optimize_nested_loop_joins(*join_node.get_left().clone())?;
-                let right_child = self.optimize_nested_loop_joins(*join_node.get_right().clone())?;
+                let right_child =
+                    self.optimize_nested_loop_joins(*join_node.get_right().clone())?;
 
                 // Apply NLJ-specific optimizations:
                 // 1. Try to swap the order if right side is smaller
@@ -45,7 +46,8 @@ impl Optimizer {
             }
             PlanNode::Filter(filter_node) => {
                 // Recursively optimize any nested joins under the filter
-                let new_child = self.optimize_nested_loop_joins(filter_node.get_child_plan().clone())?;
+                let new_child =
+                    self.optimize_nested_loop_joins(filter_node.get_child_plan().clone())?;
                 Ok(PlanNode::Filter(FilterNode::new(
                     filter_node.get_output_schema().clone(),
                     filter_node.get_predicate().clone(),
@@ -96,7 +98,6 @@ impl Optimizer {
         Ok(current_plan)
     }
 
-
     fn push_down_predicates(&self, plan: PlanNode) -> Result<PlanNode, DBError> {
         match plan {
             PlanNode::Filter(filter_node) => {
@@ -145,11 +146,7 @@ impl Optimizer {
         }
     }
 
-    fn validate_plan(
-        &self,
-        plan: &PlanNode,
-        check_options: &CheckOptions,
-    ) -> Result<(), DBError> {
+    fn validate_plan(&self, plan: &PlanNode, check_options: &CheckOptions) -> Result<(), DBError> {
         // Always validate basic plan properties
         self.validate_schema_compatibility(plan)?;
         self.validate_table_references(plan)?;
@@ -184,9 +181,10 @@ impl Optimizer {
             PlanNode::SeqScan(node) => {
                 let table_oid = node.get_table_oid();
                 if self.catalog.get_table_by_oid(table_oid).is_none() {
-                    return Err(DBError::TableNotFound(
-                        format!("Table {} not found", node.get_table_name())
-                    ));
+                    return Err(DBError::TableNotFound(format!(
+                        "Table {} not found",
+                        node.get_table_name()
+                    )));
                 }
             }
             _ => {
@@ -204,7 +202,7 @@ impl Optimizer {
             PlanNode::NestedLoopJoin(node) => {
                 if node.get_children().is_empty() {
                     return Err(DBError::Validation(
-                        "Cartesian products are not allowed".to_string()
+                        "Cartesian products are not allowed".to_string(),
                     ));
                 }
             }
@@ -224,7 +222,7 @@ impl Optimizer {
                 // Validate join conditions
                 if node.get_right().get_children().is_empty() {
                     return Err(DBError::Validation(
-                        "NLJ requires a join predicate when NLJ check is enabled".to_string()
+                        "NLJ requires a join predicate when NLJ check is enabled".to_string(),
                     ));
                 }
 
@@ -248,14 +246,14 @@ impl Optimizer {
                 // Validate TopN properties
                 if node.get_limit() == 0 {
                     return Err(DBError::Validation(
-                        "TopN limit must be greater than 0".to_string()
+                        "TopN limit must be greater than 0".to_string(),
                     ));
                 }
 
                 // Validate sort expressions
                 if node.get_sort_order_by().is_empty() {
                     return Err(DBError::Validation(
-                        "TopN requires at least one sort expression".to_string()
+                        "TopN requires at least one sort expression".to_string(),
                     ));
                 }
 
@@ -272,4 +270,3 @@ impl Optimizer {
         Ok(())
     }
 }
-

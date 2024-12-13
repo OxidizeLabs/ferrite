@@ -76,13 +76,13 @@ impl DBInstance {
     pub fn new(config: DBConfig) -> Result<Self, DBError> {
         let disk_manager = Self::create_disk_manager(&config)?;
         let log_manager = Self::create_log_manager(&disk_manager)?;
-        let buffer_pool_manager = Self::create_buffer_pool_manager(
-            &config,
-            &disk_manager,
-        )?;
+        let buffer_pool_manager = Self::create_buffer_pool_manager(&config, &disk_manager)?;
 
         let catalog = Arc::new(Catalog::new(
-            buffer_pool_manager.as_ref().map(Arc::clone).expect("REASON"),
+            buffer_pool_manager
+                .as_ref()
+                .map(Arc::clone)
+                .expect("REASON"),
             log_manager.clone().unwrap(),
             0,
             0,
@@ -109,17 +109,18 @@ impl DBInstance {
             catalog,
             execution_engine,
             config,
-            current_txn: None
+            current_txn: None,
         })
     }
 
     /// Creates an executor context for query execution
     pub fn make_executor_context(&self, txn: Transaction) -> Result<ExecutorContext, DBError> {
-        let buffer_pool = self.buffer_pool_manager
-            .as_ref()
-            .ok_or_else(|| DBError::NotImplemented("Buffer pool manager not available".to_string()))?;
+        let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
+            DBError::NotImplemented("Buffer pool manager not available".to_string())
+        })?;
 
-        let lock_manager = self.lock_manager
+        let lock_manager = self
+            .lock_manager
             .as_ref()
             .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
 
@@ -139,24 +140,22 @@ impl DBInstance {
         sql: &str,
         writer: &mut impl ResultWriter,
         txn: Arc<Mutex<Transaction>>,
-        check_options: Option<CheckOptions>
+        check_options: Option<CheckOptions>,
     ) -> Result<bool, DBError> {
         // Ensure required components are available
-        let buffer_pool = self.buffer_pool_manager
-            .as_ref()
-            .ok_or_else(|| DBError::NotImplemented("Buffer pool manager not available".to_string()))?;
+        let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
+            DBError::NotImplemented("Buffer pool manager not available".to_string())
+        })?;
 
-        let lock_manager = self.lock_manager
+        let lock_manager = self
+            .lock_manager
             .as_ref()
             .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
 
         // Create execution context
         let txn_guard = txn.lock();
         let mut executor_context = ExecutorContext::new(
-            Transaction::new(
-                txn_guard.txn_id(),
-                txn_guard.isolation_level()
-            ),
+            Transaction::new(txn_guard.txn_id(), txn_guard.isolation_level()),
             self.transaction_manager.clone(),
             self.catalog.clone(),
             buffer_pool.clone(),
@@ -182,11 +181,9 @@ impl DBInstance {
         };
 
         // Execute the plan
-        let result = self.execution_engine.execute_statement(
-            &plan,
-            executor_context,
-            writer
-        );
+        let result = self
+            .execution_engine
+            .execute_statement(&plan, executor_context, writer);
 
         // Handle execution result
         match result {
@@ -200,9 +197,9 @@ impl DBInstance {
                     TransactionState::Aborted => {
                         Err(DBError::Transaction("Transaction was aborted".to_string()))
                     }
-                    TransactionState::Committed => {
-                        Err(DBError::Transaction("Transaction already committed".to_string()))
-                    }
+                    TransactionState::Committed => Err(DBError::Transaction(
+                        "Transaction already committed".to_string(),
+                    )),
                 }
             }
             Err(e) => {
@@ -223,10 +220,14 @@ impl DBInstance {
             true => Arc::clone(self.current_txn.as_ref().unwrap()),
             false => {
                 // Get mutable reference to transaction manager for begin
-                let transaction_manager = Arc::get_mut(&mut self.transaction_manager)
-                    .ok_or_else(|| DBError::Transaction("Failed to get mutable reference to transaction manager".to_string()))?;
+                let transaction_manager =
+                    Arc::get_mut(&mut self.transaction_manager).ok_or_else(|| {
+                        DBError::Transaction(
+                            "Failed to get mutable reference to transaction manager".to_string(),
+                        )
+                    })?;
                 transaction_manager.begin(IsolationLevel::ReadUncommitted)
-            },
+            }
         };
 
         let result = self.execute_sql_txn(sql, writer, txn.clone(), check_options);
@@ -236,9 +237,16 @@ impl DBInstance {
                 if !is_local_txn {
                     // Get mutable reference for commit
                     let transaction_manager = Arc::get_mut(&mut self.transaction_manager)
-                        .ok_or_else(|| DBError::Transaction("Failed to get mutable reference to transaction manager".to_string()))?;
+                        .ok_or_else(|| {
+                            DBError::Transaction(
+                                "Failed to get mutable reference to transaction manager"
+                                    .to_string(),
+                            )
+                        })?;
                     if !transaction_manager.commit(txn) {
-                        return Err(DBError::Transaction("Failed to commit transaction".to_string()));
+                        return Err(DBError::Transaction(
+                            "Failed to commit transaction".to_string(),
+                        ));
                     }
                 }
                 Ok(success)
@@ -280,13 +288,11 @@ impl DBInstance {
     }
 
     // Private helper methods
-    fn create_disk_manager(
-        config: &DBConfig,
-    ) -> Result<Arc<FileDiskManager>, DBError> {
+    fn create_disk_manager(config: &DBConfig) -> Result<Arc<FileDiskManager>, DBError> {
         Ok(Arc::new(FileDiskManager::new(
             config.db_filename.clone(),
             config.db_log_filename.clone(),
-            config.buffer_pool_size
+            config.buffer_pool_size,
         )))
     }
 
@@ -311,7 +317,7 @@ impl DBInstance {
             config.buffer_pool_size,
             scheduler,
             disk_manager.clone(),
-            Arc::new(RwLock::new(replacer))
+            Arc::new(RwLock::new(replacer)),
         );
 
         Ok(Some(Arc::new(bpm)))
@@ -337,7 +343,7 @@ impl DBInstance {
             let checkpoint_manager = Arc::new(CheckpointManager::new(
                 transaction_manager,
                 log_manager,
-                buffer_pool_manager
+                buffer_pool_manager,
             ));
             Some(checkpoint_manager)
         } else {

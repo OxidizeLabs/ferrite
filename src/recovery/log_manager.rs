@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
 pub struct LogManager {
