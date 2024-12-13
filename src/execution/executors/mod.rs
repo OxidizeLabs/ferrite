@@ -1,2 +1,2 @@
 pub mod abstract_exector;
-mod seq_scan_executor;
+pub(crate) mod seq_scan_executor;

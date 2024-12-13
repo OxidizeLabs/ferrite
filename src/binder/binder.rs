@@ -18,19 +18,15 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
 use crate::common::logger::initialize_logger;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value as DbValue;
 use chrono::Utc;
-use log::info;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::{
     ColumnDef, Expr, Function, GroupByExpr, GroupByWithModifier, Ident, Join, Offset, OrderByExpr,
@@ -677,9 +673,9 @@ impl<'a> Drop for ContextGuard<'a> {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Arc<TransactionManager>,
     lock_manager: Arc<LockManager>,
-    log_manager: Arc<Mutex<LogManager>>,
+    log_manager: Arc<LogManager>,
     db_file: String,
     db_log_file: String,
 }
@@ -707,11 +703,22 @@ impl TestContext {
             disk_manager.clone(),
             replacer.clone(),
         ));
+        let log_manager = Arc::new(LogManager::new(disk_manager.clone()));
+        let catalog = Catalog::new(
+            bpm.clone(),
+            log_manager,
+            0,
+            0,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
 
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let transaction_manager = Arc::new(TransactionManager::new(Arc::from(catalog)));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+        let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 
         Self {
             bpm,
@@ -731,7 +738,7 @@ impl TestContext {
         Arc::clone(&self.lock_manager)
     }
 
-    pub fn log_manager(&self) -> Arc<Mutex<LogManager>> {
+    pub fn log_manager(&self) -> Arc<LogManager> {
         Arc::clone(&self.log_manager)
     }
 
@@ -749,6 +756,10 @@ impl Drop for TestContext {
 
 #[cfg(test)]
 mod unit_tests {
+    use log::info;
+    use crate::catalogue::schema::Schema;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::types_db::type_id::TypeId;
     use super::*;
 
     #[test]
@@ -766,7 +777,6 @@ mod unit_tests {
         ]);
         let mut catalog = Catalog::new(
             bpm,
-            lock_manager.clone(),
             log_manager,
             0,
             0,

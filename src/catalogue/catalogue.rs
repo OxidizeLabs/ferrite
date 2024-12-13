@@ -1,21 +1,19 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
-use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::common::logger::initialize_logger;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
-use crate::types_db::type_id::TypeId;
 use chrono::Utc;
 use core::fmt;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -66,8 +64,8 @@ pub struct IndexInfo {
 /// table creation, table lookup, index creation, and index lookup.
 pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
-    lock_manager: Arc<LockManager>,
-    log_manager: Arc<Mutex<LogManager>>,
+    // lock_manager: Arc<LockManager>,
+    log_manager: Arc<LogManager>,
     tables: HashMap<TableOidT, Box<TableInfo>>,
     table_names: HashMap<String, TableOidT>,
     next_table_oid: TableOidT,
@@ -154,8 +152,8 @@ impl Catalog {
     /// - `log_manager`: The log manager in use by the system.
     pub fn new(
         bpm: Arc<BufferPoolManager>,
-        lock_manager: Arc<LockManager>,
-        log_manager: Arc<Mutex<LogManager>>,
+        // lock_manager: Arc<LockManager>,
+        log_manager: Arc<LogManager>,
         next_index_oid: IndexOidT,
         next_table_oid: TableOidT,
         tables: HashMap<TableOidT, Box<TableInfo>>,
@@ -165,7 +163,7 @@ impl Catalog {
     ) -> Self {
         Catalog {
             bpm,
-            lock_manager,
+            // lock_manager,
             log_manager,
             tables,
             table_names,
@@ -405,9 +403,9 @@ impl Display for IndexType {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Arc<TransactionManager>,
     lock_manager: Arc<LockManager>,
-    log_manager: Arc<Mutex<LogManager>>,
+    log_manager: Arc<LogManager>,
     db_file: String,
     db_log_file: String,
 }
@@ -435,11 +433,26 @@ impl TestContext {
             disk_manager.clone(),
             replacer.clone(),
         ));
-
+        let file_disk_manager = Arc::new(FileDiskManager::new(
+            "db_file.db".to_string(),
+            "log_file.log".to_string(),
+            10,
+        ));
+        let log_manager = Arc::new(LogManager::new(file_disk_manager));
+        let catalog = Catalog::new(
+            bpm.clone(),
+            log_manager,
+            0,
+            0,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new()));
+        let transaction_manager = Arc::new(TransactionManager::new(Arc::from(catalog)));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-        let log_manager = Arc::new(Mutex::new(LogManager::new(Arc::clone(&disk_manager))));
+        let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 
         Self {
             bpm,
@@ -459,7 +472,7 @@ impl TestContext {
         Arc::clone(&self.lock_manager)
     }
 
-    pub fn log_manager(&self) -> Arc<Mutex<LogManager>> {
+    pub fn log_manager(&self) -> Arc<LogManager> {
         Arc::clone(&self.log_manager)
     }
 
@@ -478,15 +491,18 @@ impl Drop for TestContext {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::catalogue::column::Column;
+    use crate::concurrency::transaction::IsolationLevel;
+    use crate::types_db::type_id::TypeId;
 
     fn create_catalog(
         bpm: Arc<BufferPoolManager>,
         lock_manager: Arc<LockManager>,
-        log_manager: Arc<Mutex<LogManager>>,
+        log_manager: Arc<LogManager>,
     ) -> Catalog {
         Catalog::new(
             bpm,
-            lock_manager,
+            // lock_manager,
             log_manager,
             0,
             0,

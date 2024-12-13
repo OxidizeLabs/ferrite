@@ -20,7 +20,7 @@ use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 
 // Define an enum to represent the type of page to create
@@ -37,7 +37,7 @@ pub enum NewPageType {
 /// including fetching and unpinning pages, and handling page replacement.
 pub struct BufferPoolManager {
     pool_size: usize,
-    next_page_id: AtomicU32,
+    next_page_id: AtomicU64,
     pages: Arc<RwLock<Vec<Option<Arc<RwLock<PageType>>>>>>,
     page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
     replacer: Arc<RwLock<LRUKReplacer>>,
@@ -70,7 +70,7 @@ impl BufferPoolManager {
         );
         Self {
             pool_size,
-            next_page_id: AtomicU32::new(0),
+            next_page_id: AtomicU64::new(0),
             pages: Arc::new(RwLock::new(vec![None; pool_size])),
             page_table: Arc::new(RwLock::new(HashMap::new())),
             replacer,
@@ -231,11 +231,11 @@ impl BufferPoolManager {
                 frame_id
             } else {
                 let replacer = self.replacer.write(); // Acquire write lock
-                replacer.evict().unwrap_or(u32::MAX)
+                replacer.evict().unwrap_or(u64::MAX as FrameId)
             }
         };
 
-        if frame_id == u32::MAX {
+        if frame_id == u64::MAX {
             error!("Failed to fetch page {}: no available frame", page_id);
             return None;
         }
@@ -349,11 +349,11 @@ impl BufferPoolManager {
                 frame_id
             } else {
                 let replacer = self.replacer.write(); // Acquire write lock
-                replacer.evict().unwrap_or(u32::MAX)
+                replacer.evict().unwrap_or(u64::MAX)
             }
         };
 
-        if frame_id == u32::MAX {
+        if frame_id == u64::MAX {
             error!(
                 "Failed to fetch basic page guard for page {}: no available frame",
                 page_id
@@ -1156,7 +1156,7 @@ mod concurrency {
 
             let handle = thread::spawn(move || {
                 // Create a new page
-                let page_id = i as u32;
+                let page_id = i as u64;
                 bpm_clone
                     .new_page(NewPageType::Basic)
                     .expect("Failed to create a new page");

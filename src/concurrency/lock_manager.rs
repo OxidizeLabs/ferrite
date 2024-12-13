@@ -188,7 +188,7 @@ impl LockRequestQueue {
 
 /// LockManager handles transactions asking for locks on records.
 pub struct LockManager {
-    txn_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Arc<TransactionManager>,
     table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
     row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
     enable_cycle_detection: AtomicBool,
@@ -200,13 +200,13 @@ impl LockManager {
     /// Creates a new lock manager configured for the deadlock detection policy.
     ///
     /// # Parameters
-    /// - `txn_manager`: A reference to the transaction manager.
+    /// - `transaction_manager`: A reference to the transaction manager.
     ///
     /// # Returns
     /// A new `LockManager` instance.
-    pub fn new(txn_manager: Arc<Mutex<TransactionManager>>) -> Self {
+    pub fn new(transaction_manager: Arc<TransactionManager>) -> Self {
         Self {
-            txn_manager,
+            transaction_manager,
             table_lock_map: Mutex::new(HashMap::new()),
             row_lock_map: Mutex::new(HashMap::new()),
             enable_cycle_detection: AtomicBool::new(false),

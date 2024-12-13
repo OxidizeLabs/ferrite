@@ -1,26 +1,29 @@
+use std::collections::VecDeque;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::catalogue::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
-use crate::execution::check_option::CheckOptions;
+use crate::execution::check_option::{CheckOption, CheckOptions};
 use std::sync::Arc;
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::execution::executors::abstract_exector::AbstractExecutor;
 
 pub struct ExecutorContext {
     transaction: Transaction,
-    catalog: Catalog,
+    catalog: Arc<Catalog>,
     buffer_pool_manager: Arc<BufferPoolManager>,
-    // transaction_manager: Arc<TransactionManager>,
+    transaction_manager: Arc<TransactionManager>,
     lock_manager: Arc<LockManager>,
-    // _nlj_check_exec_set: VecDeque<(dyn AbstractExecutor, dyn AbstractExecutor)>,
-    _check_options: Arc<CheckOptions>,
-    _is_delete: bool,
+    nlj_check_exec_set: VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)>,
+    check_options: Arc<CheckOptions>,
+    is_delete: bool,
 }
 
 impl ExecutorContext {
     pub fn new(
         transaction: Transaction,
-        // transaction_manager: Arc<TransactionManager>,
-        catalog: Catalog,
+        transaction_manager: Arc<TransactionManager>,
+        catalog: Arc<Catalog>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         lock_manager: Arc<LockManager>,
     ) -> Self {
@@ -28,11 +31,11 @@ impl ExecutorContext {
             transaction,
             catalog,
             buffer_pool_manager,
-            // transaction_manager,
+            transaction_manager,
             lock_manager,
-            // _nlj_check_exec_set: Default::default(),
-            _check_options: Arc::new(CheckOptions::default()),
-            _is_delete: false,
+            nlj_check_exec_set: VecDeque::new(),
+            check_options: Arc::new(CheckOptions::new()),
+            is_delete: false,
         }
     }
 
@@ -48,31 +51,47 @@ impl ExecutorContext {
         &self.buffer_pool_manager
     }
 
-    // pub fn get_transaction_manager(&self) -> &TransactionManager {
-    //     &self.transaction_manager
-    // }
+    pub fn get_transaction_manager(&self) -> &TransactionManager {
+        &self.transaction_manager
+    }
 
     pub fn get_lock_manager(&self) -> &LockManager {
         self.lock_manager.as_ref()
     }
 
-    // pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(dyn AbstractExecutor, dyn AbstractExecutor)> {
-    //     &self._nlj_check_exec_set
-    // }
-
-    pub fn get_check_options(&self) -> Arc<CheckOptions> {
-        Arc::clone(&self._check_options)
+    pub fn get_nlj_check_exec_set(&self) -> &VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)> {
+        &self.nlj_check_exec_set
     }
 
-    // pub fn add_check_option(&mut self, _left_exec: Box<dyn AbstractExecutor>, _right_exec: Box<dyn AbstractExecutor>) {
-    //     self._nlj_check_exec_set.push_back((_left_exec, _right_exec))
-    // }
+    pub fn get_check_options(&self) -> Arc<CheckOptions> {
+        Arc::clone(&self.check_options)
+    }
 
-    pub fn init_check_options(&self) {
-        todo!()
+    pub fn set_check_options(&mut self, options: CheckOptions) {
+        self.check_options = Arc::new(options);
+    }
+
+    pub fn add_check_option(&mut self, left_exec: Box<dyn AbstractExecutor>, right_exec: Box<dyn AbstractExecutor>) {
+        self.nlj_check_exec_set.push_back((left_exec, right_exec));
+    }
+
+    pub fn init_check_options(&mut self) {
+        // Initialize check options based on the current state
+        let mut options = CheckOptions::new();
+
+        // Add default checks if needed
+        if !self.nlj_check_exec_set.is_empty() {
+            options.add_check(CheckOption::EnableNljCheck);
+        }
+
+        self.check_options = Arc::new(options);
     }
 
     pub fn is_delete(&self) -> bool {
-        self._is_delete
+        self.is_delete
+    }
+
+    pub fn set_delete(&mut self, is_delete: bool) {
+        self.is_delete = is_delete;
     }
 }
