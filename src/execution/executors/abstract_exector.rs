@@ -23,7 +23,7 @@ pub trait AbstractExecutor {
     fn next(&mut self) -> Option<(Tuple, RID)>;
 
     /// Get the schema of the tuples that this executor produces.
-    fn get_output_schema(&self) -> &Schema;
+    fn get_output_schema(&self) -> Schema;
 
     /// Get the executor context in which this executor runs.
     fn get_executor_context(&self) -> &ExecutorContext;

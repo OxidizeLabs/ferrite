@@ -45,14 +45,17 @@ impl Tuple {
     /// # Panics
     ///
     /// Panics if the number of values doesn't match the schema's column count.
-    pub fn new(values: Vec<Value>, schema: Schema, rid: RID) -> Self {
+    pub fn new(values: &[Value], schema: Schema, rid: RID) -> Self {
         assert_eq!(
             values.len(),
             schema.get_column_count() as usize,
             "Values length does not match schema column count"
         );
 
-        Self { values, rid }
+        Self {
+            values: values.to_vec(),
+            rid
+        }
     }
 
     /// Serializes the tuple into the given storage buffer.
@@ -120,7 +123,7 @@ impl Tuple {
             .map(|&attr| self.get_value(attr as usize).clone())
             .collect();
 
-        Tuple::new(key_values, key_schema, self.rid)
+        Tuple::new(&*key_values, key_schema, self.rid)
     }
 
     /// Returns a string representation of the tuple.
@@ -180,7 +183,7 @@ mod tests {
             Value::new(true),
         ];
         let rid = RID::new(0, 0);
-        (Tuple::new(values, schema.clone(), rid), schema)
+        (Tuple::new(&*values, schema.clone(), rid), schema)
     }
 
     #[test]
@@ -250,7 +253,7 @@ mod tests {
         let schema = create_sample_schema();
         let values = vec![Value::new(1), Value::new("Alice")]; // Missing two values
         let rid = RID::new(0, 0);
-        Tuple::new(values, schema, rid);
+        Tuple::new(&*values, schema, rid);
     }
 
     #[test]
@@ -307,7 +310,7 @@ mod tests {
             Value::new(true),
         ];
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(values, schema, rid);
+        let tuple = Tuple::new(&*values, schema, rid);
 
         assert_eq!(tuple.get_value(0), &Value::new(42));
         assert_eq!(tuple.get_value(1), &Value::new(3.14));

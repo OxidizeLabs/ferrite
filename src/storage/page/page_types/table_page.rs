@@ -53,6 +53,7 @@ impl TablePage {
     /// Initializes the table page.
     pub fn init(&mut self) {
         self.next_page_id = INVALID_PAGE_ID;
+        self.prev_page_id = INVALID_PAGE_ID;
         self.num_tuples = 0;
         self.num_deleted_tuples = 0;
         self.tuple_info.clear();
@@ -77,25 +78,35 @@ impl TablePage {
     }
 
     /// Inserts a tuple into the table.
-    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &Tuple) -> Option<RID> {
+    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &mut Tuple) -> Option<RID> {
         if let Some(tuple_offset) = self.get_next_tuple_offset(tuple) {
+            // Create new RID with the current page's ID
+            let rid = RID::new(self.page_id, self.get_num_tuples() as u32);
+
+            // Update the tuple's RID
+            tuple.set_rid(rid);
+
+            // Store tuple metadata and data
             self.tuple_info.push((
                 tuple_offset,
                 tuple.get_length().unwrap() as u16,
                 meta.clone(),
             ));
-            self.num_tuples += 1;
 
             let start = tuple_offset as usize;
             let end = start + tuple.get_length().unwrap();
-            let tuple_data = bincode::serialize(&tuple).unwrap();
-            self.data[start..end].copy_from_slice(tuple_data.as_slice());
+            let tuple_data = bincode::serialize(tuple).unwrap();
+            self.data[start..end].copy_from_slice(&tuple_data);
 
-            Some(tuple.get_rid())
+            self.num_tuples += 1;
+            self.is_dirty = true;
+
+            Some(rid)
         } else {
             None
         }
     }
+
 
     /// Updates the metadata of a tuple.
     pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), PageError> {
@@ -150,6 +161,14 @@ impl TablePage {
         self.next_page_id
     }
 
+    pub fn set_next_page_id(&mut self, page_id: PageId) {
+        self.next_page_id = page_id;
+    }
+
+    pub fn set_prev_page_id(&mut self, page_id: PageId) {
+        self.prev_page_id = page_id;
+    }
+
     /// Updates a tuple in place.
     ///
     /// # Safety
@@ -181,8 +200,6 @@ impl TablePage {
 
         Ok(())
     }
-
-    // Helper methods
 
     fn header_size() -> u16 {
         (size_of::<PageId>() + size_of::<u16>() + size_of::<u16>()) as u16
@@ -255,7 +272,7 @@ mod tests {
         ]);
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(values, schema, rid);
+        let tuple = Tuple::new(&values, schema, rid);
         let meta = TupleMeta::new(123, false);
         (meta, tuple)
     }
@@ -263,9 +280,9 @@ mod tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let mut page = TablePage::new(1);
-        let (meta, tuple) = create_test_tuple(1);
+        let (meta, mut tuple) = create_test_tuple(1);
 
-        let tuple_id = page.insert_tuple(&meta, &tuple).unwrap();
+        let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
         assert_eq!(page.num_tuples, 1);
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
@@ -277,9 +294,9 @@ mod tests {
     #[test]
     fn test_update_tuple_meta() {
         let mut page = TablePage::new(1);
-        let (meta, tuple) = create_test_tuple(1);
+        let (meta, mut tuple) = create_test_tuple(1);
 
-        let tuple_rid_id = page.insert_tuple(&meta, &tuple).unwrap();
+        let tuple_rid_id = page.insert_tuple(&meta, &mut tuple).unwrap();
         let new_meta = TupleMeta::new(456, true);
 
         page.update_tuple_meta(&new_meta, &tuple_rid_id).unwrap();
@@ -293,10 +310,10 @@ mod tests {
     #[test]
     fn test_page_full() {
         let mut page = TablePage::new(1);
-        let (meta, tuple) = create_test_tuple(1);
+        let (meta, mut tuple) = create_test_tuple(1);
 
         let mut inserted_count = 0;
-        while page.insert_tuple(&meta, &tuple).is_some() {
+        while page.insert_tuple(&meta, &mut tuple).is_some() {
             inserted_count += 1;
         }
 
@@ -307,9 +324,9 @@ mod tests {
     #[test]
     fn test_update_tuple_in_place_unsafe() {
         let mut page = TablePage::new(1);
-        let (meta, tuple) = create_test_tuple(1);
+        let (meta, mut tuple) = create_test_tuple(1);
 
-        let tuple_id = page.insert_tuple(&meta, &tuple).unwrap();
+        let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
 
         let new_meta = TupleMeta::new(789, false);
         let new_tuple = create_test_tuple(2).1;

@@ -3,6 +3,29 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
+use crate::types_db::type_id::TypeId;
+
+#[derive(Error, Debug)]
+pub enum ValuesError {
+    #[error("Value count {value_count} is not a multiple of column count {column_count}")]
+    InvalidValueCount { value_count: usize, column_count: usize },
+
+    #[error("Type mismatch for column {column_name}: expected {expected:?}, got {actual:?}")]
+    TypeMismatch {
+        column_name: String,
+        expected: TypeId,
+        actual: TypeId,
+    },
+
+    #[error("Row index {row_idx} is out of bounds (total rows: {total_rows})")]
+    RowIndexOutOfBounds {
+        row_idx: usize,
+        total_rows: usize,
+    },
+
+    #[error("Value evaluation failed: {0}")]
+    ValueEvaluationError(String),
+}
 
 #[derive(Debug, PartialEq)]
 pub enum ComparisonError {

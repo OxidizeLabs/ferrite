@@ -10,15 +10,10 @@ use crate::execution::execution_engine::ExecutorEngine;
 use crate::execution::executor_context::ExecutorContext;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
-use crate::storage::disk::disk_manager;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_manager_memory::DiskManagerMemory;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use parking_lot::{Mutex, RwLock};
-use std::error::Error;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use colored::Colorize;
 use log::{debug, info, warn};
 
 /// Trait for writing query results in a tabular format
@@ -55,7 +50,7 @@ pub struct DBInstance {
     lock_manager: Option<Arc<LockManager>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     catalog: Arc<RwLock<Catalog>>,
-    execution_engine: Arc<ExecutorEngine>,
+    execution_engine: Arc<Mutex<ExecutorEngine>>,
     config: DBConfig,
     current_txn: Option<Arc<Mutex<Transaction>>>,
 }
@@ -99,10 +94,10 @@ impl DBInstance {
         let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
         let lock_manager = Self::create_lock_manager(&transaction_manager)?;
 
-        let execution_engine = Arc::new(ExecutorEngine::new(
+        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(
             buffer_pool_manager.clone().unwrap(),
             Arc::clone(&catalog),
-        ));
+        )));
 
         Ok(Self {
             disk_manager,
@@ -119,7 +114,7 @@ impl DBInstance {
     }
 
     /// Creates an executor context for query execution
-    pub fn make_executor_context(&self, txn: Transaction) -> Result<ExecutorContext, DBError> {
+    pub fn make_executor_context(&self, txn: Arc<Mutex<Transaction>>) -> Result<ExecutorContext, DBError> {
         let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
             DBError::NotImplemented("Buffer pool manager not available".to_string())
         })?;
@@ -139,7 +134,7 @@ impl DBInstance {
     }
 
     pub fn execute_sql_txn(
-        &self,
+        &mut self,
         sql: &str,
         writer: &mut impl ResultWriter,
         txn: Arc<Mutex<Transaction>>,
@@ -163,7 +158,7 @@ impl DBInstance {
         debug!("Creating executor context");
         let txn_guard = txn.lock();
         let mut executor_context = ExecutorContext::new(
-            Transaction::new(txn_guard.txn_id(), txn_guard.isolation_level()),
+            Arc::new(Mutex::new(Transaction::new(txn_guard.txn_id(), txn_guard.isolation_level()))),
             self.transaction_manager.clone(),
             self.catalog.clone(),
             buffer_pool.clone(),
@@ -171,7 +166,7 @@ impl DBInstance {
         );
         drop(txn_guard);
 
-        // Set up check options
+        // Configure check options
         if let Some(opts) = check_options {
             debug!("Initializing check options");
             executor_context.set_check_options(opts);
@@ -180,7 +175,8 @@ impl DBInstance {
 
         // Prepare and execute
         debug!("Preparing statement");
-        let plan = match self.execution_engine.prepare_statement(sql, executor_context.get_check_options()) {
+        let mut execution_engine = self.execution_engine.lock(); // Acquire mutable lock for execution_engine
+        let plan = match execution_engine.prepare_statement(sql, executor_context.get_check_options()) {
             Ok(p) => {
                 debug!("Statement prepared successfully");
                 p
@@ -193,7 +189,7 @@ impl DBInstance {
         };
 
         debug!("Executing prepared plan");
-        let result = self.execution_engine.execute_statement(&plan, executor_context, writer);
+        let result = execution_engine.execute_statement(&plan, executor_context, writer);
 
         match &result {
             Ok(has_results) => {

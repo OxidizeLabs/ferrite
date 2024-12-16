@@ -14,6 +14,8 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::env;
+use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::plans::abstract_plan::PlanNode::{CreateTable, Insert, SeqScan};
 
 pub struct ExecutorEngine {
     buffer_pool_manager: Arc<BufferPoolManager>,
@@ -28,7 +30,7 @@ impl ExecutorEngine {
         Self {
             buffer_pool_manager,
             catalog: catalog.clone(),
-            planner: QueryPlanner::new(),
+            planner: QueryPlanner::new(catalog.clone()),
             optimizer: Optimizer::new(catalog),
             log_detailed: env::var("RUST_TEST").is_ok(),
         }
@@ -36,7 +38,7 @@ impl ExecutorEngine {
 
     /// Prepares an SQL statement for execution
     pub fn prepare_statement(
-        &self,
+        &mut self,
         sql: &str,
         check_options: Arc<CheckOptions>,
     ) -> Result<PlanNode, DBError> {
@@ -107,16 +109,23 @@ impl ExecutorEngine {
         }
 
         match plan {
-            PlanNode::SeqScan(scan_plan) => {
+            SeqScan(scan_plan) => {
                 info!("Creating sequential scan executor");
-                Ok(Box::new(SeqScanExecutor::new(context, Arc::new(scan_plan.clone()))))
+                Ok(Box::new(SeqScanExecutor::new(Arc::from(context), Arc::new(scan_plan.clone()))))
             }
-            PlanNode::CreateTable(create_table_plan) => {
+            CreateTable(create_table_plan) => {
                 info!("Creating table creation executor");
                 Ok(Box::new(CreateTableExecutor::new(
                     Arc::new(context),
                     create_table_plan.clone(),
                     false,
+                )))
+            }
+            Insert(insert_plan) => {
+                info!("Creating insert executor");
+                Ok(Box::new(InsertExecutor::new(
+                    Arc::new(context),
+                    Arc::new(insert_plan.clone()),
                 )))
             }
             _ => {
@@ -142,47 +151,65 @@ impl ExecutorEngine {
         root_executor.init();
         debug!("Executor initialization complete");
 
-        let mut has_results = false;
-        let mut row_count = 0;
+        // Handle different types of statements
+        match plan {
+            // For INSERT, CREATE TABLE, etc. - just execute and return success
+            PlanNode::Insert(_) | PlanNode::CreateTable(_) => {
+                debug!("Executing modification statement");
+                // Execute the statement - we only need to check if it returns anything
+                if root_executor.next().is_some() {
+                    info!("Modification statement executed successfully");
+                    Ok(true)
+                } else {
+                    info!("No rows affected");
+                    Ok(false)
+                }
+            },
+            // For SELECT and other queries that produce output
+            _ => {
+                let mut has_results = false;
+                let mut row_count = 0;
 
-        // Get schema information
-        let column_count = root_executor.get_output_schema().get_column_count();
-        let column_names: Vec<String> = root_executor
-            .get_output_schema()
-            .get_columns()
-            .iter()
-            .map(|col| col.get_name().to_string())
-            .collect();
+                // Get schema information
+                let column_count = root_executor.get_output_schema().get_column_count();
+                let column_names: Vec<String> = root_executor
+                    .get_output_schema()
+                    .get_columns()
+                    .iter()
+                    .map(|col| col.get_name().to_string())
+                    .collect();
 
-        debug!("Writing output schema with {} columns", column_count);
-        writer.begin_table(true);
-        writer.begin_header();
-        for name in &column_names {
-            writer.write_header_cell(name);
-        }
-        writer.end_header();
+                debug!("Writing output schema with {} columns", column_count);
+                writer.begin_table(true);
+                writer.begin_header();
+                for name in &column_names {
+                    writer.write_header_cell(name);
+                }
+                writer.end_header();
 
-        debug!("Starting result processing");
-        while let Some((tuple, _rid)) = root_executor.next() {
-            has_results = true;
-            row_count += 1;
+                debug!("Starting result processing");
+                while let Some((tuple, _rid)) = root_executor.next() {
+                    has_results = true;
+                    row_count += 1;
 
-            if row_count % 1000 == 0 {
-                debug!("Processed {} rows", row_count);
+                    if row_count % 1000 == 0 {
+                        debug!("Processed {} rows", row_count);
+                    }
+
+                    writer.begin_row();
+                    for i in 0..column_count {
+                        writer.write_cell(&tuple.get_value(i as usize).to_string());
+                    }
+                    writer.end_row();
+                }
+
+                debug!("Result processing complete");
+                writer.end_table();
+
+                info!("Statement execution finished. Processed {} rows", row_count);
+                Ok(has_results)
             }
-
-            writer.begin_row();
-            for i in 0..column_count {
-                writer.write_cell(&tuple.get_value(i as usize).to_string());
-            }
-            writer.end_row();
         }
-
-        debug!("Result processing complete");
-        writer.end_table();
-
-        info!("Statement execution finished. Processed {} rows", row_count);
-        Ok(has_results)
     }
 
     fn cleanup_after_execution(&self) {
@@ -196,30 +223,8 @@ impl ExecutorEngine {
 
         debug!("Post-execution cleanup complete");
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
-
-    // Add test setup helper
-    fn setup_test_engine() -> ExecutorEngine {
-        env::set_var("RUST_TEST", "1");
-        // Create necessary components for ExecutorEngine
-        // This is a placeholder - you'll need to provide actual implementations
-        unimplemented!("Need to implement test setup");
-    }
-
-    #[test]
-    fn test_prepare_statement() {
-        let engine = setup_test_engine();
-        // Add test implementation
-    }
-
-    #[test]
-    fn test_execute_statement() {
-        let engine = setup_test_engine();
-        // Add test implementation
+    fn is_modification_statement(&self, plan: &PlanNode) -> bool {
+        matches!(plan, Insert(_) | CreateTable(_))
     }
 }

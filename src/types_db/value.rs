@@ -28,10 +28,10 @@ pub enum Size {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Value {
-    value_: Val,
-    size_: Size,
-    manage_data_: bool,
-    type_id_: TypeId,
+    pub(crate) value_: Val,
+    pub(crate) size_: Size,
+    pub(crate) manage_data_: bool,
+    pub(crate) type_id_: TypeId,
 }
 
 impl Value {
@@ -157,6 +157,23 @@ impl Type for Value {
 }
 
 // Implement From<T> for Val
+impl From<TypeId> for Val {
+    fn from(value: TypeId) -> Self {
+        match value {
+            TypeId::Boolean => Val::Boolean(false),
+            TypeId::TinyInt => Val::TinyInt(0),
+            TypeId::SmallInt => Val::SmallInt(0),
+            TypeId::Integer => Val::Integer(0),
+            TypeId::BigInt => Val::BigInt(0),
+            TypeId::Decimal => Val::Decimal(0.0),
+            TypeId::Timestamp => Val::Timestamp(0),
+            TypeId::VarChar => Val::VarLen(String::new()),
+            TypeId::Vector => Val::Vector(Vec::new()),
+            TypeId::Invalid => Val::Null,
+        }
+    }
+}
+
 impl From<bool> for Val {
     fn from(b: bool) -> Self {
         Val::Boolean(b)

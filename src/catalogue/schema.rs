@@ -137,6 +137,12 @@ impl Default for Schema {
     }
 }
 
+impl AsRef<Schema> for Schema {
+    fn as_ref(&self) -> &Schema {
+        self
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;

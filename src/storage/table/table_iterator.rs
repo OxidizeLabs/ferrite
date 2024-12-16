@@ -4,17 +4,18 @@ use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
+use std::sync::Arc;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
-pub struct TableIterator<'a> {
-    table_heap: &'a TableHeap,
+pub struct TableIterator {
+    table_heap: Arc<TableHeap>,
     rid: RID,
     stop_at_rid: RID,
 }
 
-impl<'a> TableIterator<'a> {
-    pub fn new(table_heap: &'a TableHeap, rid: RID, stop_at_rid: RID) -> Self {
+impl TableIterator {
+    pub fn new(table_heap: Arc<TableHeap>, rid: RID, stop_at_rid: RID) -> Self {
         let mut iterator = Self {
             table_heap,
             rid,
@@ -55,32 +56,36 @@ impl<'a> TableIterator<'a> {
         if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
             if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
                 table_page.access(|page| {
+                    let current_num_tuples = page.get_num_tuples();
                     let next_tuple_id = self.rid.get_slot_num() + 1;
 
-                    if self.stop_at_rid.get_page_id() != INVALID_PAGE_ID {
-                        assert!(
-                            self.rid.get_page_id() < self.stop_at_rid.get_page_id()
-                                || (self.rid.get_page_id() == self.stop_at_rid.get_page_id()
-                                    && next_tuple_id <= self.stop_at_rid.get_slot_num()),
-                            "iterator out of bound"
-                        );
+                    if next_tuple_id >= current_num_tuples as u32 {
+                        // Move to next page
+                        let next_page_id = page.get_next_page_id();
+                        if next_page_id == INVALID_PAGE_ID {
+                            self.rid = RID::new(INVALID_PAGE_ID, 0);
+                        } else {
+                            self.rid = RID::new(next_page_id, 0);
+                        }
+                    } else {
+                        self.rid = RID::new(self.rid.get_page_id(), next_tuple_id);
                     }
 
-                    self.rid = RID::new(self.rid.get_page_id(), next_tuple_id);
-
-                    if self.rid == self.stop_at_rid {
-                        self.rid = RID::new(INVALID_PAGE_ID, 0);
-                    } else if next_tuple_id >= page.get_num_tuples() as u32 {
-                        let next_page_id = page.get_next_page_id();
-                        self.rid = RID::new(next_page_id, 0);
+                    // Check stop condition after advancing
+                    if self.stop_at_rid.get_page_id() != INVALID_PAGE_ID {
+                        if self.rid.get_page_id() > self.stop_at_rid.get_page_id() ||
+                            (self.rid.get_page_id() == self.stop_at_rid.get_page_id() &&
+                                self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()) {
+                            self.rid = RID::new(INVALID_PAGE_ID, 0);
+                        }
                     }
                 });
             } else {
-                log::error!("Failed to convert to TablePage");
+                error!("Failed to convert to TablePage");
                 self.rid = RID::new(INVALID_PAGE_ID, 0);
             }
         } else {
-            log::error!("Failed to fetch page");
+            error!("Failed to fetch page");
             self.rid = RID::new(INVALID_PAGE_ID, 0);
         }
     }
@@ -104,7 +109,7 @@ impl<'a> TableIterator<'a> {
     }
 }
 
-impl<'a> Iterator for TableIterator<'a> {
+impl Iterator for TableIterator {
     type Item = (TupleMeta, Tuple);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -138,7 +143,6 @@ mod tests {
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
-    use std::sync::Arc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -187,11 +191,10 @@ mod tests {
         }
     }
 
-    fn setup_test_table(test_name: &str) -> TableHeap {
+    fn setup_test_table(test_name: &str) -> Arc<TableHeap> {
         let ctx = TestContext::new(test_name);
         let bpm = ctx.bpm.clone();
-
-        TableHeap::new(bpm)
+        Arc::new(TableHeap::new(bpm))
     }
 
     #[test]
@@ -199,7 +202,7 @@ mod tests {
         let table_heap = setup_test_table("test_table_iterator_create");
         let rid = RID::new(INVALID_PAGE_ID, 0);
 
-        let iterator = TableIterator::new(&table_heap, rid, rid);
+        let iterator = TableIterator::new(table_heap, rid, rid);
         assert_eq!(iterator.get_rid(), rid);
     }
 
@@ -208,7 +211,7 @@ mod tests {
         let table_heap = setup_test_table("test_table_iterator_empty");
         let rid = RID::new(0, 0);
 
-        let mut iterator = TableIterator::new(&table_heap, rid, rid);
+        let mut iterator = TableIterator::new(table_heap, rid, rid);
         assert!(iterator.is_end());
         assert_eq!(
             None,
@@ -227,7 +230,7 @@ mod tests {
         ]);
         let rid = RID::new(0, 0);
         let mut tuple = Tuple::new(
-            vec![Value::from(1), Value::from(2), Value::from(3)],
+            &*vec![Value::from(1), Value::from(2), Value::from(3)],
             schema.clone(),
             rid,
         );
@@ -237,7 +240,7 @@ mod tests {
             .insert_tuple(&meta, &mut tuple, None, None, 0)
             .expect("failed to insert tuple");
 
-        let mut iterator = TableIterator::new(&table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
+        let mut iterator = TableIterator::new(table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
         assert!(!iterator.is_end());
 
         let result = iterator.next();

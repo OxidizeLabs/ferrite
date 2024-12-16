@@ -9,6 +9,7 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {
@@ -180,7 +181,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(false));
@@ -202,7 +203,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(true));
@@ -224,7 +225,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(Null));
