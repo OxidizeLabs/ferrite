@@ -9,6 +9,7 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArithmeticOp {
@@ -300,7 +301,7 @@ mod unit_tests {
             Column::new("col2", TypeId::Decimal),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,

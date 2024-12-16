@@ -1,4 +1,3 @@
-pub mod binder;
 pub mod bound_expression;
 pub mod bound_order_by;
 pub mod bound_statement;

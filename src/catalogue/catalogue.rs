@@ -186,7 +186,7 @@ impl Catalog {
     /// A (non-owning) pointer to the metadata for the table.
     pub fn create_table(
         &mut self,
-        txn: &Transaction,
+        txn: &Arc<Mutex<Transaction>>,
         table_name: &str,
         schema: Schema,
         create_table_heap: bool,
@@ -525,7 +525,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
         let table_info = catalog.create_table(&txn, "test_table", schema.clone(), true);
         assert!(table_info.is_some());
@@ -549,7 +549,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
         let table_info = catalog
             .create_table(&txn, "test_get_table_by_oid", schema.clone(), true)
@@ -577,7 +577,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
         catalog.create_table(&txn, "test_get_table_names_a", schema.clone(), true);
         catalog.create_table(&txn, "test_get_table_names_b", schema.clone(), true);
@@ -601,7 +601,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Transaction::new(0, IsolationLevel::Serializable); // Assuming Transaction::new() takes a transaction ID
+        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
         catalog.create_table(&txn, "test_get_table_schema", schema.clone(), true);
 

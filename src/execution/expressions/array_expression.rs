@@ -8,6 +8,7 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {
@@ -133,7 +134,7 @@ mod tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr
             .evaluate(&tuple, &schema)
@@ -167,7 +168,7 @@ mod tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());

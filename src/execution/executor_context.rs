@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub struct ExecutorContext {
-    transaction: Transaction,
+    transaction: Arc<Mutex<Transaction>>,
     catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_manager: Arc<Mutex<TransactionManager>>,
@@ -22,7 +22,7 @@ pub struct ExecutorContext {
 
 impl ExecutorContext {
     pub fn new(
-        transaction: Transaction,
+        transaction: Arc<Mutex<Transaction>>,
         transaction_manager: Arc<Mutex<TransactionManager>>,
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
@@ -40,7 +40,7 @@ impl ExecutorContext {
         }
     }
 
-    pub fn get_transaction(&self) -> &Transaction {
+    pub fn get_transaction(&self) -> &Arc<Mutex<Transaction>> {
         &self.transaction
     }
 

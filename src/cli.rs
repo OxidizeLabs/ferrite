@@ -58,6 +58,11 @@ impl DBCommandExecutor {
                 debug!("Handling tables command");
                 self.handle_tables(&mut writer)
             }
+            "flush" => {
+                debug!("Handling flush command");
+                self.handle_flush();
+                Ok(())
+            }
             _ => {
                 info!("Processing SQL command");
                 self.execute_sql(command, &mut writer)
@@ -73,6 +78,13 @@ impl DBCommandExecutor {
 
         debug!("Command execution completed");
         result
+    }
+
+    fn handle_flush(&self) {
+        let instance_guard = self.instance.lock();
+        let bpm = instance_guard.get_buffer_pool_manager().unwrap();
+        bpm.flush_all_pages();
+        debug!("Flush all pages completed");
     }
 
     fn handle_status(&self, writer: &mut impl ResultWriter) -> Result<(), Box<dyn Error>> {

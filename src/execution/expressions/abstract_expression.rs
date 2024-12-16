@@ -13,6 +13,7 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -188,7 +189,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), value);
         assert_eq!(expr.get_children().len(), 0);

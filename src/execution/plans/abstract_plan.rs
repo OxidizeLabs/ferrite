@@ -66,6 +66,7 @@ pub enum PlanNode {
     MockScan(MockScanNode),
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
+    Empty,
 }
 
 pub trait AbstractPlanNode {
@@ -138,6 +139,7 @@ impl PlanNode {
             PlanNode::MockScan(node) => node,
             PlanNode::Window(node) => node,
             PlanNode::CreateTable(node) => node,
+            PlanNode::Empty => panic!("Empty plan node"),
         }
     }
 }
