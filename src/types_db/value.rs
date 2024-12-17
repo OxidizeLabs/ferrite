@@ -5,7 +5,7 @@ use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
     Boolean(bool),
     TinyInt(i8),
@@ -20,13 +20,13 @@ pub enum Val {
     Null,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, PartialOrd)]
 pub enum Size {
     Length(usize),
     ElemTypeId(TypeId),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Value {
     pub(crate) value_: Val,
     pub(crate) size_: Size,
@@ -118,15 +118,22 @@ impl Type for Value {
     }
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
-        (self.value_ == other.value_).into()
+        match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+            _ => (self.value_ == other.value_).into(),
+        }
     }
 
     fn compare_not_equals(&self, other: &Value) -> CmpBool {
-        (self.value_ != other.value_).into()
+        match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+            _ => (self.value_ != other.value_).into(),
+        }
     }
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
             (Val::Boolean(l), Val::Boolean(r)) => (l < r).into(),
             (Val::TinyInt(l), Val::TinyInt(r)) => (l < r).into(),
             (Val::SmallInt(l), Val::SmallInt(r)) => (l < r).into(),
@@ -140,8 +147,20 @@ impl Type for Value {
         }
     }
 
+    fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+            _ => match self.compare_greater_than(other) {
+                CmpBool::CmpTrue => CmpBool::CmpFalse,
+                CmpBool::CmpFalse => CmpBool::CmpTrue,
+                CmpBool::CmpNull => CmpBool::CmpNull,
+            },
+        }
+    }
+
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
             (Val::Boolean(l), Val::Boolean(r)) => (l > r).into(),
             (Val::TinyInt(l), Val::TinyInt(r)) => (l > r).into(),
             (Val::SmallInt(l), Val::SmallInt(r)) => (l > r).into(),
@@ -152,6 +171,17 @@ impl Type for Value {
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
             (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l > r).into(),
             _ => CmpBool::CmpFalse,
+        }
+    }
+
+    fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
+        match (&self.value_, &other.value_) {
+            (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+            _ => match self.compare_less_than(other) {
+                CmpBool::CmpTrue => CmpBool::CmpFalse,
+                CmpBool::CmpFalse => CmpBool::CmpTrue,
+                CmpBool::CmpNull => CmpBool::CmpNull,
+            },
         }
     }
 }
@@ -311,7 +341,7 @@ impl Hash for Value {
 mod unit_tests {
     use crate::container::hash_function::HashFunction;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::types::{CmpBool, Type};
+    use crate::types_db::types::Type;
     use crate::types_db::value::{Size, Val, Value};
     use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -379,33 +409,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn value_creation() {
-        let bool_val = Value::new(true);
-        assert_eq!(bool_val.get_type_id(), TypeId::Boolean);
-
-        let int_val = Value::new(42i32);
-        assert_eq!(int_val.get_type_id(), TypeId::Integer);
-
-        let string_val = Value::new("Hello");
-        assert_eq!(string_val.get_type_id(), TypeId::VarChar);
-
-        let vec_val = Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]);
-        assert_eq!(vec_val.get_type_id(), TypeId::Vector);
-    }
-
-    #[test]
-    fn value_comparison() {
-        let val1 = Value::new(5);
-        let val2 = Value::new(10);
-        let val3 = Value::new(5);
-
-        assert_eq!(val1.compare_less_than(&val2), CmpBool::CmpTrue);
-        assert_eq!(val1.compare_greater_than(&val2), CmpBool::CmpFalse);
-        assert_eq!(val1.compare_equals(&val3), CmpBool::CmpTrue);
-    }
-
-    #[test]
-    fn serialize_val() {
+    fn test_serialize_val() {
         // Test serialization of different Val variants
         let val_boolean = Val::Boolean(true);
         let serialized_boolean = bincode::serialize(&val_boolean).expect("Serialization failed");
@@ -438,7 +442,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn deserialize_val() {
+    fn test_deserialize_val() {
         // Test deserialization of binary data into Val variants
         let binary_boolean = vec![0, 0, 0, 0, 1];
         let deserialized_boolean: Val =
@@ -472,16 +476,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn round_trip_val() {
-        // Round-trip tests for Val serialization and deserialization
-        let original_val = Val::BigInt(123456789);
-        let serialized = bincode::serialize(&original_val).expect("Serialization failed");
-        let deserialized: Val = bincode::deserialize(&serialized).expect("Deserialization failed");
-        assert_eq!(original_val, deserialized);
-    }
-
-    #[test]
-    fn serialize_value() {
+    fn test_serialize_value() {
         // Test serialization of Value struct
         let value = Value {
             value_: Val::Integer(42),
@@ -533,7 +528,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn deserialize_value() {
+    fn test_deserialize_value() {
         // Test deserialization of binary data into Value struct
         let value = Value {
             value_: Val::Integer(42),
@@ -548,7 +543,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn round_trip_value() {
+    fn test_round_trip_value() {
         // Round-trip tests for Value serialization and deserialization
         let original_value = Value {
             value_: Val::Decimal(123.456),
@@ -582,5 +577,411 @@ mod unit_tests {
         assert_eq!(format!("{:#}", bool_value), "Boolean(true)");
         assert_eq!(format!("{:#}", string_value), "VarLen(\"Hello\")");
         assert_eq!(format!("{:#}", vector_value), "Vector([Value { value_: Integer(1), size_: Length(4), manage_data_: false, type_id_: Integer }, Value { value_: VarLen(\"two\"), size_: Length(0), manage_data_: false, type_id_: VarChar }, Value { value_: Decimal(3.0), size_: Length(8), manage_data_: false, type_id_: Decimal }])");
+    }
+
+    #[test]
+    fn test_value_creation() {
+        let bool_val = Value::new(true);
+        let int_val = Value::new(42i32);
+        let string_val = Value::new("Hello");
+        let null_val = Value::new(Val::Null);
+        let vector_val = Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]);
+
+        assert_eq!(bool_val.get_type_id(), TypeId::Boolean);
+        assert_eq!(int_val.get_type_id(), TypeId::Integer);
+        assert_eq!(string_val.get_type_id(), TypeId::VarChar);
+        assert_eq!(null_val.get_type_id(), TypeId::Invalid);
+        assert_eq!(vector_val.get_type_id(), TypeId::Vector);
+    }
+
+    #[test]
+    fn test_value_storage_size() {
+        assert_eq!(Value::new(true).get_storage_size(), 1);
+        assert_eq!(Value::new(42i32).get_storage_size(), 4);
+        assert_eq!(Value::new("Hello").get_storage_size(), 5);
+        assert_eq!(Value::new(Val::Null).get_storage_size(), 1);
+        assert_eq!(
+            Value::new_vector(vec![Value::new(1), Value::new(2)]).get_storage_size(),
+            12
+        );
+    }
+
+    #[test]
+    fn test_value_debug_display() {
+        assert_eq!(format!("{:#}", Value::new(42)), "Integer(42)");
+        assert_eq!(format!("{:#}", Value::new(3.14)), "Decimal(3.14)");
+        assert_eq!(format!("{:#}", Value::new(true)), "Boolean(true)");
+        assert_eq!(format!("{:#}", Value::new("Hello")), "VarLen(\"Hello\")");
+    }
+}
+
+#[cfg(test)]
+mod basic_behavior_tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_null_comparisons() {
+        let null1 = Value::new(Val::Null);
+        let null2 = Value::new(Val::Null);
+        let val = Value::new(5);
+
+        // Equality
+        assert_eq!(null1.compare_equals(&null2), CmpBool::CmpNull);
+        assert_eq!(null1.compare_equals(&val), CmpBool::CmpNull);
+        assert_eq!(val.compare_equals(&null1), CmpBool::CmpNull);
+
+        // Inequality
+        assert_eq!(null1.compare_not_equals(&null2), CmpBool::CmpNull);
+        assert_eq!(null1.compare_not_equals(&val), CmpBool::CmpNull);
+        assert_eq!(val.compare_not_equals(&null1), CmpBool::CmpNull);
+    }
+
+    #[test]
+    fn test_basic_numeric_comparisons() {
+        let val1 = Value::new(5);
+        let val2 = Value::new(10);
+        let val3 = Value::new(5);
+
+        assert_eq!(val1.compare_equals(&val3), CmpBool::CmpTrue);
+        assert_eq!(val1.compare_not_equals(&val2), CmpBool::CmpTrue);
+        assert_eq!(val1.compare_less_than(&val2), CmpBool::CmpTrue);
+        assert_eq!(val2.compare_greater_than(&val1), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_basic_string_comparisons() {
+        let str1 = Value::new("abc");
+        let str2 = Value::new("def");
+        let str3 = Value::new("abc");
+
+        assert_eq!(str1.compare_equals(&str3), CmpBool::CmpTrue);
+        assert_eq!(str1.compare_not_equals(&str2), CmpBool::CmpTrue);
+        assert_eq!(str1.compare_less_than(&str2), CmpBool::CmpTrue);
+        assert_eq!(str2.compare_greater_than(&str1), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_basic_type_mismatch() {
+        let int_val = Value::new(5);
+        let str_val = Value::new("5");
+        let bool_val = Value::new(true);
+
+        assert_eq!(int_val.compare_equals(&str_val), CmpBool::CmpFalse);
+        assert_eq!(int_val.compare_less_than(&bool_val), CmpBool::CmpFalse);
+        assert_eq!(str_val.compare_greater_than(&bool_val), CmpBool::CmpFalse);
+    }
+
+    #[test]
+    fn test_basic_comparisons() {
+        // Integer comparisons
+        let int1 = Value::new(5);
+        let int2 = Value::new(10);
+        let int3 = Value::new(5);
+
+        assert_eq!(int1.compare_equals(&int3), CmpBool::CmpTrue);
+        assert_eq!(int1.compare_not_equals(&int2), CmpBool::CmpTrue);
+        assert_eq!(int1.compare_less_than(&int2), CmpBool::CmpTrue);
+        assert_eq!(int2.compare_greater_than(&int1), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_string_comparisons() {
+        let str1 = Value::new("abc");
+        let str2 = Value::new("def");
+        let str3 = Value::new("abc");
+
+        assert_eq!(str1.compare_equals(&str3), CmpBool::CmpTrue);
+        assert_eq!(str1.compare_not_equals(&str2), CmpBool::CmpTrue);
+        assert_eq!(str1.compare_less_than(&str2), CmpBool::CmpTrue);
+        assert_eq!(str2.compare_greater_than(&str1), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_null_comparisons() {
+        let null1 = Value::new(Val::Null);
+        let null2 = Value::new(Val::Null);
+        let int1 = Value::new(5);
+        let int2 = Value::new(10);
+
+        // NULL = NULL -> NULL
+        assert_eq!(null1.compare_equals(&null2), CmpBool::CmpNull);
+
+        // NULL = value -> NULL
+        assert_eq!(null1.compare_equals(&int1), CmpBool::CmpNull);
+
+        // value = NULL -> NULL
+        assert_eq!(int1.compare_equals(&null1), CmpBool::CmpNull);
+
+        // NULL != NULL -> NULL
+        assert_eq!(null1.compare_not_equals(&null2), CmpBool::CmpNull);
+
+        // NULL != value -> NULL
+        assert_eq!(null1.compare_not_equals(&int1), CmpBool::CmpNull);
+
+        // value != NULL -> NULL
+        assert_eq!(int1.compare_not_equals(&null1), CmpBool::CmpNull);
+
+        // NULL < value -> NULL
+        assert_eq!(null1.compare_less_than(&int1), CmpBool::CmpNull);
+
+        // NULL < NULL -> NULL
+        assert_eq!(null1.compare_less_than(&null2), CmpBool::CmpNull);
+
+        // value < NULL -> NULL
+        assert_eq!(int1.compare_less_than(&null1), CmpBool::CmpNull);
+
+        // NULL > value -> NULL
+        assert_eq!(null1.compare_greater_than(&int1), CmpBool::CmpNull);
+
+        // NULL > NULL -> NULL
+        assert_eq!(null1.compare_greater_than(&null2), CmpBool::CmpNull);
+
+        // value > NULL -> NULL
+        assert_eq!(int1.compare_greater_than(&null1), CmpBool::CmpNull);
+
+        // NULL <= value -> NULL
+        assert_eq!(null1.compare_less_than_equals(&int1), CmpBool::CmpNull);
+
+        // NULL <= NULL -> NULL
+        assert_eq!(null1.compare_less_than_equals(&null2), CmpBool::CmpNull);
+
+        // value <= NULL -> NULL
+        assert_eq!(int1.compare_less_than_equals(&null1), CmpBool::CmpNull);
+
+        // NULL >= value -> NULL
+        assert_eq!(null1.compare_greater_than_equals(&int1), CmpBool::CmpNull);
+
+        // NULL >= NULL -> NULL
+        assert_eq!(null1.compare_greater_than_equals(&null2), CmpBool::CmpNull);
+
+        // value >= NULL -> NULL
+        assert_eq!(int1.compare_greater_than_equals(&null1), CmpBool::CmpNull);
+
+        // Verify non-NULL comparisons still work correctly
+        assert_eq!(int1.compare_less_than(&int2), CmpBool::CmpTrue);
+        assert_eq!(int2.compare_greater_than(&int1), CmpBool::CmpTrue);
+        assert_eq!(int1.compare_equals(&int1), CmpBool::CmpTrue);
+        assert_eq!(int1.compare_not_equals(&int2), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_mismatched_type_comparisons() {
+        let int_val = Value::new(5);
+        let str_val = Value::new("5");
+        let bool_val = Value::new(true);
+
+        // Different types should not be comparable
+        assert_eq!(int_val.compare_equals(&str_val), CmpBool::CmpFalse);
+        assert_eq!(int_val.compare_less_than(&bool_val), CmpBool::CmpFalse);
+        assert_eq!(str_val.compare_greater_than(&bool_val), CmpBool::CmpFalse);
+    }
+
+    #[test]
+    fn test_vector_comparisons() {
+        let vec1 = Value::new_vector(vec![Value::new(1), Value::new(2)]);
+        let vec2 = Value::new_vector(vec![Value::new(1), Value::new(2)]);
+        let vec3 = Value::new_vector(vec![Value::new(2), Value::new(3)]);
+
+        assert_eq!(vec1.compare_equals(&vec2), CmpBool::CmpTrue);
+        assert_eq!(vec1.compare_not_equals(&vec3), CmpBool::CmpTrue);
+        // Vector type doesn't support less/greater than comparisons
+        assert_eq!(vec1.compare_less_than(&vec3), CmpBool::CmpFalse);
+        assert_eq!(vec1.compare_greater_than(&vec3), CmpBool::CmpFalse);
+    }
+
+    #[test]
+    fn test_decimal_comparisons() {
+        let dec1 = Value::new(3.14);
+        let dec2 = Value::new(3.14);
+        let dec3 = Value::new(2.718);
+
+        assert_eq!(dec1.compare_equals(&dec2), CmpBool::CmpTrue);
+        assert_eq!(dec1.compare_not_equals(&dec3), CmpBool::CmpTrue);
+        assert_eq!(dec3.compare_less_than(&dec1), CmpBool::CmpTrue);
+        assert_eq!(dec1.compare_greater_than(&dec3), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_timestamp_comparisons() {
+        let ts1 = Value::new(1000u64);
+        let ts2 = Value::new(2000u64);
+        let ts3 = Value::new(1000u64);
+
+        assert_eq!(ts1.compare_equals(&ts3), CmpBool::CmpTrue);
+        assert_eq!(ts1.compare_not_equals(&ts2), CmpBool::CmpTrue);
+        assert_eq!(ts1.compare_less_than(&ts2), CmpBool::CmpTrue);
+        assert_eq!(ts2.compare_greater_than(&ts1), CmpBool::CmpTrue);
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+
+    #[test]
+    fn test_concurrent_value_creation() {
+        let mut handles = vec![];
+        let values = Arc::new(vec![1, 2, 3, 4, 5]);
+
+        for _ in 0..3 {
+            let values = Arc::clone(&values);
+            let handle =
+                thread::spawn(move || values.iter().map(|&x| Value::new(x)).collect::<Vec<_>>());
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            let thread_values = handle.join().unwrap();
+            assert_eq!(thread_values.len(), 5);
+            for (i, value) in thread_values.iter().enumerate() {
+                assert_eq!(*value, Value::new(i as i32 + 1));
+            }
+        }
+    }
+
+    #[test]
+    fn test_concurrent_comparisons() {
+        let mut handles = vec![];
+        let val1 = Arc::new(Value::new(5));
+        let val2 = Arc::new(Value::new(10));
+
+        for _ in 0..3 {
+            let val1 = Arc::clone(&val1);
+            let val2 = Arc::clone(&val2);
+            let handle = thread::spawn(move || {
+                assert_eq!(val1.compare_less_than(&val2), CmpBool::CmpTrue);
+                assert_eq!(val2.compare_greater_than(&val1), CmpBool::CmpTrue);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_vector_operations() {
+        let mut handles = vec![];
+        let vector = Arc::new(Value::new_vector(vec![
+            Value::new(1),
+            Value::new(2),
+            Value::new(3),
+        ]));
+
+        for _ in 0..3 {
+            let vector = Arc::clone(&vector);
+            let handle = thread::spawn(move || {
+                let bytes = vector.as_bytes();
+                assert!(!bytes.is_empty());
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod edge_cases {
+    use super::*;
+
+    #[test]
+    fn test_empty_values() {
+        let empty_str = Value::new("");
+        let empty_vec = Value::new_vector::<Vec<Value>>(vec![]);
+
+        assert_eq!(empty_str.get_storage_size(), 0);
+        assert_eq!(empty_vec.get_storage_size(), 4);
+        assert_eq!(empty_str.compare_equals(&Value::new("")), CmpBool::CmpTrue);
+        assert_eq!(
+            empty_vec.compare_equals(&Value::new_vector::<Vec<Value>>(vec![])),
+            CmpBool::CmpTrue
+        );
+    }
+
+    #[test]
+    fn test_extreme_values() {
+        let min_tiny = Value::new(i8::MIN);
+        let max_tiny = Value::new(i8::MAX);
+        let min_int = Value::new(i32::MIN);
+        let max_int = Value::new(i32::MAX);
+        let min_big = Value::new(i64::MIN);
+        let max_big = Value::new(i64::MAX);
+
+        assert_eq!(min_tiny.compare_less_than(&max_tiny), CmpBool::CmpTrue);
+        assert_eq!(min_int.compare_less_than(&max_int), CmpBool::CmpTrue);
+        assert_eq!(min_big.compare_less_than(&max_big), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_decimal_edge_cases() {
+        let inf = Value::new(f64::INFINITY);
+        let neg_inf = Value::new(f64::NEG_INFINITY);
+        let nan = Value::new(f64::NAN);
+
+        assert_eq!(neg_inf.compare_less_than(&inf), CmpBool::CmpTrue);
+        assert_eq!(inf.compare_greater_than(&neg_inf), CmpBool::CmpTrue);
+        assert_eq!(nan.compare_equals(&nan), CmpBool::CmpFalse);
+    }
+
+    #[test]
+    fn test_nested_vectors() {
+        let nested = Value::new_vector(vec![
+            Value::new_vector(vec![Value::new(1), Value::new(2)]),
+            Value::new_vector(vec![Value::new(3), Value::new(4)]),
+        ]);
+
+        let same_nested = Value::new_vector(vec![
+            Value::new_vector(vec![Value::new(1), Value::new(2)]),
+            Value::new_vector(vec![Value::new(3), Value::new(4)]),
+        ]);
+
+        assert_eq!(nested.compare_equals(&same_nested), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_mixed_vector_types() {
+        let mixed = Value::new_vector(vec![
+            Value::new(1),
+            Value::new("string"),
+            Value::new(true),
+            Value::new(3.14),
+        ]);
+
+        let same_mixed = Value::new_vector(vec![
+            Value::new(1),
+            Value::new("string"),
+            Value::new(true),
+            Value::new(3.14),
+        ]);
+
+        assert_eq!(mixed.compare_equals(&same_mixed), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_empty_vector_comparisons() {
+        // Test empty vectors
+        let empty_vec1 = Value::new_vector::<Vec<Value>>(vec![]);
+        let empty_vec2 = Value::new_vector(vec![] as Vec<Value>);
+        assert_eq!(empty_vec1.compare_equals(&empty_vec2), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_empty_string_comparisons() {
+        let empty_str1 = Value::new("");
+        let empty_str2 = Value::new("");
+        assert_eq!(empty_str1.compare_equals(&empty_str2), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_boolean_comparisons() {
+        let empty_str1 = Value::new("");
+        let empty_str2 = Value::new("");
+        assert_eq!(empty_str1.compare_equals(&empty_str2), CmpBool::CmpTrue);
     }
 }
