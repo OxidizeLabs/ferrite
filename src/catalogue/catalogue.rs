@@ -4,7 +4,6 @@ use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::common::logger::initialize_logger;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
@@ -64,8 +63,6 @@ pub struct IndexInfo {
 /// table creation, table lookup, index creation, and index lookup.
 pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
-    // lock_manager: Arc<LockManager>,
-    log_manager: Arc<LogManager>,
     tables: HashMap<TableOidT, TableInfo>,
     table_names: HashMap<String, TableOidT>,
     next_table_oid: TableOidT,
@@ -152,8 +149,6 @@ impl Catalog {
     /// - `log_manager`: The log manager in use by the system.
     pub fn new(
         bpm: Arc<BufferPoolManager>,
-        // lock_manager: Arc<LockManager>,
-        log_manager: Arc<LogManager>,
         next_index_oid: IndexOidT,
         next_table_oid: TableOidT,
         tables: HashMap<TableOidT, TableInfo>,
@@ -163,8 +158,6 @@ impl Catalog {
     ) -> Self {
         Catalog {
             bpm,
-            // lock_manager,
-            log_manager,
             tables,
             table_names,
             next_table_oid,
@@ -184,13 +177,7 @@ impl Catalog {
     ///
     /// # Returns
     /// A (non-owning) pointer to the metadata for the table.
-    pub fn create_table(
-        &mut self,
-        txn: &Arc<Mutex<Transaction>>,
-        table_name: &str,
-        schema: Schema,
-        create_table_heap: bool,
-    ) -> Option<&TableInfo> {
+    pub fn create_table(&mut self, table_name: &str, schema: Schema) -> Option<&TableInfo> {
         // Check if table already exists
         if self.table_names.contains_key(table_name) {
             return None;
@@ -203,12 +190,7 @@ impl Catalog {
         let table_oid = self.next_table_oid.add(1);
 
         // Create table info
-        let table_info = TableInfo::new(
-            schema,
-            table_name.to_string(),
-            table,
-            table_oid,
-        );
+        let table_info = TableInfo::new(schema, table_name.to_string(), table, table_oid);
 
         // Add to catalog maps
         self.table_names.insert(table_name.to_string(), table_oid);
@@ -402,7 +384,7 @@ impl Display for IndexType {
 
 pub struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    // transaction_manager: Arc<Mutex<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     log_manager: Arc<LogManager>,
     db_file: String,
@@ -432,15 +414,9 @@ impl TestContext {
             disk_manager.clone(),
             replacer.clone(),
         ));
-        let file_disk_manager = Arc::new(FileDiskManager::new(
-            "db_file.db".to_string(),
-            "log_file.log".to_string(),
-            10,
-        ));
-        let log_manager = Arc::new(LogManager::new(file_disk_manager));
+
         let catalog = Arc::new(RwLock::new(Catalog::new(
             bpm.clone(),
-            log_manager,
             0,
             0,
             Default::default(),
@@ -449,13 +425,12 @@ impl TestContext {
             Default::default(),
         )));
         // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new((catalog))));
+        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
         let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
         let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
 
         Self {
             bpm,
-            transaction_manager,
             lock_manager,
             log_manager,
             db_file,
@@ -491,18 +466,13 @@ impl Drop for TestContext {
 mod unit_tests {
     use super::*;
     use crate::catalogue::column::Column;
-    use crate::concurrency::transaction::IsolationLevel;
     use crate::types_db::type_id::TypeId;
 
     fn create_catalog(
         bpm: Arc<BufferPoolManager>,
-        lock_manager: Arc<LockManager>,
-        log_manager: Arc<LogManager>,
     ) -> Catalog {
         Catalog::new(
             bpm,
-            // lock_manager,
-            log_manager,
             0,
             0,
             HashMap::new(),
@@ -516,18 +486,15 @@ mod unit_tests {
     fn test_create_table() {
         let ctx = TestContext::new("test_create_table");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
-        let log_manager = ctx.log_manager();
 
-        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+        let mut catalog = create_catalog(bpm);
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
-        let table_info = catalog.create_table(&txn, "test_table", schema.clone(), true);
+        let table_info = catalog.create_table("test_table", schema.clone());
         assert!(table_info.is_some());
 
         let retrieved_info = catalog.get_table("test_table");
@@ -540,19 +507,16 @@ mod unit_tests {
     fn test_get_table_by_oid() {
         let ctx = TestContext::new("test_get_table_by_oid");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
-        let log_manager = ctx.log_manager();
 
-        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+        let mut catalog = create_catalog(bpm);
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
         let table_info = catalog
-            .create_table(&txn, "test_get_table_by_oid", schema.clone(), true)
+            .create_table("test_get_table_by_oid", schema.clone())
             .unwrap();
         let table_oid = table_info.get_table_oidt();
 
@@ -568,19 +532,16 @@ mod unit_tests {
     fn test_get_table_names() {
         let ctx = TestContext::new("test_get_table_names");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
-        let log_manager = ctx.log_manager();
 
-        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+        let mut catalog = create_catalog(bpm);
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
-        catalog.create_table(&txn, "test_get_table_names_a", schema.clone(), true);
-        catalog.create_table(&txn, "test_get_table_names_b", schema.clone(), true);
+        catalog.create_table("test_get_table_names_a", schema.clone());
+        catalog.create_table("test_get_table_names_b", schema.clone());
 
         let table_names = catalog.get_table_names();
         assert_eq!(table_names.len(), 2);
@@ -592,24 +553,18 @@ mod unit_tests {
     fn test_get_table_schema() {
         let ctx = TestContext::new("test_get_table_schema");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
-        let log_manager = ctx.log_manager();
 
-        let mut catalog = create_catalog(bpm, lock_manager, log_manager);
+        let mut catalog = create_catalog(bpm);
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let txn = Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::Serializable)));
 
-        catalog.create_table(&txn, "test_get_table_schema", schema.clone(), true);
+        catalog.create_table("test_get_table_schema", schema.clone());
 
         let retrieved_schema = catalog.get_table_schema("test_get_table_schema");
         assert!(retrieved_schema.is_some());
         assert_eq!(retrieved_schema.unwrap(), schema);
     }
-
-    // Additional tests for index-related functions can be added here
-    // once the create_index function is implemented
 }

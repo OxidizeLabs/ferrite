@@ -1,26 +1,21 @@
-use std::ops::Deref;
-use crate::common::config::TableOidT;
+use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
-use crate::execution::executors::abstract_exector::AbstractExecutor;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::executors::values_executor::ValuesExecutor;
+use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::insert_plan::InsertNode;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::catalogue::schema::Schema;
 use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use parking_lot::RwLock;
-use crate::execution::executors::values_executor::ValuesExecutor;
-use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
-use crate::execution::plans::values_plan::ValuesNode;
 
 pub struct InsertExecutor {
     context: Arc<ExecutorContext>,
     plan: Arc<InsertNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
-    tuple_index: usize,
     child_executor: Option<Box<dyn AbstractExecutor>>,
 }
 
@@ -43,21 +38,20 @@ impl InsertExecutor {
             plan,
             table_heap,
             initialized: false,
-            tuple_index: 0,
             child_executor: None,
         }
     }
 
-    fn insert_tuple(&self, tuple_meta: &TupleMeta, tuple: &mut Tuple, table_oid_t: TableOidT) -> Result<RID, String> {
+    fn insert_tuple(
+        &self,
+        tuple_meta: &TupleMeta,
+        tuple: &mut Tuple,
+    ) -> Result<RID, String> {
         debug!("Inserting tuple into table: {}", self.plan.get_table_name());
-        let lock_manager = self.get_executor_context().get_lock_manager();
-        let txn_guard = self.get_executor_context().get_transaction().lock();
-        let txn = txn_guard.deref();
-        self.table_heap.insert_tuple(tuple_meta, tuple, Option::from(lock_manager), Option::from(txn), table_oid_t)
-    }
-
-    fn get_table_heap(&self) -> Arc<TableHeap> {
-        Arc::clone(&self.table_heap)
+        self.table_heap.insert_tuple(
+            tuple_meta,
+            tuple
+        )
     }
 }
 
@@ -65,7 +59,7 @@ impl AbstractExecutor for InsertExecutor {
     fn init(&mut self) {
         if !self.initialized {
             debug!("Initializing insert executor");
-            match &**self.plan.get_child() {
+            match self.plan.get_child() {
                 PlanNode::Values(values_plan) => {
                     // Initialize child executor
                     debug!("Creating values executor for insert");
@@ -99,10 +93,9 @@ impl AbstractExecutor for InsertExecutor {
                     .expect("Time went backwards")
                     .as_nanos() as u64;
                 let tuple_meta = TupleMeta::new(time_stamp, false);
-                let table_oid = self.plan.get_table_oid();
 
                 // Insert tuple into table heap
-                match self.insert_tuple(&tuple_meta, &mut tuple, table_oid) {
+                match self.insert_tuple(&tuple_meta, &mut tuple) {
                     Ok(rid) => {
                         info!("Successfully inserted tuple at RID: {:?}", rid);
                         Some((tuple, rid))
@@ -133,26 +126,24 @@ impl AbstractExecutor for InsertExecutor {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
-    use parking_lot::Mutex;
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::types_db::type_id::TypeId;
-    use crate::execution::plans::values_plan::ValuesNode;
-    use crate::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::execution::expressions::abstract_expression::Expression;
-    use crate::concurrency::transaction::{Transaction, IsolationLevel};
-    use crate::types_db::value::Value;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::IsolationLevel::ReadUncommitted;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
+    use crate::execution::expressions::abstract_expression::Expression;
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::execution::plans::values_plan::ValuesNode;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use chrono::Utc;
+    use parking_lot::{Mutex, RwLock};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -174,12 +165,10 @@ mod tests {
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
             // Create disk manager and scheduler
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
 
             // Create buffer pool manager
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
@@ -190,13 +179,9 @@ mod tests {
                 replacer,
             ));
 
-            // Create log manager
-            let log_manager = Arc::new(LogManager::new(disk_manager));
-
             // Create catalog
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 Arc::clone(&buffer_pool),
-                Arc::clone(&log_manager),
                 0,
                 0,
                 Default::default(),
@@ -206,7 +191,8 @@ mod tests {
             )));
 
             // Create transaction manager
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(Arc::clone(&catalog))));
+            let transaction_manager =
+                Arc::new(Mutex::new(TransactionManager::new(Arc::clone(&catalog))));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             Self {
@@ -255,8 +241,8 @@ mod tests {
         let table_name = "test_table";
         {
             let mut catalog = test_ctx.catalog.write();
-            let txn = Arc::new(Mutex::new(Transaction::new(0, ReadUncommitted)));
-            catalog.create_table(&txn, table_name, schema.clone(), true)
+            catalog
+                .create_table(table_name, schema.clone())
                 .expect("Failed to create table");
         }
 
@@ -275,16 +261,16 @@ mod tests {
         ]];
 
         // Create values plan node
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            PlanNode::Empty,
-        ).expect("Failed to create ValuesNode"));
+        let values_node = Arc::new(
+            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
+                .expect("Failed to create ValuesNode"),
+        );
 
         // Get table info for insert plan
         let table_oid = {
             let catalog = test_ctx.catalog.read();
-            catalog.get_table(table_name)
+            catalog
+                .get_table(table_name)
                 .expect("Table not found")
                 .get_table_oidt()
         };
@@ -327,8 +313,8 @@ mod tests {
 
         {
             let mut catalog = test_ctx.catalog.write();
-            let txn = Arc::new(Mutex::new(Transaction::new(0, ReadUncommitted)));
-            catalog.create_table(&txn, table_name, schema.clone(), true)
+            catalog
+                .create_table(table_name, schema.clone())
                 .expect("Failed to create table");
         }
 
@@ -346,15 +332,15 @@ mod tests {
             )))],
         ];
 
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            PlanNode::Empty,
-        ).expect("Failed to create ValuesNode"));
+        let values_node = Arc::new(
+            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
+                .expect("Failed to create ValuesNode"),
+        );
 
         let table_oid = {
             let catalog = test_ctx.catalog.read();
-            catalog.get_table(table_name)
+            catalog
+                .get_table(table_name)
                 .expect("Table not found")
                 .get_table_oidt()
         };
@@ -401,26 +387,24 @@ mod tests {
 
         {
             let mut catalog = test_ctx.catalog.write();
-            let txn = Arc::new(Mutex::new(Transaction::new(0, ReadUncommitted)));
-            catalog.create_table(&txn, table_name, schema.clone(), true)
+            catalog
+                .create_table(table_name, schema.clone())
                 .expect("Failed to create table");
         }
 
-        let expressions = vec![vec![Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(1),
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )))]];
+        let expressions = vec![vec![Arc::new(Expression::Constant(
+            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
+        ))]];
 
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            PlanNode::Empty,
-        ).expect("Failed to create ValuesNode"));
+        let values_node = Arc::new(
+            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
+                .expect("Failed to create ValuesNode"),
+        );
 
         let table_oid = {
             let catalog = test_ctx.catalog.read();
-            catalog.get_table(table_name)
+            catalog
+                .get_table(table_name)
                 .expect("Table not found")
                 .get_table_oidt()
         };

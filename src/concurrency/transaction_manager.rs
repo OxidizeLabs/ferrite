@@ -1,5 +1,5 @@
 use crate::catalogue::catalogue::Catalog;
-use crate::common::config::TransactionId;
+use crate::common::config::{TransactionId, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,

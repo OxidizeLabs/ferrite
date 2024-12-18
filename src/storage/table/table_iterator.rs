@@ -1,4 +1,4 @@
-use crate::common::config::INVALID_PAGE_ID;
+use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
@@ -13,6 +13,7 @@ pub struct TableIterator {
     rid: RID,
     stop_at_rid: RID,
 }
+
 
 impl TableIterator {
     pub fn new(table_heap: Arc<TableHeap>, rid: RID, stop_at_rid: RID) -> Self {
@@ -50,62 +51,86 @@ impl TableIterator {
         debug!("Iterator initialized: {:?}", self);
     }
 
-    /// Advances the iterator to the next position.
-    fn advance(&mut self) {
-        let bpm = self.table_heap.get_bpm();
-        if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
-            if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                table_page.access(|page| {
-                    let current_num_tuples = page.get_num_tuples();
-                    let next_tuple_id = self.rid.get_slot_num() + 1;
-
-                    if next_tuple_id >= current_num_tuples as u32 {
-                        // Move to next page
-                        let next_page_id = page.get_next_page_id();
-                        if next_page_id == INVALID_PAGE_ID {
-                            self.rid = RID::new(INVALID_PAGE_ID, 0);
-                        } else {
-                            self.rid = RID::new(next_page_id, 0);
-                        }
-                    } else {
-                        self.rid = RID::new(self.rid.get_page_id(), next_tuple_id);
-                    }
-
-                    // Check stop condition after advancing
-                    if self.stop_at_rid.get_page_id() != INVALID_PAGE_ID {
-                        if self.rid.get_page_id() > self.stop_at_rid.get_page_id() ||
-                            (self.rid.get_page_id() == self.stop_at_rid.get_page_id() &&
-                                self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()) {
-                            self.rid = RID::new(INVALID_PAGE_ID, 0);
-                        }
-                    }
-                });
-            } else {
-                error!("Failed to convert to TablePage");
-                self.rid = RID::new(INVALID_PAGE_ID, 0);
-            }
-        } else {
-            error!("Failed to fetch page");
-            self.rid = RID::new(INVALID_PAGE_ID, 0);
-        }
-    }
-
-    /// Gets the current RID.
-    ///
-    /// # Returns
-    ///
-    /// The current `RID`.
     pub fn get_rid(&self) -> RID {
         self.rid
     }
 
-    /// Checks if the iterator has reached the end.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the iterator has reached the end, `false` otherwise.
     pub fn is_end(&self) -> bool {
-        self.rid.get_page_id() == INVALID_PAGE_ID
+        self.rid.get_page_id() == self.stop_at_rid.get_page_id() && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num() || self.rid.get_page_id() == INVALID_PAGE_ID
+    }
+
+    /// Checks if we need to move to the next page based on tuple position
+    fn should_move_to_next_page(&self, page: &TablePage, next_tuple_id: u32) -> bool {
+        next_tuple_id >= page.get_num_tuples() as u32
+    }
+
+    /// Gets the next RID when moving within the same page
+    fn get_next_rid_same_page(&self, next_tuple_id: u32) -> RID {
+        RID::new(self.rid.get_page_id(), next_tuple_id)
+    }
+
+    /// Gets the next RID when moving to a new page
+    fn get_next_rid_new_page(&self, next_page_id: u32) -> RID {
+        if next_page_id == INVALID_PAGE_ID as u32 {
+            RID::new(INVALID_PAGE_ID, 0)
+        } else {
+            RID::new(next_page_id as PageId, 0)
+        }
+    }
+
+    /// Checks if we've reached or passed the stop condition
+    fn is_past_stop_point(&self, current_rid: RID) -> bool {
+        if self.stop_at_rid.get_page_id() == INVALID_PAGE_ID {
+            return false;
+        }
+
+        current_rid.get_page_id() > self.stop_at_rid.get_page_id()
+            || (current_rid.get_page_id() == self.stop_at_rid.get_page_id()
+            && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
+    }
+
+    /// Advances the iterator to the next position.
+    fn advance(&mut self) {
+        let bpm = self.table_heap.get_bpm();
+
+        // Try to fetch the current page
+        let page_guard = match bpm.fetch_page_guarded(self.rid.get_page_id()) {
+            Some(guard) => guard,
+            None => {
+                error!("Failed to fetch page");
+                self.rid = RID::new(INVALID_PAGE_ID, 0);
+                return;
+            }
+        };
+
+        // Try to convert to TablePage
+        let table_page = match page_guard.into_specific_type::<TablePage, 8>() {
+            Some(page) => page,
+            None => {
+                error!("Failed to convert to TablePage");
+                self.rid = RID::new(INVALID_PAGE_ID, 0);
+                return;
+            }
+        };
+
+        // Process the page within the access closure
+        table_page.access(|page| {
+            let next_tuple_id = self.rid.get_slot_num() + 1;
+
+            // Determine the next RID
+            let next_rid = if self.should_move_to_next_page(page, next_tuple_id) {
+                self.get_next_rid_new_page(page.get_next_page_id() as u32)
+            } else {
+                self.get_next_rid_same_page(next_tuple_id)
+            };
+
+            // Update the iterator's position
+            self.rid = if self.is_past_stop_point(next_rid) {
+                RID::new(INVALID_PAGE_ID, 0)
+            } else {
+                next_rid
+            };
+        });
     }
 }
 
@@ -237,7 +262,7 @@ mod tests {
         let meta = TupleMeta::new(123, false);
 
         table_heap
-            .insert_tuple(&meta, &mut tuple, None, None, 0)
+            .insert_tuple(&meta, &mut tuple)
             .expect("failed to insert tuple");
 
         let mut iterator = TableIterator::new(table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
@@ -248,6 +273,64 @@ mod tests {
         let (result_meta, result_tuple) = result.unwrap();
         assert_eq!(result_meta, meta);
         assert_eq!(result_tuple, tuple);
+
+        assert!(iterator.is_end());
+        assert_eq!(iterator.next(), None);
+    }
+
+    #[test]
+    fn test_table_iterator_multiple_tuples() {
+        let table_heap = setup_test_table("test_table_iterator_single_tuple");
+        let schema = Schema::new(vec![
+            Column::new("col_1", Integer),
+            Column::new("col_2", Integer),
+            Column::new("col_3", Integer),
+        ]);
+        let rid_1 = RID::new(0, 0);
+        let rid_2 = RID::new(0, 1);
+
+        let mut tuple_1 = Tuple::new(
+            &*vec![Value::from(1), Value::from(2), Value::from(3)],
+            schema.clone(),
+            rid_1,
+        );
+
+        let mut tuple_2 = Tuple::new(
+            &*vec![Value::from(4), Value::from(5), Value::from(6)],
+            schema.clone(),
+            rid_2,
+        );
+
+        let meta_1 = TupleMeta::new(123, false);
+        let meta_2 = TupleMeta::new(124, false);
+
+
+
+
+        table_heap
+            .insert_tuple(&meta_1, &mut tuple_1)
+            .expect("failed to insert tuple 1");
+
+        // insert tuple twice
+        table_heap
+            .insert_tuple(&meta_2, &mut tuple_2)
+            .expect("failed to insert tuple 2");
+
+        let mut iterator = TableIterator::new(table_heap, rid_1, RID::new(INVALID_PAGE_ID, 1));
+        assert!(!iterator.is_end());
+
+        let result = iterator.next();
+        assert!(result.is_some());
+        let (result_meta, result_tuple) = result.unwrap();
+        assert_eq!(result_meta, meta_1);
+        assert_eq!(result_tuple, tuple_1);
+
+        let result2 = iterator.next();
+        assert!(result2.is_some());
+        let (result_meta2, result_tuple2) = result2.unwrap();
+        assert_eq!(result_meta2, meta_2);
+        assert_eq!(result_tuple2, tuple_2);
+
 
         assert!(iterator.is_end());
         assert_eq!(iterator.next(), None);

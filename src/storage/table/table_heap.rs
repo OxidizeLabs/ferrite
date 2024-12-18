@@ -1,8 +1,6 @@
 use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
-use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
+use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::Transaction;
 use crate::storage::page::page::PageTrait;
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
@@ -70,20 +68,17 @@ impl TableHeap {
     pub fn insert_tuple(
         &self,
         meta: &TupleMeta,
-        tuple: &mut Tuple,
-        lock_mgr: Option<&LockManager>,
-        txn: Option<&Transaction>,
-        oid: TableOidT,
+        tuple: &mut Tuple
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
         // Helper function to try inserting into a page
         let mut try_insert = |page_id: PageId| -> Option<Option<RID>> {
             if let Some(page_guard) = self.bpm.fetch_page_guarded(page_id) {
-                if let Some(mut table_page_guard) = page_guard.into_specific_type::<TablePage, 8>() {
-                    return table_page_guard.access_mut(|table_page| {
-                        table_page.insert_tuple(meta, tuple)
-                    });
+                if let Some(mut table_page_guard) = page_guard.into_specific_type::<TablePage, 8>()
+                {
+                    return table_page_guard
+                        .access_mut(|table_page| table_page.insert_tuple(meta, tuple));
                 }
             }
             None
@@ -95,7 +90,8 @@ impl TableHeap {
         }
 
         // If insertion failed, create a new page and try again
-        let new_page_guard = self.bpm
+        let new_page_guard = self
+            .bpm
             .new_page_guarded(NewPageType::Table)
             .ok_or_else(|| "Failed to create new page".to_string())?;
 
@@ -132,7 +128,7 @@ impl TableHeap {
     /// - `meta`: New tuple meta.
     /// - `rid`: The RID of the inserted tuple.
     pub fn update_tuple_meta(&self, meta: &TupleMeta, rid: RID) {
-        let _write_guard = self.latch.write(); // Use RAII for the write lock
+        let _write_guard = self.latch.write();
 
         let page_guard = self
             .bpm
@@ -145,7 +141,7 @@ impl TableHeap {
             .ok_or_else(|| "Failed to convert to TablePage".to_string())
             .unwrap();
 
-        table_page_guard
+        let _ = table_page_guard
             .access_mut(|table_page| table_page.update_tuple_meta(meta, &rid))
             .expect("Failed to update tuple metadata");
     }
@@ -239,12 +235,12 @@ impl TableHeap {
             }
         } else {
             None
-        }.unwrap_or(RID::new(INVALID_PAGE_ID, 0));
+        }
+        .unwrap_or(RID::new(INVALID_PAGE_ID, 0));
 
         debug!(
             "Creating iterator: start_rid = {:?}, stop_at_rid = {:?}",
-            start_rid,
-            stop_at_rid
+            start_rid, stop_at_rid
         );
 
         let table_heap = Arc::new(TableHeap {
@@ -520,7 +516,7 @@ mod tests {
         let meta = TupleMeta::new(0, false);
 
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple, None, None, 0)
+            .insert_tuple(&meta, &mut tuple)
             .expect("Failed to insert tuple");
 
         let (retrieved_meta, retrieved_tuple) =
@@ -543,7 +539,7 @@ mod tests {
         let meta = TupleMeta::new(0, false);
 
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple, None, None, 0)
+            .insert_tuple(&meta, &mut tuple)
             .expect("Failed to insert tuple");
 
         let updated_meta = TupleMeta::new(1, true);
@@ -556,51 +552,51 @@ mod tests {
         assert_eq!(retrieved_meta, updated_meta);
     }
 
-    // #[test]
-    // fn test_table_iterator() {
-    //     let ctx = TestContext::new("test_table_iterator");
-    //     let bpm = ctx.bpm.clone();
-    //     let table_heap = TableHeap::new(bpm);
-    //     let schema = create_test_schema();
-    //
-    //     // Insert multiple tuples
-    //     let mut inserted_rids = Vec::new();
-    //     for i in 0..5 {
-    //         let tuple_values = vec![
-    //             Value::new(i),
-    //             Value::new(format!("Name{}", i)),
-    //             Value::new(20 + i),
-    //         ];
-    //         let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, i as u32));
-    //         let meta = TupleMeta::new(0, false);
-    //         let rid = table_heap
-    //             .insert_tuple(&meta, &mut tuple, None, None, 0)
-    //             .expect("Failed to insert tuple");
-    //         inserted_rids.push(rid);
-    //         debug!("Inserted tuple with RID: {:?}", rid);
-    //     }
-    //
-    //     debug!("Table heap after insertions: {:?}", table_heap);
-    //
-    //     let iterator = table_heap.make_iterator();
-    //     let tuples = iterator.collect::<Vec<(TupleMeta, Tuple)>>();
-    //
-    //     debug!("Collected {} tuples", tuples.len());
-    //
-    //     assert_eq!(
-    //         tuples.len(),
-    //         5,
-    //         "Expected 5 tuples, but got {}",
-    //         tuples.len()
-    //     );
-    //     for (i, (meta, tuple)) in tuples.iter().enumerate() {
-    //         assert_eq!(tuple.get_value(0), &Value::new(i as i32));
-    //         assert_eq!(tuple.get_value(1), &Value::new(format!("Name{}", i)));
-    //         assert_eq!(tuple.get_value(2), &Value::new(20 + i as i32));
-    //         assert_eq!(meta.get_timestamp(), 0);
-    //         assert_eq!(meta.is_deleted(), false);
-    //     }
-    // }
+    #[test]
+    fn test_table_iterator() {
+        let ctx = TestContext::new("test_table_iterator");
+        let bpm = ctx.bpm.clone();
+        let table_heap = TableHeap::new(bpm);
+        let schema = create_test_schema();
+
+        // Insert multiple tuples
+        let mut inserted_rids = Vec::new();
+        for i in 0..5 {
+            let tuple_values = vec![
+                Value::new(i),
+                Value::new(format!("Name{}", i)),
+                Value::new(20 + i),
+            ];
+            let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, i as u32));
+            let meta = TupleMeta::new(0, false);
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple)
+                .expect("Failed to insert tuple");
+            inserted_rids.push(rid);
+            debug!("Inserted tuple with RID: {:?}", rid);
+        }
+
+        debug!("Table heap after insertions: {:?}", table_heap);
+
+        let iterator = table_heap.make_iterator();
+        let tuples = iterator.collect::<Vec<(TupleMeta, Tuple)>>();
+
+        debug!("Collected {} tuples", tuples.len());
+
+        assert_eq!(
+            tuples.len(),
+            5,
+            "Expected 5 tuples, but got {}",
+            tuples.len()
+        );
+        for (i, (meta, tuple)) in tuples.iter().enumerate() {
+            assert_eq!(tuple.get_value(0), &Value::new(i as i32));
+            assert_eq!(tuple.get_value(1), &Value::new(format!("Name{}", i)));
+            assert_eq!(tuple.get_value(2), &Value::new(20 + i as i32));
+            assert_eq!(meta.get_timestamp(), 0);
+            assert_eq!(meta.is_deleted(), false);
+        }
+    }
 
     #[test]
     fn test_table_heap_debug() {

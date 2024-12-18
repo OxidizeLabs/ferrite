@@ -4,7 +4,7 @@ use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::check_option::{CheckOption, CheckOptions};
-use crate::execution::executors::abstract_exector::AbstractExecutor;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
 use parking_lot::{Mutex, RwLock};
 use std::collections::VecDeque;
 use std::sync::Arc;

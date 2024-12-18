@@ -122,6 +122,24 @@ pub struct LockRequest {
     granted: bool,
 }
 
+/// Structure to hold lock requests for the same resource (table or row).
+pub struct LockRequestQueue {
+    request_queue: VecDeque<Arc<Mutex<LockRequest>>>,
+    cv: Condvar,
+    upgrading: TxnId,
+    latch: Mutex<()>,
+}
+
+/// LockManager handles transactions asking for locks on records.
+pub struct LockManager {
+    transaction_manager: Arc<Mutex<TransactionManager>>,
+    table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
+    row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
+    enable_cycle_detection: AtomicBool,
+    cycle_detection_thread: Option<thread::JoinHandle<()>>,
+    waits_for: Mutex<HashMap<TxnId, Vec<TxnId>>>,
+}
+
 impl LockRequest {
     /// Creates a new table lock request.
     ///
@@ -163,14 +181,6 @@ impl LockRequest {
     }
 }
 
-/// Structure to hold lock requests for the same resource (table or row).
-pub struct LockRequestQueue {
-    request_queue: VecDeque<Arc<Mutex<LockRequest>>>,
-    cv: Condvar,
-    upgrading: TxnId,
-    latch: Mutex<()>,
-}
-
 impl LockRequestQueue {
     /// Creates a new `LockRequestQueue`.
     ///
@@ -184,16 +194,6 @@ impl LockRequestQueue {
             latch: Mutex::new(()),
         }
     }
-}
-
-/// LockManager handles transactions asking for locks on records.
-pub struct LockManager {
-    transaction_manager: Arc<Mutex<TransactionManager>>,
-    table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
-    row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
-    enable_cycle_detection: AtomicBool,
-    cycle_detection_thread: Option<thread::JoinHandle<()>>,
-    waits_for: Mutex<HashMap<TxnId, Vec<TxnId>>>,
 }
 
 impl LockManager {
@@ -237,8 +237,10 @@ impl LockManager {
     ///
     /// # Errors
     /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, oid: TableOidT) -> bool {
-        unimplemented!()
+    pub fn lock_table(&self, txn: &mut Transaction, lock_mode: LockMode, table_oid: TableOidT) -> bool {
+        let mut lock_queue = self.table_lock_map.lock();
+        lock_queue.entry(table_oid).or_insert(Arc::new(Mutex::new(LockRequestQueue::new())));
+        true
     }
 
     /// Releases the lock held on a table by the transaction.

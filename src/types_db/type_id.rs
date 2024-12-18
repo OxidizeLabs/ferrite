@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
 // Every possible SQL type ID
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum TypeId {
     Boolean,
     TinyInt,

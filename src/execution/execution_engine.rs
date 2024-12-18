@@ -1,35 +1,33 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::catalogue::Catalog;
 use crate::common::db_instance::ResultWriter;
 use crate::common::exception::DBError;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
-use crate::execution::executors::abstract_exector::AbstractExecutor;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::executors::create_table_executor::CreateTableExecutor;
+use crate::execution::executors::insert_executor::InsertExecutor;
 use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
+use crate::execution::plans::abstract_plan::PlanNode::{CreateTable, Filter, Insert, SeqScan};
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
 use crate::planner::planner::QueryPlanner;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use std::env;
-use crate::execution::executors::insert_executor::InsertExecutor;
-use crate::execution::plans::abstract_plan::PlanNode::{CreateTable, Insert, SeqScan};
+use std::sync::Arc;
+use crate::execution::executors::filter_executor::FilterExecutor;
 
 pub struct ExecutorEngine {
-    buffer_pool_manager: Arc<BufferPoolManager>,
-    catalog: Arc<RwLock<Catalog>>,
+    // buffer_pool_manager: Arc<BufferPoolManager>,
+    // catalog: Arc<RwLock<Catalog>>,
     planner: QueryPlanner,
     optimizer: Optimizer,
     log_detailed: bool,
 }
 
 impl ExecutorEngine {
-    pub fn new(buffer_pool_manager: Arc<BufferPoolManager>, catalog: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         Self {
-            buffer_pool_manager,
-            catalog: catalog.clone(),
             planner: QueryPlanner::new(catalog.clone()),
             optimizer: Optimizer::new(catalog),
             log_detailed: env::var("RUST_TEST").is_ok(),
@@ -83,7 +81,10 @@ impl ExecutorEngine {
 
         match &result {
             Ok(has_results) => {
-                info!("Statement execution completed successfully. Has results: {}", has_results);
+                info!(
+                    "Statement execution completed successfully. Has results: {}",
+                    has_results
+                );
                 debug!("Releasing all resources and returning control to CLI");
             }
             Err(e) => {
@@ -111,7 +112,10 @@ impl ExecutorEngine {
         match plan {
             SeqScan(scan_plan) => {
                 info!("Creating sequential scan executor");
-                Ok(Box::new(SeqScanExecutor::new(Arc::from(context), Arc::new(scan_plan.clone()))))
+                Ok(Box::new(SeqScanExecutor::new(
+                    Arc::from(context),
+                    Arc::new(scan_plan.clone()),
+                )))
             }
             CreateTable(create_table_plan) => {
                 info!("Creating table creation executor");
@@ -126,6 +130,14 @@ impl ExecutorEngine {
                 Ok(Box::new(InsertExecutor::new(
                     Arc::new(context),
                     Arc::new(insert_plan.clone()),
+                )))
+            }
+            Filter(filter_plan) => {
+                info!("Creating filter executor for WHERE clause");
+                debug!("Filter predicate: {:?}", filter_plan.get_filter_predicate());
+                Ok(Box::new(FilterExecutor::new(
+                    Arc::new(context),
+                    Arc::new(filter_plan.clone()),
                 )))
             }
             _ => {
@@ -156,7 +168,6 @@ impl ExecutorEngine {
             // For INSERT, CREATE TABLE, etc. - just execute and return success
             PlanNode::Insert(_) | PlanNode::CreateTable(_) => {
                 debug!("Executing modification statement");
-                // Execute the statement - we only need to check if it returns anything
                 if root_executor.next().is_some() {
                     info!("Modification statement executed successfully");
                     Ok(true)
@@ -164,8 +175,8 @@ impl ExecutorEngine {
                     info!("No rows affected");
                     Ok(false)
                 }
-            },
-            // For SELECT and other queries that produce output
+            }
+            // For SELECT and other queries that produce output (including filtered results)
             _ => {
                 let mut has_results = false;
                 let mut row_count = 0;
@@ -198,15 +209,16 @@ impl ExecutorEngine {
 
                     writer.begin_row();
                     for i in 0..column_count {
-                        writer.write_cell(&tuple.get_value(i as usize).to_string());
+                        let value = tuple.get_value(i as usize);
+                        writer.write_cell(&value.to_string());
                     }
                     writer.end_row();
                 }
 
-                debug!("Result processing complete");
+                debug!("Result processing complete. Found {} matching rows", row_count);
                 writer.end_table();
 
-                info!("Statement execution finished. Processed {} rows", row_count);
+                info!("Query execution finished. Processed {} rows", row_count);
                 Ok(has_results)
             }
         }
@@ -223,8 +235,79 @@ impl ExecutorEngine {
 
         debug!("Post-execution cleanup complete");
     }
-
-    fn is_modification_statement(&self, plan: &PlanNode) -> bool {
-        matches!(plan, Insert(_) | CreateTable(_))
-    }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::catalogue::catalogue::TestContext;
+//     use crate::common::db_instance::ResultWriter;
+//     use std::collections::HashMap;
+//     use parking_lot::Mutex;
+//     use crate::concurrency::transaction::{IsolationLevel, Transaction};
+//     use crate::concurrency::transaction_manager::TransactionManager;
+//
+//     #[test]
+//     fn test_select_with_where_clause() {
+//         // Set up test context
+//         let test_context = TestContext::new("select_where_test");
+//         let catalog = Arc::new(RwLock::new(Catalog::new(
+//             test_context.bpm(),
+//             0,
+//             0,
+//             HashMap::new(),
+//             HashMap::new(),
+//             HashMap::new(),
+//             HashMap::new(),
+//         )));
+//
+//         // Create table and insert test data
+//         let mut engine = ExecutorEngine::new(catalog.clone());
+//
+//         // Create table
+//         let create_sql = "CREATE TABLE test_table (id INTEGER, name VARCHAR(255), age INTEGER)";
+//         let create_plan = engine.prepare_statement(create_sql, Arc::new(CheckOptions::new())).unwrap();
+//         let mut writer = ResultWriter::new();
+//         let context = ExecutorContext::new(
+//             Arc::new(Mutex::new(Transaction::new(0, IsolationLevel::ReadUncommitted))),
+//             Arc::new(Mutex::new(TransactionManager::new(catalog.clone()))),
+//             catalog.clone(),
+//             test_context.bpm(),
+//             test_context.lock_manager(),
+//         );
+//         engine.execute_statement(&create_plan, context, &mut writer).unwrap();
+//
+//         // Insert test data
+//         let insert_sql = "INSERT INTO test_table VALUES (1, 'Alice', 25), (2, 'Bob', 30), (3, 'Charlie', 35)";
+//         let insert_plan = engine.prepare_statement(insert_sql, Arc::new(CheckOptions::new())).unwrap();
+//         let context = ExecutorContext::new(
+//             Arc::new(Mutex::new(Transaction::new(1, IsolationLevel::ReadUncommitted))),
+//             Arc::new(Mutex::new(TransactionManager::new(catalog.clone()))),
+//             catalog.clone(),
+//             test_context.bpm(),
+//             test_context.lock_manager(),
+//         );
+//         engine.execute_statement(&insert_plan, context, &mut writer).unwrap();
+//
+//         // Test SELECT with WHERE clause
+//         let select_sql = "SELECT * FROM test_table WHERE age > 30";
+//         let select_plan = engine.prepare_statement(select_sql, Arc::new(CheckOptions::new())).unwrap();
+//         let mut result_writer = ResultWriter::new();
+//         let context = ExecutorContext::new(
+//             Arc::new(Mutex::new(Transaction::new(2, IsolationLevel::ReadUncommitted))),
+//             Arc::new(Mutex::new(TransactionManager::new(catalog.clone()))),
+//             catalog.clone(),
+//             test_context.bpm(),
+//             test_context.lock_manager(),
+//         );
+//
+//         let success = engine.execute_statement(&select_plan, context, &mut result_writer).unwrap();
+//         assert!(success, "Query should return results");
+//
+//         let result = result_writer.get_output();
+//         assert!(result.contains("Charlie"));
+//         assert!(result.contains("35"));
+//         assert!(!result.contains("Bob"));
+//         assert!(!result.contains("Alice"));
+//     }
+// }

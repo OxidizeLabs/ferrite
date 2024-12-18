@@ -51,7 +51,9 @@ impl Optimizer {
                     self.optimize_nested_loop_joins(filter_node.get_child_plan().clone())?;
                 Ok(PlanNode::Filter(FilterNode::new(
                     filter_node.get_output_schema().clone(),
-                    filter_node.get_predicate().clone(),
+                    filter_node.get_table_oid(),
+                    filter_node.get_table_name().to_string(),
+                    filter_node.get_filter_predicate().clone(),
                     new_child,
                 )))
             }

@@ -8,7 +8,6 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {

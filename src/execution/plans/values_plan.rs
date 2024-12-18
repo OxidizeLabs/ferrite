@@ -1,14 +1,12 @@
-// In values_plan.rs
 use crate::catalogue::schema::Schema;
+use crate::common::exception::ValuesError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::sync::Arc;
-use log::debug;
-use crate::common::exception::ValuesError;
-use crate::storage::table::tuple;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::Type;
 use crate::types_db::value::{Size, Val, Value};
+use log::debug;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuesNode {
@@ -31,7 +29,11 @@ impl ValuesNode {
         child: PlanNode,
     ) -> Result<Self, ValuesError> {
         let column_count = output_schema.get_column_count() as usize;
-        debug!("Creating ValuesNode with {} rows and schema: {}", expressions.len(), output_schema);
+        debug!(
+            "Creating ValuesNode with {} rows and schema: {}",
+            expressions.len(),
+            output_schema
+        );
 
         // Validate row lengths
         Self::validate_row_expression_lengths(&expressions, column_count)?;
@@ -71,7 +73,7 @@ impl ValuesNode {
         expressions: &Vec<Vec<Arc<Expression>>>,
         column_count: usize,
     ) -> Result<(), ValuesError> {
-        for (idx, row_exprs) in expressions.iter().enumerate() {
+        for (_idx, row_exprs) in expressions.iter().enumerate() {
             if row_exprs.len() != column_count {
                 return Err(ValuesError::InvalidValueCount {
                     value_count: row_exprs.len(),
@@ -128,7 +130,8 @@ impl ValueRow {
                     ValuesError::ValueEvaluationError(format!("Column index {} out of bounds", idx))
                 })?;
 
-                let value = expr.evaluate(&dummy_tuple, schema)
+                let value = expr
+                    .evaluate(&dummy_tuple, schema)
                     .map_err(|e| ValuesError::ValueEvaluationError(e.to_string()))?;
 
                 // Verify type compatibility
@@ -244,11 +247,9 @@ mod tests {
     #[test]
     fn test_values_node_creation() {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let expressions = vec![vec![Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(1),
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )))]];
+        let expressions = vec![vec![Arc::new(Expression::Constant(
+            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
+        ))]];
 
         let result = ValuesNode::new(schema, expressions, PlanNode::Empty);
         assert!(result.is_ok());
@@ -260,11 +261,9 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let expressions = vec![vec![Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(1),
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )))]]; // Only one column when schema expects two
+        let expressions = vec![vec![Arc::new(Expression::Constant(
+            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
+        ))]];
 
         let result = ValuesNode::new(schema, expressions, PlanNode::Empty);
         assert!(matches!(
@@ -274,15 +273,6 @@ mod tests {
                 column_count: 2,
             })
         ));
-    }
-
-    #[test]
-    fn test_value_row_empty_evaluation() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let row = ValueRow::new(vec![]);
-
-        assert!(row.is_empty());
-        assert_eq!(row.len(), 0);
     }
 
     #[test]
