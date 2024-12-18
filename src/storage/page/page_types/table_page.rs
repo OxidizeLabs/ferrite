@@ -107,7 +107,6 @@ impl TablePage {
         }
     }
 
-
     /// Updates the metadata of a tuple.
     pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), PageError> {
         let tuple_id = rid.get_slot_num() as usize;
@@ -258,7 +257,7 @@ impl PageTrait for TablePage {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
@@ -339,5 +338,299 @@ mod tests {
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
         assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
         assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
+    }
+    #[test]
+    fn test_table_page_creation() {
+        let page = TablePage::new(1);
+        assert_eq!(page.get_page_id(), 1);
+        assert_eq!(page.get_num_tuples(), 0);
+        assert_eq!(page.get_num_deleted_tuples(), 0);
+        assert_eq!(page.get_next_page_id(), INVALID_PAGE_ID);
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_pin_count(), 0);
+    }
+
+    #[test]
+    fn test_page_initialization() {
+        let mut page = TablePage::new(1);
+        page.set_next_page_id(2);
+        page.set_prev_page_id(3);
+        page.set_dirty(true);
+        page.increment_pin_count();
+
+        page.init();
+
+        assert_eq!(page.get_next_page_id(), INVALID_PAGE_ID);
+        assert_eq!(page.prev_page_id, INVALID_PAGE_ID);
+        assert_eq!(page.get_num_tuples(), 0);
+        assert_eq!(page.get_num_deleted_tuples(), 0);
+        assert!(page.tuple_info.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tuple_operation_tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+
+    fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(id), Value::from("Test".to_string())];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(123, false);
+        (meta, tuple)
+    }
+
+    #[test]
+    fn test_basic_tuple_insertion() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        assert_eq!(page.get_num_tuples(), 1);
+        assert_eq!(rid.get_page_id(), 1);
+        assert_eq!(rid.get_slot_num(), 0);
+    }
+
+    #[test]
+    fn test_tuple_retrieval() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+
+        assert_eq!(retrieved_meta.get_timestamp(), meta.get_timestamp());
+        assert_eq!(retrieved_meta.is_deleted(), meta.is_deleted());
+        assert_eq!(retrieved_tuple.get_value(0), tuple.get_value(0));
+        assert_eq!(retrieved_tuple.get_value(1), tuple.get_value(1));
+    }
+
+    #[test]
+    fn test_tuple_metadata_update() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let new_meta = TupleMeta::new(456, true);
+
+        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        let retrieved_meta = page.get_tuple_meta(&rid).unwrap();
+
+        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_meta.is_deleted(), new_meta.is_deleted());
+        assert_eq!(page.get_num_deleted_tuples(), 1);
+    }
+
+    #[test]
+    fn test_tuple_in_place_update() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let new_meta = TupleMeta::new(789, false);
+        let new_tuple = create_test_tuple(2).1;
+
+        unsafe {
+            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
+                .unwrap();
+        }
+
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
+    }
+}
+
+#[cfg(test)]
+mod error_handling_tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+
+    fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(id), Value::from("Test".to_string())];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(123, false);
+        (meta, tuple)
+    }
+
+    #[test]
+    fn test_invalid_tuple_retrieval() {
+        let page = TablePage::new(1);
+        let invalid_rid = RID::new(1, 100);
+        assert!(matches!(
+            page.get_tuple(&invalid_rid),
+            Err(PageError::TupleInvalid)
+        ));
+    }
+
+    #[test]
+    fn test_invalid_meta_update() {
+        let mut page = TablePage::new(1);
+        let invalid_rid = RID::new(1, 100);
+        let meta = TupleMeta::new(123, false);
+        assert!(matches!(
+            page.update_tuple_meta(&meta, &invalid_rid),
+            Err(PageError::TupleInvalid)
+        ));
+    }
+
+    #[test]
+    fn test_invalid_in_place_update() {
+        let mut page = TablePage::new(1);
+        let (meta, tuple) = create_test_tuple(1);
+        let invalid_rid = RID::new(1, 100);
+
+        unsafe {
+            assert!(matches!(
+                page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid),
+                Err(PageError::TupleInvalid)
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+
+    fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(id), Value::from("Test".to_string())];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(123, false);
+        (meta, tuple)
+    }
+
+    #[test]
+    fn test_page_capacity() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        let mut inserted_count = 0;
+        while page.insert_tuple(&meta, &mut tuple).is_some() {
+            inserted_count += 1;
+        }
+
+        assert!(inserted_count > 0);
+        assert!(page.get_next_tuple_offset(&tuple).is_none());
+    }
+
+    #[test]
+    fn test_space_management() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        // Insert first tuple
+        page.insert_tuple(&meta, &mut tuple).unwrap();
+        let first_offset = page.tuple_info[0].0;
+
+        // Insert second tuple
+        page.insert_tuple(&meta, &mut tuple).unwrap();
+        let second_offset = page.tuple_info[1].0;
+
+        // Verify tuples are packed from the end of the page
+        assert!(second_offset < first_offset);
+        assert_eq!(page.get_num_tuples(), 2);
+    }
+
+    #[test]
+    fn test_header_size_constraints() {
+        let page = TablePage::new(1);
+        assert!(TablePage::header_size() < DB_PAGE_SIZE as u16);
+        assert_eq!(page.tuple_info_size(), 0);
+    }
+}
+
+#[cfg(test)]
+mod concurrency_safety_tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use std::sync::Arc;
+    use std::thread;
+
+    fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(id), Value::from("Test".to_string())];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(123, false);
+        (meta, tuple)
+    }
+
+    #[test]
+    fn test_pin_count_operations() {
+        let mut page = TablePage::new(1);
+
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
+
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 2);
+
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
+
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 0);
+    }
+
+    #[test]
+    fn test_concurrent_reads() {
+        let mut page = Arc::new(TablePage::new(1));
+        let (meta, mut tuple) = create_test_tuple(1);
+
+        Arc::get_mut(&mut page)
+            .unwrap()
+            .insert_tuple(&meta, &mut tuple)
+            .unwrap();
+
+        let mut handles = vec![];
+
+        for _ in 0..3 {
+            let page_clone = Arc::clone(&page);
+            let rid = RID::new(1, 0);
+
+            let handle = thread::spawn(move || {
+                let (retrieved_meta, retrieved_tuple) = page_clone.get_tuple(&rid).unwrap();
+                assert_eq!(retrieved_meta.get_timestamp(), 123);
+                assert_eq!(retrieved_tuple.get_value(0), &Value::from(1));
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
