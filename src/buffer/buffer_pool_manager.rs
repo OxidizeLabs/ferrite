@@ -979,7 +979,7 @@ mod unit_tests {
         let page = context.bpm.new_page(NewPageType::Basic).unwrap();
         let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE as usize];
-        rand::thread_rng().fill(&mut data[..]);
+        rand::rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
 
         // Unpin and evict the page
@@ -1035,7 +1035,7 @@ mod unit_tests {
         let page = context.bpm.new_page(NewPageType::Basic).unwrap();
         let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE as usize];
-        rand::thread_rng().fill(&mut data[..]);
+        rand::rng().fill(&mut data[..]);
         context.bpm.write_page(page_id, data);
 
         // Flush the page
@@ -1139,7 +1139,7 @@ mod concurrency {
         let bpm = Arc::clone(&ctx.bpm);
 
         // Generate random data for writing
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let data: [u8; DB_PAGE_SIZE as usize] = rng.random();
 
         // Mutex for synchronizing tests completion

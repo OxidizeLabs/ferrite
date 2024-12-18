@@ -13,7 +13,6 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::execution::executor_context::ExecutorContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -44,8 +43,8 @@ pub trait ExpressionOps {
 impl ExpressionOps for Expression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         match self {
-            Self::Constant(expr) => Ok(expr.get_value().clone()),
-            Self::ColumnRef(expr) => Ok(tuple.get_value(expr.get_column_index()).clone()),
+            Self::Constant(expr) => expr.evaluate(tuple, schema),
+            Self::ColumnRef(expr) => expr.evaluate(tuple, schema),
             Self::Arithmetic(expr) => expr.evaluate(tuple, schema),
             Self::Comparison(expr) => expr.evaluate(tuple, schema),
             Self::Logic(expr) => expr.evaluate(tuple, schema),

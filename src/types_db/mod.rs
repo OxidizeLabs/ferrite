@@ -1,4 +1,3 @@
-pub mod abstract_pool;
 pub mod bigint_type;
 pub mod boolean_type;
 pub mod decimal_type;
@@ -9,9 +8,7 @@ pub mod smallint_type;
 pub mod timestamp_type;
 pub mod tinyint_type;
 pub mod type_id;
-pub mod type_util;
 pub mod types;
 pub mod value;
-pub mod value_factory;
 pub mod varlen_type;
 pub mod vector_type;

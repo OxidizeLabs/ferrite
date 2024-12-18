@@ -1,7 +1,7 @@
 use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
-use crate::execution::executors::abstract_exector::AbstractExecutor;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::create_plan::CreateTablePlanNode;
 use crate::storage::table::tuple::Tuple;
@@ -36,7 +36,6 @@ impl AbstractExecutor for CreateTableExecutor {
         let catalog = self.context.get_catalog();
         let table_name = self.plan.get_table_name();
         let schema = self.plan.get_output_schema();
-        let txn = self.context.get_transaction();
 
         // Since Catalog isn't wrapped in RwLock, we need to be careful with mutation
         // Check if table exists when if_not_exists is true
@@ -48,10 +47,8 @@ impl AbstractExecutor for CreateTableExecutor {
 
         // Create new table in catalog
         catalog_guard.create_table(
-            txn,
             table_name,
             schema.clone(),
-            true, // Create if not exists
         );
 
         self.executed = true;

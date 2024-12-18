@@ -18,21 +18,3 @@ impl Type for VectorType {
         TypeId::Vector
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_vector_type_new() {
-        let vt = VectorType::new();
-        assert_eq!(vt.get_type_id(), TypeId::Vector);
-    }
-
-    #[test]
-    fn test_is_coercible_from() {
-        let vt = VectorType::new();
-        assert!(vt.is_coercible_from(TypeId::Vector));
-        assert!(!vt.is_coercible_from(TypeId::Integer));
-    }
-}

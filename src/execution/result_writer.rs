@@ -1,5 +1,5 @@
-use colored::Colorize;
 use crate::common::db_instance::ResultWriter;
+use colored::Colorize;
 use std::collections::VecDeque;
 
 pub struct CliResultWriter {

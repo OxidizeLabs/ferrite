@@ -54,7 +54,7 @@ impl Tuple {
 
         Self {
             values: values.to_vec(),
-            rid
+            rid,
         }
     }
 
@@ -114,6 +114,10 @@ impl Tuple {
     /// Panics if the index is out of bounds.
     pub fn get_value(&self, column_index: usize) -> &Value {
         &self.values[column_index]
+    }
+
+    pub fn get_values(&self) -> &Vec<Value> {
+        &self.values
     }
 
     /// Creates a new tuple containing only the key attributes.

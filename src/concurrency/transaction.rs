@@ -202,12 +202,12 @@ impl Transaction {
     ///
     /// # Returns
     /// The undo log entry at the specified index.
-    pub fn undo_log(&self, log_id: usize) -> UndoLog {
+    pub fn get_undo_log(&self, log_id: usize) -> UndoLog {
         self.undo_logs.lock().unwrap()[log_id].clone()
     }
 
     /// Returns the number of undo log entries.
-    pub fn undo_log_num(&self) -> usize {
+    pub fn get_undo_log_num(&self) -> usize {
         self.undo_logs.lock().unwrap().len()
     }
 

@@ -1,14 +1,13 @@
 use crate::common::db_instance::{DBConfig, DBInstance, ResultWriter};
-use log::{debug, info, warn};
-use colored::*;
-use parking_lot::Mutex;
-use std::sync::Arc;
-use std::error::Error;
-use clap::Parser;
-use rustyline::DefaultEditor;
-use sqlparser::dialect::GenericDialect;
 use crate::common::logger::initialize_logger;
 use crate::execution::result_writer::CliResultWriter;
+use clap::Parser;
+use colored::*;
+use log::{debug, info, warn};
+use parking_lot::Mutex;
+use rustyline::DefaultEditor;
+use std::error::Error;
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -24,15 +23,13 @@ struct Args {
 }
 
 struct DBCommandExecutor {
-    instance: Arc<Mutex<DBInstance>>,
-    dialect: GenericDialect,
+    instance: Arc<Mutex<DBInstance>>
 }
 
 impl DBCommandExecutor {
     fn new(instance: Arc<Mutex<DBInstance>>) -> Self {
         Self {
-            instance,
-            dialect: GenericDialect {},
+            instance
         }
     }
 
@@ -101,10 +98,22 @@ impl DBCommandExecutor {
         // Write configuration details
         self.write_status_row(writer, "Database File", &config.db_filename);
         self.write_status_row(writer, "Log File", &config.db_log_filename);
-        self.write_status_row(writer, "Buffer Pool Size", &config.buffer_pool_size.to_string());
+        self.write_status_row(
+            writer,
+            "Buffer Pool Size",
+            &config.buffer_pool_size.to_string(),
+        );
         self.write_status_row(writer, "LRU-K Value", &config.lru_k.to_string());
-        self.write_status_row(writer, "LRU Sample Size", &config.lru_sample_size.to_string());
-        self.write_status_row(writer, "Logging Enabled", &config.enable_logging.to_string());
+        self.write_status_row(
+            writer,
+            "LRU Sample Size",
+            &config.lru_sample_size.to_string(),
+        );
+        self.write_status_row(
+            writer,
+            "Logging Enabled",
+            &config.enable_logging.to_string(),
+        );
 
         writer.end_table();
         debug!("Status display completed");
@@ -129,9 +138,17 @@ impl DBCommandExecutor {
         writer.end_header();
 
         // Check and write component status
-        self.write_info_row(writer, "Buffer Pool", instance.get_buffer_pool_manager().is_some());
+        self.write_info_row(
+            writer,
+            "Buffer Pool",
+            instance.get_buffer_pool_manager().is_some(),
+        );
         self.write_info_row(writer, "Log Manager", instance.get_log_manager().is_some());
-        self.write_info_row(writer, "Checkpoint Manager", instance.get_checkpoint_manager().is_some());
+        self.write_info_row(
+            writer,
+            "Checkpoint Manager",
+            instance.get_checkpoint_manager().is_some(),
+        );
 
         writer.end_table();
         debug!("Info display completed");
@@ -141,7 +158,11 @@ impl DBCommandExecutor {
     fn write_info_row(&self, writer: &mut impl ResultWriter, component: &str, is_available: bool) {
         writer.begin_row();
         writer.write_cell(component);
-        writer.write_cell(if is_available { "Available" } else { "Disabled" });
+        writer.write_cell(if is_available {
+            "Available"
+        } else {
+            "Disabled"
+        });
         writer.end_row();
     }
 
