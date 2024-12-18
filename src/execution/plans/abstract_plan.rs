@@ -20,6 +20,7 @@ use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::execution::plans::table_scan_plan::TableScanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -43,10 +44,12 @@ pub enum PlanType {
     // InitCheck,
     Window,
     CreateTable,
+    TableScan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanNode {
+    TableScan(TableScanNode),
     SeqScan(SeqScanPlanNode),
     IndexScan(IndexScanNode),
     Insert(InsertNode),
@@ -66,7 +69,7 @@ pub enum PlanNode {
     MockScan(MockScanNode),
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
-    Empty,
+    Empty
 }
 
 pub trait AbstractPlanNode {
@@ -120,6 +123,7 @@ impl PlanNode {
     // Helper method to get a reference to the AbstractPlanNode
     fn as_abstract_plan_node(&self) -> &dyn AbstractPlanNode {
         match self {
+            PlanNode::TableScan(node) => node,
             PlanNode::SeqScan(node) => node,
             PlanNode::IndexScan(node) => node,
             PlanNode::NestedLoopJoin(node) => node,

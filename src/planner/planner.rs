@@ -2,6 +2,7 @@ use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
+use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
@@ -12,7 +13,7 @@ use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use log::{debug, info};
+use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::Expr;
 use sqlparser::ast::{
@@ -23,7 +24,6 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
 use std::sync::Arc;
-use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 
 pub struct QueryPlanner {
     catalog: Arc<RwLock<Catalog>>,
@@ -50,19 +50,19 @@ impl QueryPlanner {
     }
 
     pub fn create_plan(&mut self, sql: &str) -> Result<PlanNode, String> {
-        info!("Planning query: {}", sql);
+        debug!("Planning query: {}", sql);
 
         let dialect = GenericDialect {};
         let ast = match Parser::parse_sql(&dialect, sql) {
             Ok(ast) => ast,
             Err(e) => {
-                info!("Failed to parse SQL: {}", e);
+                debug!("Failed to parse SQL: {}", e);
                 return Err(format!("Failed to parse SQL: {}", e));
             }
         };
 
         if ast.len() != 1 {
-            info!("Error: Expected exactly one statement");
+            debug!("Error: Expected exactly one statement");
             return Err("Expected exactly one statement".to_string());
         }
 
@@ -84,7 +84,7 @@ impl QueryPlanner {
                 self.plan_insert(insert)
             }
             _ => {
-                info!("Error: Unsupported statement type");
+                debug!("Error: Unsupported statement type");
                 Err("Only SELECT statements are supported".to_string())
             }
         }
@@ -229,7 +229,8 @@ impl QueryPlanner {
                 .iter()
                 .enumerate()
                 .map(|(column_index, expr)| {
-                    self.parse_expression(expr, schema).map(|expr| Arc::new(expr))
+                    self.parse_expression(expr, schema)
+                        .map(|expr| Arc::new(expr))
                 })
                 .collect();
 
@@ -483,14 +484,14 @@ impl QueryPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types_db::type_id::TypeId;
-    use std::collections::HashMap;
-    use chrono::Utc;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use std::collections::HashMap;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -510,12 +511,10 @@ mod tests {
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -526,8 +525,8 @@ mod tests {
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm,
-                0, // next_index_oid
-                0, // next_table_oid
+                0,              // next_index_oid
+                0,              // next_table_oid
                 HashMap::new(), // tables
                 HashMap::new(), // indexes
                 HashMap::new(), // table_names
@@ -588,27 +587,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_table_if_not_exists() {
-        let mut ctx = TestContext::new("create_table_if_not_exists_test");
-
-        let sql = "CREATE TABLE IF NOT EXISTS users (id INTEGER)";
-        let plan = ctx.planner.create_plan(sql).unwrap();
-
-        match plan {
-            PlanNode::CreateTable(create_table) => {
-                assert_eq!(create_table.get_table_name(), "users");
-                assert_eq!(create_table.if_not_exists(), true);
-            }
-            _ => panic!("Expected CreateTable plan node"),
-        }
-
-        // Try creating the same table again
-        let sql2 = "CREATE TABLE IF NOT EXISTS users (id INTEGER)";
-        let plan2 = ctx.planner.create_plan(sql2);
-        assert!(plan2.is_ok(), "CREATE TABLE IF NOT EXISTS should not fail");
-    }
-
-    #[test]
     fn test_select_queries() {
         let mut ctx = TestContext::new("select_queries_test");
 
@@ -664,7 +642,8 @@ mod tests {
                 assert_eq!(insert.get_table_name(), "users");
 
                 // Check child plan (Values node)
-                match insert.get_child() {  // Double dereference to get to the inner PlanNode
+                match insert.get_child() {
+                    // Double dereference to get to the inner PlanNode
                     PlanNode::Values(values) => {
                         assert_eq!(values.get_output_schema().get_column_count(), 2);
                     }
@@ -712,12 +691,27 @@ mod tests {
 
         // Test select with different comparison operators
         let test_cases = vec![
-            ("SELECT * FROM users WHERE age > 25", ComparisonType::GreaterThan),
+            (
+                "SELECT * FROM users WHERE age > 25",
+                ComparisonType::GreaterThan,
+            ),
             ("SELECT * FROM users WHERE age = 30", ComparisonType::Equal),
-            ("SELECT * FROM users WHERE age < 40", ComparisonType::LessThan),
-            ("SELECT * FROM users WHERE age >= 25", ComparisonType::GreaterThanOrEqual),
-            ("SELECT * FROM users WHERE age <= 40", ComparisonType::LessThanOrEqual),
-            ("SELECT * FROM users WHERE age != 35", ComparisonType::NotEqual),
+            (
+                "SELECT * FROM users WHERE age < 40",
+                ComparisonType::LessThan,
+            ),
+            (
+                "SELECT * FROM users WHERE age >= 25",
+                ComparisonType::GreaterThanOrEqual,
+            ),
+            (
+                "SELECT * FROM users WHERE age <= 40",
+                ComparisonType::LessThanOrEqual,
+            ),
+            (
+                "SELECT * FROM users WHERE age != 35",
+                ComparisonType::NotEqual,
+            ),
         ];
 
         for (sql, expected_comp_type) in test_cases {

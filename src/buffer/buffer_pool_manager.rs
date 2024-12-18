@@ -153,7 +153,7 @@ impl BufferPoolManager {
     /// - `page_id`: The ID of the page to write to.
     /// - `data`: The data to write to the page.
     pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE as usize]) {
-        info!("Writing to page with ID: {}", page_id);
+        debug!("Writing to page with ID: {}", page_id);
 
         // Acquire read lock on the page collection
         let pages = self.pages.read();
@@ -253,7 +253,7 @@ impl BufferPoolManager {
             if let Some(page_arc) = pages[frame_id as usize].as_mut() {
                 let mut page = page_arc.write(); // Acquire write lock on the page
                 if page.as_page_trait_mut().is_dirty() {
-                    info!("Page {} is dirty, scheduling a write-back", old_page_id);
+                    debug!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
@@ -373,7 +373,7 @@ impl BufferPoolManager {
             if let Some(page_rwlock) = pages[frame_id as usize].as_mut() {
                 let mut page = page_rwlock.write(); // Acquire write lock on the page
                 if page.as_page_trait_mut().is_dirty() {
-                    info!("Page {} is dirty, scheduling a write-back", old_page_id);
+                    debug!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
@@ -447,7 +447,7 @@ impl BufferPoolManager {
             if let Some(&frame_id) = page_table.get(&page_id) {
                 frame_id
             } else {
-                info!("Page {} is not in the page table", page_id);
+                warn!("Page {} is not in the page table", page_id);
                 return false;
             }
         };
@@ -467,7 +467,7 @@ impl BufferPoolManager {
                 debug!("Step 2ci: Acquire page write lock");
                 let mut page = page_arc.write();
 
-                info!(
+                debug!(
                     "Unpinning page {} with current pin count {}",
                     page_id,
                     page.as_page_trait().get_pin_count()
@@ -483,18 +483,18 @@ impl BufferPoolManager {
 
                     // If the pin count reaches 0, the page should become evictable
                     if page.as_page_trait().get_pin_count() == 0 {
-                        info!("Page {} is now evictable", page_id);
+                        debug!("Page {} is now evictable", page_id);
                         true
                     } else {
-                        info!("Page {} unpinned but still in use", page_id);
+                        debug!("Page {} unpinned but still in use", page_id);
                         false
                     }
                 } else {
-                    info!("Page {} has pin count 0, cannot unpin further", page_id);
+                    warn!("Page {} has pin count 0, cannot unpin further", page_id);
                     return false;
                 }
             } else {
-                info!("Page {} was not found in the pages array", page_id);
+                debug!("Page {} was not found in the pages array", page_id);
                 return false;
             }
         };
@@ -525,7 +525,7 @@ impl BufferPoolManager {
         };
 
         if let Some(frame_id) = frame_id {
-            info!("Flushing page {} from frame {}", page_id, frame_id);
+            warn!("Flushing page {} from frame {}", page_id, frame_id);
 
             // Step 2: Get a clone of the page Arc to release the pages lock early
             let page_to_flush = {
@@ -541,19 +541,19 @@ impl BufferPoolManager {
 
                     if page.as_page_trait_mut().is_dirty() {
                         let data = page.as_page_trait().get_data();
-                        info!("Page data before flushing: {:?}", &data[..64]);
+                        debug!("Page data before flushing: {:?}", &data[..64]);
 
                         // Perform the disk write
                         self.disk_manager
                             .write_page(page_id, &data)
                             .expect("Failed to write page");
 
-                        info!("Page data written to disk: {:?}", &data[..64]);
+                        warn!("Page data written to disk: {:?}", &data[..64]);
 
                         page.as_page_trait_mut().set_dirty(false); // Reset dirty flag after flushing
                         flush_successful = true;
                     } else {
-                        info!("Page {} is not dirty, no need to flush", page_id);
+                        warn!("Page {} is not dirty, no need to flush", page_id);
                     }
                 } // Release the page lock after the I/O operation is complete
 
@@ -564,11 +564,11 @@ impl BufferPoolManager {
                     Some(false)
                 }
             } else {
-                info!("Failed to find page in frame {}", frame_id);
+                warn!("Failed to find page in frame {}", frame_id);
                 None
             }
         } else {
-            info!("Page ID {} not found in page table", page_id);
+            warn!("Page ID {} not found in page table", page_id);
             None
         }
     }
@@ -632,7 +632,7 @@ impl BufferPoolManager {
                 Some(frame_id) => frame_id,
                 None => {
                     // Page ID not found in page table
-                    info!("Page ID {} not found in page table", page_id);
+                    warn!("Page ID {} not found in page table", page_id);
                     return;
                 }
             }
@@ -734,7 +734,7 @@ impl BufferPoolManager {
         if let Some(page_rwlock) = page_to_evict {
             let mut page = page_rwlock.write(); // Acquire a write lock on the individual page
             if page.as_page_trait_mut().is_dirty() {
-                info!("Page {} is dirty, scheduling a write-back", old_page_id);
+                debug!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                 // Perform disk write operation outside the main locks
                 self.flush_page(old_page_id); // Perform the flush without holding any locks

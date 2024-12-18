@@ -18,3 +18,4 @@ pub mod topn_plan;
 pub mod update_plan;
 pub mod values_plan;
 pub mod window_plan;
+pub mod table_scan_plan;

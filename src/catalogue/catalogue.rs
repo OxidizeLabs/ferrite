@@ -27,6 +27,7 @@ pub enum IndexType {
 }
 
 /// The TableInfo struct maintains metadata about a table.
+#[derive(Debug)]
 pub struct TableInfo {
     /// The table schema
     schema: Schema,
@@ -382,83 +383,16 @@ impl Display for IndexType {
     }
 }
 
-pub struct TestContext {
-    bpm: Arc<BufferPoolManager>,
-    // transaction_manager: Arc<Mutex<TransactionManager>>,
-    lock_manager: Arc<LockManager>,
-    log_manager: Arc<LogManager>,
-    db_file: String,
-    db_log_file: String,
-}
-
-impl TestContext {
-    pub fn new(test_name: &str) -> Self {
-        initialize_logger();
-        const BUFFER_POOL_SIZE: usize = 5;
-        const K: usize = 2;
-
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-
-        let disk_manager = Arc::new(FileDiskManager::new(
-            db_file.clone(),
-            db_log_file.clone(),
-            100,
-        ));
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(
-            BUFFER_POOL_SIZE,
-            disk_scheduler,
-            disk_manager.clone(),
-            replacer.clone(),
-        ));
-
-        let catalog = Arc::new(RwLock::new(Catalog::new(
-            bpm.clone(),
-            0,
-            0,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
-        )));
-        // Create TransactionManager with a placeholder Catalog
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
-        let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-        let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
-
-        Self {
-            bpm,
-            lock_manager,
-            log_manager,
-            db_file,
-            db_log_file,
-        }
-    }
-
-    pub fn bpm(&self) -> Arc<BufferPoolManager> {
-        Arc::clone(&self.bpm)
-    }
-
-    pub fn lock_manager(&self) -> Arc<LockManager> {
-        Arc::clone(&self.lock_manager)
-    }
-
-    pub fn log_manager(&self) -> Arc<LogManager> {
-        Arc::clone(&self.log_manager)
-    }
-
-    fn cleanup(&self) {
-        let _ = fs::remove_file(&self.db_file);
-        let _ = fs::remove_file(&self.db_log_file);
-    }
-}
-
-impl Drop for TestContext {
-    fn drop(&mut self) {
-        self.cleanup();
+impl PartialEq for TableInfo {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare schema
+        self.schema == other.schema &&
+            // Compare table name
+            self.name == other.name &&
+            // Compare table OID
+            self.oid == other.oid &&
+            // Compare table heap Arc by comparing the internal pointer
+            Arc::ptr_eq(&self.table, &other.table)
     }
 }
 
@@ -467,6 +401,87 @@ mod unit_tests {
     use super::*;
     use crate::catalogue::column::Column;
     use crate::types_db::type_id::TypeId;
+
+    pub struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        // transaction_manager: Arc<Mutex<TransactionManager>>,
+        lock_manager: Arc<LockManager>,
+        log_manager: Arc<LogManager>,
+        db_file: String,
+        db_log_file: String,
+    }
+
+    impl TestContext {
+        pub fn new(test_name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 5;
+            const K: usize = 2;
+
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            ));
+
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                bpm.clone(),
+                0,
+                0,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )));
+            // Create TransactionManager with a placeholder Catalog
+            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+            let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
+
+            Self {
+                bpm,
+                lock_manager,
+                log_manager,
+                db_file,
+                db_log_file,
+            }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
+        }
+
+        pub fn lock_manager(&self) -> Arc<LockManager> {
+            Arc::clone(&self.lock_manager)
+        }
+
+        pub fn log_manager(&self) -> Arc<LogManager> {
+            Arc::clone(&self.log_manager)
+        }
+
+        fn cleanup(&self) {
+            let _ = fs::remove_file(&self.db_file);
+            let _ = fs::remove_file(&self.db_log_file);
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup();
+        }
+    }
+
 
     fn create_catalog(
         bpm: Arc<BufferPoolManager>,
@@ -566,5 +581,44 @@ mod unit_tests {
         let retrieved_schema = catalog.get_table_schema("test_get_table_schema");
         assert!(retrieved_schema.is_some());
         assert_eq!(retrieved_schema.unwrap(), schema);
+    }
+
+    #[test]
+    fn test_table_info_equality() {
+        let ctx = TestContext::new("test_table_info_equality");
+        let bpm = ctx.bpm();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let table_heap = Arc::new(TableHeap::new(bpm.clone()));
+        let table_heap2 = Arc::new(TableHeap::new(bpm));
+
+        // Create two identical TableInfo instances
+        let info1 = TableInfo::new(
+            schema.clone(),
+            "test_table".to_string(),
+            table_heap.clone(),
+            1,
+        );
+        let info2 = TableInfo::new(
+            schema.clone(),
+            "test_table".to_string(),
+            table_heap.clone(),
+            1,
+        );
+
+        // Create a different TableInfo instance
+        let info3 = TableInfo::new(
+            schema.clone(),
+            "different_table".to_string(),
+            table_heap2,
+            2,
+        );
+
+        // Test equality
+        assert_eq!(info1, info2);
+        assert_ne!(info1, info3);
     }
 }
