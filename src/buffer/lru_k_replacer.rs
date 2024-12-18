@@ -1,5 +1,5 @@
 use crate::common::config::FrameId;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -52,7 +52,7 @@ impl LRUKReplacer {
     ///
     /// A new `LRUKReplacer` instance.
     pub fn new(replacer_size: usize, k: usize) -> Self {
-        info!(
+        debug!(
             "Initializing LRUKReplacer with size {} and k {}",
             replacer_size, k
         );
@@ -113,7 +113,7 @@ impl LRUKReplacer {
 
         if let Some(victim_id) = victim_frame_id {
             if frame_store.remove(&victim_id).is_some() {
-                info!("Evicting frame {}", victim_id);
+                debug!("Evicting frame {}", victim_id);
                 return Some(victim_id);
             }
         }
@@ -156,7 +156,7 @@ impl LRUKReplacer {
                 }
             });
 
-        info!("Recorded access for frame {} at {}", frame_id, now);
+        debug!("Recorded access for frame {} at {}", frame_id, now);
     }
 
     /// Sets whether a frame is eligible for eviction.
@@ -171,7 +171,7 @@ impl LRUKReplacer {
             frame.is_evictable = set_evictable;
             debug!("Set frame {} evictable: {}", frame_id, set_evictable);
         } else {
-            info!(
+            debug!(
                 "Frame {} not found in frame_store, adding with evictable status {}",
                 frame_id, set_evictable
             );
@@ -195,13 +195,13 @@ impl LRUKReplacer {
         let mut frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
         if let Some(frame) = frame_store.get(&frame_id) {
             if frame.is_evictable {
-                info!("Removing frame {}", frame_id);
+                debug!("Removing frame {}", frame_id);
                 frame_store.remove(&frame_id);
             } else {
                 error!("Attempt to remove a non-evictable frame {}", frame_id);
             }
         } else {
-            info!("Attempt to remove a non-existing frame {}", frame_id);
+            debug!("Attempt to remove a non-existing frame {}", frame_id);
         }
     }
 

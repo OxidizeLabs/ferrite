@@ -7,6 +7,7 @@ use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::expressions::logic_expression::LogicExpression;
+use crate::execution::expressions::mock_expression::MockExpression;
 use crate::execution::expressions::string_expression::StringExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
@@ -23,6 +24,7 @@ pub enum Expression {
     Logic(LogicExpression),
     String(StringExpression),
     Array(ArrayExpression),
+    Mock(MockExpression),
 }
 
 pub trait ExpressionOps {
@@ -50,6 +52,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.evaluate(tuple, schema),
             Self::String(expr) => expr.evaluate(tuple, schema),
             Self::Array(expr) => expr.evaluate(tuple, schema),
+            Self::Mock(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -80,6 +83,10 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
+            Self::Mock(expr) => {
+                // For mock expressions, we'll just use the regular evaluate
+                expr.evaluate(left_tuple, left_schema)
+            }
         }
     }
 
@@ -92,6 +99,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_child_at(child_idx),
             Self::String(expr) => expr.get_child_at(child_idx),
             Self::Array(expr) => expr.get_child_at(child_idx),
+            Self::Mock(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -104,6 +112,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_children(),
             Self::String(expr) => expr.get_children(),
             Self::Array(expr) => expr.get_children(),
+            Self::Mock(expr) => expr.get_children(),
         }
     }
 
@@ -116,6 +125,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_return_type(),
             Self::String(expr) => expr.get_return_type(),
             Self::Array(expr) => expr.get_return_type(),
+            Self::Mock(expr) => expr.get_return_type(),
         }
     }
 
@@ -128,6 +138,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.clone_with_children(children),
             Self::String(expr) => expr.clone_with_children(children),
             Self::Array(expr) => expr.clone_with_children(children),
+            Self::Mock(expr) => expr.clone_with_children(children),
         }
     }
 }
@@ -170,6 +181,7 @@ impl Display for Expression {
                 }
                 write!(f, "]")
             }
+            Self::Mock(expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -178,6 +190,7 @@ impl Display for Expression {
 mod unit_tests {
     use super::*;
     use crate::common::rid::RID;
+    use crate::execution::expressions::mock_expression::MockExpression;
     use crate::types_db::type_id::TypeId;
 
     #[test]
@@ -193,5 +206,35 @@ mod unit_tests {
         assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), value);
         assert_eq!(expr.get_children().len(), 0);
         assert_eq!(expr.to_string(), "Constant(42)");
+    }
+
+    #[test]
+    fn test_mock_expression() {
+        let mock = MockExpression::new("test".to_string(), TypeId::Integer);
+        let expr = Expression::Mock(mock);
+
+        let schema = Schema::new(vec![]);
+        let rid = RID::new(0, 0);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+
+        // The actual evaluation will depend on your MockExpression implementation
+        assert!(expr.evaluate(&tuple, &schema).is_ok());
+        assert_eq!(expr.get_children().len(), 0);
+        assert!(expr.to_string().contains("test"));
+    }
+
+    #[test]
+    fn test_mock_expression_in_children() {
+        let mock = MockExpression::new("test".to_string(), TypeId::Integer);
+        let mock_expr = Arc::new(Expression::Mock(mock));
+
+        // Create an array expression with mock child
+        let array_expr = Expression::Array(ArrayExpression::new(vec![mock_expr]));
+
+        assert_eq!(array_expr.get_children().len(), 1);
+        match &array_expr.get_children()[0].as_ref() {
+            Expression::Mock(_) => (),
+            _ => panic!("Expected Mock expression"),
+        }
     }
 }

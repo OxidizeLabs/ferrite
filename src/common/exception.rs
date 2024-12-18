@@ -105,6 +105,24 @@ pub enum ExpressionError {
     Array(ArrayExpressionError),
     #[error("Arithmetic error: {0}")]
     ArithmeticError(ArithmeticExpressionError),
+    #[error("DB error: {0}")]
+    DB(DBError),
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
+    #[error("Comparison error: {0}")]
+    ComparisonError(ComparisonError),
+    #[error("Key conversion error: {0}")]
+    KeyConversionError(KeyConversionError),
+    #[error("Tuple error: {0}")]
+    Tuple(TupleError),
+    #[error("Delete page error: {0}")]
+    DeletePageError(DeletePageError),
+    #[error("Flush error: {0}")]
+    FlushError(FlushError),
+    #[error("Page error: {0}")]
+    PageError(PageError),
+    #[error("Page guard error: {0}")]
+    PageGuardError(PageGuardError)
 }
 
 #[derive(Debug, Error)]
@@ -223,6 +241,26 @@ impl Display for KeyConversionError {
                 write!(f, "Deserialization error: {}", msg)
             }
             &KeyConversionError::OffsetOutOfBounds | &KeyConversionError::InvalidOffset => todo!(),
+        }
+    }
+}
+
+impl Display for ComparisonError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ComparisonError::ValueRetrievalError(msg) => {
+                write!(f, "Value retrieval error: {}", msg)
+            }
+        }
+    }
+}
+
+impl Display for FlushError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            FlushError::IoError(e) => write!(f, "IO error: {}", e),
+            FlushError::PageNotFound => write!(f, "Page not found"),
+            FlushError::PageNotInTable => write!(f, "Page not in table"),
         }
     }
 }

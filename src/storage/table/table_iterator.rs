@@ -5,6 +5,7 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;
+use crate::catalogue::catalogue::TableInfo;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -14,6 +15,12 @@ pub struct TableIterator {
     stop_at_rid: RID,
 }
 
+pub struct TableScanIterator {
+    /// The underlying table iterator
+    inner: TableIterator,
+    /// Reference to table info
+    table_info: Arc<TableInfo>,
+}
 
 impl TableIterator {
     pub fn new(table_heap: Arc<TableHeap>, rid: RID, stop_at_rid: RID) -> Self {
@@ -134,6 +141,42 @@ impl TableIterator {
     }
 }
 
+impl TableScanIterator {
+    pub fn new(table_info: Arc<TableInfo>) -> Self {
+        let table_heap = table_info.get_table_heap();
+        let inner = TableIterator::new(
+            table_heap,
+            RID::new(0, 0),
+            RID::new(INVALID_PAGE_ID, 0),
+        );
+
+        Self {
+            inner,
+            table_info,
+        }
+    }
+
+    /// Check if scan has reached the end
+    pub fn is_end(&self) -> bool {
+        self.inner.is_end()
+    }
+
+    /// Get current RID
+    pub fn get_rid(&self) -> RID {
+        self.inner.get_rid()
+    }
+
+    /// Reset the iterator to start of table
+    pub fn reset(&mut self) {
+        let table_heap = self.table_info.get_table_heap();
+        self.inner = TableIterator::new(
+            table_heap,
+            RID::new(0, 0),
+            RID::new(INVALID_PAGE_ID, 0),
+        );
+    }
+}
+
 impl Iterator for TableIterator {
     type Item = (TupleMeta, Tuple);
 
@@ -154,6 +197,14 @@ impl Iterator for TableIterator {
     }
 }
 
+impl Iterator for TableScanIterator {
+    type Item = (TupleMeta, Tuple);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,10 +215,12 @@ mod tests {
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::type_id::TypeId::Integer;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
+    use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
+    use crate::execution::plans::table_scan_plan::TableScanNode;
+    use crate::types_db::type_id::TypeId;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -222,6 +275,22 @@ mod tests {
         Arc::new(TableHeap::new(bpm))
     }
 
+    fn create_test_schema() -> Schema {
+        Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ])
+    }
+
+    fn create_test_table_info(name: &str, schema: Schema, table_heap: Arc<TableHeap>) -> Arc<TableInfo> {
+        Arc::new(TableInfo::new(
+            schema,
+            name.to_string(),
+            table_heap,
+            1, // table_oid
+        ))
+    }
     #[test]
     fn test_table_iterator_create() {
         let table_heap = setup_test_table("test_table_iterator_create");
@@ -249,9 +318,9 @@ mod tests {
     fn test_table_iterator_single_tuple() {
         let table_heap = setup_test_table("test_table_iterator_single_tuple");
         let schema = Schema::new(vec![
-            Column::new("col_1", Integer),
-            Column::new("col_2", Integer),
-            Column::new("col_3", Integer),
+            Column::new("col_1", TypeId::Integer),
+            Column::new("col_2", TypeId::Integer),
+            Column::new("col_3", TypeId::Integer),
         ]);
         let rid = RID::new(0, 0);
         let mut tuple = Tuple::new(
@@ -282,9 +351,9 @@ mod tests {
     fn test_table_iterator_multiple_tuples() {
         let table_heap = setup_test_table("test_table_iterator_single_tuple");
         let schema = Schema::new(vec![
-            Column::new("col_1", Integer),
-            Column::new("col_2", Integer),
-            Column::new("col_3", Integer),
+            Column::new("col_1", TypeId::Integer),
+            Column::new("col_2", TypeId::Integer),
+            Column::new("col_3", TypeId::Integer),
         ]);
         let rid_1 = RID::new(0, 0);
         let rid_2 = RID::new(0, 1);
@@ -334,5 +403,35 @@ mod tests {
 
         assert!(iterator.is_end());
         assert_eq!(iterator.next(), None);
+    }
+
+    #[test]
+    fn test_table_scan_creation() {
+        let schema = create_test_schema();
+        let table_heap = setup_test_table("test_table_scan_creation");
+        let table_info = create_test_table_info("users", schema.clone(), table_heap);
+
+        let scan = TableScanNode::new(table_info, Arc::from(schema), Some("u".to_string()));
+
+        assert_eq!(scan.get_type(), PlanType::TableScan);
+        assert_eq!(scan.get_table_name(), "users");
+        assert_eq!(scan.get_table_alias(), Some("u"));
+    }
+
+    #[test]
+    fn test_table_scan_iterator() {
+        let schema = create_test_schema();
+        let table_heap = setup_test_table("test_table_scan_iterator");
+        let table_info = create_test_table_info("users", schema.clone(), table_heap);
+
+        let scan = TableScanNode::new(table_info, Arc::from(schema), None);
+        let mut iterator = scan.scan();
+
+        // Test empty table
+        assert!(iterator.next().is_none());
+
+        // Reset and test again
+        iterator.reset();
+        assert!(iterator.next().is_none());
     }
 }
