@@ -1,12 +1,8 @@
+use crate::catalogue::catalogue::TableInfo;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::catalogue::catalogue::TableInfo;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::storage::table::table_iterator::{TableIterator, TableScanIterator};
-use crate::common::rid::RID;
-use crate::common::config::INVALID_PAGE_ID;
+use crate::storage::table::table_iterator::TableScanIterator;
 use std::sync::Arc;
-use log::{debug, error};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableScanNode {
@@ -100,17 +96,16 @@ impl AbstractPlanNode for TableScanNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::storage::table::table_heap::TableHeap;
-    use std::sync::Arc;
-    use chrono::Utc;
-    use parking_lot::RwLock;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::table_heap::TableHeap;
     use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use parking_lot::RwLock;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -173,7 +168,11 @@ mod tests {
         ])
     }
 
-    fn create_test_table_info(name: &str, schema: Schema, table_heap: Arc<TableHeap>) -> Arc<TableInfo> {
+    fn create_test_table_info(
+        name: &str,
+        schema: Schema,
+        table_heap: Arc<TableHeap>,
+    ) -> Arc<TableInfo> {
         Arc::new(TableInfo::new(
             schema,
             name.to_string(),
