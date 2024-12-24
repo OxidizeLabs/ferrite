@@ -20,7 +20,7 @@ pub struct AggregationPlanNode {
 }
 
 /// Represents a key in an aggregation operation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AggregateKey {
     pub group_bys: Vec<Value>,
 }
@@ -168,19 +168,6 @@ impl Hash for AggregateKey {
         }
     }
 }
-
-impl PartialEq for AggregateKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.group_bys.len() == other.group_bys.len()
-            && self
-                .group_bys
-                .iter()
-                .zip(&other.group_bys)
-                .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
-    }
-}
-
-impl Eq for AggregateKey {}
 
 #[cfg(test)]
 mod tests {

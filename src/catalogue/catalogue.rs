@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Add;
 use std::sync::Arc;
+use log::{info, warn};
 
 pub enum IndexType {
     BPlusTreeIndex,
@@ -169,23 +170,46 @@ impl Catalog {
     /// # Returns
     /// A (non-owning) pointer to the metadata for the table.
     pub fn create_table(&mut self, table_name: &str, schema: Schema) -> Option<&TableInfo> {
+        // Debug: Print input schema details
+        info!("Creating table '{}' with schema:", table_name);
+        for i in 0..schema.get_column_count() {
+            let column = schema.get_column(i as usize).unwrap();
+            info!(
+                "Column {}: Name = {}, Type = {:?}, Offset = {}",
+                i,
+                column.get_name(),
+                column.get_type(),
+                column.get_offset()
+            );
+        }
+
         // Check if table already exists
         if self.table_names.contains_key(table_name) {
+            warn!("Table '{}' already exists", table_name);
             return None;
         }
 
         // Create new table heap
         let table = Arc::new(TableHeap::new(self.bpm.clone()));
 
-        // Generate new table OID
-        let table_oid = self.next_table_oid.add(1);
+        // Increment table OID (note: this was .add(1) before, which might be incorrect)
+        self.next_table_oid += 1;
+        let table_oid = self.next_table_oid;
 
         // Create table info
-        let table_info = TableInfo::new(schema, table_name.to_string(), table, table_oid);
+        let table_info = TableInfo::new(
+            schema.clone(),
+            table_name.to_string(),
+            table,
+            table_oid
+        );
 
         // Add to catalog maps
         self.table_names.insert(table_name.to_string(), table_oid);
         self.tables.insert(table_oid, table_info);
+
+        // Print confirmation
+        info!("Table '{}' created successfully with OID {}", table_name, table_oid);
 
         // Return reference to the newly created table info
         self.tables.get(&table_oid)
@@ -370,6 +394,47 @@ impl Display for IndexType {
             IndexType::STLUnorderedIndex => "STLUnordered",
         };
         write!(f, "{}", name)
+    }
+}
+
+impl Display for Catalog {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Catalog Contents:")?;
+        writeln!(f, "----------------")?;
+
+        // Iterate through all tables
+        for (oid, table_info) in &self.tables {
+            writeln!(f, "Table OID {}: '{}'", oid, table_info.get_table_name())?;
+
+            // Get and display table schema
+            let schema = table_info.get_table_schema();
+            writeln!(f, "  Schema:")?;
+
+            for i in 0..schema.get_column_count() {
+                let column = schema.get_column(i as usize).unwrap();
+                writeln!(
+                    f,
+                    "    Column {}: Name = {}, Type = {:?}, Offset = {}",
+                    i,
+                    column.get_name(),
+                    column.get_type(),
+                    column.get_offset()
+                )?;
+            }
+
+            // Optional: List indexes for this table
+            let table_indexes = self.get_table_indexes(table_info.get_table_name());
+            if !table_indexes.is_empty() {
+                writeln!(f, "  Indexes:")?;
+                for index in table_indexes {
+                    writeln!(f, "    - {}", index.name)?;
+                }
+            }
+
+            writeln!(f)?; // Extra newline between tables
+        }
+
+        Ok(())
     }
 }
 
