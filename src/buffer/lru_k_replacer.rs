@@ -226,13 +226,17 @@ impl LRUKReplacer {
         self.replacer_size
     }
 
+    pub fn get_k(&self) -> usize {
+        self.k
+    }
+
     /// Returns the number of frames that are eligible for eviction.
     ///
     /// # Returns
     ///
     /// The number of evictable frames.
     pub fn total_evictable_frames(&self) -> usize {
-        let frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
+        let frame_store = self.frame_store.lock().unwrap();
         let size = frame_store
             .iter()
             .filter(|&frame| frame.1.is_evictable)

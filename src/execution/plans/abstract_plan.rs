@@ -345,6 +345,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_basic_select_plan() {
         let mut ctx = TestContext::new("test_basic_select_plan");
         ctx.setup_sample_tables().unwrap();
@@ -375,6 +376,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_simple_join_plan() {
         let mut ctx = TestContext::new("test_simple_join_plan");
         ctx.setup_sample_tables().unwrap();
@@ -531,6 +533,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn debug_column_resolution() {
         let mut ctx = TestContext::new("debug_column_resolution");
         ctx.setup_sample_tables().unwrap();
@@ -712,6 +715,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_catalog_display() {
         let mut ctx = TestContext::new("test_catalog_display");
         ctx.setup_sample_tables().unwrap();

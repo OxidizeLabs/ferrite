@@ -3,7 +3,7 @@ use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::common::exception::DBError;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::execution_engine::ExecutorEngine;
@@ -45,7 +45,7 @@ pub struct DBConfig {
 pub struct DBInstance {
     buffer_pool_manager: Option<Arc<BufferPoolManager>>,
     log_manager: Option<Arc<LogManager>>,
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Option<Arc<Mutex<TransactionManager>>>,
     lock_manager: Option<Arc<LockManager>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     catalog: Arc<RwLock<Catalog>>,
@@ -89,8 +89,8 @@ impl DBInstance {
             Default::default(),
         )));
 
-        let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
-        let lock_manager = Self::create_lock_manager(&transaction_manager)?;
+        let transaction_manager = Some(Arc::new(Mutex::new(TransactionManager::new(catalog.clone()))));
+        let lock_manager = Self::create_lock_manager(&transaction_manager.clone().unwrap())?;
 
         let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(Arc::clone(&catalog))));
 
@@ -123,7 +123,7 @@ impl DBInstance {
 
         Ok(Arc::new(ExecutorContext::new(
             txn,
-            self.transaction_manager.clone(),
+            self.transaction_manager.clone().unwrap(),
             self.catalog.clone(),
             Arc::clone(buffer_pool),
             Arc::clone(lock_manager),
@@ -145,7 +145,7 @@ impl DBInstance {
         // Create execution context without holding any locks
         let exec_ctx = Arc::new(RwLock::new(ExecutorContext::new(
             txn.clone(),
-            self.transaction_manager.clone(),
+            self.transaction_manager.clone().unwrap(),
             self.catalog.clone(),
             self.buffer_pool_manager
                 .clone()
@@ -210,9 +210,10 @@ impl DBInstance {
 
         // Create new transaction
         let txn = {
-            let mut txn_manager = self.transaction_manager.lock();
+            let txn_manager = &self.get_transaction_manager();
+            let mut txn_manager_guard = txn_manager.unwrap().lock();
             debug!("Creating new transaction");
-            txn_manager.begin(IsolationLevel::ReadUncommitted)
+            txn_manager_guard.begin(IsolationLevel::ReadUncommitted)
         };
         debug!("Created transaction {}", txn.get_transaction_id());
 
@@ -222,8 +223,9 @@ impl DBInstance {
         match &result {
             Ok(_) => {
                 debug!("Committing transaction {}", txn.get_transaction_id());
-                let mut txn_manager = self.transaction_manager.lock();
-                if !txn_manager.commit(txn.clone()) {
+                let txn_manager = &self.get_transaction_manager();
+                let mut txn_manager_guard = txn_manager.unwrap().lock();
+                if !txn_manager_guard.commit(txn.clone()) {
                     warn!("Transaction commit failed");
                     return Err(DBError::Transaction(
                         "Failed to commit transaction".to_string(),
@@ -237,8 +239,9 @@ impl DBInstance {
                     txn.get_transaction_id(),
                     e
                 );
-                let mut txn_manager = self.transaction_manager.lock();
-                txn_manager.abort(txn.clone());
+                let txn_manager = &self.get_transaction_manager();
+                let mut txn_manager_guard = txn_manager.unwrap().lock();
+                txn_manager_guard.abort(txn.clone());
                 info!("Transaction rolled back");
             }
         }
@@ -284,6 +287,14 @@ impl DBInstance {
 
     pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
         self.checkpoint_manager.as_ref()
+    }
+
+    pub fn get_lock_manager(&self) -> Option<&Arc<LockManager>> {
+        self.lock_manager.as_ref()
+    }
+
+    pub fn get_transaction_manager(&self) -> Option<&Arc<Mutex<TransactionManager>>> {
+        self.transaction_manager.as_ref()
     }
 
     pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
@@ -332,6 +343,15 @@ impl DBInstance {
         Ok(if cfg!(not(feature = "disable-lock-manager")) {
             let lock_manager = Arc::new(LockManager::new(Arc::clone(transaction_manager)));
             Some(lock_manager)
+        } else {
+            None
+        })
+    }
+
+    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>) -> Result<Option<Arc<TransactionManager>>, DBError> {
+        Ok(if cfg!(not(feature = "disable-transaction-manager")) {
+            let transaction_manager = Arc::new(TransactionManager::new(catalog));
+            Some(transaction_manager)
         } else {
             None
         })

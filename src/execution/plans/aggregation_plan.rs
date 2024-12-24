@@ -1,14 +1,11 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
+use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
-use std::fmt;
 use std::fmt::Write;
-use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use crate::execution::expressions::aggregate_expression::AggregationType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {

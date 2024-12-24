@@ -2,15 +2,13 @@ use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
-use crate::execution::expressions::abstract_expression::Expression::Aggregate;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
-use crate::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
+use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
-use crate::execution::expressions::string_expression::StringExpression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_plan::CreateTablePlanNode;
@@ -29,15 +27,13 @@ use sqlparser::ast::{
 };
 use sqlparser::ast::{
     ColumnDef, CreateTable, DataType, Insert, ObjectName, Query, Select, SetExpr, Statement,
-    TableFactor, TableWithJoins,
+    TableFactor,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
-use std::panic::set_hook;
 use std::sync::Arc;
 use chrono::NaiveDateTime;
-use sqlparser::keywords::Keyword::TYPE;
 
 pub struct QueryPlanner {
     catalog: Arc<RwLock<Catalog>>,
@@ -245,7 +241,7 @@ impl QueryPlanner {
             [SelectItem::Wildcard(_)] => current_plan.clone(),
             _ => {
                 let proj_exprs = self.parse_projection_expressions(&select.projection, &schema)?;
-                let proj_schema = self.create_projection_schema(&proj_exprs, &schema)?;
+                let proj_schema = self.create_projection_schema(&proj_exprs)?;
 
                 PlanNode::Projection(ProjectionNode::new(
                     Arc::from(proj_schema),
@@ -346,37 +342,6 @@ impl QueryPlanner {
         Ok(PlanNode::Values(
             ValuesNode::new(schema.clone(), all_rows, PlanNode::Empty).unwrap(),
         ))
-    }
-
-    fn plan_table_scan(&self, table: &TableWithJoins) -> Result<PlanNode, String> {
-        match &table.relation {
-            TableFactor::Table { name, .. } => {
-                // Table name as a string
-                let table_name = name.to_string();
-
-                // Fetch the schema from the catalog
-                let schema = self
-                    .catalog
-                    .read()
-                    .get_table_schema(&table_name)
-                    .ok_or_else(|| format!("Table '{}' not found in the catalog", table_name))?;
-
-                // Use the real schema and include table_oid from the catalog
-                let table_oid = self
-                    .catalog
-                    .read()
-                    .get_table(&table_name)
-                    .ok_or_else(|| {
-                        format!("Table OID for '{}' not found in the catalog", table_name)
-                    })?
-                    .get_table_oidt();
-
-                Ok(PlanNode::SeqScan(SeqScanPlanNode::new(
-                    schema, table_oid, table_name, None,
-                )))
-            }
-            _ => Err("Only simple table scans are supported".to_string()),
-        }
     }
 
     fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
@@ -636,20 +601,6 @@ impl QueryPlanner {
         }
     }
 
-    fn parse_group_by_expressions(
-        &self,
-        exprs: &Vec<Expr>,
-        schema: &Schema,
-    ) -> Result<Vec<Expression>, String> {
-        let mut result = Vec::new();
-
-        for expr in exprs {
-            result.push(self.parse_expression(expr, schema)?);
-        }
-
-        Ok(result)
-    }
-
     fn parse_aggregate_function(
         &self,
         func: &Function,
@@ -815,11 +766,7 @@ impl QueryPlanner {
         Ok(proj_exprs)
     }
 
-    fn create_projection_schema(
-        &self,
-        proj_exprs: &Vec<Expression>,
-        input_schema: &Schema,
-    ) -> Result<Schema, String> {
+    fn create_projection_schema(&self, proj_exprs: &Vec<Expression>) -> Result<Schema, String> {
         let mut columns = Vec::new();
 
         for expr in proj_exprs {
@@ -918,120 +865,6 @@ impl QueryPlanner {
         }
     }
 
-    fn create_numeric_expression(
-        &self,
-        value: &str,
-        column: &Column,
-    ) -> Result<ConstantExpression, String> {
-        match column.get_type() {
-            TypeId::Decimal => {
-                let num = value
-                    .parse::<f64>()
-                    .map_err(|_| format!("Failed to parse {} as float", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            TypeId::TinyInt => {
-                let num = value
-                    .parse::<i8>()
-                    .map_err(|_| format!("Failed to parse {} as tinyint", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            TypeId::SmallInt => {
-                let num = value
-                    .parse::<i16>()
-                    .map_err(|_| format!("Failed to parse {} as smallint", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            TypeId::Integer => {
-                let num = value
-                    .parse::<i32>()
-                    .map_err(|_| format!("Failed to parse {} as integer", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            TypeId::BigInt => {
-                let num = value
-                    .parse::<i64>()
-                    .map_err(|_| format!("Failed to parse {} as bigint", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            TypeId::Timestamp => {
-                let num = value
-                    .parse::<u64>()
-                    .map_err(|_| format!("Failed to parse {} as timestamp", value))?;
-                Ok(ConstantExpression::new(
-                    Value::new(num),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
-            _ => Err(format!("Cannot convert number to {:?}", column.get_type())),
-        }
-    }
-
-    fn create_string_expression(
-        &self,
-        value: &str,
-        column: &Column,
-    ) -> Result<ConstantExpression, String> {
-        if column.get_type() != TypeId::VarChar {
-            return Err(format!(
-                "Cannot insert string into column of type {:?}",
-                column.get_type()
-            ));
-        }
-        Ok(ConstantExpression::new(
-            Value::new(value.to_string()),
-            column.clone(),
-            Vec::new(),
-        ))
-    }
-
-    fn create_boolean_expression(
-        &self,
-        value: bool,
-        column: &Column,
-    ) -> Result<ConstantExpression, String> {
-        if column.get_type() != TypeId::Boolean {
-            return Err(format!(
-                "Cannot insert boolean into column of type {:?}",
-                column.get_type()
-            ));
-        }
-        Ok(ConstantExpression::new(
-            Value::new(value),
-            column.clone(),
-            Vec::new(),
-        ))
-    }
-
-    fn create_null_expression(&self, column: &Column) -> Result<ConstantExpression, String> {
-        Ok(ConstantExpression::new(
-            Value::new(Val::Null),
-            column.clone(),
-            Vec::new(),
-        ))
-    }
-
     fn create_constant_expression(
         &self,
         value: &sqlparser::ast::Value,
@@ -1093,11 +926,11 @@ impl QueryPlanner {
                         // Parse timestamp string to u64
                         // First try standard format "YYYY-MM-DD HH:MM:SS"
                         let timestamp = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                            .map(|dt| dt.timestamp() as u64)
+                            .map(|dt| dt.and_utc().timestamp() as u64)
                             .or_else(|_| {
                                 // Try format with milliseconds
                                 NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.3f")
-                                    .map(|dt| dt.timestamp() as u64)
+                                    .map(|dt| dt.and_utc().timestamp() as u64)
                             })
                             .map_err(|_| format!("Failed to parse timestamp from string: {}", s))?;
 

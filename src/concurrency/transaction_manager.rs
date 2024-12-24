@@ -74,7 +74,7 @@ impl TransactionManager {
 
         // Handle serializable transactions
         if txn.get_isolation_level() == IsolationLevel::Serializable {
-            if !self.verify_txn(&txn) {
+            if !self.verify_transaction(&txn) {
                 self.abort(txn);
                 return false;
             }
@@ -233,7 +233,19 @@ impl TransactionManager {
         self.txn_map.read().get(txn_id).cloned()
     }
 
-    fn verify_txn(&self, txn: &Transaction) -> bool {
+    pub fn get_transactions(&self) -> Vec<Arc<Transaction>> {
+        self.txn_map.read().values().cloned().collect()
+    }
+
+    pub fn get_active_transaction_count(&self) -> usize {
+        self.get_transactions().len()
+    }
+
+    pub fn get_next_transaction_id(&self) -> u64 {
+        self.txn_map.read().keys().next().map_or(0, |k| *k)
+    }
+
+    fn verify_transaction(&self, txn: &Transaction) -> bool {
         if txn.get_isolation_level() != IsolationLevel::Serializable {
             return true;
         }

@@ -127,29 +127,136 @@ impl DBCommandExecutor {
 
     fn handle_info(&self, writer: &mut impl ResultWriter) -> Result<(), Box<dyn Error>> {
         let instance = self.instance.lock();
-        debug!("Writing component status information");
+        debug!("Writing detailed system information");
 
+        // Component Status Table
         writer.begin_table(true);
         writer.begin_header();
         writer.write_header_cell("Component");
         writer.write_header_cell("Status");
         writer.end_header();
 
-        // Check and write component status
-        self.write_info_row(
-            writer,
-            "Buffer Pool",
-            instance.get_buffer_pool_manager().is_some(),
-        );
+        self.write_info_row(writer, "Buffer Pool", instance.get_buffer_pool_manager().is_some());
+        self.write_info_row(writer, "Transaction Manager", instance.get_transaction_manager().is_some());
         self.write_info_row(writer, "Log Manager", instance.get_log_manager().is_some());
-        self.write_info_row(
-            writer,
-            "Checkpoint Manager",
-            instance.get_checkpoint_manager().is_some(),
-        );
-
+        self.write_info_row(writer, "Lock Manager", instance.get_lock_manager().is_some());
+        self.write_info_row(writer, "Checkpoint Manager", instance.get_checkpoint_manager().is_some());
         writer.end_table();
-        debug!("Info display completed");
+
+        // Buffer Pool Details
+        if let Some(bpm) = instance.get_buffer_pool_manager() {
+            writer.begin_table(true);
+            writer.begin_header();
+            writer.write_header_cell("Buffer Pool Statistics");
+            writer.write_header_cell("Value");
+            writer.end_header();
+
+            writer.begin_row();
+            writer.write_cell("Pool Size");
+            writer.write_cell(&bpm.get_pool_size().to_string());
+            writer.end_row();
+
+            writer.begin_row();
+            writer.write_cell("Free Frames");
+            writer.write_cell(&bpm.get_free_list_size().to_string());
+            writer.end_row();
+
+            writer.end_table();
+        }
+
+        // Transaction Manager Details
+        if let Some(txn_mgr) = instance.get_transaction_manager() {
+            let txn_mgr_guard = txn_mgr.lock();
+            writer.begin_table(true);
+            writer.begin_header();
+            writer.write_header_cell("Transaction Statistics");
+            writer.write_header_cell("Value");
+            writer.end_header();
+
+            writer.begin_row();
+            writer.write_cell("Active Transactions");
+            writer.write_cell(&txn_mgr_guard.get_active_transaction_count().to_string());
+            writer.end_row();
+
+            writer.begin_row();
+            writer.write_cell("Next Transaction ID");
+            writer.write_cell(&txn_mgr_guard.get_next_transaction_id().to_string());
+            writer.end_row();
+
+            writer.end_table();
+        }
+
+        // Log Manager Details
+        if let Some(log_mgr) = instance.get_log_manager() {
+            writer.begin_table(true);
+            writer.begin_header();
+            writer.write_header_cell("Log Statistics");
+            writer.write_header_cell("Value");
+            writer.end_header();
+
+            writer.begin_row();
+            writer.write_cell("Persistent LSN");
+            writer.write_cell(&log_mgr.get_persistent_lsn().to_string());
+            writer.end_row();
+
+            writer.begin_row();
+            writer.write_cell("Log Buffer Size");
+            writer.write_cell(&log_mgr.get_log_buffer_size().to_string());
+            writer.end_row();
+
+            writer.end_table();
+        }
+
+        // Lock Manager Details
+        if let Some(lock_mgr) = instance.get_lock_manager() {
+            writer.begin_table(true);
+            writer.begin_header();
+            writer.write_header_cell("Lock Statistics");
+            writer.write_header_cell("Value");
+            writer.end_header();
+
+            writer.begin_row();
+            writer.write_cell("Active Locks");
+            writer.write_cell(&lock_mgr.get_active_lock_count().to_string());
+            writer.end_row();
+
+            writer.begin_row();
+            writer.write_cell("Waiting Transactions");
+            writer.write_cell(&lock_mgr.get_waiting_lock_count().to_string());
+            writer.end_row();
+
+            writer.end_table();
+        }
+
+        // Replacer Details
+        if let Some(bpm) = instance.get_buffer_pool_manager() {
+            if let Some(replacer) = bpm.get_replacer() {
+                writer.begin_table(true);
+                writer.begin_header();
+                writer.write_header_cell("Replacer Statistics");
+                writer.write_header_cell("Value");
+                writer.end_header();
+
+                writer.begin_row();
+                writer.write_cell("K Value");
+                writer.write_cell(&replacer.get_k().to_string());
+                writer.end_row();
+
+                writer.begin_row();
+                writer.write_cell("Sample Size");
+                writer.write_cell(&replacer.get_replacer_size().to_string());
+                writer.end_row();
+
+                writer.begin_row();
+                writer.write_cell("Victim Count");
+                writer.write_cell(&replacer.total_evictable_frames().to_string());
+                writer.end_row();
+
+                writer.end_table();
+            }
+        }
+
+        debug!("System information display completed");
         Ok(())
     }
 
@@ -196,7 +303,7 @@ impl DBCommandExecutor {
                 // Prepare indexes string
                 let indexes = catalog_read.get_table_indexes(&name)
                     .iter()
-                    .map(|idx| idx.get_index_name().clone())
+                    .map(|idx| idx.get_index_name())
                     .collect::<Vec<_>>()
                     .join(", ");
 
@@ -218,8 +325,9 @@ impl DBCommandExecutor {
         println!("\n{}", "Available Commands:".bold());
         println!("\nMeta Commands:");
         println!("  status  - Display database configuration and status");
-        println!("  info    - Show component status and information");
+        println!("  info    - Show detailed system component information");
         println!("  catalog - Show catalog of the database");
+        println!("  flush   - Flush all pages in buffer pool to disk");
         println!("  help    - Show this help message");
         println!("  exit    - Exit the database");
 

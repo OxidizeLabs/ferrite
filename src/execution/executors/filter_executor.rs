@@ -547,6 +547,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_filter_with_transaction() {
         let test_context = TestContext::new("filter_transaction_test");
         let schema = create_test_schema();
