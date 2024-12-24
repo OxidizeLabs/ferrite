@@ -7,3 +7,4 @@ pub mod constant_value_expression;
 pub mod logic_expression;
 pub mod mock_expression;
 pub mod string_expression;
+pub mod aggregate_expression;

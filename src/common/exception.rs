@@ -150,6 +150,8 @@ pub enum ExpressionError {
     PageError(PageError),
     #[error("Page guard error: {0}")]
     PageGuardError(PageGuardError),
+    #[error("Invalid Operation error: {0}")]
+    InvalidOperation(String),
 }
 
 #[derive(Debug, Error)]

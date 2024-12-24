@@ -285,7 +285,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore]
         fn test_multiple_rows_with_transaction() {
             let test_ctx = TestContext::new();
             let schema = create_test_schema();
@@ -354,7 +353,6 @@ mod tests {
         use crate::concurrency::transaction::TransactionState;
 
         #[test]
-        #[ignore]
         fn test_transaction_commit() {
             let test_ctx = TestContext::new();
             let schema = create_test_schema();
