@@ -6,14 +6,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionNode {
     output_schema: Arc<Schema>,
-    expressions: Vec<Arc<Expression>>,
+    expressions: Vec<Expression>,
     child: Box<PlanNode>,
 }
 
 impl ProjectionNode {
     pub fn new(
         output_schema: Arc<Schema>,
-        expressions: Vec<Arc<Expression>>,
+        expressions: Vec<Expression>,
         child: PlanNode,
     ) -> Self {
         Self {
@@ -24,7 +24,7 @@ impl ProjectionNode {
     }
 
     /// Get a reference to the expressions used in this projection
-    pub fn get_expressions(&self) -> &Vec<Arc<Expression>> {
+    pub fn get_expressions(&self) -> &Vec<Expression> {
         &self.expressions
     }
 
@@ -181,11 +181,11 @@ mod tests {
         ])
     }
 
-    fn create_mock_expression(name: &str, return_type: TypeId) -> Arc<Expression> {
-        Arc::new(Expression::Mock(MockExpression::new(
+    fn create_mock_expression(name: &str, return_type: TypeId) -> Expression {
+        Expression::Mock(MockExpression::new(
             name.to_string(),
             return_type,
-        )))
+        ))
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
 
         // Expression verification
         let exprs = projection.get_expressions();
-        match exprs[0].as_ref() {
+        match exprs[0].clone() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_name(), "id");
                 assert_eq!(mock.get_type(), TypeId::Integer);
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(exprs.len(), 2);
 
         // Verify first expression
-        match exprs[0].as_ref() {
+        match exprs[0].clone() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::Integer);
                 assert_eq!(mock.get_name(), "result");
@@ -271,7 +271,7 @@ mod tests {
         }
 
         // Verify second expression
-        match exprs[1].as_ref() {
+        match exprs[1].clone(){
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::VarChar);
                 assert_eq!(mock.get_name(), "name");

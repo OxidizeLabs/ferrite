@@ -2,20 +2,31 @@ use crate::catalogue::catalogue::Catalog;
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
+use crate::execution::expressions::abstract_expression::Expression::Aggregate;
+use crate::execution::expressions::abstract_expression::ExpressionOps;
+use crate::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
+use crate::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
+use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
+use crate::execution::expressions::string_expression::StringExpression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_plan::CreateTablePlanNode;
 use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::plans::insert_plan::InsertNode;
+use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::Expr;
+use sqlparser::ast::{
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
+    SelectItem, UnaryOperator,
+};
 use sqlparser::ast::{
     ColumnDef, CreateTable, DataType, Insert, ObjectName, Query, Select, SetExpr, Statement,
     TableFactor, TableWithJoins,
@@ -23,6 +34,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
+use std::panic::set_hook;
 use std::sync::Arc;
 
 pub struct QueryPlanner {
@@ -90,6 +102,11 @@ impl QueryPlanner {
         }
     }
 
+    pub fn explain(&mut self, sql: &str) -> Result<String, String> {
+        let plan = self.create_plan(sql)?;
+        Ok(format!("Query Plan:\n{}\n", plan.explain()))
+    }
+
     fn plan_create_table(&mut self, create_table: &CreateTable) -> Result<PlanNode, String> {
         let columns = self.convert_column_defs(&create_table.columns)?;
         let schema = Schema::new(columns);
@@ -111,6 +128,7 @@ impl QueryPlanner {
     fn plan_query(&self, query: &Query) -> Result<PlanNode, String> {
         match &*query.body {
             SetExpr::Select(select) => self.plan_select(select),
+            SetExpr::Query(query) => self.plan_query(query),
             _ => Err("Only simple SELECT statements are supported".to_string()),
         }
     }
@@ -120,7 +138,7 @@ impl QueryPlanner {
             return Err("Only single table queries are supported".to_string());
         }
 
-        // Extract table name first
+        // Start with base table scan
         let table_name = match &select.from[0].relation {
             TableFactor::Table { name, .. } => name.to_string(),
             _ => return Err("Only simple table scans are supported".to_string()),
@@ -134,28 +152,108 @@ impl QueryPlanner {
         let schema = table_info.get_table_schema();
         let table_oid = table_info.get_table_oidt();
 
-        // Plan the base table scan
-        let table_scan = PlanNode::SeqScan(SeqScanPlanNode::new(
+        // Start building the plan from bottom up
+        let mut current_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
             schema.clone(),
             table_oid,
             table_name.clone(),
             None,
         ));
 
-        // If there's a WHERE clause, add a filter node
+        // Add WHERE clause if present
         if let Some(where_clause) = &select.selection {
             let filter_expr = self.parse_expression(where_clause, &schema)?;
-
-            Ok(PlanNode::Filter(FilterNode::new(
+            current_plan = PlanNode::Filter(FilterNode::new(
                 schema.clone(),
                 table_oid,
-                table_name,
+                table_name.clone(),
                 filter_expr,
-                table_scan,
-            )))
-        } else {
-            Ok(table_scan)
+                current_plan,
+            ));
         }
+
+        // Check if we need aggregation (either due to GROUP BY or aggregate functions)
+        let has_group_by = match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
+            GroupByExpr::All(_) => true,
+        };
+        let has_aggregates = self.has_aggregate_functions(&select.projection);
+
+        if has_group_by || has_aggregates {
+            // Parse aggregate functions from SELECT list
+            let (agg_exprs, agg_types) = self.parse_aggregates(&select.projection, &schema)?;
+
+            // Parse GROUP BY expressions if present
+            let group_by_exprs =
+                if has_group_by {
+                    match &select.group_by {
+                        GroupByExpr::Expressions(exprs, _modifiers) => {
+                            let mut result = Vec::new();
+                            for expr in exprs {
+                                result.push(Arc::new(self.parse_expression(expr, &schema)?));
+                            }
+                            result
+                        }
+                        GroupByExpr::All(_modifiers) => {
+                            // For GROUP BY ALL, group by all columns
+                            let mut exprs = Vec::new();
+                            for i in 0..schema.get_column_count() {
+                                let col = schema.get_column(i as usize).unwrap();
+                                exprs.push(Arc::new(Expression::ColumnRef(
+                                    ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
+                                )));
+                            }
+                            exprs
+                        }
+                    }
+                } else {
+                    vec![] // Empty for global aggregation
+                };
+
+            let output_schema = if has_group_by {
+                // When we have GROUP BY, output schema includes group by columns + aggregate results
+                let mut columns = Vec::new();
+                for expr in &group_by_exprs {
+                    columns.push(expr.get_return_type().clone());
+                }
+                for expr in &agg_exprs {
+                    columns.push(expr.get_return_type().clone());
+                }
+                Schema::new(columns)
+            } else {
+                // For global aggregation, output schema only includes aggregate results
+                let columns = agg_exprs
+                    .iter()
+                    .map(|expr| expr.get_return_type().clone())
+                    .collect();
+                Schema::new(columns)
+            };
+
+            current_plan = PlanNode::Aggregation(AggregationPlanNode::new(
+                output_schema,
+                vec![current_plan],
+                group_by_exprs,
+                agg_exprs,
+                agg_types,
+            ));
+        }
+
+        // Add projection if not a simple SELECT *
+        match &select.projection[..] {
+            [SelectItem::Wildcard(_)] => current_plan.clone(),
+            _ => {
+                let proj_exprs = self.parse_projection_expressions(&select.projection, &schema)?;
+                let proj_schema = self.create_projection_schema(&proj_exprs, &schema)?;
+
+                PlanNode::Projection(ProjectionNode::new(
+                    Arc::from(proj_schema),
+                    proj_exprs,
+                    current_plan.clone(),
+                ))
+            }
+        };
+
+        Ok(current_plan)
     }
 
     fn plan_insert(&self, insert: &Insert) -> Result<PlanNode, String> {
@@ -175,7 +273,6 @@ impl QueryPlanner {
         // Plan values or select source
         let child_plan = match &insert.source {
             Some(query) => match &*query.body {
-                // Dereference the Box here
                 SetExpr::Values(values) => self.plan_values_node(&values.rows, &table_schema)?,
                 SetExpr::Select(select) => {
                     let select_plan = self.plan_select(select)?;
@@ -205,36 +302,47 @@ impl QueryPlanner {
         )))
     }
 
-    fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
-        match table_name {
-            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
-            _ => Err("Only single table INSERT statements are supported".to_string()),
-        }
-    }
-
     fn plan_values_node(&self, rows: &[Vec<Expr>], schema: &Schema) -> Result<PlanNode, String> {
-        let column_count = schema.get_column_count() as usize;
         let mut all_rows = Vec::new();
 
         for row in rows {
-            if row.len() != column_count {
+            if row.len() != schema.get_column_count() as usize {
                 return Err(format!(
-                    "INSERT has {} values but {} columns",
+                    "VALUES has {} columns but schema expects {}",
                     row.len(),
-                    column_count
+                    schema.get_column_count()
                 ));
             }
 
-            let row_expressions: Result<Vec<Arc<Expression>>, String> = row
-                .iter()
-                .enumerate()
-                .map(|(_column_index, expr)| {
-                    self.parse_expression(expr, schema)
-                        .map(|expr| Arc::new(expr))
-                })
-                .collect();
+            let mut row_values = Vec::new();
+            for (i, expr) in row.iter().enumerate() {
+                match expr {
+                    Expr::Value(value) => {
+                        let val = match value {
+                            sqlparser::ast::Value::Number(n, _) => {
+                                Value::from(n.parse::<i32>().map_err(|e| e.to_string())?)
+                            }
+                            sqlparser::ast::Value::SingleQuotedString(s)
+                            | sqlparser::ast::Value::DoubleQuotedString(s) => {
+                                Value::from(s.as_str())
+                            }
+                            sqlparser::ast::Value::Boolean(b) => Value::from(*b),
+                            sqlparser::ast::Value::Null => Value::new(Val::Null),
+                            _ => return Err(format!("Unsupported value type: {:?}", value)),
+                        };
 
-            all_rows.push(row_expressions?);
+                        // Create a constant expression for the value
+                        let column = schema.get_column(i).unwrap();
+                        row_values.push(Arc::new(Expression::Constant(ConstantExpression::new(
+                            val,
+                            column.clone(),
+                            vec![],
+                        ))));
+                    }
+                    _ => return Err(format!("Unsupported expression in VALUES: {:?}", expr)),
+                }
+            }
+            all_rows.push(row_values);
         }
 
         Ok(PlanNode::Values(
@@ -275,48 +383,38 @@ impl QueryPlanner {
 
     fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
         match expr {
-            Expr::BinaryOp { left, op, right } => {
-                let left_expr = self.parse_expression(left, schema)?;
-                let right_expr = self.parse_expression(right, schema)?;
-
-                let comparison_type = match op {
-                    sqlparser::ast::BinaryOperator::Eq => ComparisonType::Equal,
-                    sqlparser::ast::BinaryOperator::Gt => ComparisonType::GreaterThan,
-                    sqlparser::ast::BinaryOperator::Lt => ComparisonType::LessThan,
-                    sqlparser::ast::BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
-                    sqlparser::ast::BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
-                    sqlparser::ast::BinaryOperator::NotEq => ComparisonType::NotEqual,
-                    _ => return Err("Unsupported binary operator".to_string()),
-                };
-
-                Ok(Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(left_expr),
-                    Arc::new(right_expr),
-                    comparison_type,
-                    vec![],
-                )))
-            }
-            Expr::Value(value) => {
-                // Convert SQL value to our Value type
-                let val = match value {
-                    sqlparser::ast::Value::Number(n, _) => {
-                        Value::from(n.parse::<i32>().map_err(|e| e.to_string())?)
-                    }
-                    sqlparser::ast::Value::SingleQuotedString(s) => Value::from(s.as_str()),
-                    _ => return Err("Unsupported value type".to_string()),
-                };
-
-                Ok(Expression::Constant(ConstantExpression::new(
-                    val,
-                    Column::new("const", TypeId::Integer),
-                    vec![],
-                )))
-            }
             Expr::Identifier(ident) => {
                 // Look up column in the provided schema
                 let column_idx = schema
                     .get_column_index(&ident.value)
                     .ok_or_else(|| format!("Column {} not found in schema", ident.value))?;
+
+                let column = schema
+                    .get_column(column_idx)
+                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
+
+                Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                    0, // table index (for single table, it's always 0)
+                    column_idx,
+                    column.clone(),
+                    vec![],
+                )))
+            }
+
+            Expr::CompoundIdentifier(parts) => {
+                if parts.len() != 2 {
+                    return Err("Only table.column compound identifiers are supported".to_string());
+                }
+
+                let table_name = &parts[0].value;
+                let column_name = &parts[1].value;
+
+                // Look up column in the provided schema
+                let column_idx = schema
+                    .get_column_index(&format!("{}.{}", table_name, column_name))
+                    .ok_or_else(|| {
+                        format!("Column {}.{} not found in schema", table_name, column_name)
+                    })?;
 
                 let column = schema
                     .get_column(column_idx)
@@ -329,7 +427,463 @@ impl QueryPlanner {
                     vec![],
                 )))
             }
-            _ => Err("Unsupported expression type".to_string()),
+
+            Expr::Value(value) => {
+                let (val, type_id) = match value {
+                    sqlparser::ast::Value::Number(n, _) => (
+                        Value::from(n.parse::<i32>().map_err(|e| e.to_string())?),
+                        TypeId::Integer,
+                    ),
+                    sqlparser::ast::Value::SingleQuotedString(s)
+                    | sqlparser::ast::Value::DoubleQuotedString(s) => {
+                        (Value::from(s.as_str()), TypeId::VarChar)
+                    }
+                    sqlparser::ast::Value::Boolean(b) => (Value::from(*b), TypeId::Boolean),
+                    sqlparser::ast::Value::Null => (Value::new(Val::Null), TypeId::Invalid),
+                    _ => return Err(format!("Unsupported value type: {:?}", value)),
+                };
+
+                Ok(Expression::Constant(ConstantExpression::new(
+                    val,
+                    Column::new("const", type_id),
+                    vec![],
+                )))
+            }
+
+            Expr::BinaryOp { left, op, right } => {
+                let left_expr = self.parse_expression(left, schema)?;
+                let right_expr = self.parse_expression(right, schema)?;
+
+                match op {
+                    BinaryOperator::Eq
+                    | BinaryOperator::NotEq
+                    | BinaryOperator::Gt
+                    | BinaryOperator::Lt
+                    | BinaryOperator::GtEq
+                    | BinaryOperator::LtEq => {
+                        let comparison_type = match op {
+                            BinaryOperator::Eq => ComparisonType::Equal,
+                            BinaryOperator::NotEq => ComparisonType::NotEqual,
+                            BinaryOperator::Gt => ComparisonType::GreaterThan,
+                            BinaryOperator::Lt => ComparisonType::LessThan,
+                            BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
+                            BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Comparison(ComparisonExpression::new(
+                            Arc::new(left_expr),
+                            Arc::new(right_expr),
+                            comparison_type,
+                            vec![],
+                        )))
+                    }
+
+                    BinaryOperator::Plus
+                    | BinaryOperator::Minus
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide => {
+                        let op = match op {
+                            BinaryOperator::Plus => ArithmeticOp::Add,
+                            BinaryOperator::Minus => ArithmeticOp::Subtract,
+                            BinaryOperator::Multiply => ArithmeticOp::Multiply,
+                            BinaryOperator::Divide => ArithmeticOp::Divide,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            Arc::new(left_expr.clone()),
+                            Arc::new(right_expr.clone()),
+                            op,
+                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
+                        )))
+                    }
+
+                    BinaryOperator::And | BinaryOperator::Or => {
+                        let logic_type = match op {
+                            BinaryOperator::And => LogicType::And,
+                            BinaryOperator::Or => LogicType::Or,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Logic(LogicExpression::new(
+                            Arc::new(left_expr.clone()),
+                            Arc::new(right_expr.clone()),
+                            logic_type,
+                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
+                        )))
+                    }
+
+                    _ => Err("Unsupported binary operator".to_string()),
+                }
+            }
+
+            Expr::UnaryOp { op, expr } => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                match op {
+                    UnaryOperator::Not => Ok(Expression::Logic(LogicExpression::new(
+                        Arc::new(inner_expr),
+                        Arc::new(Expression::Constant(ConstantExpression::new(
+                            Value::new(true),
+                            Column::new("const", TypeId::Boolean),
+                            vec![],
+                        ))),
+                        LogicType::And,
+                        vec![],
+                    ))),
+                    UnaryOperator::Plus => Ok(inner_expr),
+                    UnaryOperator::Minus => {
+                        let zero = Expression::Constant(ConstantExpression::new(
+                            Value::new(0),
+                            Column::new("const", TypeId::Integer),
+                            vec![],
+                        ));
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            Arc::new(zero),
+                            Arc::new(inner_expr),
+                            ArithmeticOp::Subtract,
+                            vec![],
+                        )))
+                    }
+                    _ => Err("Unsupported unary operator".to_string()),
+                }
+            }
+
+            Expr::IsNull(expr) => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(inner_expr),
+                    Arc::new(Expression::Constant(ConstantExpression::new(
+                        Value::new(Val::Null),
+                        Column::new("const", TypeId::Invalid),
+                        vec![],
+                    ))),
+                    ComparisonType::Equal,
+                    vec![],
+                )))
+            }
+
+            Expr::IsNotNull(expr) => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(inner_expr),
+                    Arc::new(Expression::Constant(ConstantExpression::new(
+                        Value::new(Val::Null),
+                        Column::new("const", TypeId::Invalid),
+                        vec![],
+                    ))),
+                    ComparisonType::NotEqual,
+                    vec![],
+                )))
+            }
+
+            Expr::Between {
+                expr,
+                negated,
+                low,
+                high,
+            } => {
+                let expr = self.parse_expression(expr, schema)?;
+                let low = self.parse_expression(low, schema)?;
+                let high = self.parse_expression(high, schema)?;
+
+                let low_compare = Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(expr.clone()),
+                    Arc::new(low),
+                    ComparisonType::GreaterThanOrEqual,
+                    vec![],
+                ));
+
+                let high_compare = Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(expr),
+                    Arc::new(high),
+                    ComparisonType::LessThanOrEqual,
+                    vec![],
+                ));
+
+                let mut result = Expression::Logic(LogicExpression::new(
+                    Arc::new(low_compare),
+                    Arc::new(high_compare),
+                    LogicType::And,
+                    vec![],
+                ));
+
+                if *negated {
+                    result = Expression::Logic(LogicExpression::new(
+                        Arc::new(result),
+                        Arc::new(Expression::Constant(ConstantExpression::new(
+                            Value::new(true),
+                            Column::new("const", TypeId::Boolean),
+                            vec![],
+                        ))),
+                        LogicType::And, // Using AND with true is effectively NOT
+                        vec![],
+                    ));
+                }
+
+                Ok(result)
+            }
+
+            Expr::Function(func) => {
+                let func_name = func.name.to_string().to_uppercase();
+
+                match func_name.as_str() {
+                    "COUNT" => {
+                        match &func.args {
+                            FunctionArguments::None => Err("COUNT requires arguments".to_string()),
+                            FunctionArguments::List(list) => {
+                                // Check for COUNT(*)
+                                if list.args.len() == 1 {
+                                    match &list.args[0] {
+                                        FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
+                                            // Handle COUNT(*)
+                                            Ok(Aggregate(AggregateExpression::new(
+                                                AggregationType::CountStar,
+                                                Arc::new(Expression::Constant(
+                                                    ConstantExpression::new(
+                                                        Value::new(1), // Dummy value for COUNT(*)
+                                                        Column::new("const", TypeId::Integer),
+                                                        vec![],
+                                                    ),
+                                                )),
+                                                vec![],
+                                            )))
+                                        }
+                                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                            // Handle COUNT(expr)
+                                            let inner_expr = self.parse_expression(expr, schema)?;
+                                            Ok(Aggregate(AggregateExpression::new(
+                                                AggregationType::Count,
+                                                Arc::new(inner_expr),
+                                                vec![],
+                                            )))
+                                        }
+                                        _ => Err("Unsupported COUNT argument type".to_string()),
+                                    }
+                                } else {
+                                    Err("COUNT takes exactly one argument".to_string())
+                                }
+                            }
+                            _ => Err("Unsupported COUNT syntax".to_string()),
+                        }
+                    }
+                    // Add other aggregate functions later...
+                    _ => Err(format!("Unsupported function: {}", func_name)),
+                }
+            }
+
+            _ => Err(format!("Unsupported expression type: {:?}", expr)),
+        }
+    }
+
+    fn parse_group_by_expressions(
+        &self,
+        exprs: &Vec<Expr>,
+        schema: &Schema,
+    ) -> Result<Vec<Expression>, String> {
+        let mut result = Vec::new();
+
+        for expr in exprs {
+            result.push(self.parse_expression(expr, schema)?);
+        }
+
+        Ok(result)
+    }
+
+    fn parse_aggregate_function(
+        &self,
+        func: &Function,
+        schema: &Schema,
+    ) -> Result<(Expression, AggregationType), String> {
+        let func_name = func.name.to_string().to_uppercase();
+
+        let (agg_type, arg_expr) = match func_name.as_str() {
+            "COUNT" => {
+                match &func.args {
+                    FunctionArguments::None => (
+                        // COUNT without args treated as COUNT(*)
+                        AggregationType::CountStar,
+                        Expression::Constant(ConstantExpression::new(
+                            Value::new(1),
+                            Column::new("const", TypeId::Integer),
+                            vec![],
+                        )),
+                    ),
+                    FunctionArguments::List(list) => {
+                        if list.args.is_empty() {
+                            // COUNT() treated as COUNT(*)
+                            (
+                                AggregationType::CountStar,
+                                Expression::Constant(ConstantExpression::new(
+                                    Value::new(1),
+                                    Column::new("const", TypeId::Integer),
+                                    vec![],
+                                )),
+                            )
+                        } else {
+                            match &list.args[0] {
+                                FunctionArg::Named { .. } => {
+                                    return Err(
+                                        "Named arguments not supported in aggregate functions"
+                                            .to_string(),
+                                    );
+                                }
+                                FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                                    FunctionArgExpr::Expr(expr) => (
+                                        AggregationType::Count,
+                                        self.parse_expression(expr, schema)?,
+                                    ),
+                                    FunctionArgExpr::Wildcard => (
+                                        AggregationType::CountStar,
+                                        Expression::Constant(ConstantExpression::new(
+                                            Value::new(1),
+                                            Column::new("const", TypeId::Integer),
+                                            vec![],
+                                        )),
+                                    ),
+                                    FunctionArgExpr::QualifiedWildcard(_) => {
+                                        return Err("Qualified wildcards not supported in aggregate functions".to_string());
+                                    }
+                                },
+                            }
+                        }
+                    }
+                    FunctionArguments::Subquery(_) => {
+                        return Err("Subqueries not supported in aggregate functions".to_string());
+                    }
+                }
+            }
+            "SUM" | "MIN" | "MAX" => {
+                let agg_type = match func_name.as_str() {
+                    "SUM" => AggregationType::Sum,
+                    "MIN" => AggregationType::Min,
+                    "MAX" => AggregationType::Max,
+                    _ => unreachable!(),
+                };
+
+                match &func.args {
+                    FunctionArguments::None => {
+                        return Err(format!("{}() requires an argument", func_name));
+                    }
+                    FunctionArguments::List(list) => {
+                        if list.args.is_empty() {
+                            return Err(format!("{}() requires an argument", func_name));
+                        }
+
+                        match &list.args[0] {
+                            FunctionArg::Named { .. } => {
+                                return Err("Named arguments not supported in aggregate functions"
+                                    .to_string());
+                            }
+                            FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                                FunctionArgExpr::Expr(expr) => {
+                                    (agg_type, self.parse_expression(expr, schema)?)
+                                }
+                                FunctionArgExpr::Wildcard
+                                | FunctionArgExpr::QualifiedWildcard(_) => {
+                                    return Err(format!("{}(*) is not valid", func_name));
+                                }
+                            },
+                        }
+                    }
+                    FunctionArguments::Subquery(_) => {
+                        return Err("Subqueries not supported in aggregate functions".to_string());
+                    }
+                }
+            }
+            _ => return Err(format!("Unsupported aggregate function: {}", func_name)),
+        };
+
+        Ok((arg_expr, agg_type))
+    }
+
+    fn parse_aggregates(
+        &self,
+        projection: &Vec<SelectItem>,
+        schema: &Schema,
+    ) -> Result<(Vec<Arc<Expression>>, Vec<AggregationType>), String> {
+        let mut agg_exprs = Vec::new();
+        let mut agg_types = Vec::new();
+
+        for item in projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                    if let Expr::Function(func) = expr {
+                        let (agg_expr, agg_type) = self.parse_aggregate_function(func, schema)?;
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_types.push(agg_type);
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        Ok((agg_exprs, agg_types))
+    }
+
+    fn parse_projection_expressions(
+        &self,
+        items: &Vec<SelectItem>,
+        schema: &Schema,
+    ) -> Result<Vec<Expression>, String> {
+        let mut proj_exprs = Vec::new();
+
+        for item in items {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    proj_exprs.push(self.parse_expression(expr, schema)?);
+                }
+                SelectItem::ExprWithAlias { expr, .. } => {
+                    proj_exprs.push(self.parse_expression(expr, schema)?);
+                }
+                SelectItem::Wildcard(_) => {
+                    // Add all columns from schema
+                    for i in 0..schema.get_column_count() {
+                        let col = schema.get_column(i as usize).unwrap();
+                        proj_exprs.push(Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            i as usize,
+                            col.clone(),
+                            vec![],
+                        )));
+                    }
+                }
+                _ => return Err("Unsupported projection item".to_string()),
+            }
+        }
+
+        Ok(proj_exprs)
+    }
+
+    fn create_projection_schema(
+        &self,
+        proj_exprs: &Vec<Expression>,
+        input_schema: &Schema,
+    ) -> Result<Schema, String> {
+        let mut columns = Vec::new();
+
+        for expr in proj_exprs {
+            columns.push(expr.get_return_type().clone());
+        }
+
+        Ok(Schema::new(columns))
+    }
+
+    fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
+        projection.iter().any(|item| match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                self.is_aggregate_function(expr)
+            }
+            _ => false,
+        })
+    }
+
+    fn is_aggregate_function(&self, expr: &Expr) -> bool {
+        if let Expr::Function(func) = expr {
+            let name = func.name.to_string().to_uppercase();
+            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
+        } else {
+            false
         }
     }
 
@@ -392,6 +946,13 @@ impl QueryPlanner {
             // Same types are always compatible
             (a, b) if a == b => true,
             _ => false,
+        }
+    }
+
+    fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
+        match table_name {
+            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
+            _ => Err("Only single table INSERT statements are supported".to_string()),
         }
     }
 
@@ -491,6 +1052,7 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
+    use sqlparser::ast::Ident;
     use std::collections::HashMap;
 
     struct TestContext {
@@ -748,6 +1310,91 @@ mod tests {
                 }
                 _ => panic!("Expected Filter plan node"),
             }
+        }
+    }
+
+    #[test]
+    fn test_parse_column_reference() {
+        let mut ctx = TestContext::new("column_ref_test");
+
+        // Create a table with a schema
+        ctx.planner
+            .create_plan("CREATE TABLE test_table (id INTEGER, age INTEGER, name VARCHAR(255))")
+            .unwrap();
+
+        // Get the schema from the catalog
+        let catalog = ctx.catalog.read();
+        let schema = catalog.get_table("test_table").unwrap().get_table_schema();
+
+        // Create an identifier expression
+        let ident = Expr::Identifier(Ident {
+            value: "age".to_string(),
+            quote_style: None,
+        });
+
+        // Parse the expression
+        let result = ctx.planner.parse_expression(&ident, &schema);
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            Expression::ColumnRef(col_ref) => {
+                assert_eq!(col_ref.get_column_index(), 1); // age is the second column
+                assert_eq!(col_ref.get_return_type().get_type(), TypeId::Integer);
+            }
+            _ => panic!("Expected ColumnRef expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_op_with_columns() {
+        let mut ctx = TestContext::new("binary_op_test");
+
+        // Create a table with a schema
+        ctx.planner
+            .create_plan("CREATE TABLE test_table (id INTEGER, age INTEGER, name VARCHAR(255))")
+            .unwrap();
+
+        // Get the schema from the catalog
+        let catalog = ctx.catalog.read();
+        let schema = catalog.get_table("test_table").unwrap().get_table_schema();
+
+        // Create a binary operation: age > 25
+        let expr = Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident {
+                value: "age".to_string(),
+                quote_style: None,
+            })),
+            op: BinaryOperator::Gt,
+            right: Box::new(Expr::Value(sqlparser::ast::Value::Number(
+                "25".to_string(),
+                false,
+            ))),
+        };
+
+        // Parse the expression
+        let result = ctx.planner.parse_expression(&expr, &schema);
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            Expression::Comparison(comp) => {
+                assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
+
+                match comp.get_left().as_ref() {
+                    Expression::ColumnRef(col_ref) => {
+                        assert_eq!(col_ref.get_column_index(), 1);
+                        assert_eq!(col_ref.get_return_type().get_type(), TypeId::Integer);
+                    }
+                    _ => panic!("Expected ColumnRef expression for left side"),
+                }
+
+                match comp.get_right().as_ref() {
+                    Expression::Constant(const_expr) => {
+                        assert_eq!(const_expr.get_value(), &Value::from(25));
+                    }
+                    _ => panic!("Expected Constant expression for right side"),
+                }
+            }
+            _ => panic!("Expected Comparison expression"),
         }
     }
 }

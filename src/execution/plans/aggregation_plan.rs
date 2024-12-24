@@ -8,16 +8,7 @@ use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-
-/// Represents the various SQL aggregation functions.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AggregationType {
-    CountStar,
-    Count,
-    Sum,
-    Min,
-    Max,
-}
+use crate::execution::expressions::aggregate_expression::AggregationType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {
@@ -190,18 +181,6 @@ impl PartialEq for AggregateKey {
 }
 
 impl Eq for AggregateKey {}
-
-impl Display for AggregationType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            AggregationType::CountStar => write!(f, "COUNT(*)"),
-            AggregationType::Count => write!(f, "COUNT"),
-            AggregationType::Sum => write!(f, "SUM"),
-            AggregationType::Min => write!(f, "MIN"),
-            AggregationType::Max => write!(f, "MAX"),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -14,6 +14,7 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::execution::expressions::aggregate_expression::AggregateExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -25,6 +26,7 @@ pub enum Expression {
     String(StringExpression),
     Array(ArrayExpression),
     Mock(MockExpression),
+    Aggregate(AggregateExpression),
 }
 
 pub trait ExpressionOps {
@@ -53,6 +55,7 @@ impl ExpressionOps for Expression {
             Self::String(expr) => expr.evaluate(tuple, schema),
             Self::Array(expr) => expr.evaluate(tuple, schema),
             Self::Mock(expr) => expr.evaluate(tuple, schema),
+            Self::Aggregate(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -87,6 +90,9 @@ impl ExpressionOps for Expression {
                 // For mock expressions, we'll just use the regular evaluate
                 expr.evaluate(left_tuple, left_schema)
             }
+            Self::Aggregate(expr) => {
+                expr.evaluate(left_tuple, right_schema)
+            }
         }
     }
 
@@ -100,6 +106,7 @@ impl ExpressionOps for Expression {
             Self::String(expr) => expr.get_child_at(child_idx),
             Self::Array(expr) => expr.get_child_at(child_idx),
             Self::Mock(expr) => expr.get_child_at(child_idx),
+            Self::Aggregate(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -113,6 +120,7 @@ impl ExpressionOps for Expression {
             Self::String(expr) => expr.get_children(),
             Self::Array(expr) => expr.get_children(),
             Self::Mock(expr) => expr.get_children(),
+            Self::Aggregate(expr) => expr.get_children(),
         }
     }
 
@@ -126,6 +134,7 @@ impl ExpressionOps for Expression {
             Self::String(expr) => expr.get_return_type(),
             Self::Array(expr) => expr.get_return_type(),
             Self::Mock(expr) => expr.get_return_type(),
+            Self::Aggregate(expr) => expr.get_return_type(),
         }
     }
 
@@ -139,6 +148,7 @@ impl ExpressionOps for Expression {
             Self::String(expr) => expr.clone_with_children(children),
             Self::Array(expr) => expr.clone_with_children(children),
             Self::Mock(expr) => expr.clone_with_children(children),
+            Self::Aggregate(expr) => expr.clone_with_children(children),
         }
     }
 }
@@ -182,6 +192,10 @@ impl Display for Expression {
                 write!(f, "]")
             }
             Self::Mock(expr) => write!(f, "{}", expr),
+            Self::Aggregate(expr) => write!(f, "{}({})",
+                                            expr.get_agg_type(),
+                                            expr.get_arg()
+            )
         }
     }
 }

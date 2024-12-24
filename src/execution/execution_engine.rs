@@ -16,7 +16,7 @@ use crate::execution::plans::abstract_plan::PlanNode::*;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
 use crate::planner::planner::QueryPlanner;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
@@ -130,7 +130,13 @@ impl ExecutorEngine {
             Filter(filter_plan) => {
                 info!("Creating filter executor for WHERE clause");
                 debug!("Filter predicate: {:?}", filter_plan.get_filter_predicate());
-                let executor = FilterExecutor::new(context, Arc::new(filter_plan.clone()));
+                // Create child executor first
+                let child_executor = self.create_executor(filter_plan.get_child_plan(), context.clone())?;
+                let executor = FilterExecutor::new(
+                    child_executor,
+                    context,
+                    Arc::new(filter_plan.clone())
+                );
                 Ok(Box::new(executor))
             }
             Values(values_plan) => {
@@ -145,10 +151,16 @@ impl ExecutorEngine {
             }
             Aggregation(aggregation_plan) => {
                 info!("Creating aggregation executor");
+                // Create child executor first
+                let child_executor = self.create_executor(
+                    &aggregation_plan.get_child_plan(),
+                    context.clone()
+                )?;
+
                 let executor = AggregationExecutor::new(
-                    context.clone(),
+                    child_executor,
                     Arc::new(aggregation_plan.clone()),
-                    Box::new(MockExecutor::new(vec![], Default::default(), context)),
+                    context,
                 );
                 Ok(Box::new(executor))
             }
