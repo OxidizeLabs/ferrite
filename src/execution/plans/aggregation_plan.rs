@@ -21,7 +21,7 @@ pub enum AggregationType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
     children: Vec<PlanNode>,
     group_bys: Vec<Arc<Expression>>,
     aggregates: Vec<Arc<Expression>>,
@@ -31,19 +31,19 @@ pub struct AggregationPlanNode {
 /// Represents a key in an aggregation operation.
 #[derive(Clone, Debug)]
 pub struct AggregateKey {
-    group_bys: Vec<Value>,
+    pub group_bys: Vec<Value>,
 }
 
 /// Represents a value for each of the running aggregates.
 #[derive(Debug, Clone)]
 pub struct AggregateValue {
-    aggregates: Vec<Value>,
+    pub aggregates: Vec<Value>,
 }
 
 impl AggregationPlanNode {
     /// Constructs a new AggregationPlanNode.
     pub fn new(
-        output_schema: Arc<Schema>,
+        output_schema: Schema,
         children: Vec<PlanNode>,
         group_bys: Vec<Arc<Expression>>,
         aggregates: Vec<Arc<Expression>>,
@@ -86,6 +86,10 @@ impl AggregationPlanNode {
     /// Returns all aggregate types.
     pub fn get_aggregate_types(&self) -> &[AggregationType] {
         &self.agg_types
+    }
+
+    pub fn get_group_bys2(&self) -> &Vec<Arc<Expression>> {
+        &self.group_bys
     }
 
     /// Infers the schema for the aggregation.
@@ -185,6 +189,8 @@ impl PartialEq for AggregateKey {
     }
 }
 
+impl Eq for AggregateKey {}
+
 impl Display for AggregationType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -208,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_aggregation_plan_node_creation() {
-        let schema = Arc::new(Schema::new(vec![]));
+        let schema = Schema::new(vec![]);
         let table = "mock_table".to_string();
         let children = vec![PlanNode::MockScan(MockScanNode::new(
             schema.clone(),
@@ -264,8 +270,9 @@ mod tests {
         assert_eq!(hasher1, hasher2);
     }
 
+    #[test]
     fn test_aggregation_plan_node_to_string() {
-        let schema = Arc::new(Schema::new(vec![]));
+        let schema = Schema::new(vec![]);
         let table = "mock_table".to_string();
         let children = vec![PlanNode::MockScan(MockScanNode::new(
             schema.clone(),
@@ -300,13 +307,13 @@ mod tests {
         let result = agg_node.plan_node_to_string();
         assert_eq!(
             result,
-            "Aggregation { group_by=[ColumnValue(0)], aggregates=[SUM(ColumnValue(1)), COUNT(ColumnValue(1))] }"
+            "Aggregation { group_by=[#0.0], aggregates=[SUM(#0.1), COUNT(#0.1)] }"
         );
     }
 
     #[test]
     fn test_aggregation_plan_node_to_string_no_group_by() {
-        let schema = Arc::new(Schema::new(vec![]));
+        let schema = Schema::new(vec![]);
         let table = "mock_table".to_string();
         let children = vec![PlanNode::MockScan(MockScanNode::new(
             schema.clone(),
