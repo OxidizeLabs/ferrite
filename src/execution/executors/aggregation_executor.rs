@@ -1,9 +1,10 @@
-use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::catalogue::schema::Schema;
+use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
+use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::aggregation_plan::{
     AggregateKey, AggregateValue, AggregationPlanNode,
@@ -15,7 +16,6 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::common::exception::ExpressionError;
 
 pub struct AggregationExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -88,11 +88,13 @@ impl AggregationExecutor {
     fn evaluate_group_by(
         &self,
         tuple: &Tuple,
-        schema: &Schema
+        schema: &Schema,
     ) -> Result<AggregateKey, ExpressionError> {
         // If no group by expressions, return an empty key
         if self.agg_plan.get_group_bys().is_empty() {
-            return Ok(AggregateKey { group_bys: Vec::new() });
+            return Ok(AggregateKey {
+                group_bys: Vec::new(),
+            });
         }
 
         // Evaluate group by expressions
@@ -103,7 +105,9 @@ impl AggregationExecutor {
             group_values.push(group_value);
         }
 
-        Ok(AggregateKey { group_bys: group_values })
+        Ok(AggregateKey {
+            group_bys: group_values,
+        })
     }
 
     /// Evaluate aggregate expressions for a tuple
@@ -124,7 +128,9 @@ impl AggregationExecutor {
 
             Ok(vec![value])
         } else {
-            Err(ExpressionError::InvalidOperation("No aggregate expressions".to_string()))
+            Err(ExpressionError::InvalidOperation(
+                "No aggregate expressions".to_string(),
+            ))
         }
     }
 
@@ -165,18 +171,16 @@ impl AggregationExecutor {
         debug!("Processing tuple: {:?}", tuple.get_values());
 
         // Get group by key
-        let group_key = self.evaluate_group_by(tuple, &schema)
-            .map_err(|e| {
-                error!("Failed to evaluate group key: {}", e);
-                e
-            });
+        let group_key = self.evaluate_group_by(tuple, &schema).map_err(|e| {
+            error!("Failed to evaluate group key: {}", e);
+            e
+        });
 
         // Evaluate aggregate values
-        let agg_values = self.evaluate_aggregates(tuple, &schema)
-            .map_err(|e| {
-                error!("Failed to evaluate aggregate values: {}", e);
-                e
-            });
+        let agg_values = self.evaluate_aggregates(tuple, &schema).map_err(|e| {
+            error!("Failed to evaluate aggregate values: {}", e);
+            e
+        });
 
         // Update group aggregates
         self.update_group_aggregates(group_key.unwrap(), &agg_values.unwrap());
@@ -187,39 +191,48 @@ impl AggregationExecutor {
     /// Update aggregates for a specific group
     fn update_group_aggregates(&mut self, group_key: AggregateKey, agg_values: &[Value]) {
         // Get or create current aggregates for this group
-        let current_aggregates = self.group_values
+        let current_aggregates = self
+            .group_values
             .entry(group_key.clone())
             .or_insert_with(|| {
                 debug!("Creating new aggregate entry");
                 // Initialize based on the first aggregate type
                 AggregateValue {
-                    aggregates: vec![Value::new(Val::Integer(0)); agg_values.len()]
+                    aggregates: vec![Value::new(Val::Integer(0)); agg_values.len()],
                 }
             });
 
         // Update each aggregate value
         let mut new_aggregates = current_aggregates.aggregates.clone();
-        for (i, (agg_value, agg_type)) in agg_values.iter()
+        for (i, (agg_value, agg_type)) in agg_values
+            .iter()
             .zip(self.agg_plan.get_aggregate_types())
-            .enumerate() {
+            .enumerate()
+        {
             debug!(
-            "Computing aggregate for index {}: Current = {:?}, New = {:?}, Type = {:?}",
-            i,
-            current_aggregates.aggregates[i],
-            agg_value,
-            agg_type
-        );
+                "Computing aggregate for index {}: Current = {:?}, New = {:?}, Type = {:?}",
+                i, current_aggregates.aggregates[i], agg_value, agg_type
+            );
 
             // Special handling for Sum aggregation
             if agg_type == &AggregationType::Sum {
                 match (&current_aggregates.aggregates[i], agg_value) {
-                    (_, Value { value_: Val::Integer(new_val), .. }) => {
+                    (
+                        _,
+                        Value {
+                            value_: Val::Integer(new_val),
+                            ..
+                        },
+                    ) => {
                         let current_sum = match &current_aggregates.aggregates[i] {
-                            Value { value_: Val::Integer(curr), .. } => *curr,
+                            Value {
+                                value_: Val::Integer(curr),
+                                ..
+                            } => *curr,
                             _ => 0,
                         };
                         new_aggregates[i] = Value::new(current_sum + *new_val);
-                    },
+                    }
                     _ => {
                         if let Ok(new_value) = Self::compute_aggregate_value(
                             agg_type.clone(),
@@ -262,80 +275,114 @@ impl AggregationExecutor {
                     (None, Val::Decimal(val)) => Ok(Value::new(*val as i32)),
 
                     // Summing with existing Integer value
-                    (Some(Value { value_: Val::Integer(sum), .. }), Val::Integer(new_val)) => {
-                        Ok(Value::new(*sum + *new_val))
-                    },
-                    (Some(Value { value_: Val::Integer(sum), .. }), Val::BigInt(new_val)) => {
-                        Ok(Value::new(*sum + *new_val as i32))
-                    },
-                    (Some(Value { value_: Val::Integer(sum), .. }), Val::Decimal(new_val)) => {
-                        Ok(Value::new(*sum + *new_val as i32))
-                    },
+                    (
+                        Some(Value {
+                            value_: Val::Integer(sum),
+                            ..
+                        }),
+                        Val::Integer(new_val),
+                    ) => Ok(Value::new(*sum + *new_val)),
+                    (
+                        Some(Value {
+                            value_: Val::Integer(sum),
+                            ..
+                        }),
+                        Val::BigInt(new_val),
+                    ) => Ok(Value::new(*sum + *new_val as i32)),
+                    (
+                        Some(Value {
+                            value_: Val::Integer(sum),
+                            ..
+                        }),
+                        Val::Decimal(new_val),
+                    ) => Ok(Value::new(*sum + *new_val as i32)),
 
                     // Summing with existing BigInt value
-                    (Some(Value { value_: Val::BigInt(sum), .. }), Val::Integer(new_val)) => {
-                        Ok(Value::new((*sum + *new_val as i64) as i32))
-                    },
-                    (Some(Value { value_: Val::BigInt(sum), .. }), Val::BigInt(new_val)) => {
-                        Ok(Value::new((*sum + *new_val) as i32))
-                    },
-                    (Some(Value { value_: Val::BigInt(sum), .. }), Val::Decimal(new_val)) => {
-                        Ok(Value::new((*sum as f64 + *new_val) as i32))
-                    },
+                    (
+                        Some(Value {
+                            value_: Val::BigInt(sum),
+                            ..
+                        }),
+                        Val::Integer(new_val),
+                    ) => Ok(Value::new((*sum + *new_val as i64) as i32)),
+                    (
+                        Some(Value {
+                            value_: Val::BigInt(sum),
+                            ..
+                        }),
+                        Val::BigInt(new_val),
+                    ) => Ok(Value::new((*sum + *new_val) as i32)),
+                    (
+                        Some(Value {
+                            value_: Val::BigInt(sum),
+                            ..
+                        }),
+                        Val::Decimal(new_val),
+                    ) => Ok(Value::new((*sum as f64 + *new_val) as i32)),
 
                     // Summing with existing Decimal value
-                    (Some(Value { value_: Val::Decimal(sum), .. }), Val::Integer(new_val)) => {
-                        Ok(Value::new((*sum + *new_val as f64) as i32))
-                    },
-                    (Some(Value { value_: Val::Decimal(sum), .. }), Val::BigInt(new_val)) => {
-                        Ok(Value::new((*sum + *new_val as f64) as i32))
-                    },
-                    (Some(Value { value_: Val::Decimal(sum), .. }), Val::Decimal(new_val)) => {
-                        Ok(Value::new((*sum + *new_val) as i32))
-                    },
+                    (
+                        Some(Value {
+                            value_: Val::Decimal(sum),
+                            ..
+                        }),
+                        Val::Integer(new_val),
+                    ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
+                    (
+                        Some(Value {
+                            value_: Val::Decimal(sum),
+                            ..
+                        }),
+                        Val::BigInt(new_val),
+                    ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
+                    (
+                        Some(Value {
+                            value_: Val::Decimal(sum),
+                            ..
+                        }),
+                        Val::Decimal(new_val),
+                    ) => Ok(Value::new((*sum + *new_val) as i32)),
 
                     // Fallback for unsupported combinations
-                    _ => Err(ExpressionError::InvalidOperation("Unsupported sum aggregation".to_string())),
+                    _ => Err(ExpressionError::InvalidOperation(
+                        "Unsupported sum aggregation".to_string(),
+                    )),
                 }
-            },
-            AggregationType::CountStar | AggregationType::Count => {
-                match old_value {
-                    Some(val) => match val.get_value() {
-                        Val::Integer(count) => Ok(Value::new(count + 1)),
-                        Val::BigInt(count) => Ok(Value::new((count + 1) as i32)),
-                        _ => Err(ExpressionError::InvalidOperation("Invalid count value".to_string())),
-                    },
-                    None => Ok(Value::new(1i32)),
-                }
+            }
+            AggregationType::CountStar | AggregationType::Count => match old_value {
+                Some(val) => match val.get_value() {
+                    Val::Integer(count) => Ok(Value::new(count + 1)),
+                    Val::BigInt(count) => Ok(Value::new((count + 1) as i32)),
+                    _ => Err(ExpressionError::InvalidOperation(
+                        "Invalid count value".to_string(),
+                    )),
+                },
+                None => Ok(Value::new(1i32)),
             },
             // Rest of the implementation remains the same
-            AggregationType::Min => {
-                match old_value {
-                    Some(old) => {
-                        if old.compare_less_than(new_value) == CmpBool::CmpTrue {
-                            Ok(old.clone())
-                        } else {
-                            Ok(new_value.clone())
-                        }
-                    },
-                    None => Ok(new_value.clone()),
+            AggregationType::Min => match old_value {
+                Some(old) => {
+                    if old.compare_less_than(new_value) == CmpBool::CmpTrue {
+                        Ok(old.clone())
+                    } else {
+                        Ok(new_value.clone())
+                    }
                 }
+                None => Ok(new_value.clone()),
             },
-            AggregationType::Max => {
-                match old_value {
-                    Some(old) => {
-                        if old.compare_greater_than(new_value) == CmpBool::CmpTrue {
-                            Ok(old.clone())
-                        } else {
-                            Ok(new_value.clone())
-                        }
-                    },
-                    None => Ok(new_value.clone()),
+            AggregationType::Max => match old_value {
+                Some(old) => {
+                    if old.compare_greater_than(new_value) == CmpBool::CmpTrue {
+                        Ok(old.clone())
+                    } else {
+                        Ok(new_value.clone())
+                    }
                 }
+                None => Ok(new_value.clone()),
             },
-            AggregationType::Avg => {
-                Err(ExpressionError::InvalidOperation("AVG aggregation not supported".to_string()))
-            },
+            AggregationType::Avg => Err(ExpressionError::InvalidOperation(
+                "AVG aggregation not supported".to_string(),
+            )),
         }
     }
 
@@ -357,7 +404,10 @@ impl AggregationExecutor {
         // Extract the values for global aggregation
         let global_result = self.group_values.values().next().map(|values| {
             let rid = RID::new(0, 0);
-            debug!("Returning global aggregation result: {:?}", values.aggregates);
+            debug!(
+                "Returning global aggregation result: {:?}",
+                values.aggregates
+            );
             (
                 Tuple::new(&values.aggregates, self.agg_output_schema.clone(), rid),
                 rid,
@@ -423,11 +473,11 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Val::Integer;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::{Mutex, RwLock};
     use std::collections::HashMap;
-    use crate::types_db::value::Val::{BigInt, Integer};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -648,25 +698,25 @@ mod tests {
         // Create aggregation plan
         let agg_plan = Arc::new(AggregationPlanNode::new(
             output_schema.clone(),
-            Vec::new(), // No children
-            vec![group_expr.clone()], // Group by expressions
-            vec![sum_expr.clone()],   // Aggregate expressions
-            vec![AggregationType::Sum] // Aggregate types
+            Vec::new(),                 // No children
+            vec![group_expr.clone()],   // Group by expressions
+            vec![sum_expr.clone()],     // Aggregate expressions
+            vec![AggregationType::Sum], // Aggregate types
         ));
 
         // Create and initialize aggregation executor
-        let mut executor = AggregationExecutor::new(
-            child_executor,
-            agg_plan,
-            exec_ctx
-        );
+        let mut executor = AggregationExecutor::new(child_executor, agg_plan, exec_ctx);
         executor.init();
 
         // Collect results with additional debugging
         let mut results = Vec::new();
         let mut iteration = 0;
         while let Some((tuple, _)) = executor.next() {
-            println!("Iteration {}: Collected tuple: {:?}", iteration, tuple.get_values());
+            println!(
+                "Iteration {}: Collected tuple: {:?}",
+                iteration,
+                tuple.get_values()
+            );
             results.push(tuple.clone());
             iteration += 1;
         }
@@ -682,13 +732,13 @@ mod tests {
 
         // Verify results
         // Sort to ensure consistent order
-        results.sort_by(|a, b| {
-            match a.get_value(0).compare_less_than(b.get_value(0)) {
+        results.sort_by(
+            |a, b| match a.get_value(0).compare_less_than(b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
-            }
-        });
+            },
+        );
 
         // Check first group (group_id = 1)
         assert_eq!(
