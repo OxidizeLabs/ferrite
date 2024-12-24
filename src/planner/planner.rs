@@ -36,6 +36,8 @@ use sqlparser::parser::Parser;
 use std::env;
 use std::panic::set_hook;
 use std::sync::Arc;
+use chrono::NaiveDateTime;
+use sqlparser::keywords::Keyword::TYPE;
 
 pub struct QueryPlanner {
     catalog: Arc<RwLock<Catalog>>,
@@ -316,31 +318,27 @@ impl QueryPlanner {
 
             let mut row_values = Vec::new();
             for (i, expr) in row.iter().enumerate() {
-                match expr {
+                let column = schema.get_column(i).unwrap();
+                let value_expr = match expr {
                     Expr::Value(value) => {
-                        let val = match value {
-                            sqlparser::ast::Value::Number(n, _) => {
-                                Value::from(n.parse::<i32>().map_err(|e| e.to_string())?)
-                            }
-                            sqlparser::ast::Value::SingleQuotedString(s)
-                            | sqlparser::ast::Value::DoubleQuotedString(s) => {
-                                Value::from(s.as_str())
-                            }
-                            sqlparser::ast::Value::Boolean(b) => Value::from(*b),
-                            sqlparser::ast::Value::Null => Value::new(Val::Null),
-                            _ => return Err(format!("Unsupported value type: {:?}", value)),
-                        };
-
-                        // Create a constant expression for the value
-                        let column = schema.get_column(i).unwrap();
-                        row_values.push(Arc::new(Expression::Constant(ConstantExpression::new(
-                            val,
-                            column.clone(),
-                            vec![],
-                        ))));
-                    }
+                        Arc::new(Expression::Constant(
+                            self.create_constant_expression(value, column)?
+                        ))
+                    },
+                    Expr::Cast { expr, .. } => {
+                        // For cast expressions, use the target column type directly
+                        match expr.as_ref() {
+                            Expr::Value(value) => {
+                                Arc::new(Expression::Constant(
+                                    self.create_constant_expression(value, column)?
+                                ))
+                            },
+                            _ => return Err(format!("Unsupported inner expression in CAST: {:?}", expr)),
+                        }
+                    },
                     _ => return Err(format!("Unsupported expression in VALUES: {:?}", expr)),
-                }
+                };
+                row_values.push(value_expr);
             }
             all_rows.push(row_values);
         }
@@ -625,50 +623,12 @@ impl QueryPlanner {
             }
 
             Expr::Function(func) => {
-                let func_name = func.name.to_string().to_uppercase();
 
-                match func_name.as_str() {
-                    "COUNT" => {
-                        match &func.args {
-                            FunctionArguments::None => Err("COUNT requires arguments".to_string()),
-                            FunctionArguments::List(list) => {
-                                // Check for COUNT(*)
-                                if list.args.len() == 1 {
-                                    match &list.args[0] {
-                                        FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
-                                            // Handle COUNT(*)
-                                            Ok(Aggregate(AggregateExpression::new(
-                                                AggregationType::CountStar,
-                                                Arc::new(Expression::Constant(
-                                                    ConstantExpression::new(
-                                                        Value::new(1), // Dummy value for COUNT(*)
-                                                        Column::new("const", TypeId::Integer),
-                                                        vec![],
-                                                    ),
-                                                )),
-                                                vec![],
-                                            )))
-                                        }
-                                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                            // Handle COUNT(expr)
-                                            let inner_expr = self.parse_expression(expr, schema)?;
-                                            Ok(Aggregate(AggregateExpression::new(
-                                                AggregationType::Count,
-                                                Arc::new(inner_expr),
-                                                vec![],
-                                            )))
-                                        }
-                                        _ => Err("Unsupported COUNT argument type".to_string()),
-                                    }
-                                } else {
-                                    Err("COUNT takes exactly one argument".to_string())
-                                }
-                            }
-                            _ => Err("Unsupported COUNT syntax".to_string()),
-                        }
+                match self.parse_aggregate_function(&func, schema) {
+                    Ok(aggregate_function) => {
+                        Ok(aggregate_function.0)
                     }
-                    // Add other aggregate functions later...
-                    _ => Err(format!("Unsupported function: {}", func_name)),
+                    _ => Err(format!("Unsupported function: {}", func)),
                 }
             }
 
@@ -911,13 +871,15 @@ impl QueryPlanner {
 
     fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
         match sql_type {
-            DataType::Boolean => Ok(TypeId::Boolean),
+            DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
             DataType::TinyInt(_) => Ok(TypeId::TinyInt),
             DataType::SmallInt(_) => Ok(TypeId::SmallInt),
             DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
             DataType::BigInt(_) => Ok(TypeId::BigInt),
-            DataType::Decimal(_) => Ok(TypeId::Decimal),
-            DataType::Varchar(_) | DataType::String(_) => Ok(TypeId::VarChar),
+            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
+            DataType::Varchar(_) | DataType::String(_) | DataType::Text => Ok(TypeId::VarChar),
+            DataType::Array(_) => Ok(TypeId::Vector),
+            DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
             _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
         }
     }
@@ -962,6 +924,36 @@ impl QueryPlanner {
         column: &Column,
     ) -> Result<ConstantExpression, String> {
         match column.get_type() {
+            TypeId::Decimal => {
+                let num = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("Failed to parse {} as float", value))?;
+                Ok(ConstantExpression::new(
+                    Value::new(num),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
+            TypeId::TinyInt => {
+                let num = value
+                    .parse::<i8>()
+                    .map_err(|_| format!("Failed to parse {} as tinyint", value))?;
+                Ok(ConstantExpression::new(
+                    Value::new(num),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
+            TypeId::SmallInt => {
+                let num = value
+                    .parse::<i16>()
+                    .map_err(|_| format!("Failed to parse {} as smallint", value))?;
+                Ok(ConstantExpression::new(
+                    Value::new(num),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
             TypeId::Integer => {
                 let num = value
                     .parse::<i32>()
@@ -971,7 +963,27 @@ impl QueryPlanner {
                     column.clone(),
                     Vec::new(),
                 ))
-            }
+            },
+            TypeId::BigInt => {
+                let num = value
+                    .parse::<i64>()
+                    .map_err(|_| format!("Failed to parse {} as bigint", value))?;
+                Ok(ConstantExpression::new(
+                    Value::new(num),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
+            TypeId::Timestamp => {
+                let num = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("Failed to parse {} as timestamp", value))?;
+                Ok(ConstantExpression::new(
+                    Value::new(num),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
             _ => Err(format!("Cannot convert number to {:?}", column.get_type())),
         }
     }
@@ -1025,19 +1037,102 @@ impl QueryPlanner {
         value: &sqlparser::ast::Value,
         column: &Column,
     ) -> Result<ConstantExpression, String> {
-        match value {
-            sqlparser::ast::Value::Number(number, _) => {
-                self.create_numeric_expression(number, column)
+        match (value, column.get_type()) {
+            // Handle numeric conversions
+            (sqlparser::ast::Value::Number(n, _), type_id) => {
+                match type_id {
+                    TypeId::SmallInt => {
+                        let num = n.parse::<i16>()
+                            .map_err(|_| format!("Failed to parse '{}' as SmallInt", n))?;
+                        Ok(ConstantExpression::new(
+                            Value::new(num),
+                            column.clone(),
+                            Vec::new(),
+                        ))
+                    },
+                    TypeId::Integer => {
+                        let num = n.parse::<i32>()
+                            .map_err(|_| format!("Failed to parse '{}' as Integer", n))?;
+                        Ok(ConstantExpression::new(
+                            Value::new(num),
+                            column.clone(),
+                            Vec::new(),
+                        ))
+                    },
+                    TypeId::BigInt => {
+                        let num = n.parse::<i64>()
+                            .map_err(|_| format!("Failed to parse '{}' as BigInt", n))?;
+                        Ok(ConstantExpression::new(
+                            Value::new(num),
+                            column.clone(),
+                            Vec::new(),
+                        ))
+                    },
+                    TypeId::Decimal => {
+                        let num = n.parse::<f64>()
+                            .map_err(|_| format!("Failed to parse '{}' as Decimal", n))?;
+                        Ok(ConstantExpression::new(
+                            Value::new(num),
+                            column.clone(),
+                            Vec::new(),
+                        ))
+                    },
+                    _ => Err(format!("Cannot convert number to {:?}", type_id)),
+                }
+            },
+
+            // Handle string values
+            (sqlparser::ast::Value::SingleQuotedString(s) | sqlparser::ast::Value::DoubleQuotedString(s), type_id) => {
+                match type_id {
+                    TypeId::VarChar => Ok(ConstantExpression::new(
+                        Value::new(s.clone()),
+                        column.clone(),
+                        Vec::new(),
+                    )),
+                    TypeId::Timestamp => {
+                        // Parse timestamp string to u64
+                        // First try standard format "YYYY-MM-DD HH:MM:SS"
+                        let timestamp = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                            .map(|dt| dt.timestamp() as u64)
+                            .or_else(|_| {
+                                // Try format with milliseconds
+                                NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.3f")
+                                    .map(|dt| dt.timestamp() as u64)
+                            })
+                            .map_err(|_| format!("Failed to parse timestamp from string: {}", s))?;
+
+                        Ok(ConstantExpression::new(
+                            Value::new(timestamp),
+                            column.clone(),
+                            Vec::new(),
+                        ))
+                    },
+                    _ => Err(format!("Cannot convert string to {:?}", type_id)),
+                }
+            },
+
+            // Handle boolean values
+            (sqlparser::ast::Value::Boolean(b), TypeId::Boolean) => {
+                Ok(ConstantExpression::new(
+                    Value::new(*b),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
+
+            // Handle NULL values
+            (sqlparser::ast::Value::Null, _) => {
+                Ok(ConstantExpression::new(
+                    Value::new(Val::Null),
+                    column.clone(),
+                    Vec::new(),
+                ))
+            },
+
+            // Handle unsupported combinations
+            (value, type_id) => {
+                Err(format!("Cannot convert {:?} to {:?}", value, type_id))
             }
-            sqlparser::ast::Value::SingleQuotedString(string)
-            | sqlparser::ast::Value::DoubleQuotedString(string) => {
-                self.create_string_expression(string, column)
-            }
-            sqlparser::ast::Value::Boolean(boolean) => {
-                self.create_boolean_expression(*boolean, column)
-            }
-            sqlparser::ast::Value::Null => self.create_null_expression(column),
-            _ => Err(format!("Unsupported SQL value type: {:?}", value)),
         }
     }
 }
