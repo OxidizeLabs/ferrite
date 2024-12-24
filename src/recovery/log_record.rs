@@ -317,3 +317,208 @@ impl LogRecord {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use std::mem::size_of;
+
+    const DUMMY_TXN_ID: TxnId = 1;
+    const DUMMY_PREV_LSN: Lsn = 0;
+    const DUMMY_PAGE_ID: PageId = 1;
+    const DUMMY_PREV_PAGE_ID: PageId = 0;
+
+    fn create_test_schema() -> Schema {
+        Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ])
+    }
+
+    fn create_test_tuple() -> Tuple {
+        let schema = create_test_schema();
+        let values = vec![Value::new(1), Value::new("test")];
+        let rid = RID::new(1, 1);
+        Tuple::new(&values, schema, rid)
+    }
+
+    fn create_test_tuple_updated() -> Tuple {
+        let schema = create_test_schema();
+        let values = vec![Value::new(1), Value::new("updated")];
+        let rid = RID::new(1, 1);
+        Tuple::new(&values, schema, rid)
+    }
+
+    #[test]
+    fn test_transaction_record() {
+        let record =
+            LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Begin);
+
+        assert_eq!(record.get_size(), LogRecord::HEADER_SIZE as i32);
+        assert_eq!(record.get_txn_id(), DUMMY_TXN_ID);
+        assert_eq!(record.get_prev_lsn(), DUMMY_PREV_LSN);
+        assert_eq!(record.get_log_record_type(), LogRecordType::Begin);
+        assert_eq!(record.get_lsn(), INVALID_LSN);
+    }
+
+    #[test]
+    fn test_insert_record() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+        let expected_size = LogRecord::HEADER_SIZE as i32
+            + size_of::<RID>() as i32
+            + size_of::<i32>() as i32
+            + tuple.get_length().unwrap() as i32;
+
+        let record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Insert,
+            rid,
+            tuple.clone(),
+        );
+
+        assert_eq!(record.get_size(), expected_size);
+        assert_eq!(record.get_log_record_type(), LogRecordType::Insert);
+        assert_eq!(record.get_insert_rid(), Some(&rid));
+        assert_eq!(record.get_insert_tuple(), Some(&tuple));
+        assert!(record.get_delete_rid().is_none());
+        assert!(record.get_delete_tuple().is_none());
+    }
+
+    #[test]
+    fn test_delete_record() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+        let expected_size = LogRecord::HEADER_SIZE as i32
+            + size_of::<RID>() as i32
+            + size_of::<i32>() as i32
+            + tuple.get_length().unwrap() as i32;
+
+        let record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::MarkDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        assert_eq!(record.get_size(), expected_size);
+        assert_eq!(record.get_log_record_type(), LogRecordType::MarkDelete);
+        assert_eq!(record.get_delete_rid(), Some(&rid));
+        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+        assert!(record.get_insert_rid().is_none());
+        assert!(record.get_insert_tuple().is_none());
+    }
+
+    #[test]
+    fn test_update_record() {
+        let old_tuple = create_test_tuple();
+        let new_tuple = create_test_tuple_updated();
+        let rid = old_tuple.get_rid();
+        let expected_size = LogRecord::HEADER_SIZE as i32
+            + size_of::<RID>() as i32
+            + old_tuple.get_length().unwrap() as i32
+            + new_tuple.get_length().unwrap() as i32
+            + 2 * size_of::<i32>() as i32;
+
+        let record = LogRecord::new_update_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Update,
+            rid,
+            old_tuple.clone(),
+            new_tuple.clone(),
+        );
+
+        assert_eq!(record.get_size(), expected_size);
+        assert_eq!(record.get_log_record_type(), LogRecordType::Update);
+        assert_eq!(record.get_update_rid(), Some(&rid));
+        assert_eq!(record.get_original_tuple(), Some(&old_tuple));
+        assert_eq!(record.get_update_tuple(), Some(&new_tuple));
+    }
+
+    #[test]
+    fn test_new_page_record() {
+        let expected_size = LogRecord::HEADER_SIZE as i32 + 2 * size_of::<PageId>() as i32;
+
+        let record = LogRecord::new_page_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::NewPage,
+            DUMMY_PREV_PAGE_ID,
+            DUMMY_PAGE_ID,
+        );
+
+        assert_eq!(record.get_size(), expected_size);
+        assert_eq!(record.get_log_record_type(), LogRecordType::NewPage);
+        assert_eq!(record.get_new_page_record(), Some(DUMMY_PREV_PAGE_ID));
+        assert_eq!(record.get_page_id(), Some(&DUMMY_PAGE_ID));
+    }
+
+    #[test]
+    fn test_to_string() {
+        let record =
+            LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Begin);
+
+        let expected_string = format!(
+            "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
+            LogRecord::HEADER_SIZE,
+            INVALID_LSN,
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Begin as i32
+        );
+
+        assert_eq!(record.to_string(), expected_string);
+    }
+
+    #[test]
+    fn test_invalid_record_type() {
+        let record =
+            LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Invalid);
+
+        assert_eq!(record.get_log_record_type(), LogRecordType::Invalid);
+        assert_eq!(record.get_size(), LogRecord::HEADER_SIZE as i32);
+    }
+
+    #[test]
+    fn test_rollback_delete_record() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+
+        let record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::RollbackDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        assert_eq!(record.get_log_record_type(), LogRecordType::RollbackDelete);
+        assert_eq!(record.get_delete_rid(), Some(&rid));
+        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+    }
+
+    #[test]
+    fn test_apply_delete_record() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+
+        let record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::ApplyDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        assert_eq!(record.get_log_record_type(), LogRecordType::ApplyDelete);
+        assert_eq!(record.get_delete_rid(), Some(&rid));
+        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+    }
+}

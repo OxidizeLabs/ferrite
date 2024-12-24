@@ -13,6 +13,7 @@ use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::sort_plan::SortNode;
+use crate::execution::plans::table_scan_plan::TableScanNode;
 use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::execution::plans::topn_plan::TopNNode;
 use crate::execution::plans::update_plan::UpdateNode;
@@ -20,7 +21,6 @@ use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use crate::execution::plans::table_scan_plan::TableScanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -69,7 +69,7 @@ pub enum PlanNode {
     MockScan(MockScanNode),
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
-    Empty
+    Empty,
 }
 
 pub trait AbstractPlanNode {

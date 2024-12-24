@@ -4,18 +4,22 @@ use crate::common::exception::DBError;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::executors::aggregation_executor::AggregationExecutor;
 use crate::execution::executors::create_table_executor::CreateTableExecutor;
+use crate::execution::executors::filter_executor::FilterExecutor;
 use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::executors::mock_executor::MockExecutor;
 use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::execution::plans::abstract_plan::PlanNode::{CreateTable, Filter, Insert, SeqScan};
+use crate::execution::executors::table_scan_executor::TableScanExecutor;
+use crate::execution::executors::values_executor::ValuesExecutor;
+use crate::execution::plans::abstract_plan::PlanNode::*;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
 use crate::planner::planner::QueryPlanner;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
-use crate::execution::executors::filter_executor::FilterExecutor;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,
@@ -72,7 +76,7 @@ impl ExecutorEngine {
     pub fn execute_statement(
         &self,
         plan: &PlanNode,
-        context: ExecutorContext,
+        context: Arc<RwLock<ExecutorContext>>,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
         info!("Starting execution of plan: {:?}", plan.get_type());
@@ -103,42 +107,50 @@ impl ExecutorEngine {
     fn create_executor(
         &self,
         plan: &PlanNode,
-        context: ExecutorContext,
+        context: Arc<RwLock<ExecutorContext>>,
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
-        if self.log_detailed {
-            debug!("Creating executor for plan type: {:?}", plan.get_type());
-        }
-
+        debug!("Creating executor for plan type: {:?}", plan.get_type());
         match plan {
-            SeqScan(scan_plan) => {
-                info!("Creating sequential scan executor");
-                Ok(Box::new(SeqScanExecutor::new(
-                    Arc::from(context),
-                    Arc::new(scan_plan.clone()),
-                )))
-            }
-            CreateTable(create_table_plan) => {
-                info!("Creating table creation executor");
-                Ok(Box::new(CreateTableExecutor::new(
-                    Arc::new(context),
-                    create_table_plan.clone(),
-                    false,
-                )))
-            }
             Insert(insert_plan) => {
                 info!("Creating insert executor");
-                Ok(Box::new(InsertExecutor::new(
-                    Arc::new(context),
-                    Arc::new(insert_plan.clone()),
-                )))
+                let executor = InsertExecutor::new(context, Arc::new(insert_plan.clone()));
+                Ok(Box::new(executor))
+            }
+            SeqScan(scan_plan) => {
+                info!("Creating sequential scan executor");
+                let executor = SeqScanExecutor::new(context, Arc::new(scan_plan.clone()));
+                Ok(Box::new(executor))
+            }
+            CreateTable(create_plan) => {
+                info!("Creating table creation executor");
+                let executor =
+                    CreateTableExecutor::new(context, Arc::from(create_plan.clone()), false);
+                Ok(Box::new(executor))
             }
             Filter(filter_plan) => {
                 info!("Creating filter executor for WHERE clause");
                 debug!("Filter predicate: {:?}", filter_plan.get_filter_predicate());
-                Ok(Box::new(FilterExecutor::new(
-                    Arc::new(context),
-                    Arc::new(filter_plan.clone()),
-                )))
+                let executor = FilterExecutor::new(context, Arc::new(filter_plan.clone()));
+                Ok(Box::new(executor))
+            }
+            Values(values_plan) => {
+                info!("Creating values executor");
+                let executor = ValuesExecutor::new(context, Arc::new(values_plan.clone()));
+                Ok(Box::new(executor))
+            }
+            TableScan(table_scan_plan) => {
+                info!("Creating table scanner");
+                let executor = TableScanExecutor::new(context, Arc::new(table_scan_plan.clone()));
+                Ok(Box::new(executor))
+            }
+            Aggregation(aggregation_plan) => {
+                info!("Creating aggregation executor");
+                let executor = AggregationExecutor::new(
+                    context.clone(),
+                    Arc::new(aggregation_plan.clone()),
+                    Box::new(MockExecutor::new(vec![], Default::default(), context)),
+                );
+                Ok(Box::new(executor))
             }
             _ => {
                 warn!("Unsupported plan type: {:?}", plan.get_type());
@@ -153,7 +165,7 @@ impl ExecutorEngine {
     fn execute_statement_internal(
         &self,
         plan: &PlanNode,
-        context: ExecutorContext,
+        context: Arc<RwLock<ExecutorContext>>,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
         // Create root executor
@@ -165,8 +177,7 @@ impl ExecutorEngine {
 
         // Handle different types of statements
         match plan {
-            // For INSERT, CREATE TABLE, etc. - just execute and return success
-            PlanNode::Insert(_) | PlanNode::CreateTable(_) => {
+            Insert(_) | CreateTable(_) => {
                 debug!("Executing modification statement");
                 if root_executor.next().is_some() {
                     info!("Modification statement executed successfully");
@@ -215,7 +226,10 @@ impl ExecutorEngine {
                     writer.end_row();
                 }
 
-                debug!("Result processing complete. Found {} matching rows", row_count);
+                debug!(
+                    "Result processing complete. Found {} matching rows",
+                    row_count
+                );
                 writer.end_table();
 
                 info!("Query execution finished. Processed {} rows", row_count);

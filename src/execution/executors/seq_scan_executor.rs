@@ -10,11 +10,12 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
-use log::{debug, error};
+use log::{debug, error, info};
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct SeqScanExecutor {
-    context: Arc<ExecutorContext>,
+    context: Arc<RwLock<ExecutorContext>>,
     plan: Arc<SeqScanPlanNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
@@ -22,16 +23,48 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(context: Arc<ExecutorContext>, plan: Arc<SeqScanPlanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<SeqScanPlanNode>) -> Self {
         let table_name = plan.get_table_name();
+        debug!("Creating SeqScanExecutor for table '{}'", table_name);
+
+        debug!("Attempting to acquire context read lock");
         let table_heap = {
-            let catalog = context.get_catalog();
-            let catalog_guard = catalog.read();
-            let table_info = catalog_guard
-                .get_table(table_name)
-                .expect("Table not found");
-            table_info.get_table_heap()
+            let context_guard = match context.try_read() {
+                Some(guard) => {
+                    debug!("Successfully acquired context read lock");
+                    guard
+                }
+                None => {
+                    error!("Failed to acquire context read lock");
+                    panic!("Could not acquire context lock");
+                }
+            };
+
+            debug!("Attempting to acquire catalog read lock");
+            let catalog = context_guard.get_catalog();
+            let catalog_guard = match catalog.try_read() {
+                Some(guard) => {
+                    debug!("Successfully acquired catalog read lock");
+                    guard
+                }
+                None => {
+                    error!("Failed to acquire catalog read lock");
+                    panic!("Could not acquire catalog lock");
+                }
+            };
+
+            match catalog_guard.get_table(table_name) {
+                Some(table_info) => {
+                    debug!("Found table '{}' in catalog", table_name);
+                    table_info.get_table_heap()
+                }
+                None => {
+                    error!("Table '{}' not found in catalog", table_name);
+                    panic!("Table not found");
+                }
+            }
         };
+        debug!("Released all locks in SeqScanExecutor creation");
 
         Self {
             context,
@@ -44,11 +77,18 @@ impl SeqScanExecutor {
 
     fn apply_predicate(&self, tuple: &Tuple) -> bool {
         if let Some(predicate) = self.plan.get_filter_predicate() {
+            debug!("Evaluating predicate on tuple: {:?}", tuple.get_values());
             match predicate.evaluate(tuple, self.plan.get_output_schema()) {
                 Ok(value) => match value.get_value() {
-                    Val::Boolean(b) => *b,
+                    Val::Boolean(b) => {
+                        debug!("Predicate evaluation result: {}", b);
+                        *b
+                    }
                     _ => {
-                        error!("Predicate evaluation did not return boolean value");
+                        error!(
+                            "Predicate evaluation did not return boolean value, got: {:?}",
+                            value
+                        );
                         false
                     }
                 },
@@ -58,35 +98,30 @@ impl SeqScanExecutor {
                 }
             }
         } else {
-            true
+            true // No predicate to apply
         }
     }
-
-    // fn acquire_table_lock(&self) -> Result<(), String> {
-    //     let txn = self.context.get_transaction();
-    //     let mut txn_guard = txn.lock();
-    //     let lock_manager = self.context.get_lock_manager();
-    //     // Acquire table lock in shared mode for reading
-    //     lock_manager.lock_table(&mut txn_guard, LockMode::Exclusive, self.plan.get_table_oid());
-    //     Ok(())
-    // }
 }
 
 impl AbstractExecutor for SeqScanExecutor {
     fn init(&mut self) {
-        debug!("Initializing SeqScanExecutor");
+        if self.initialized {
+            debug!("SeqScanExecutor already initialized");
+            return;
+        }
 
-        // Acquire table lock
-        // if let Err(e) = self.acquire_table_lock() {
-        //     error!("Failed to acquire table lock: {}", e);
-        //     return;
-        // }
+        info!(
+            "Initializing SeqScanExecutor for table '{}'",
+            self.plan.get_table_name()
+        );
 
         // Create iterator from start to end of table
-        // Start at first tuple of first page
         let start_rid = RID::new(0, 0);
-        // Use max values to ensure we scan to the end
         let stop_rid = RID::new(u32::MAX as PageId, u32::MAX);
+        debug!(
+            "Creating table iterator with range: {:?} to {:?}",
+            start_rid, stop_rid
+        );
 
         self.iterator = Some(TableIterator::new(
             self.table_heap.clone(),
@@ -95,72 +130,87 @@ impl AbstractExecutor for SeqScanExecutor {
         ));
         self.initialized = true;
 
-        debug!("SeqScanExecutor initialized successfully");
+        debug!(
+            "SeqScanExecutor initialized with {} predicate",
+            if self.plan.get_filter_predicate().is_some() {
+                "a"
+            } else {
+                "no"
+            }
+        );
     }
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
         if !self.initialized {
+            debug!("SeqScanExecutor not initialized, initializing now");
             self.init();
         }
 
         // Cache predicate presence to avoid borrow conflicts
         let has_predicate = self.plan.get_filter_predicate().is_some();
+        debug!("Starting scan iteration (has predicate: {})", has_predicate);
 
         // Keep trying until we find a valid tuple or reach the end
         while let Some(iter) = &mut self.iterator {
             match iter.next() {
                 Some((meta, tuple)) => {
+                    debug!("Found tuple with RID {:?}", tuple.get_rid());
+
                     // Skip deleted tuples
                     if meta.is_deleted() {
+                        debug!("Skipping deleted tuple with RID {:?}", tuple.get_rid());
                         continue;
                     }
 
-                    // If there's no predicate or if the tuple satisfies the predicate
+                    // Apply predicate if it exists
                     if !has_predicate || self.apply_predicate(&tuple) {
-                        debug!("Found matching tuple with RID: {:?}", tuple.get_rid());
+                        debug!("Returning matching tuple with RID {:?}", tuple.get_rid());
                         return Some((tuple.clone(), tuple.get_rid()));
+                    } else {
+                        debug!("Tuple did not satisfy predicate, continuing scan");
                     }
                 }
                 None => {
-                    debug!("No more tuples to scan");
+                    info!("Reached end of table scan");
                     return None;
                 }
             }
         }
 
-        debug!("No iterator available");
+        error!("No iterator available for table scan");
         None
     }
 
     fn get_output_schema(&self) -> Schema {
+        debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema().clone()
     }
 
-    fn get_executor_context(&self) -> &ExecutorContext {
-        &self.context
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+        self.context.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
-    use std::collections::HashMap;
-    use std::fs;
-    use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::tuple::{Tuple, TupleMeta};
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use chrono::Utc;
+    use parking_lot::{Mutex, RwLock};
+    use std::collections::HashMap;
+    use std::fs;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -238,9 +288,7 @@ mod tests {
         }
     }
 
-    fn create_catalog(
-        bpm: Arc<BufferPoolManager>
-    ) -> Catalog {
+    fn create_catalog(bpm: Arc<BufferPoolManager>) -> Catalog {
         Catalog::new(
             bpm,
             0,
@@ -279,14 +327,9 @@ mod tests {
         ]);
 
         // Create transaction and table
-        let txn = Arc::new(Mutex::new(Transaction::new(
-            0,
-            IsolationLevel::Serializable,
-        )));
+        let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
         let table_name = "test_table";
-        let table_info = catalog
-            .create_table(table_name, schema.clone())
-            .unwrap();
+        let table_info = catalog.create_table(table_name, schema.clone()).unwrap();
         let table_heap = table_info.get_table_heap();
 
         // Insert test data
@@ -307,13 +350,13 @@ mod tests {
             None,
         ));
 
-        let context = Arc::new(ExecutorContext::new(
+        let context = Arc::new(RwLock::new(ExecutorContext::new(
             txn,
             transaction_manager,
             Arc::new(RwLock::new(catalog)),
             Arc::clone(&bpm),
             lock_manager,
-        ));
+        )));
 
         let mut executor = SeqScanExecutor::new(context, plan);
         executor.init();
@@ -368,14 +411,9 @@ mod tests {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 
         // Create transaction and empty table
-        let txn = Arc::new(Mutex::new(Transaction::new(
-            0,
-            IsolationLevel::Serializable,
-        )));
+        let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
         let table_name = "empty_table";
-        let table_info = catalog
-            .create_table(table_name, schema.clone())
-            .unwrap();
+        let table_info = catalog.create_table(table_name, schema.clone()).unwrap();
 
         // Create scan plan and executor
         let plan = Arc::new(SeqScanPlanNode::new(
@@ -385,13 +423,13 @@ mod tests {
             None,
         ));
 
-        let context = Arc::new(ExecutorContext::new(
+        let context = Arc::new(RwLock::new(ExecutorContext::new(
             txn,
             transaction_manager,
             Arc::new(RwLock::new(catalog)),
             Arc::clone(&bpm),
             lock_manager,
-        ));
+        )));
 
         let mut executor = SeqScanExecutor::new(context, plan);
         executor.init();

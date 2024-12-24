@@ -228,7 +228,7 @@ impl QueryPlanner {
             let row_expressions: Result<Vec<Arc<Expression>>, String> = row
                 .iter()
                 .enumerate()
-                .map(|(column_index, expr)| {
+                .map(|(_column_index, expr)| {
                     self.parse_expression(expr, schema)
                         .map(|expr| Arc::new(expr))
                 })

@@ -1,6 +1,9 @@
 pub mod abstract_executor;
+pub mod aggregation_executor;
 pub mod create_table_executor;
-pub mod insert_executor;
-pub mod seq_scan_executor;
-pub mod values_executor;
 pub mod filter_executor;
+pub mod insert_executor;
+pub mod mock_executor;
+pub mod seq_scan_executor;
+pub mod table_scan_executor;
+pub mod values_executor;

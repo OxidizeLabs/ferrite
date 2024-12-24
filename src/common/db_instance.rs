@@ -51,7 +51,7 @@ pub struct DBInstance {
     catalog: Arc<RwLock<Catalog>>,
     execution_engine: Arc<Mutex<ExecutorEngine>>,
     config: DBConfig,
-    current_txn: Option<Arc<Mutex<Transaction>>>,
+    current_txn: Option<Arc<Transaction>>,
 }
 
 impl Default for DBConfig {
@@ -92,9 +92,7 @@ impl DBInstance {
         let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
         let lock_manager = Self::create_lock_manager(&transaction_manager)?;
 
-        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(
-            Arc::clone(&catalog),
-        )));
+        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(Arc::clone(&catalog))));
 
         Ok(Self {
             buffer_pool_manager,
@@ -112,8 +110,8 @@ impl DBInstance {
     /// Creates an executor context for query execution
     pub fn make_executor_context(
         &self,
-        txn: Arc<Mutex<Transaction>>,
-    ) -> Result<ExecutorContext, DBError> {
+        txn: Arc<Transaction>,
+    ) -> Result<Arc<ExecutorContext>, DBError> {
         let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
             DBError::NotImplemented("Buffer pool manager not available".to_string())
         })?;
@@ -123,109 +121,82 @@ impl DBInstance {
             .as_ref()
             .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
 
-        Ok(ExecutorContext::new(
+        Ok(Arc::new(ExecutorContext::new(
             txn,
             self.transaction_manager.clone(),
             self.catalog.clone(),
             Arc::clone(buffer_pool),
             Arc::clone(lock_manager),
-        ))
+        )))
     }
 
     pub fn execute_sql_txn(
         &mut self,
         sql: &str,
         writer: &mut impl ResultWriter,
-        txn: Arc<Mutex<Transaction>>,
+        txn: Arc<Transaction>,
         check_options: Option<CheckOptions>,
     ) -> Result<bool, DBError> {
-        debug!("Starting SQL transaction execution");
-        debug!("Transaction ID: {}", txn.lock().txn_id());
+        debug!(
+            "Starting SQL transaction execution for transaction {}",
+            txn.get_transaction_id()
+        );
 
-        // Verify components
-        let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
-            warn!("Buffer pool manager not available");
-            DBError::NotImplemented("Buffer pool manager not available".to_string())
-        })?;
-
-        let lock_manager = self.lock_manager.as_ref().ok_or_else(|| {
-            warn!("Lock manager not available");
-            DBError::NotImplemented("Lock manager not available".to_string())
-        })?;
-
-        // Create execution context
-        debug!("Creating executor context");
-        let txn_guard = txn.lock();
-        let mut executor_context = ExecutorContext::new(
-            Arc::new(Mutex::new(Transaction::new(
-                txn_guard.txn_id(),
-                txn_guard.isolation_level(),
-            ))),
+        // Create execution context without holding any locks
+        let exec_ctx = Arc::new(RwLock::new(ExecutorContext::new(
+            txn.clone(),
             self.transaction_manager.clone(),
             self.catalog.clone(),
-            buffer_pool.clone(),
-            lock_manager.clone(),
-        );
-        drop(txn_guard);
+            self.buffer_pool_manager
+                .clone()
+                .expect("Buffer pool manager required"),
+            self.lock_manager.clone().expect("Lock manager required"),
+        )));
 
-        // Configure check options
+        debug!("Created execution context");
+
+        // Configure check options if needed
         if let Some(opts) = check_options {
-            debug!("Initializing check options");
-            executor_context.set_check_options(opts);
-            executor_context.init_check_options();
+            debug!("Configuring check options");
+            let mut ctx_guard = exec_ctx.write();
+            ctx_guard.set_check_options(opts);
+            ctx_guard.init_check_options();
+            // guard is dropped here
+            debug!("Check options configured");
         }
 
-        // Prepare and execute
-        debug!("Preparing statement");
-        let mut execution_engine = self.execution_engine.lock(); // Acquire mutable lock for execution_engine
-        let plan =
-            match execution_engine.prepare_statement(sql, executor_context.get_check_options()) {
-                Ok(p) => {
-                    debug!("Statement prepared successfully");
-                    p
-                }
-                Err(e) => {
-                    warn!("Statement preparation failed: {:?}", e);
-                    txn.lock().set_tainted();
-                    return Err(e);
-                }
+        // Prepare statement without holding context lock
+        debug!("Preparing SQL statement");
+        let plan = {
+            let mut engine = self.execution_engine.lock();
+            let check_options = {
+                let ctx_guard = exec_ctx.read();
+                ctx_guard.get_check_options()
             };
+            engine.prepare_statement(sql, check_options)?
+        };
+        debug!("Statement prepared successfully");
 
-        debug!("Executing prepared plan");
-        let result = execution_engine.execute_statement(&plan, executor_context, writer);
+        // Execute the statement
+        debug!("Executing prepared statement");
+        let result = {
+            let engine = self.execution_engine.lock();
+            engine.execute_statement(&plan, exec_ctx.clone(), writer)
+        };
 
         match &result {
             Ok(has_results) => {
-                debug!("Plan execution completed, checking transaction state");
-                let txn_guard = txn.lock();
-                match txn_guard.get_state() {
-                    TransactionState::Running => {
-                        info!("Execution completed successfully. Results: {}", has_results);
-                    }
-                    state => {
-                        warn!("Invalid transaction state after execution: {:?}", state);
-                        return Err(match state {
-                            TransactionState::Tainted => {
-                                DBError::Transaction("Transaction is tainted".to_string())
-                            }
-                            TransactionState::Aborted => {
-                                DBError::Transaction("Transaction was aborted".to_string())
-                            }
-                            TransactionState::Committed => {
-                                DBError::Transaction("Transaction already committed".to_string())
-                            }
-                            _ => unreachable!(),
-                        });
-                    }
-                }
+                debug!(
+                    "Statement execution completed successfully. Results: {}",
+                    has_results
+                );
             }
             Err(e) => {
-                warn!("Plan execution failed: {:?}", e);
-                txn.lock().set_tainted();
+                warn!("Statement execution failed: {:?}", e);
+                txn.set_tainted();
             }
         }
 
-        info!("SQL transaction execution completed");
         result
     }
 
@@ -237,58 +208,41 @@ impl DBInstance {
     ) -> Result<bool, DBError> {
         info!("Starting SQL execution: {}", sql);
 
-        let is_local_txn = self.current_txn.is_some();
-        debug!(
-            "Transaction status: {}",
-            if is_local_txn {
-                "using existing"
-            } else {
-                "creating new"
-            }
-        );
-
-        let txn = match is_local_txn {
-            true => {
-                debug!("Using existing transaction");
-                Arc::clone(self.current_txn.as_ref().unwrap())
-            }
-            false => {
-                debug!("Starting new transaction");
-                let mut txn_manager = self.transaction_manager.lock();
-                let txn = txn_manager.begin(IsolationLevel::ReadUncommitted);
-                debug!("New transaction created with ID: {}", txn.lock().txn_id());
-                txn
-            }
+        // Create new transaction
+        let txn = {
+            let mut txn_manager = self.transaction_manager.lock();
+            debug!("Creating new transaction");
+            txn_manager.begin(IsolationLevel::ReadUncommitted)
         };
+        debug!("Created transaction {}", txn.get_transaction_id());
 
-        debug!("Executing SQL in transaction context");
+        // Execute in transaction context
         let result = self.execute_sql_txn(sql, writer, txn.clone(), check_options);
 
         match &result {
             Ok(_) => {
-                if !is_local_txn {
-                    debug!("Committing transaction");
-                    let mut txn_manager = self.transaction_manager.lock();
-                    if !txn_manager.commit(txn) {
-                        warn!("Transaction commit failed");
-                        return Err(DBError::Transaction(
-                            "Failed to commit transaction".to_string(),
-                        ));
-                    }
-                    info!("Transaction committed successfully");
+                debug!("Committing transaction {}", txn.get_transaction_id());
+                let mut txn_manager = self.transaction_manager.lock();
+                if !txn_manager.commit(txn.clone()) {
+                    warn!("Transaction commit failed");
+                    return Err(DBError::Transaction(
+                        "Failed to commit transaction".to_string(),
+                    ));
                 }
-                info!("SQL execution completed successfully");
+                info!("Transaction committed successfully");
             }
             Err(e) => {
-                warn!("SQL execution failed: {:?}", e);
+                warn!(
+                    "Rolling back transaction {} due to error: {:?}",
+                    txn.get_transaction_id(),
+                    e
+                );
                 let mut txn_manager = self.transaction_manager.lock();
-                txn_manager.abort(txn);
-                self.current_txn = None;
-                info!("Transaction aborted due to error");
+                txn_manager.abort(txn.clone());
+                info!("Transaction rolled back");
             }
         }
 
-        info!("SQL execution finished");
         result
     }
 
@@ -359,7 +313,7 @@ impl DBInstance {
         config: &DBConfig,
         disk_manager: &Arc<FileDiskManager>,
     ) -> Result<Option<Arc<BufferPoolManager>>, DBError> {
-        let replacer = LRUKReplacer::new(config.lru_k, config.lru_sample_size);
+        let replacer = LRUKReplacer::new(config.lru_sample_size, config.lru_k);
         let scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 
         let bpm = BufferPoolManager::new(

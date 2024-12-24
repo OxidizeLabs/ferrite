@@ -5,12 +5,13 @@ use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::check_option::{CheckOption, CheckOptions};
 use crate::execution::executors::abstract_executor::AbstractExecutor;
+use log::debug;
 use parking_lot::{Mutex, RwLock};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub struct ExecutorContext {
-    transaction: Arc<Mutex<Transaction>>,
+    transaction: Arc<Transaction>,
     catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_manager: Arc<Mutex<TransactionManager>>,
@@ -22,12 +23,17 @@ pub struct ExecutorContext {
 
 impl ExecutorContext {
     pub fn new(
-        transaction: Arc<Mutex<Transaction>>,
+        transaction: Arc<Transaction>,
         transaction_manager: Arc<Mutex<TransactionManager>>,
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         lock_manager: Arc<LockManager>,
     ) -> Self {
+        debug!(
+            "Creating ExecutorContext for transaction {}",
+            transaction.get_transaction_id()
+        );
+
         Self {
             transaction,
             catalog,
@@ -40,8 +46,8 @@ impl ExecutorContext {
         }
     }
 
-    pub fn get_transaction(&self) -> &Arc<Mutex<Transaction>> {
-        &self.transaction
+    pub fn get_transaction(&self) -> Arc<Transaction> {
+        Arc::clone(&self.transaction)
     }
 
     pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
@@ -71,6 +77,7 @@ impl ExecutorContext {
     }
 
     pub fn set_check_options(&mut self, options: CheckOptions) {
+        debug!("Setting check options");
         self.check_options = Arc::new(options);
     }
 

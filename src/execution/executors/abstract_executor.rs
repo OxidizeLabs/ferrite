@@ -2,6 +2,7 @@ use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::storage::table::tuple::Tuple;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 /// The AbstractExecutor implements the Volcano tuple-at-a-time iterator model.
@@ -26,7 +27,7 @@ pub trait AbstractExecutor {
     fn get_output_schema(&self) -> Schema;
 
     /// Get the executor context in which this executor runs.
-    fn get_executor_context(&self) -> &ExecutorContext;
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>>;
 }
 
 /// A base struct for concrete executors to inherit from.

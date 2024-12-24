@@ -82,7 +82,7 @@ impl IndexMetadata {
 }
 
 /// Base class for derived indices of different types.
-pub trait Index {
+pub trait Index: Send + Sync {
     /// Constructs a new `Index` instance.
     ///
     /// # Parameters

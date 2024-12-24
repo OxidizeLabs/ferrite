@@ -1,3 +1,4 @@
+use crate::catalogue::catalogue::TableInfo;
 use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::storage::page::page_types::table_page::TablePage;
@@ -5,7 +6,6 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;
-use crate::catalogue::catalogue::TableInfo;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -63,7 +63,9 @@ impl TableIterator {
     }
 
     pub fn is_end(&self) -> bool {
-        self.rid.get_page_id() == self.stop_at_rid.get_page_id() && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num() || self.rid.get_page_id() == INVALID_PAGE_ID
+        self.rid.get_page_id() == self.stop_at_rid.get_page_id()
+            && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()
+            || self.rid.get_page_id() == INVALID_PAGE_ID
     }
 
     /// Checks if we need to move to the next page based on tuple position
@@ -93,7 +95,7 @@ impl TableIterator {
 
         current_rid.get_page_id() > self.stop_at_rid.get_page_id()
             || (current_rid.get_page_id() == self.stop_at_rid.get_page_id()
-            && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
+                && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
     }
 
     /// Advances the iterator to the next position.
@@ -144,16 +146,9 @@ impl TableIterator {
 impl TableScanIterator {
     pub fn new(table_info: Arc<TableInfo>) -> Self {
         let table_heap = table_info.get_table_heap();
-        let inner = TableIterator::new(
-            table_heap,
-            RID::new(0, 0),
-            RID::new(INVALID_PAGE_ID, 0),
-        );
+        let inner = TableIterator::new(table_heap, RID::new(0, 0), RID::new(INVALID_PAGE_ID, 0));
 
-        Self {
-            inner,
-            table_info,
-        }
+        Self { inner, table_info }
     }
 
     /// Check if scan has reached the end
@@ -169,11 +164,7 @@ impl TableScanIterator {
     /// Reset the iterator to start of table
     pub fn reset(&mut self) {
         let table_heap = self.table_info.get_table_heap();
-        self.inner = TableIterator::new(
-            table_heap,
-            RID::new(0, 0),
-            RID::new(INVALID_PAGE_ID, 0),
-        );
+        self.inner = TableIterator::new(table_heap, RID::new(0, 0), RID::new(INVALID_PAGE_ID, 0));
     }
 }
 
@@ -213,14 +204,14 @@ mod tests {
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
     use crate::common::logger::initialize_logger;
+    use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
+    use crate::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
-    use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
-    use crate::execution::plans::table_scan_plan::TableScanNode;
-    use crate::types_db::type_id::TypeId;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -283,7 +274,11 @@ mod tests {
         ])
     }
 
-    fn create_test_table_info(name: &str, schema: Schema, table_heap: Arc<TableHeap>) -> Arc<TableInfo> {
+    fn create_test_table_info(
+        name: &str,
+        schema: Schema,
+        table_heap: Arc<TableHeap>,
+    ) -> Arc<TableInfo> {
         Arc::new(TableInfo::new(
             schema,
             name.to_string(),
@@ -373,9 +368,6 @@ mod tests {
         let meta_1 = TupleMeta::new(123, false);
         let meta_2 = TupleMeta::new(124, false);
 
-
-
-
         table_heap
             .insert_tuple(&meta_1, &mut tuple_1)
             .expect("failed to insert tuple 1");
@@ -399,7 +391,6 @@ mod tests {
         let (result_meta2, result_tuple2) = result2.unwrap();
         assert_eq!(result_meta2, meta_2);
         assert_eq!(result_tuple2, tuple_2);
-
 
         assert!(iterator.is_end());
         assert_eq!(iterator.next(), None);
