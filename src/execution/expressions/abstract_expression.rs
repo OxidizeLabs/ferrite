@@ -192,9 +192,7 @@ impl Display for Expression {
                 write!(f, "]")
             }
             Self::Mock(expr) => write!(f, "{}", expr),
-            Self::Aggregate(expr) => write!(f, "{}({})",
-                                            expr.get_agg_type(),
-                                            expr.get_arg()
+            Self::Aggregate(expr) => write!(f, "{}({})", expr.get_agg_type(), expr.get_arg()
             )
         }
     }

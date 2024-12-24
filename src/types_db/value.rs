@@ -20,7 +20,7 @@ pub enum Val {
     Null,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, PartialOrd)]
 pub enum Size {
     Length(usize),
     ElemTypeId(TypeId),
@@ -336,6 +336,8 @@ impl Hash for Value {
         }
     }
 }
+
+impl Eq for Value {}
 
 #[cfg(test)]
 mod unit_tests {
