@@ -1159,6 +1159,14 @@ impl LockManager {
         output
     }
 
+    pub fn get_active_lock_count(&self) -> usize {
+        self.table_lock_map.lock().len()
+    }
+
+    pub fn get_waiting_lock_count(&self) -> usize {
+        self.waits_for.lock().len()
+    }
+
     /// Validates if a transaction can take a lock based on isolation level
     fn validate_lock_request(
         &self,

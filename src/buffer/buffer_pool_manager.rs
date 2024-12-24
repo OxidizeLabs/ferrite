@@ -17,7 +17,7 @@ use crate::storage::page::page_types::extendable_hash_table_header_page::Extenda
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
 use log::{debug, error, info, warn};
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -686,6 +686,14 @@ impl BufferPoolManager {
             page_id, frame_id
         );
         Ok(())
+    }
+
+    pub fn get_free_list_size(&self) -> usize {
+        self.free_list.read().len()
+    }
+
+pub fn get_replacer(&self) -> Option<RwLockReadGuard<LRUKReplacer>> {
+        Some(self.replacer.read())
     }
 
     fn get_frame_id(&self, page_id: PageId) -> Result<FrameId, DeletePageError> {

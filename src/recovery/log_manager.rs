@@ -119,4 +119,8 @@ impl LogManager {
     pub fn get_log_buffer(&self) -> &[u8] {
         &self.log_buffer
     }
+
+    pub fn get_log_buffer_size(&self) -> usize {
+        self.log_buffer.len()
+    }
 }
