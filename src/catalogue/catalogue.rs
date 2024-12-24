@@ -6,7 +6,6 @@ use crate::storage::table::table_heap::TableHeap;
 use core::fmt;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::Add;
 use std::sync::Arc;
 use log::{info, warn};
 
@@ -129,6 +128,30 @@ impl IndexInfo {
             is_primary_key,
             index_type,
         }
+    }
+
+    pub fn get_key_schema(&self) -> &Schema {
+        &self.key_schema
+    }
+
+    pub fn get_index_oid(&self) -> IndexOidT {
+        self.index_oid
+    }
+
+    pub fn get_index_name(&self) -> &str {
+        self.table_name.as_str()
+    }
+
+    pub fn get_index_type(&self) -> &IndexType {
+        &self.index_type
+    }
+
+    pub fn get_key_size(&self) -> usize {
+        self.key_size
+    }
+
+    pub fn is_primary_key(&self) -> bool {
+        self.is_primary_key
     }
 }
 

@@ -49,9 +49,9 @@ impl DBCommandExecutor {
                 self.handle_help();
                 Ok(())
             }
-            "tables" => {
+            "catalog" => {
                 debug!("Handling tables command");
-                self.handle_tables(&mut writer)
+                self.handle_catalog(&mut writer)
             }
             "flush" => {
                 debug!("Handling flush command");
@@ -164,7 +164,7 @@ impl DBCommandExecutor {
         writer.end_row();
     }
 
-    fn handle_tables(&self, writer: &mut impl ResultWriter) -> Result<(), Box<dyn Error>> {
+    fn handle_catalog(&self, writer: &mut impl ResultWriter) -> Result<(), Box<dyn Error>> {
         let instance = self.instance.lock();
         debug!("Retrieving catalog information");
 
@@ -172,26 +172,45 @@ impl DBCommandExecutor {
         let catalog_read = catalog.read();
         let table_names = catalog_read.get_table_names();
 
-        debug!("Writing table information");
+        debug!("Writing catalog information");
         writer.begin_table(false);
         writer.begin_header();
-        writer.write_header_cell("oid");
-        writer.write_header_cell("name");
-        writer.write_header_cell("cols");
+        writer.write_header_cell("Table OID");
+        writer.write_header_cell("Table Name");
+        writer.write_header_cell("Schema");
+        writer.write_header_cell("Indexes");
         writer.end_header();
 
         for name in table_names {
             if let Some(table_info) = catalog_read.get_table(&name) {
+                // Prepare schema string
+                let schema = table_info.get_table_schema();
+                let schema_str = (0..schema.get_column_count())
+                    .map(|i| {
+                        let col = schema.get_column(i as usize).unwrap();
+                        format!("{}: {:?}", col.get_name(), col.get_type())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Prepare indexes string
+                let indexes = catalog_read.get_table_indexes(&name)
+                    .iter()
+                    .map(|idx| idx.get_index_name().clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
                 writer.begin_row();
                 writer.write_cell(&table_info.get_table_oidt().to_string());
                 writer.write_cell(&table_info.get_table_name());
-                writer.write_cell(&table_info.get_table_schema().to_string(false));
+                writer.write_cell(&schema_str);
+                writer.write_cell(&indexes);
                 writer.end_row();
             }
         }
 
         writer.end_table();
-        debug!("Tables display completed");
+        debug!("Catalog display completed");
         Ok(())
     }
 
@@ -200,7 +219,7 @@ impl DBCommandExecutor {
         println!("\nMeta Commands:");
         println!("  status  - Display database configuration and status");
         println!("  info    - Show component status and information");
-        println!("  tables  - List all tables in the database");
+        println!("  catalog - Show catalog of the database");
         println!("  help    - Show this help message");
         println!("  exit    - Exit the database");
 
