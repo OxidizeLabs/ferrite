@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::Display;
 
 /// Represents the star (*) in SELECT statements, e.g., `SELECT * FROM x`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BoundStar;
 
 impl BoundStar {

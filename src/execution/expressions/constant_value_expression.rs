@@ -79,8 +79,8 @@ impl Display for ConstantExpression {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
     use crate::types_db::type_id::TypeId;
 
     #[test]
@@ -98,12 +98,7 @@ mod tests {
 
         // Test join evaluation
         let result = expr
-            .evaluate_join(
-                &dummy_tuple,
-                &dummy_schema,
-                &dummy_tuple,
-                &dummy_schema,
-            )
+            .evaluate_join(&dummy_tuple, &dummy_schema, &dummy_tuple, &dummy_schema)
             .unwrap();
         assert_eq!(result, value);
     }
@@ -112,13 +107,11 @@ mod tests {
     fn test_constant_expression_children() {
         let value = Value::new(42);
         let column = Column::new("test", TypeId::Integer);
-        let children = vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                column.clone(),
-                vec![],
-            ))),
-        ];
+        let children = vec![Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1),
+            column.clone(),
+            vec![],
+        )))];
 
         let expr = ConstantExpression::new(value, column, children.clone());
 

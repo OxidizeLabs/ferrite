@@ -107,6 +107,54 @@ impl TablePage {
         }
     }
 
+    pub fn update_tuple(
+        &mut self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+        rid: RID,
+    ) -> Result<(), PageError> {
+        let tuple_id = rid.get_slot_num() as usize;
+        if tuple_id >= self.num_tuples as usize {
+            return Err(PageError::TupleInvalid);
+        }
+
+        // Get current tuple info
+        let (current_offset, current_size, _) = self.tuple_info[tuple_id];
+        let new_size = tuple.get_length().unwrap() as u16;
+
+        // If new tuple has same size, we can update in place
+        if current_size == new_size {
+            // Update the tuple metadata
+            self.tuple_info[tuple_id].2 = meta.clone();
+
+            // Update the tuple data
+            let tuple_data = bincode::serialize(tuple).unwrap();
+            let start = current_offset as usize;
+            let end = start + new_size as usize;
+            self.data[start..end].copy_from_slice(&tuple_data);
+
+            self.is_dirty = true;
+            Ok(())
+        } else {
+            // If sizes differ, we need to check if we have space for the new tuple
+            if let Some(new_offset) = self.get_next_tuple_offset(tuple) {
+                // Update tuple info
+                self.tuple_info[tuple_id] = (new_offset, new_size, meta.clone());
+
+                // Write new tuple data
+                let tuple_data = bincode::serialize(tuple).unwrap();
+                let start = new_offset as usize;
+                let end = start + new_size as usize;
+                self.data[start..end].copy_from_slice(&tuple_data);
+
+                self.is_dirty = true;
+                Ok(())
+            } else {
+                Err(PageError::TupleInvalid)
+            }
+        }
+    }
+
     /// Updates the metadata of a tuple.
     pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), PageError> {
         let tuple_id = rid.get_slot_num() as usize;

@@ -1,16 +1,15 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MockScanNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
     table: String,
     children: Vec<PlanNode>,
 }
 
 impl MockScanNode {
-    pub fn new(output_schema: Arc<Schema>, table: String, children: Vec<PlanNode>) -> Self {
+    pub fn new(output_schema: Schema, table: String, children: Vec<PlanNode>) -> Self {
         Self {
             output_schema,
             table,

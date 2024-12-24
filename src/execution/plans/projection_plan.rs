@@ -3,7 +3,6 @@ use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionNode {
     output_schema: Arc<Schema>,
@@ -100,22 +99,21 @@ impl AbstractPlanNode for ProjectionNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::catalogue::TableInfo;
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
-    use crate::types_db::type_id::TypeId;
-    use crate::catalogue::catalogue::TableInfo;
-    use crate::storage::table::table_heap::TableHeap;
-    use crate::execution::plans::table_scan_plan::TableScanNode;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use std::sync::Arc;
-    use chrono::Utc;
-    use parking_lot::RwLock;
-    use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::execution::expressions::mock_expression::MockExpression;
+    use crate::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::table_heap::TableHeap;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use parking_lot::RwLock;
+    use std::sync::Arc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -186,7 +184,7 @@ mod tests {
     fn create_mock_expression(name: &str, return_type: TypeId) -> Arc<Expression> {
         Arc::new(Expression::Mock(MockExpression::new(
             name.to_string(),
-            return_type
+            return_type,
         )))
     }
 
@@ -218,7 +216,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_name(), "id");
                 assert_eq!(mock.get_type(), TypeId::Integer);
-            },
+            }
             _ => panic!("Expected Mock expression"),
         }
     }
@@ -227,13 +225,9 @@ mod tests {
     fn test_projection_node_string_representation() {
         let ctx = TestContext::new("test_projection_node_string_representation");
         let input_schema = create_test_schema();
-        let output_schema = Arc::new(Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-        ]));
+        let output_schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
 
-        let expressions = vec![
-            create_mock_expression("id", TypeId::Integer),
-        ];
+        let expressions = vec![create_mock_expression("id", TypeId::Integer)];
 
         let child_node = create_mock_table_scan(&ctx, "test_table", input_schema);
         let projection = ProjectionNode::new(output_schema, expressions, child_node);
@@ -272,7 +266,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::Integer);
                 assert_eq!(mock.get_name(), "result");
-            },
+            }
             _ => panic!("Expected Mock expression"),
         }
 
@@ -281,7 +275,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::VarChar);
                 assert_eq!(mock.get_name(), "name");
-            },
+            }
             _ => panic!("Expected Mock expression"),
         }
     }

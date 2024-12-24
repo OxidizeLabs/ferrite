@@ -23,14 +23,12 @@ struct Args {
 }
 
 struct DBCommandExecutor {
-    instance: Arc<Mutex<DBInstance>>
+    instance: Arc<Mutex<DBInstance>>,
 }
 
 impl DBCommandExecutor {
     fn new(instance: Arc<Mutex<DBInstance>>) -> Self {
-        Self {
-            instance
-        }
+        Self { instance }
     }
 
     fn execute_command(&mut self, command: &str) -> Result<(), Box<dyn Error>> {

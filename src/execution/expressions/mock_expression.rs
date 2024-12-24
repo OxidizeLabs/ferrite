@@ -1,7 +1,3 @@
-use std::any::Any;
-use std::fmt;
-use std::fmt::Display;
-use std::sync::Arc;
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
@@ -10,6 +6,10 @@ use crate::execution::expressions::abstract_expression::{Expression, ExpressionO
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
+use std::any::Any;
+use std::fmt;
+use std::fmt::Display;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MockExpression {
@@ -30,11 +30,7 @@ impl MockExpression {
             TypeId::Decimal => Value::new(42.0f64),
             TypeId::Timestamp => Value::new(42u64),
             TypeId::VarChar => Value::new(name.clone()),
-            TypeId::Vector => Value::new_vector(vec![
-                Value::new(1),
-                Value::new(2),
-                Value::new(3)
-            ]),
+            TypeId::Vector => Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
             TypeId::Invalid => Value::new(Val::Null),
         });
 
@@ -95,11 +91,9 @@ impl Display for MockExpression {
 
 impl ExpressionOps for MockExpression {
     fn evaluate(&self, _tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
-        self.return_value.clone().ok_or_else(||
-            ExpressionError::UnsupportedOperation(
-                "Mock expression has no return value".to_string()
-            )
-        )
+        self.return_value.clone().ok_or_else(|| {
+            ExpressionError::UnsupportedOperation("Mock expression has no return value".to_string())
+        })
     }
 
     fn evaluate_join(
@@ -123,15 +117,11 @@ impl ExpressionOps for MockExpression {
 
     fn get_return_type(&self) -> &Column {
         static COLUMN: std::sync::OnceLock<Column> = std::sync::OnceLock::new();
-        COLUMN.get_or_init(|| {
-            Column::new("mock_col", self.return_type)
-        })
+        COLUMN.get_or_init(|| Column::new("mock_col", self.return_type))
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        Arc::new(Expression::Mock(
-            self.clone().with_children(children)
-        ))
+        Arc::new(Expression::Mock(self.clone().with_children(children)))
     }
 }
 
@@ -201,7 +191,9 @@ mod tests {
         let expr = MockExpression::new("test".to_string(), TypeId::Integer);
         let (tuple, schema) = create_test_tuple();
 
-        let result = expr.evaluate_join(&tuple, &schema, &tuple, &schema).unwrap();
+        let result = expr
+            .evaluate_join(&tuple, &schema, &tuple, &schema)
+            .unwrap();
         assert_eq!(result, Value::new(42));
     }
 

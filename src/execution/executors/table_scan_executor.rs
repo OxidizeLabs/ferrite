@@ -2,18 +2,19 @@ use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::table_scan_plan::TableScanNode;
 use crate::storage::table::table_iterator::TableScanIterator;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error};
+use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::plans::abstract_plan::AbstractPlanNode;
 
 /// TableScanExecutor implements a simple sequential scan over a table
 /// using the Volcano-style iterator model.
 pub struct TableScanExecutor {
     /// The executor context
-    context: Arc<ExecutorContext>,
+    context: Arc<RwLock<ExecutorContext>>,
     /// The table scan plan node
     plan: Arc<TableScanNode>,
     /// Flag indicating if the executor has been initialized
@@ -24,7 +25,7 @@ pub struct TableScanExecutor {
 
 impl TableScanExecutor {
     /// Create a new table scan executor
-    pub fn new(context: Arc<ExecutorContext>, plan: Arc<TableScanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<TableScanNode>) -> Self {
         Self {
             context,
             plan,
@@ -36,7 +37,10 @@ impl TableScanExecutor {
 
 impl AbstractExecutor for TableScanExecutor {
     fn init(&mut self) {
-        debug!("Initializing TableScanExecutor for table: {}", self.plan.get_table_name());
+        debug!(
+            "Initializing TableScanExecutor for table: {}",
+            self.plan.get_table_name()
+        );
 
         // Create a new table scan iterator from the plan
         self.iterator = Some(self.plan.scan());
@@ -80,8 +84,8 @@ impl AbstractExecutor for TableScanExecutor {
         self.plan.get_output_schema().clone()
     }
 
-    fn get_executor_context(&self) -> &ExecutorContext {
-        &self.context
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+        self.context.clone()
     }
 }
 

@@ -98,7 +98,7 @@ mod tests {
     use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     fn create_mock_child() -> Box<PlanNode> {
-        let schema = Arc::new(Schema::new(vec![]));
+        let schema = Schema::new(vec![]);
         let table = "mock_table".to_string();
         Box::new(PlanNode::MockScan(MockScanNode::new(schema, table, vec![])))
     }

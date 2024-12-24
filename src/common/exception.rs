@@ -5,6 +5,33 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
 
+#[derive(Error, Debug, PartialEq)]
+pub enum LockError {
+    #[error("Attempted to use intention lock on row")]
+    AttemptedIntentionLockOnRow,
+
+    #[error("Attempted shared lock in READ_UNCOMMITTED")]
+    LockSharedOnReadUncommitted,
+
+    #[error("Attempted lock while transaction is in SHRINKING phase")]
+    LockOnShrinking,
+
+    #[error("Required table lock not present")]
+    TableLockNotPresent,
+
+    #[error("Incompatible lock upgrade requested")]
+    IncompatibleUpgrade,
+
+    #[error("Lock upgrade conflict with another transaction")]
+    UpgradeConflict,
+
+    #[error("Attempted to unlock without holding lock")]
+    NoLockHeld,
+
+    #[error("Attempted to unlock table before unlocking rows")]
+    TableUnlockedBeforeRows,
+}
+
 #[derive(Error, Debug)]
 pub enum ValuesError {
     #[error("Value count {value_count} is not a multiple of column count {column_count}")]
@@ -122,7 +149,7 @@ pub enum ExpressionError {
     #[error("Page error: {0}")]
     PageError(PageError),
     #[error("Page guard error: {0}")]
-    PageGuardError(PageGuardError)
+    PageGuardError(PageGuardError),
 }
 
 #[derive(Debug, Error)]

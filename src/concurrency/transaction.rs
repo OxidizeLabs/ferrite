@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-use std::{fmt, thread};
-
 use crate::common::config::{TimeStampOidT, Timestamp, TxnId, INVALID_TS, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
+use parking_lot::RwLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::{fmt, thread};
 
 /// Represents a link to a previous version of this tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,6 +45,8 @@ pub enum TransactionState {
     Tainted,
     Committed,
     Aborted,
+    Shrinking,
+    Growing,
 }
 
 /// Transaction isolation level.
@@ -53,16 +55,21 @@ pub enum IsolationLevel {
     ReadUncommitted,
     SnapshotIsolation,
     Serializable,
+    RepeatableRead,
+    ReadCommitted,
 }
 
 /// Represents a transaction.
 pub struct Transaction {
+    // Immutable fields
     txn_id: TxnId,
     isolation_level: IsolationLevel,
     thread_id: thread::ThreadId,
-    state: Mutex<TransactionState>,
-    read_ts: Mutex<Timestamp>,
-    commit_ts: Mutex<Timestamp>,
+
+    // Mutable fields with interior mutability
+    state: RwLock<TransactionState>,
+    read_ts: RwLock<Timestamp>,
+    commit_ts: RwLock<Timestamp>,
     undo_logs: Mutex<Vec<UndoLog>>,
     write_set: Mutex<HashMap<u32, HashSet<RID>>>,
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
@@ -82,9 +89,9 @@ impl Transaction {
             txn_id,
             isolation_level,
             thread_id: thread::current().id(),
-            state: Mutex::new(TransactionState::Running),
-            read_ts: Mutex::new(0),
-            commit_ts: Mutex::new(INVALID_TS),
+            state: RwLock::new(TransactionState::Running),
+            read_ts: RwLock::new(0),
+            commit_ts: RwLock::new(INVALID_TS),
             undo_logs: Mutex::new(Vec::new()),
             write_set: Mutex::new(HashMap::new()),
             scan_predicates: Mutex::new(HashMap::new()),
@@ -97,7 +104,7 @@ impl Transaction {
     }
 
     /// Returns the ID of this transaction.
-    pub fn txn_id(&self) -> TxnId {
+    pub fn get_transaction_id(&self) -> TxnId {
         self.txn_id
     }
 
@@ -113,27 +120,35 @@ impl Transaction {
     }
 
     /// Returns the isolation level of this transaction.
-    pub fn isolation_level(&self) -> IsolationLevel {
+    pub fn get_isolation_level(&self) -> IsolationLevel {
         self.isolation_level
     }
 
     /// Returns the transaction state.
     pub fn get_state(&self) -> TransactionState {
-        *self.state.lock().unwrap()
+        *self.state.read()
     }
 
     pub fn set_state(&self, state: TransactionState) {
-        *self.state.lock().unwrap() = state;
+        *self.state.write() = state;
     }
 
     /// Returns the read timestamp.
     pub fn read_ts(&self) -> TimeStampOidT {
-        *self.read_ts.lock().unwrap()
+        *self.read_ts.read()
+    }
+
+    pub fn set_read_ts(&self, ts: TimeStampOidT) {
+        *self.read_ts.write() = ts;
     }
 
     /// Returns the commit timestamp.
     pub fn commit_ts(&self) -> TimeStampOidT {
-        *self.commit_ts.lock().unwrap()
+        *self.commit_ts.read()
+    }
+
+    pub fn set_commit_ts(&self, ts: TimeStampOidT) {
+        *self.commit_ts.write() = ts;
     }
 
     /// Modifies an existing undo log.
@@ -160,6 +175,33 @@ impl Transaction {
             prev_txn: self.txn_id,
             prev_log_idx: logs.len() - 1,
         }
+    }
+
+    /// Returns the undo log entry at the specified index.
+    ///
+    /// # Parameters
+    /// - `log_id`: The index of the undo log entry.
+    ///
+    /// # Returns
+    /// The undo log entry at the specified index.
+    pub fn get_undo_log(&self, log_id: usize) -> UndoLog {
+        self.undo_logs.lock().unwrap()[log_id].clone()
+    }
+
+    /// Returns the number of undo log entries.
+    pub fn get_undo_log_num(&self) -> usize {
+        self.undo_logs.lock().unwrap().len()
+    }
+
+    /// Clears the undo logs.
+    ///
+    /// # Returns
+    /// The number of cleared undo logs.
+    pub fn clear_undo_log(&self) -> usize {
+        let mut logs = self.undo_logs.lock().unwrap();
+        let size = logs.len();
+        logs.clear();
+        size
     }
 
     /// Appends a write set entry.
@@ -195,37 +237,14 @@ impl Transaction {
         self.scan_predicates.lock().unwrap().clone()
     }
 
-    /// Returns the undo log entry at the specified index.
-    ///
-    /// # Parameters
-    /// - `log_id`: The index of the undo log entry.
-    ///
-    /// # Returns
-    /// The undo log entry at the specified index.
-    pub fn get_undo_log(&self, log_id: usize) -> UndoLog {
-        self.undo_logs.lock().unwrap()[log_id].clone()
-    }
-
-    /// Returns the number of undo log entries.
-    pub fn get_undo_log_num(&self) -> usize {
-        self.undo_logs.lock().unwrap().len()
-    }
-
-    /// Clears the undo logs.
-    ///
-    /// # Returns
-    /// The number of cleared undo logs.
-    pub fn clear_undo_log(&self) -> usize {
-        let mut logs = self.undo_logs.lock().unwrap();
-        let size = logs.len();
-        logs.clear();
-        size
-    }
-
     /// Sets the transaction state to tainted.
     pub fn set_tainted(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.write();
         *state = TransactionState::Tainted;
+    }
+
+    pub fn get_scan_predicates(&self) -> HashMap<u32, Vec<Arc<Expression>>> {
+        self.scan_predicates.lock().unwrap().clone()
     }
 }
 
@@ -236,6 +255,8 @@ impl fmt::Display for IsolationLevel {
             IsolationLevel::ReadUncommitted => "READ_UNCOMMITTED",
             IsolationLevel::SnapshotIsolation => "SNAPSHOT_ISOLATION",
             IsolationLevel::Serializable => "SERIALIZABLE",
+            IsolationLevel::RepeatableRead => "REPEATABLE_READ",
+            IsolationLevel::ReadCommitted => "READ_commit_isolation",
         };
         write!(f, "{}", name)
     }
@@ -249,6 +270,8 @@ impl fmt::Display for TransactionState {
             TransactionState::Tainted => "TAINTED",
             TransactionState::Committed => "COMMITTED",
             TransactionState::Aborted => "ABORTED",
+            TransactionState::Shrinking => "SHRINKING",
+            TransactionState::Growing => "GROWING",
         };
         write!(f, "{}", name)
     }

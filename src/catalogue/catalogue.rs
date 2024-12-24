@@ -1,21 +1,11 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
-use crate::common::logger::initialize_logger;
-use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction_manager::TransactionManager;
-use crate::recovery::log_manager::LogManager;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
-use chrono::Utc;
 use core::fmt;
-use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::fs;
 use std::ops::Add;
 use std::sync::Arc;
 
@@ -399,12 +389,22 @@ impl PartialEq for TableInfo {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::column::Column;
+    use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use parking_lot::{Mutex, RwLock};
+    use std::fs;
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        // transaction_manager: Arc<Mutex<TransactionManager>>,
+        transaction_manager: Arc<Mutex<TransactionManager>>,
         lock_manager: Arc<LockManager>,
         log_manager: Arc<LogManager>,
         db_file: String,
@@ -426,7 +426,8 @@ mod unit_tests {
                 db_log_file.clone(),
                 100,
             ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -451,6 +452,7 @@ mod unit_tests {
 
             Self {
                 bpm,
+                transaction_manager,
                 lock_manager,
                 log_manager,
                 db_file,
@@ -482,10 +484,7 @@ mod unit_tests {
         }
     }
 
-
-    fn create_catalog(
-        bpm: Arc<BufferPoolManager>,
-    ) -> Catalog {
+    fn create_catalog(bpm: Arc<BufferPoolManager>) -> Catalog {
         Catalog::new(
             bpm,
             0,

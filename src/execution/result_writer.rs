@@ -58,7 +58,15 @@ impl CliResultWriter {
 
         print!("{}", left);
         for (idx, width) in self.column_widths.iter().enumerate() {
-            print!("{}", if style == BorderStyle::Row {"─"} else {"═"}.repeat(*width));
+            print!(
+                "{}",
+                if style == BorderStyle::Row {
+                    "─"
+                } else {
+                    "═"
+                }
+                .repeat(*width)
+            );
             if idx < self.column_widths.len() - 1 {
                 print!("{}", cross);
             }
@@ -105,7 +113,6 @@ impl CliResultWriter {
             self.print_horizontal_line(BorderStyle::Top);
         }
 
-        let total_rows = self.rows.len();
         let mut rows: Vec<_> = self.rows.drain(..).collect();
 
         // Print header if present

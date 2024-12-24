@@ -65,11 +65,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
-    pub fn insert_tuple(
-        &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple
-    ) -> Result<RID, String> {
+    pub fn insert_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
         // Helper function to try inserting into a page
@@ -119,6 +115,76 @@ impl TableHeap {
             Some(rid) => Ok(rid.unwrap()),
             None => Err("Failed to insert tuple into new page".to_string()),
         }
+    }
+
+    pub fn update_tuple(
+        &self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+        rid: RID,
+    ) -> Result<RID, String> {
+        let _write_guard = self.latch.write();
+
+        // Helper function to try updating in a page
+        let mut try_update = |page_id: PageId| -> Option<Result<RID, String>> {
+            if let Some(page_guard) = self.bpm.fetch_page_guarded(page_id) {
+                if let Some(mut table_page_guard) = page_guard.into_specific_type::<TablePage, 8>()
+                {
+                    return Some(
+                        table_page_guard
+                            .access_mut(|table_page| {
+                                match table_page.update_tuple(meta, tuple, rid) {
+                                    Ok(()) => Ok(rid),
+                                    Err(_) => {
+                                        // If update fails, try inserting as new tuple
+                                        match table_page.insert_tuple(meta, tuple) {
+                                            Some(new_rid) => Ok(new_rid),
+                                            None => {
+                                                Err("Failed to update/insert tuple".to_string())
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                            .unwrap_or_else(|| Err("Failed to access table page".to_string())),
+                    );
+                }
+            }
+            None
+        };
+
+        // Try updating in the original page
+        if let Some(result) = try_update(rid.get_page_id()) {
+            return result;
+        }
+
+        // If update fails, try inserting as new tuple in the last page
+        if let Some(result) = try_update(self.last_page_id) {
+            return result;
+        }
+
+        // If all else fails, create a new page and insert there
+        let new_page_guard = self
+            .bpm
+            .new_page_guarded(NewPageType::Table)
+            .ok_or_else(|| "Failed to create new page".to_string())?;
+
+        let new_page_id = new_page_guard.get_page_id();
+
+        // Initialize the new page
+        if let Some(mut table_page) = new_page_guard.into_specific_type::<TablePage, 8>() {
+            table_page.access_mut(|page| {
+                page.init();
+                page.set_dirty(true);
+            });
+
+            // Try inserting into the new page
+            if let Some(result) = try_update(new_page_id) {
+                return result;
+            }
+        }
+
+        Err("Failed to update tuple".to_string())
     }
 
     /// Updates the meta of a tuple.

@@ -11,21 +11,22 @@ use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
 use log::{debug, error};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 
 pub struct FilterExecutor {
-    context: Arc<ExecutorContext>,
+    context: Arc<RwLock<ExecutorContext>>,
     plan: Arc<FilterNode>,
     initialized: bool,
     iterator: Arc<Mutex<TableIterator>>,
 }
 
 impl FilterExecutor {
-    pub fn new(context: Arc<ExecutorContext>, plan: Arc<FilterNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<FilterNode>) -> Self {
         let table_name = plan.get_table_name();
         let table_heap = {
-            let catalog = context.get_catalog();
+            let context_guard = context.read();
+            let catalog = context_guard.get_catalog();
             let catalog_guard = catalog.read();
             let table_info = catalog_guard
                 .get_table(table_name)
@@ -55,22 +56,20 @@ impl FilterExecutor {
         );
 
         match predicate.evaluate(tuple, self.plan.get_output_schema()) {
-            Ok(value) => {
-                match value.get_value() {
-                    Val::Boolean(b) => {
-                        debug!(
-                            "Predicate evaluation result: {}, for tuple: {:?}",
-                            b,
-                            tuple.get_values()
-                        );
-                        *b
-                    }
-                    _ => {
-                        error!("Predicate evaluation did not return boolean value");
-                        false
-                    }
+            Ok(value) => match value.get_value() {
+                Val::Boolean(b) => {
+                    debug!(
+                        "Predicate evaluation result: {}, for tuple: {:?}",
+                        b,
+                        tuple.get_values()
+                    );
+                    *b
                 }
-            }
+                _ => {
+                    error!("Predicate evaluation did not return boolean value");
+                    false
+                }
+            },
             Err(e) => {
                 error!("Failed to evaluate predicate: {}", e);
                 false
@@ -79,15 +78,15 @@ impl FilterExecutor {
     }
 
     fn acquire_table_lock(&self) -> Result<(), String> {
-        let txn = self.context.get_transaction();
-        let mut txn_guard = txn.lock();
-        let lock_manager = self.context.get_lock_manager();
-        // Acquire table lock in shared mode for reading
-        lock_manager.lock_table(
-            &mut txn_guard,
-            LockMode::Exclusive,
-            self.plan.get_table_oid(),
-        );
+        let txn = self.context.read().get_transaction();
+        let context_guard = self.context.read();
+        let lock_manager = context_guard.get_lock_manager();
+
+        // Since txn is now Arc<Transaction>, we don't need &mut
+        if let Err(e) = lock_manager.lock_table(txn, LockMode::Exclusive, self.plan.get_table_oid())
+        {
+            return Err(format!("Failed to acquire table lock: {:?}", e));
+        }
         Ok(())
     }
 }
@@ -143,8 +142,8 @@ impl AbstractExecutor for FilterExecutor {
         self.plan.get_output_schema().clone()
     }
 
-    fn get_executor_context(&self) -> &ExecutorContext {
-        &self.context
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+        self.context.clone()
     }
 }
 
@@ -256,20 +255,17 @@ mod tests {
     fn create_test_executor_context(
         test_context: &TestContext,
         catalog: Arc<RwLock<Catalog>>,
-    ) -> Arc<ExecutorContext> {
+    ) -> Arc<RwLock<ExecutorContext>> {
         // Create a new transaction
-        let transaction = Arc::new(Mutex::new(Transaction::new(
-            0,
-            IsolationLevel::ReadUncommitted,
-        )));
+        let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
 
-        Arc::new(ExecutorContext::new(
+        Arc::new(RwLock::new(ExecutorContext::new(
             transaction,
             Arc::clone(&test_context.transaction_manager),
             catalog,
             test_context.bpm(),
             test_context.lock_manager(),
-        ))
+        )))
     }
 
     fn create_age_filter(
@@ -322,8 +318,8 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm(),
-            0, // next_index_oid
-            0, // next_table_oid
+            0,              // next_index_oid
+            0,              // next_table_oid
             HashMap::new(), // tables
             HashMap::new(), // indexes
             HashMap::new(), // table_names
@@ -447,7 +443,10 @@ mod tests {
         // Log all results before assertions
         println!("All matching ages: {:?}", results);
 
-        assert!(results.iter().all(|&age| age > 30), "All ages should be > 30");
+        assert!(
+            results.iter().all(|&age| age > 30),
+            "All ages should be > 30"
+        );
         assert_eq!(results.len(), 2, "Should find exactly one match > 30");
         assert!(results.contains(&35), "Should contain Charlie's age (35)");
     }
@@ -485,17 +484,14 @@ mod tests {
         let catalog = Arc::new(RwLock::new(catalog));
 
         // Create executor context with explicit transaction
-        let transaction = Arc::new(Mutex::new(Transaction::new(
-            1,
-            IsolationLevel::ReadUncommitted,
-        ))); // read-only transaction
-        let executor_context = Arc::new(ExecutorContext::new(
+        let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadUncommitted)); // read-only transaction
+        let executor_context = Arc::new(RwLock::new(ExecutorContext::new(
             transaction,
             Arc::clone(&test_context.transaction_manager),
             Arc::clone(&catalog),
             test_context.bpm(),
             test_context.lock_manager(),
-        ));
+        )));
 
         // Create filter for age > 25
         let filter_plan = create_age_filter(25, ComparisonType::GreaterThan, &schema);

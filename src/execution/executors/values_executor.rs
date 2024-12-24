@@ -6,17 +6,18 @@ use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error};
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct ValuesExecutor {
-    context: Arc<ExecutorContext>,
+    context: Arc<RwLock<ExecutorContext>>,
     plan: Arc<ValuesNode>,
     current_row: usize,
     initialized: bool,
 }
 
 impl ValuesExecutor {
-    pub fn new(context: Arc<ExecutorContext>, plan: Arc<ValuesNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<ValuesNode>) -> Self {
         Self {
             context,
             plan,
@@ -77,8 +78,8 @@ impl AbstractExecutor for ValuesExecutor {
         self.plan.get_output_schema().clone()
     }
 
-    fn get_executor_context(&self) -> &ExecutorContext {
-        self.context.as_ref()
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+        self.context.clone()
     }
 }
 
@@ -103,8 +104,8 @@ mod tests {
     use tempfile::tempdir;
 
     mod helpers {
-        use crate::catalogue::catalogue::Catalog;
         use super::*;
+        use crate::catalogue::catalogue::Catalog;
         use crate::execution::plans::abstract_plan::PlanNode;
 
         pub fn create_test_schema() -> Schema {
@@ -151,7 +152,7 @@ mod tests {
             pub transaction_manager: Arc<Mutex<TransactionManager>>,
             pub lock_manager: Arc<LockManager>,
             pub buffer_pool_manager: Arc<BufferPoolManager>,
-            pub transaction: Arc<Mutex<Transaction>>,
+            pub transaction: Arc<Transaction>,
         }
 
         impl TestContext {
@@ -165,7 +166,8 @@ mod tests {
                     log_path.to_str().unwrap().to_string(),
                     100,
                 ));
-                let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+                let disk_scheduler =
+                    Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 
                 const BUFFER_POOL_SIZE: usize = 10;
                 const K: usize = 2;
@@ -188,10 +190,13 @@ mod tests {
                     HashMap::new(),
                 )));
 
-                let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
+                let transaction_manager =
+                    Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
                 let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
-                let transaction = transaction_manager.lock().begin(IsolationLevel::Serializable);
+                let transaction = transaction_manager
+                    .lock()
+                    .begin(IsolationLevel::Serializable);
 
                 Self {
                     catalog,
@@ -202,21 +207,21 @@ mod tests {
                 }
             }
 
-            pub fn create_executor_context(&self) -> Arc<ExecutorContext> {
-                Arc::new(ExecutorContext::new(
+            pub fn create_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+                Arc::new(RwLock::new(ExecutorContext::new(
                     self.transaction.clone(),
                     self.transaction_manager.clone(),
                     self.catalog.clone(),
                     self.buffer_pool_manager.clone(),
                     self.lock_manager.clone(),
-                ))
+                )))
             }
         }
     }
 
     mod initialization {
-        use super::*;
         use super::helpers::*;
+        use super::*;
 
         #[test]
         fn test_initial_state() {
@@ -246,9 +251,9 @@ mod tests {
     }
 
     mod row_processing {
-        use crate::concurrency::transaction::TransactionState;
-        use super::*;
         use super::helpers::*;
+        use super::*;
+        use crate::concurrency::transaction::TransactionState;
 
         #[test]
         fn test_empty_values() {
@@ -290,7 +295,7 @@ mod tests {
             let mut executor = ValuesExecutor::new(context, plan);
 
             {
-                let txn = test_ctx.transaction.lock();
+                let txn = test_ctx.transaction.clone();
                 assert_eq!(txn.get_state(), TransactionState::Running);
             }
 
@@ -298,21 +303,24 @@ mod tests {
                 let result = executor.next();
                 assert!(result.is_some());
                 let (tuple, _) = result.unwrap();
-                assert_eq!(tuple.get_value(0), &Value::new(i as i32));
+                assert_eq!(tuple.get_value(0), &Value::new(i));
             }
 
-            test_ctx.transaction_manager.lock().commit(test_ctx.transaction.clone());
+            test_ctx
+                .transaction_manager
+                .lock()
+                .commit(test_ctx.transaction.clone());
 
             {
-                let txn = test_ctx.transaction.lock();
+                let txn = test_ctx.transaction;
                 assert_eq!(txn.get_state(), TransactionState::Committed);
             }
         }
     }
 
     mod schema_handling {
-        use super::*;
         use super::helpers::*;
+        use super::*;
 
         #[test]
         fn test_output_schema() {
@@ -325,16 +333,25 @@ mod tests {
             let output_schema = executor.get_output_schema();
 
             assert_eq!(output_schema.get_column_count(), 3);
-            assert_eq!(output_schema.get_column(0).unwrap().get_type(), TypeId::Integer);
-            assert_eq!(output_schema.get_column(1).unwrap().get_type(), TypeId::VarChar);
-            assert_eq!(output_schema.get_column(2).unwrap().get_type(), TypeId::Boolean);
+            assert_eq!(
+                output_schema.get_column(0).unwrap().get_type(),
+                TypeId::Integer
+            );
+            assert_eq!(
+                output_schema.get_column(1).unwrap().get_type(),
+                TypeId::VarChar
+            );
+            assert_eq!(
+                output_schema.get_column(2).unwrap().get_type(),
+                TypeId::Boolean
+            );
         }
     }
 
     mod transaction_handling {
-        use crate::concurrency::transaction::TransactionState;
-        use super::*;
         use super::helpers::*;
+        use super::*;
+        use crate::concurrency::transaction::TransactionState;
 
         #[test]
         #[ignore]
@@ -350,10 +367,13 @@ mod tests {
             assert!(executor.next().is_some());
 
             // Commit transaction
-            test_ctx.transaction_manager.lock().commit(test_ctx.transaction.clone());
+            test_ctx
+                .transaction_manager
+                .lock()
+                .commit(test_ctx.transaction.clone());
 
             {
-                let txn = test_ctx.transaction.lock();
+                let txn = test_ctx.transaction;
                 assert_eq!(txn.get_state(), TransactionState::Committed);
             }
         }
@@ -371,10 +391,13 @@ mod tests {
             assert!(executor.next().is_some());
 
             // Abort transaction
-            test_ctx.transaction_manager.lock().abort(test_ctx.transaction.clone());
+            test_ctx
+                .transaction_manager
+                .lock()
+                .abort(test_ctx.transaction.clone());
 
             {
-                let txn = test_ctx.transaction.lock();
+                let txn = test_ctx.transaction;
                 assert_eq!(txn.get_state(), TransactionState::Aborted);
             }
         }
