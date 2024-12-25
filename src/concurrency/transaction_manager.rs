@@ -1,5 +1,5 @@
 use crate::catalogue::catalogue::Catalog;
-use crate::common::config::TxnId;
+use crate::common::config::{TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
@@ -12,6 +12,8 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use crate::recovery::log_manager::LogManager;
+use crate::recovery::log_record::{LogRecord, LogRecordType};
 
 pub struct PageVersionInfo {
     // Stores previous version info for all slots
@@ -25,10 +27,14 @@ pub struct TransactionManager {
     last_commit_ts: AtomicU64,
     catalog: Arc<RwLock<Catalog>>,
     version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
+    log_manager: Arc<RwLock<LogManager>>,
 }
 
 impl TransactionManager {
-    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+
+
+    // Modify constructor
+    pub fn new(catalog: Arc<RwLock<Catalog>>, log_manager: Arc<RwLock<LogManager>>) -> Self {
         TransactionManager {
             next_txn_id: AtomicU64::new(0),
             txn_map: RwLock::new(HashMap::new()),
@@ -36,6 +42,7 @@ impl TransactionManager {
             last_commit_ts: AtomicU64::new(0),
             catalog,
             version_info: RwLock::new(HashMap::new()),
+            log_manager,
         }
     }
 
@@ -50,10 +57,17 @@ impl TransactionManager {
         let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
         let txn = Arc::new(Transaction::new(txn_id, isolation_level));
 
+        // Write begin log record
+        let begin_record = LogRecord::new_transaction_record(
+            txn_id,
+            INVALID_LSN,
+            LogRecordType::Begin
+        );
+        let lsn = self.log_manager.write().append_log_record(&begin_record);
+        txn.set_prev_lsn(lsn);
+
         // Update transaction map
         self.txn_map.write().insert(txn_id, Arc::clone(&txn));
-
-        // Add to running transactions
         self.running_txns.add_txn(txn.read_ts());
 
         txn
@@ -67,12 +81,10 @@ impl TransactionManager {
     /// # Returns
     /// `true` if the transaction was successfully committed; otherwise, `false`.
     pub fn commit(&mut self, txn: Arc<Transaction>) -> bool {
-        // Check transaction state
         if txn.get_state() != TransactionState::Running {
             panic!("txn not in running state");
         }
 
-        // Handle serializable transactions
         if txn.get_isolation_level() == IsolationLevel::Serializable {
             if !self.verify_transaction(&txn) {
                 self.abort(txn);
@@ -80,12 +92,20 @@ impl TransactionManager {
             }
         }
 
+        // Write commit log record
+        let commit_record = LogRecord::new_transaction_record(
+            txn.get_transaction_id(),
+            txn.get_prev_lsn(),
+            LogRecordType::Commit
+        );
+        let lsn = self.log_manager.write().append_log_record(&commit_record);
+        txn.set_prev_lsn(lsn);
+
         // Update transaction state and metadata
         {
             let mut txn_map = self.txn_map.write();
             txn.set_state(TransactionState::Committed);
 
-            // Update running transactions
             let read_ts = txn.read_ts();
             self.running_txns.update_commit_ts(read_ts);
             self.running_txns.remove_txn(read_ts);
@@ -102,10 +122,18 @@ impl TransactionManager {
     /// - `txn`: The transaction to abort.
     pub fn abort(&mut self, txn: Arc<Transaction>) {
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
-        {
+        if current_state != TransactionState::Running && current_state != TransactionState::Tainted {
             panic!("txn not in running / tainted state");
         }
+
+        // Write abort log record
+        let abort_record = LogRecord::new_transaction_record(
+            txn.get_transaction_id(),
+            txn.get_prev_lsn(),
+            LogRecordType::Abort
+        );
+        let lsn = self.log_manager.write().append_log_record(&abort_record);
+        txn.set_prev_lsn(lsn);
 
         {
             let mut txn_map = self.txn_map.write();
@@ -320,27 +348,35 @@ pub fn update_tuple_and_undo_link(
     tuple: &mut Tuple,
     check: Option<Box<dyn Fn(&TupleMeta, &Tuple, RID, Option<UndoLink>) -> bool>>,
 ) -> bool {
-    // First try to update the tuple
+    // Write update log record before modifying data
+    let old_tuple = table_heap.get_tuple(rid).unwrap().1;
+    let update_record = LogRecord::new_update_record(
+        txn.get_transaction_id(),
+        txn.get_prev_lsn(),
+        LogRecordType::Update,
+        rid,
+        old_tuple,
+        tuple.clone(),
+    );
+    let lsn = txn_mgr.log_manager.write().append_log_record(&update_record);
+    txn.set_prev_lsn(lsn);
+
+    // Proceed with update
     let update_result = match table_heap.update_tuple(meta, tuple, rid) {
         Ok(new_rid) => {
             if new_rid != rid {
-                // If RID changed (tuple was moved), we need to update the undo link
-                // Create a closure to handle the undo link update
                 if !txn_mgr.update_undo_link(
                     new_rid,
                     undo_link.clone(),
                     Some(Box::new(move |_| true)),
                 ) {
-                    // If updating undo link fails, we need to clean up the newly inserted tuple
                     let rollback_meta = TupleMeta::new(txn.get_transaction_id(), true);
                     let _ = table_heap.update_tuple_meta(&rollback_meta, new_rid);
                     return false;
                 }
                 new_rid
             } else {
-                // RID didn't change, update undo link normally
                 if !txn_mgr.update_undo_link(rid, undo_link.clone(), Some(Box::new(|_| true))) {
-                    // If updating undo link fails, revert the tuple update
                     let rollback_meta = TupleMeta::new(txn.get_transaction_id(), true);
                     let _ = table_heap.update_tuple_meta(&rollback_meta, rid);
                     return false;
@@ -351,10 +387,9 @@ pub fn update_tuple_and_undo_link(
         Err(_) => return false,
     };
 
-    // If check function is provided, verify the update
+    // Verify update if check function provided
     if let Some(check_fn) = check {
         if !check_fn(meta, tuple, update_result, undo_link.clone()) {
-            // If check fails, revert both updates
             let rollback_meta = TupleMeta::new(txn.get_transaction_id(), true);
             let _ = table_heap.update_tuple_meta(&rollback_meta, update_result);
             txn_mgr.update_undo_link(update_result, None, Some(Box::new(|_| true)));

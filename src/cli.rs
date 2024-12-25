@@ -188,6 +188,7 @@ impl DBCommandExecutor {
 
         // Log Manager Details
         if let Some(log_mgr) = instance.get_log_manager() {
+            let log_mgr_read = log_mgr.read();
             writer.begin_table(true);
             writer.begin_header();
             writer.write_header_cell("Log Statistics");
@@ -196,12 +197,12 @@ impl DBCommandExecutor {
 
             writer.begin_row();
             writer.write_cell("Persistent LSN");
-            writer.write_cell(&log_mgr.get_persistent_lsn().to_string());
+            writer.write_cell(&log_mgr_read.get_persistent_lsn().to_string());
             writer.end_row();
 
             writer.begin_row();
             writer.write_cell("Log Buffer Size");
-            writer.write_cell(&log_mgr.get_log_buffer_size().to_string());
+            writer.write_cell(&log_mgr_read.get_log_buffer_size().to_string());
             writer.end_row();
 
             writer.end_table();
