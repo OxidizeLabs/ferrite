@@ -1,4 +1,4 @@
-use crate::common::config::{TimeStampOidT, Timestamp, TxnId, INVALID_TS, INVALID_TXN_ID};
+use crate::common::config::{Lsn, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
@@ -73,6 +73,7 @@ pub struct Transaction {
     undo_logs: Mutex<Vec<UndoLog>>,
     write_set: Mutex<HashMap<u32, HashSet<RID>>>,
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
+    prev_lsn: RwLock<Lsn>,
 }
 
 impl Transaction {
@@ -95,6 +96,7 @@ impl Transaction {
             undo_logs: Mutex::new(Vec::new()),
             write_set: Mutex::new(HashMap::new()),
             scan_predicates: Mutex::new(HashMap::new()),
+            prev_lsn: RwLock::new(INVALID_LSN),
         }
     }
 
@@ -245,6 +247,14 @@ impl Transaction {
 
     pub fn get_scan_predicates(&self) -> HashMap<u32, Vec<Arc<Expression>>> {
         self.scan_predicates.lock().unwrap().clone()
+    }
+
+    pub fn set_prev_lsn(&self, lsn: Lsn) {
+        *self.prev_lsn.write() = lsn;
+    }
+
+    pub fn get_prev_lsn(&self) -> Lsn {
+        *self.prev_lsn.read()
     }
 }
 

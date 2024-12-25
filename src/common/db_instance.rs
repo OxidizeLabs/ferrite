@@ -15,6 +15,7 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
+use crate::recovery::log_record::{LogRecord, LogRecordType};
 
 /// Trait for writing query results in a tabular format
 pub trait ResultWriter {
@@ -44,7 +45,7 @@ pub struct DBConfig {
 /// Main struct representing the DB database instance with generic disk manager type
 pub struct DBInstance {
     buffer_pool_manager: Option<Arc<BufferPoolManager>>,
-    log_manager: Option<Arc<LogManager>>,
+    log_manager: Option<Arc<RwLock<LogManager>>>,
     transaction_manager: Option<Arc<Mutex<TransactionManager>>>,
     lock_manager: Option<Arc<LockManager>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
@@ -89,7 +90,7 @@ impl DBInstance {
             Default::default(),
         )));
 
-        let transaction_manager = Some(Arc::new(Mutex::new(TransactionManager::new(catalog.clone()))));
+        let transaction_manager = Self::create_transaction_manager(catalog.clone(), log_manager.clone().unwrap())?;
         let lock_manager = Self::create_lock_manager(&transaction_manager.clone().unwrap())?;
 
         let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(Arc::clone(&catalog))));
@@ -281,7 +282,7 @@ impl DBInstance {
         self.buffer_pool_manager.as_ref()
     }
 
-    pub fn get_log_manager(&self) -> Option<&Arc<LogManager>> {
+    pub fn get_log_manager(&self) -> Option<&Arc<RwLock<LogManager>>> {
         self.log_manager.as_ref()
     }
 
@@ -312,9 +313,9 @@ impl DBInstance {
 
     fn create_log_manager(
         disk_manager: &Arc<FileDiskManager>,
-    ) -> Result<Option<Arc<LogManager>>, DBError> {
+    ) -> Result<Option<Arc<RwLock<LogManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-checkpoint-manager")) {
-            Some(Arc::new(LogManager::new(disk_manager.clone())))
+            Some(Arc::new(RwLock::new(LogManager::new(disk_manager.clone()))))
         } else {
             None
         })
@@ -348,9 +349,9 @@ impl DBInstance {
         })
     }
 
-    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>) -> Result<Option<Arc<TransactionManager>>, DBError> {
+    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>, log_manager: Arc<RwLock<LogManager>>) -> Result<Option<Arc<Mutex<TransactionManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-transaction-manager")) {
-            let transaction_manager = Arc::new(TransactionManager::new(catalog));
+            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog, log_manager)));
             Some(transaction_manager)
         } else {
             None
