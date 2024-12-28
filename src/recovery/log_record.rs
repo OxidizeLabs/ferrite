@@ -521,4 +521,199 @@ mod tests {
         assert_eq!(record.get_delete_rid(), Some(&rid));
         assert_eq!(record.get_delete_tuple(), Some(&tuple));
     }
+
+    // Add to existing test setup functions
+    fn create_large_test_tuple() -> Tuple {
+        let schema = create_test_schema();
+        let large_string = "a".repeat(1000);
+        let values = vec![Value::new(1), Value::new(large_string)];
+        let rid = RID::new(1, 1);
+        Tuple::new(&values, schema, rid)
+    }
+
+    #[test]
+    fn test_size_calculations_with_large_tuples() {
+        let large_tuple = create_large_test_tuple();
+        let rid = large_tuple.get_rid();
+
+        // Test insert record size
+        let insert_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Insert,
+            rid,
+            large_tuple.clone(),
+        );
+
+        let expected_size = LogRecord::HEADER_SIZE as i32
+            + size_of::<RID>() as i32
+            + size_of::<i32>() as i32
+            + large_tuple.get_length().unwrap() as i32;
+
+        assert_eq!(insert_record.get_size(), expected_size);
+    }
+
+    #[test]
+    fn test_sequential_update_records() {
+        let tuple1 = create_test_tuple();
+        let tuple2 = create_test_tuple_updated();
+        let tuple3 = create_large_test_tuple();
+        let rid = tuple1.get_rid();
+
+        // Create chain of update records
+        let record1 = LogRecord::new_update_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Update,
+            rid,
+            tuple1.clone(),
+            tuple2.clone(),
+        );
+
+        let record2 = LogRecord::new_update_record(
+            DUMMY_TXN_ID,
+            record1.get_lsn(),
+            LogRecordType::Update,
+            rid,
+            tuple2.clone(),
+            tuple3.clone(),
+        );
+
+        assert_eq!(record2.get_prev_lsn(), record1.get_lsn());
+        assert_eq!(record2.get_original_tuple(), Some(&tuple2));
+        assert_eq!(record2.get_update_tuple(), Some(&tuple3));
+    }
+
+    #[test]
+    fn test_commit_after_operations() {
+        // Test insert followed by commit
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+
+        let insert_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Insert,
+            rid,
+            tuple.clone(),
+        );
+
+        let commit_record = LogRecord::new_transaction_record(
+            DUMMY_TXN_ID,
+            insert_record.get_lsn(),
+            LogRecordType::Commit,
+        );
+
+        assert_eq!(commit_record.get_prev_lsn(), insert_record.get_lsn());
+        assert_eq!(commit_record.get_txn_id(), insert_record.get_txn_id());
+    }
+
+    #[test]
+    fn test_multiple_page_records() {
+        let page_id1 = DUMMY_PAGE_ID;
+        let page_id2 = DUMMY_PAGE_ID + 1;
+        let page_id3 = DUMMY_PAGE_ID + 2;
+
+        // Create chain of new page records
+        let record1 = LogRecord::new_page_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::NewPage,
+            page_id1,
+            page_id2,
+        );
+
+        let record2 = LogRecord::new_page_record(
+            DUMMY_TXN_ID,
+            record1.get_lsn(),
+            LogRecordType::NewPage,
+            page_id2,
+            page_id3,
+        );
+
+        assert_eq!(record1.get_page_id(), Some(&page_id2));
+        assert_eq!(record2.get_page_id(), Some(&page_id3));
+        assert_eq!(record2.get_new_page_record(), Some(page_id2));
+    }
+
+    #[test]
+    fn test_transaction_abort_after_operations() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+
+        // Create sequence: Insert -> MarkDelete -> Abort
+        let insert_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Insert,
+            rid,
+            tuple.clone(),
+        );
+
+        let delete_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            insert_record.get_lsn(),
+            LogRecordType::MarkDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        let abort_record = LogRecord::new_transaction_record(
+            DUMMY_TXN_ID,
+            delete_record.get_lsn(),
+            LogRecordType::Abort,
+        );
+
+        assert_eq!(abort_record.get_prev_lsn(), delete_record.get_lsn());
+        assert_eq!(abort_record.get_txn_id(), delete_record.get_txn_id());
+    }
+
+    #[test]
+    fn test_record_type_transitions() {
+        let tuple = create_test_tuple();
+        let rid = tuple.get_rid();
+
+        // Test valid sequence: Begin -> Insert -> MarkDelete -> ApplyDelete -> Commit
+        let begin_record = LogRecord::new_transaction_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Begin,
+        );
+
+        let insert_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            begin_record.get_lsn(),
+            LogRecordType::Insert,
+            rid,
+            tuple.clone(),
+        );
+
+        let mark_delete_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            insert_record.get_lsn(),
+            LogRecordType::MarkDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        let apply_delete_record = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            mark_delete_record.get_lsn(),
+            LogRecordType::ApplyDelete,
+            rid,
+            tuple.clone(),
+        );
+
+        let commit_record = LogRecord::new_transaction_record(
+            DUMMY_TXN_ID,
+            apply_delete_record.get_lsn(),
+            LogRecordType::Commit,
+        );
+
+        assert_eq!(begin_record.get_log_record_type(), LogRecordType::Begin);
+        assert_eq!(insert_record.get_log_record_type(), LogRecordType::Insert);
+        assert_eq!(mark_delete_record.get_log_record_type(), LogRecordType::MarkDelete);
+        assert_eq!(apply_delete_record.get_log_record_type(), LogRecordType::ApplyDelete);
+        assert_eq!(commit_record.get_log_record_type(), LogRecordType::Commit);
+    }
 }
