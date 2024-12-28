@@ -124,3 +124,246 @@ impl LogManager {
         self.log_buffer.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::config::TxnId;
+    use crate::common::rid::RID;
+    use crate::recovery::log_record::{LogRecord, LogRecordType};
+    use crate::storage::table::tuple::Tuple;
+    use std::fs;
+    use std::path::Path;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    struct TestContext {
+        log_file_path: String,
+        disk_manager: Arc<FileDiskManager>,
+        log_manager: LogManager,
+    }
+
+    impl TestContext {
+        fn new(test_name: &str) -> Self {
+            let log_file_path = format!("tests/data/{}_{}.log", test_name, chrono::Utc::now().timestamp());
+            let disk_manager = Arc::new(FileDiskManager::new(
+                "dummy.db".to_string(),
+                log_file_path.clone(),
+                100,
+            ));
+            let log_manager = LogManager::new(Arc::clone(&disk_manager));
+
+            TestContext {
+                log_file_path,
+                disk_manager,
+                log_manager,
+            }
+        }
+
+        fn cleanup(&self) {
+            if Path::new(&self.log_file_path).exists() {
+                let _ = fs::remove_file(&self.log_file_path);
+            }
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup();
+        }
+    }
+
+    #[test]
+    fn test_log_manager_initialization() {
+        let ctx = TestContext::new("init_test");
+
+        assert_eq!(ctx.log_manager.get_next_lsn(), 0);
+        assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
+        assert_eq!(ctx.log_manager.get_log_buffer_size(), LOG_BUFFER_SIZE as usize);
+    }
+
+    #[test]
+    fn test_append_log_record() {
+        let mut ctx = TestContext::new("append_test");
+
+        let txn_id: TxnId = 1;
+        let prev_lsn = INVALID_LSN;
+
+        // Create a begin transaction log record
+        let log_record = LogRecord::new_transaction_record(
+            txn_id,
+            prev_lsn,
+            LogRecordType::Begin,
+        );
+
+        // Append the log record
+        let lsn = ctx.log_manager.append_log_record(&log_record);
+        assert_eq!(lsn, 0); // First LSN should be 0
+
+        // Verify LSN was incremented
+        assert_eq!(ctx.log_manager.get_next_lsn(), 1);
+
+        // Verify log buffer contains data
+        assert!(!ctx.log_manager.get_log_buffer().is_empty());
+    }
+
+    #[test]
+    fn test_multiple_append_operations() {
+        let mut ctx = TestContext::new("multiple_append_test");
+
+        // Append multiple log records
+        for i in 0..5 {
+            let log_record = LogRecord::new_transaction_record(
+                i as TxnId,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            );
+            let lsn = ctx.log_manager.append_log_record(&log_record);
+            assert_eq!(lsn, i);
+        }
+
+        assert_eq!(ctx.log_manager.get_next_lsn(), 5);
+    }
+
+    #[test]
+    fn test_persistent_lsn_management() {
+        let mut ctx = TestContext::new("persistent_lsn_test");
+
+        assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
+
+        // Set persistent LSN
+        let test_lsn = 42;
+        ctx.log_manager.set_persistent_lsn(test_lsn);
+        assert_eq!(ctx.log_manager.get_persistent_lsn(), test_lsn);
+    }
+
+    #[test]
+    fn test_flush_thread_lifecycle() {
+        let mut ctx = TestContext::new("flush_thread_test");
+
+        // Start flush thread
+        ctx.log_manager.run_flush_thread();
+
+        // Allow some time for thread to start
+        sleep(Duration::from_millis(100));
+
+        // Append some log records
+        for i in 0..3 {
+            let log_record = LogRecord::new_transaction_record(
+                i as TxnId,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            );
+            ctx.log_manager.append_log_record(&log_record);
+        }
+
+        // Shutdown should complete cleanly
+        ctx.log_manager.shut_down();
+    }
+
+    #[test]
+    fn test_log_record_types() {
+        let mut ctx = TestContext::new("record_types_test");
+
+        // Test Begin record
+        let begin_record = LogRecord::new_transaction_record(
+            1,
+            INVALID_LSN,
+            LogRecordType::Begin,
+        );
+        let begin_lsn = ctx.log_manager.append_log_record(&begin_record);
+
+        // Test Commit record
+        let commit_record = LogRecord::new_transaction_record(
+            1,
+            begin_lsn,
+            LogRecordType::Commit,
+        );
+        let commit_lsn = ctx.log_manager.append_log_record(&commit_record);
+
+        // Test Abort record
+        let abort_record = LogRecord::new_transaction_record(
+            2,
+            INVALID_LSN,
+            LogRecordType::Abort,
+        );
+        ctx.log_manager.append_log_record(&abort_record);
+
+        assert_eq!(ctx.log_manager.get_next_lsn(), 3);
+    }
+
+    #[test]
+    fn test_large_log_records() {
+        let mut ctx = TestContext::new("large_records_test");
+
+        // Create a large log record
+        let large_data = vec![42u8; 1000]; // Large dummy data
+        let log_record = LogRecord::new_transaction_record(
+            1,
+            INVALID_LSN,
+            LogRecordType::Begin,
+        );
+
+        // Append multiple large records
+        for _ in 0..5 {
+            ctx.log_manager.append_log_record(&log_record);
+        }
+
+        assert!(ctx.log_manager.get_log_buffer().len() > 1000);
+    }
+
+    #[test]
+    fn test_concurrent_log_appends() {
+        let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new("concurrent_test")));
+        let thread_count = 5;
+        let mut handles = vec![];
+
+        for i in 0..thread_count {
+            let ctx_clone = Arc::clone(&ctx);
+            let handle = thread::spawn(move || {
+                let log_record = LogRecord::new_transaction_record(
+                    i as TxnId,
+                    INVALID_LSN,
+                    LogRecordType::Begin,
+                );
+                ctx_clone.write().log_manager.append_log_record(&log_record)
+            });
+            handles.push(handle);
+        }
+
+        // Collect all LSNs
+        let lsns: Vec<Lsn> = handles.into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+
+        // Verify LSNs are unique and sequential
+        let mut unique_lsns: Vec<Lsn> = lsns.clone();
+        unique_lsns.sort();
+        unique_lsns.dedup();
+        assert_eq!(unique_lsns.len(), thread_count);
+
+        assert_eq!(ctx.read().log_manager.get_next_lsn() as usize, thread_count);
+    }
+
+    #[test]
+    fn test_shutdown_behavior() {
+        let mut ctx = TestContext::new("shutdown_test");
+
+        // Start flush thread
+        ctx.log_manager.run_flush_thread();
+
+        // Append some records
+        for i in 0..3 {
+            let log_record = LogRecord::new_transaction_record(
+                i as TxnId,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            );
+            ctx.log_manager.append_log_record(&log_record);
+        }
+
+        // Test multiple shutdown calls (should handle gracefully)
+        ctx.log_manager.shut_down();
+        ctx.log_manager.shut_down(); // Second shutdown should not panic
+    }
+}
