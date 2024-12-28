@@ -1,3 +1,4 @@
+use std::net::Shutdown::Write;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
@@ -46,7 +47,7 @@ pub struct DBConfig {
 pub struct DBInstance {
     buffer_pool_manager: Option<Arc<BufferPoolManager>>,
     log_manager: Option<Arc<RwLock<LogManager>>>,
-    transaction_manager: Option<Arc<Mutex<TransactionManager>>>,
+    transaction_manager: Option<Arc<RwLock<TransactionManager>>>,
     lock_manager: Option<Arc<LockManager>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     catalog: Arc<RwLock<Catalog>>,
@@ -212,7 +213,7 @@ impl DBInstance {
         // Create new transaction
         let txn = {
             let txn_manager = &self.get_transaction_manager();
-            let mut txn_manager_guard = txn_manager.unwrap().lock();
+            let mut txn_manager_guard = txn_manager.unwrap().write();
             debug!("Creating new transaction");
             txn_manager_guard.begin(IsolationLevel::ReadUncommitted)
         };
@@ -225,7 +226,7 @@ impl DBInstance {
             Ok(_) => {
                 debug!("Committing transaction {}", txn.get_transaction_id());
                 let txn_manager = &self.get_transaction_manager();
-                let mut txn_manager_guard = txn_manager.unwrap().lock();
+                let mut txn_manager_guard = txn_manager.unwrap().write();
                 if !txn_manager_guard.commit(txn.clone()) {
                     warn!("Transaction commit failed");
                     return Err(DBError::Transaction(
@@ -241,7 +242,7 @@ impl DBInstance {
                     e
                 );
                 let txn_manager = &self.get_transaction_manager();
-                let mut txn_manager_guard = txn_manager.unwrap().lock();
+                let mut txn_manager_guard = txn_manager.unwrap().write();
                 txn_manager_guard.abort(txn.clone());
                 info!("Transaction rolled back");
             }
@@ -294,7 +295,7 @@ impl DBInstance {
         self.lock_manager.as_ref()
     }
 
-    pub fn get_transaction_manager(&self) -> Option<&Arc<Mutex<TransactionManager>>> {
+    pub fn get_transaction_manager(&self) -> Option<&Arc<RwLock<TransactionManager>>> {
         self.transaction_manager.as_ref()
     }
 
@@ -339,7 +340,7 @@ impl DBInstance {
     }
 
     fn create_lock_manager(
-        transaction_manager: &Arc<Mutex<TransactionManager>>,
+        transaction_manager: &Arc<RwLock<TransactionManager>>,
     ) -> Result<Option<Arc<LockManager>>, DBError> {
         Ok(if cfg!(not(feature = "disable-lock-manager")) {
             let lock_manager = Arc::new(LockManager::new(Arc::clone(transaction_manager)));
@@ -349,9 +350,9 @@ impl DBInstance {
         })
     }
 
-    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>, log_manager: Arc<RwLock<LogManager>>) -> Result<Option<Arc<Mutex<TransactionManager>>>, DBError> {
+    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>, log_manager: Arc<RwLock<LogManager>>) -> Result<Option<Arc<RwLock<TransactionManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-transaction-manager")) {
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog, log_manager)));
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             Some(transaction_manager)
         } else {
             None

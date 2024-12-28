@@ -211,10 +211,11 @@ mod tests {
     use parking_lot::{Mutex, RwLock};
     use std::collections::HashMap;
     use std::fs;
+    use crate::recovery::log_manager::LogManager;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<Mutex<TransactionManager>>,
+        transaction_manager: Arc<RwLock<TransactionManager>>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
@@ -255,9 +256,9 @@ mod tests {
                 Default::default(),
             )));
 
-            // Create TransactionManager with a placeholder Catalog
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             Self {
                 bpm,
