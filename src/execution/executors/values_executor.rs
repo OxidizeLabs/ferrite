@@ -107,6 +107,7 @@ mod tests {
         use super::*;
         use crate::catalogue::catalogue::Catalog;
         use crate::execution::plans::abstract_plan::PlanNode;
+        use crate::recovery::log_manager::LogManager;
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![
@@ -149,7 +150,7 @@ mod tests {
 
         pub struct TestContext {
             pub catalog: Arc<RwLock<Catalog>>,
-            pub transaction_manager: Arc<Mutex<TransactionManager>>,
+            pub transaction_manager: Arc<RwLock<TransactionManager>>,
             pub lock_manager: Arc<LockManager>,
             pub buffer_pool_manager: Arc<BufferPoolManager>,
             pub transaction: Arc<Transaction>,
@@ -176,7 +177,7 @@ mod tests {
                 let buffer_pool_manager = Arc::new(BufferPoolManager::new(
                     BUFFER_POOL_SIZE,
                     disk_scheduler,
-                    disk_manager,
+                    disk_manager.clone(),
                     replacer,
                 ));
 
@@ -190,12 +191,13 @@ mod tests {
                     HashMap::new(),
                 )));
 
+                let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
                 let transaction_manager =
-                    Arc::new(Mutex::new(TransactionManager::new(catalog.clone())));
+                    Arc::new(RwLock::new(TransactionManager::new(catalog.clone(), log_manager)));
                 let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
                 let transaction = transaction_manager
-                    .lock()
+                    .write()
                     .begin(IsolationLevel::Serializable);
 
                 Self {
@@ -307,7 +309,7 @@ mod tests {
 
             test_ctx
                 .transaction_manager
-                .lock()
+                .write()
                 .commit(test_ctx.transaction.clone());
 
             {
@@ -367,7 +369,7 @@ mod tests {
             // Commit transaction
             test_ctx
                 .transaction_manager
-                .lock()
+                .write()
                 .commit(test_ctx.transaction.clone());
 
             {
@@ -391,7 +393,7 @@ mod tests {
             // Abort transaction
             test_ctx
                 .transaction_manager
-                .lock()
+                .write()
                 .abort(test_ctx.transaction.clone());
 
             {

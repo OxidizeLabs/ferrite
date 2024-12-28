@@ -7,7 +7,7 @@ use crate::concurrency::lock_manager::LockMode::{
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction::{Transaction, TransactionState};
 use crate::concurrency::transaction_manager::TransactionManager;
-use parking_lot::{Condvar, Mutex};
+use parking_lot::{Condvar, Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -139,7 +139,7 @@ pub struct LockRequestQueue {
 
 /// LockManager handles transactions asking for locks on records.
 pub struct LockManager {
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Arc<RwLock<TransactionManager>>,
     table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
     txn_locks: Mutex<HashMap<TxnId, TxnLockState>>,
     row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
@@ -218,7 +218,7 @@ impl LockManager {
     ///
     /// # Returns
     /// A new `LockManager` instance.
-    pub fn new(transaction_manager: Arc<Mutex<TransactionManager>>) -> Self {
+    pub fn new(transaction_manager: Arc<RwLock<TransactionManager>>) -> Self {
         Self {
             transaction_manager,
             table_lock_map: Mutex::new(HashMap::new()),
@@ -260,7 +260,7 @@ impl LockManager {
                         "Deadlock detected, aborting transaction"
                     );
 
-                    let txn_mgr_guard = txn_mgr.lock();
+                    let txn_mgr_guard = txn_mgr.write();
                     if let Some(txn) = txn_mgr_guard.get_transaction(&txn_id) {
                         txn.set_state(TransactionState::Aborted);
                     }
@@ -637,7 +637,7 @@ impl LockManager {
                 );
 
                 // Using parking_lot Mutex
-                let txn_mgr = self.transaction_manager.lock();
+                let txn_mgr = self.transaction_manager.write();
                 if let Some(txn) = txn_mgr.get_transaction(&txn_id) {
                     txn.set_state(TransactionState::Aborted);
                 }
@@ -1366,6 +1366,7 @@ mod tests {
     use chrono::Utc;
     use parking_lot::{Mutex, RwLock};
     use std::fs;
+    use crate::recovery::log_manager::LogManager;
 
     pub struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1408,9 +1409,9 @@ mod tests {
                 Default::default(),
                 Default::default(),
             )));
-
+            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager =
-                Arc::new(Mutex::new(TransactionManager::new(Arc::clone(&catalog))));
+                Arc::new(RwLock::new(TransactionManager::new(Arc::clone(&catalog), log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             Self {

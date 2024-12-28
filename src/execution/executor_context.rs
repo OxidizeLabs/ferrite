@@ -14,7 +14,7 @@ pub struct ExecutorContext {
     transaction: Arc<Transaction>,
     catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
-    transaction_manager: Arc<Mutex<TransactionManager>>,
+    transaction_manager: Arc<RwLock<TransactionManager>>,
     lock_manager: Arc<LockManager>,
     nlj_check_exec_set: VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)>,
     check_options: Arc<CheckOptions>,
@@ -24,7 +24,7 @@ pub struct ExecutorContext {
 impl ExecutorContext {
     pub fn new(
         transaction: Arc<Transaction>,
-        transaction_manager: Arc<Mutex<TransactionManager>>,
+        transaction_manager: Arc<RwLock<TransactionManager>>,
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         lock_manager: Arc<LockManager>,
@@ -58,7 +58,7 @@ impl ExecutorContext {
         &self.buffer_pool_manager
     }
 
-    pub fn get_transaction_manager(&self) -> &Arc<Mutex<TransactionManager>> {
+    pub fn get_transaction_manager(&self) -> &Arc<RwLock<TransactionManager>> {
         &self.transaction_manager
     }
 

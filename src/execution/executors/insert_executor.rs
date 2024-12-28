@@ -195,11 +195,12 @@ mod tests {
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::{Mutex, RwLock};
+    use crate::recovery::log_manager::LogManager;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
-        transaction_manager: Arc<Mutex<TransactionManager>>,
+        transaction_manager: Arc<RwLock<TransactionManager>>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         log_file: String,
@@ -241,10 +242,10 @@ mod tests {
                 Default::default(),
             )));
 
-            // Create transaction manager
+            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager =
-                Arc::new(Mutex::new(TransactionManager::new(Arc::clone(&catalog))));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
+                Arc::new(RwLock::new(TransactionManager::new(Arc::clone(&catalog), log_manager)));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             Self {
                 catalog,
@@ -427,7 +428,7 @@ mod tests {
         // Commit the transaction
         {
             let exec_ctx_guard = exec_ctx.read();
-            let mut txn_manager = test_ctx.transaction_manager.lock();
+            let mut txn_manager = test_ctx.transaction_manager.write();
             assert!(txn_manager.commit(exec_ctx_guard.get_transaction().clone()));
         }
     }
@@ -484,7 +485,7 @@ mod tests {
 
         // Rollback the transaction
         {
-            let mut txn_manager = test_ctx.transaction_manager.lock();
+            let mut txn_manager = test_ctx.transaction_manager.write();
             txn_manager.abort(exec_ctx_guard.get_transaction());
         }
     }

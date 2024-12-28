@@ -492,9 +492,9 @@ mod unit_tests {
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<Mutex<TransactionManager>>,
-        lock_manager: Arc<LockManager>,
-        log_manager: Arc<LogManager>,
+        transaction_manager: Arc<RwLock<TransactionManager>>,
+        lock_manager: Arc<RwLock<LockManager>>,
+        log_manager: Arc<RwLock<LogManager>>,
         db_file: String,
         db_log_file: String,
     }
@@ -533,10 +533,9 @@ mod unit_tests {
                 Default::default(),
                 Default::default(),
             )));
-            // Create TransactionManager with a placeholder Catalog
-            let transaction_manager = Arc::new(Mutex::new(TransactionManager::new(catalog)));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
-            let log_manager = Arc::new(LogManager::new(Arc::clone(&disk_manager)));
+            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager.clone())));
+            let lock_manager = Arc::new(RwLock::new(LockManager::new(Arc::clone(&transaction_manager.clone()))));
 
             Self {
                 bpm,
@@ -552,11 +551,11 @@ mod unit_tests {
             Arc::clone(&self.bpm)
         }
 
-        pub fn lock_manager(&self) -> Arc<LockManager> {
+        pub fn lock_manager(&self) -> Arc<RwLock<LockManager>> {
             Arc::clone(&self.lock_manager)
         }
 
-        pub fn log_manager(&self) -> Arc<LogManager> {
+        pub fn log_manager(&self) -> Arc<RwLock<LogManager>> {
             Arc::clone(&self.log_manager)
         }
 

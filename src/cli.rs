@@ -166,7 +166,7 @@ impl DBCommandExecutor {
 
         // Transaction Manager Details
         if let Some(txn_mgr) = instance.get_transaction_manager() {
-            let txn_mgr_guard = txn_mgr.lock();
+            let txn_mgr_guard = txn_mgr.read();
             writer.begin_table(true);
             writer.begin_header();
             writer.write_header_cell("Transaction Statistics");
