@@ -1,4 +1,6 @@
-use crate::common::config::{Lsn, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID};
+use crate::common::config::{
+    Lsn, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
+};
 use crate::common::rid::RID;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
@@ -284,5 +286,268 @@ impl fmt::Display for TransactionState {
             TransactionState::Growing => "GROWING",
         };
         write!(f, "{}", name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::common::config::TXN_START_ID;
+    use crate::common::rid::RID;
+    use crate::execution::expressions::abstract_expression::Expression::Mock;
+    use crate::execution::expressions::mock_expression::MockExpression;
+    use crate::storage::table::tuple::Tuple;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+
+    fn create_test_tuple() -> Tuple {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::Integer),
+        ]);
+        Tuple::new(&[Value::from(1), Value::from(100)], schema, RID::new(0, 0))
+    }
+
+    #[test]
+    fn test_transaction_basic_properties() {
+        let txn_id = 1;
+        let isolation_level = IsolationLevel::ReadCommitted;
+        let txn = Transaction::new(txn_id, isolation_level);
+
+        assert_eq!(txn.get_transaction_id(), txn_id);
+        assert_eq!(txn.get_isolation_level(), isolation_level);
+        assert_eq!(txn.get_state(), TransactionState::Running);
+        assert_eq!(txn.thread_id(), thread::current().id());
+    }
+
+    #[test]
+    fn test_transaction_state_transitions() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+
+        // Test initial state
+        assert_eq!(txn.get_state(), TransactionState::Running);
+
+        // Test state transitions
+        txn.set_state(TransactionState::Tainted);
+        assert_eq!(txn.get_state(), TransactionState::Tainted);
+
+        txn.set_state(TransactionState::Committed);
+        assert_eq!(txn.get_state(), TransactionState::Committed);
+
+        txn.set_state(TransactionState::Aborted);
+        assert_eq!(txn.get_state(), TransactionState::Aborted);
+    }
+
+    #[test]
+    fn test_transaction_timestamps() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+
+        // Test read timestamp
+        txn.set_read_ts(100);
+        assert_eq!(txn.read_ts(), 100);
+
+        // Test commit timestamp
+        txn.set_commit_ts(200);
+        assert_eq!(txn.commit_ts(), 200);
+
+        // Test temp timestamp
+        assert_eq!(txn.temp_ts(), txn.get_transaction_id() as TimeStampOidT);
+    }
+
+    #[test]
+    fn test_transaction_undo_logs() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+        let tuple = create_test_tuple();
+
+        // Create test undo log
+        let undo_log = UndoLog {
+            is_deleted: false,
+            modified_fields: vec![true, false],
+            tuple: tuple.clone(),
+            ts: 100,
+            prev_version: UndoLink {
+                prev_txn: INVALID_TXN_ID,
+                prev_log_idx: 0,
+            },
+        };
+
+        // Test append undo log
+        let link = txn.append_undo_log(undo_log.clone());
+        assert_eq!(link.prev_txn, txn.get_transaction_id());
+        assert_eq!(link.prev_log_idx, 0);
+
+        // Test get undo log
+        let retrieved_log = txn.get_undo_log(0);
+        assert_eq!(retrieved_log.is_deleted, undo_log.is_deleted);
+        assert_eq!(retrieved_log.modified_fields, undo_log.modified_fields);
+        assert_eq!(retrieved_log.ts, undo_log.ts);
+
+        // Test modify undo log
+        let mut modified_log = undo_log.clone();
+        modified_log.is_deleted = true;
+        txn.modify_undo_log(0, modified_log);
+        let retrieved_modified = txn.get_undo_log(0);
+        assert!(retrieved_modified.is_deleted);
+
+        // Test undo log count and clear
+        assert_eq!(txn.get_undo_log_num(), 1);
+        let cleared_count = txn.clear_undo_log();
+        assert_eq!(cleared_count, 1);
+        assert_eq!(txn.get_undo_log_num(), 0);
+    }
+
+    #[test]
+    fn test_transaction_write_sets() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+        let rid1 = RID::new(1, 1);
+        let rid2 = RID::new(1, 2);
+
+        // Test append write set
+        txn.append_write_set(1, rid1);
+        txn.append_write_set(1, rid2);
+        txn.append_write_set(2, rid1);
+
+        // Test get write sets
+        let write_sets = txn.write_sets();
+        assert_eq!(write_sets.len(), 2); // Two tables
+        assert_eq!(write_sets.get(&1).unwrap().len(), 2); // Two RIDs in table 1
+        assert_eq!(write_sets.get(&2).unwrap().len(), 1); // One RID in table 2
+        assert!(write_sets.get(&1).unwrap().contains(&rid1));
+        assert!(write_sets.get(&1).unwrap().contains(&rid2));
+        assert!(write_sets.get(&2).unwrap().contains(&rid1));
+    }
+
+    #[test]
+    fn test_transaction_scan_predicates() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+        let predicate1 = Arc::new(Mock(MockExpression::new(
+            "predicate1".to_string(),
+            Default::default(),
+        )));
+        let predicate2 = Arc::new(Mock(MockExpression::new(
+            "predicate2".to_string(),
+            Default::default(),
+        )));
+
+        // Test append scan predicates
+        txn.append_scan_predicate(1, predicate1.clone());
+        txn.append_scan_predicate(1, predicate2.clone());
+        txn.append_scan_predicate(2, predicate1.clone());
+
+        // Test get scan predicates
+        let scan_predicates = txn.scan_predicates();
+        assert_eq!(scan_predicates.len(), 2); // Two tables
+        assert_eq!(scan_predicates.get(&1).unwrap().len(), 2); // Two predicates for table 1
+        assert_eq!(scan_predicates.get(&2).unwrap().len(), 1); // One predicate for table 2
+    }
+
+    #[test]
+    fn test_transaction_tainted_state() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+        assert_eq!(txn.get_state(), TransactionState::Running);
+
+        txn.set_tainted();
+        assert_eq!(txn.get_state(), TransactionState::Tainted);
+    }
+
+    #[test]
+    fn test_transaction_lsn_management() {
+        let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+
+        // Test initial LSN
+        assert_eq!(txn.get_prev_lsn(), INVALID_LSN);
+
+        // Test LSN update
+        let new_lsn = 100;
+        txn.set_prev_lsn(new_lsn);
+        assert_eq!(txn.get_prev_lsn(), new_lsn);
+    }
+
+    #[test]
+    fn test_undo_link_validity() {
+        let valid_link = UndoLink {
+            prev_txn: 1,
+            prev_log_idx: 0,
+        };
+        assert!(valid_link.is_valid());
+
+        let invalid_link = UndoLink {
+            prev_txn: INVALID_TXN_ID,
+            prev_log_idx: 0,
+        };
+        assert!(!invalid_link.is_valid());
+    }
+
+    #[test]
+    fn test_transaction_id_human_readable() {
+        let txn_id = TXN_START_ID + 1;
+        let txn = Transaction::new(txn_id, IsolationLevel::ReadCommitted);
+        assert_eq!(txn.txn_id_human_readable(), 1);
+    }
+
+    #[test]
+    fn test_isolation_level_display() {
+        assert_eq!(
+            IsolationLevel::ReadUncommitted.to_string(),
+            "READ_UNCOMMITTED"
+        );
+        assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
+        assert_eq!(
+            IsolationLevel::ReadCommitted.to_string(),
+            "READ_commit_isolation"
+        );
+        assert_eq!(
+            IsolationLevel::RepeatableRead.to_string(),
+            "REPEATABLE_READ"
+        );
+        assert_eq!(
+            IsolationLevel::SnapshotIsolation.to_string(),
+            "SNAPSHOT_ISOLATION"
+        );
+    }
+
+    #[test]
+    fn test_transaction_state_display() {
+        assert_eq!(TransactionState::Running.to_string(), "RUNNING");
+        assert_eq!(TransactionState::Tainted.to_string(), "TAINTED");
+        assert_eq!(TransactionState::Committed.to_string(), "COMMITTED");
+        assert_eq!(TransactionState::Aborted.to_string(), "ABORTED");
+        assert_eq!(TransactionState::Shrinking.to_string(), "SHRINKING");
+        assert_eq!(TransactionState::Growing.to_string(), "GROWING");
+    }
+
+    #[test]
+    fn test_concurrent_undo_log_operations() {
+        let txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
+        let tuple = create_test_tuple();
+        let thread_count = 5;
+        let mut handles = vec![];
+
+        for i in 0..thread_count {
+            let txn_clone = Arc::clone(&txn);
+            let tuple_clone = tuple.clone();
+            let handle = thread::spawn(move || {
+                let undo_log = UndoLog {
+                    is_deleted: false,
+                    modified_fields: vec![true, false],
+                    tuple: tuple_clone,
+                    ts: i as TimeStampOidT,
+                    prev_version: UndoLink {
+                        prev_txn: INVALID_TXN_ID,
+                        prev_log_idx: 0,
+                    },
+                };
+                txn_clone.append_undo_log(undo_log);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(txn.get_undo_log_num(), thread_count);
     }
 }
