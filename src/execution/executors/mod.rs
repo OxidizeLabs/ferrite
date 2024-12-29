@@ -7,3 +7,4 @@ pub mod mock_executor;
 pub mod seq_scan_executor;
 pub mod table_scan_executor;
 pub mod values_executor;
+pub mod projection_executor;
