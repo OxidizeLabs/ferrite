@@ -19,6 +19,7 @@ use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
+use chrono::NaiveDateTime;
 use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::{
@@ -33,7 +34,6 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
 use std::sync::Arc;
-use chrono::NaiveDateTime;
 
 pub struct QueryPlanner {
     catalog: Arc<RwLock<Catalog>>,
@@ -182,31 +182,30 @@ impl QueryPlanner {
             let (agg_exprs, agg_types) = self.parse_aggregates(&select.projection, &schema)?;
 
             // Parse GROUP BY expressions if present
-            let group_by_exprs =
-                if has_group_by {
-                    match &select.group_by {
-                        GroupByExpr::Expressions(exprs, _modifiers) => {
-                            let mut result = Vec::new();
-                            for expr in exprs {
-                                result.push(Arc::new(self.parse_expression(expr, &schema)?));
-                            }
-                            result
+            let group_by_exprs = if has_group_by {
+                match &select.group_by {
+                    GroupByExpr::Expressions(exprs, _modifiers) => {
+                        let mut result = Vec::new();
+                        for expr in exprs {
+                            result.push(Arc::new(self.parse_expression(expr, &schema)?));
                         }
-                        GroupByExpr::All(_modifiers) => {
-                            // For GROUP BY ALL, group by all columns
-                            let mut exprs = Vec::new();
-                            for i in 0..schema.get_column_count() {
-                                let col = schema.get_column(i as usize).unwrap();
-                                exprs.push(Arc::new(Expression::ColumnRef(
-                                    ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
-                                )));
-                            }
-                            exprs
-                        }
+                        result
                     }
-                } else {
-                    vec![] // Empty for global aggregation
-                };
+                    GroupByExpr::All(_modifiers) => {
+                        // For GROUP BY ALL, group by all columns
+                        let mut exprs = Vec::new();
+                        for i in 0..schema.get_column_count() {
+                            let col = schema.get_column(i as usize).unwrap();
+                            exprs.push(Arc::new(Expression::ColumnRef(
+                                ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
+                            )));
+                        }
+                        exprs
+                    }
+                }
+            } else {
+                vec![] // Empty for global aggregation
+            };
 
             let output_schema = if has_group_by {
                 // When we have GROUP BY, output schema includes group by columns + aggregate results
@@ -236,9 +235,9 @@ impl QueryPlanner {
             ));
         }
 
-        // Add projection if not a simple SELECT *
-        match &select.projection[..] {
-            [SelectItem::Wildcard(_)] => current_plan.clone(),
+        // Add projection based on SELECT list
+        current_plan = match &select.projection[..] {
+            [SelectItem::Wildcard(_)] => current_plan,
             _ => {
                 let proj_exprs = self.parse_projection_expressions(&select.projection, &schema)?;
                 let proj_schema = self.create_projection_schema(&proj_exprs)?;
@@ -246,7 +245,7 @@ impl QueryPlanner {
                 PlanNode::Projection(ProjectionNode::new(
                     Arc::from(proj_schema),
                     proj_exprs,
-                    current_plan.clone(),
+                    current_plan,
                 ))
             }
         };
@@ -316,22 +315,23 @@ impl QueryPlanner {
             for (i, expr) in row.iter().enumerate() {
                 let column = schema.get_column(i).unwrap();
                 let value_expr = match expr {
-                    Expr::Value(value) => {
-                        Arc::new(Expression::Constant(
-                            self.create_constant_expression(value, column)?
-                        ))
-                    },
+                    Expr::Value(value) => Arc::new(Expression::Constant(
+                        self.create_constant_expression(value, column)?,
+                    )),
                     Expr::Cast { expr, .. } => {
                         // For cast expressions, use the target column type directly
                         match expr.as_ref() {
-                            Expr::Value(value) => {
-                                Arc::new(Expression::Constant(
-                                    self.create_constant_expression(value, column)?
+                            Expr::Value(value) => Arc::new(Expression::Constant(
+                                self.create_constant_expression(value, column)?,
+                            )),
+                            _ => {
+                                return Err(format!(
+                                    "Unsupported inner expression in CAST: {:?}",
+                                    expr
                                 ))
-                            },
-                            _ => return Err(format!("Unsupported inner expression in CAST: {:?}", expr)),
+                            }
                         }
-                    },
+                    }
                     _ => return Err(format!("Unsupported expression in VALUES: {:?}", expr)),
                 };
                 row_values.push(value_expr);
@@ -587,15 +587,10 @@ impl QueryPlanner {
                 Ok(result)
             }
 
-            Expr::Function(func) => {
-
-                match self.parse_aggregate_function(&func, schema) {
-                    Ok(aggregate_function) => {
-                        Ok(aggregate_function.0)
-                    }
-                    _ => Err(format!("Unsupported function: {}", func)),
-                }
-            }
+            Expr::Function(func) => match self.parse_aggregate_function(&func, schema) {
+                Ok(aggregate_function) => Ok(aggregate_function.0),
+                _ => Err(format!("Unsupported function: {}", func)),
+            },
 
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
@@ -872,50 +867,56 @@ impl QueryPlanner {
     ) -> Result<ConstantExpression, String> {
         match (value, column.get_type()) {
             // Handle numeric conversions
-            (sqlparser::ast::Value::Number(n, _), type_id) => {
-                match type_id {
-                    TypeId::SmallInt => {
-                        let num = n.parse::<i16>()
-                            .map_err(|_| format!("Failed to parse '{}' as SmallInt", n))?;
-                        Ok(ConstantExpression::new(
-                            Value::new(num),
-                            column.clone(),
-                            Vec::new(),
-                        ))
-                    },
-                    TypeId::Integer => {
-                        let num = n.parse::<i32>()
-                            .map_err(|_| format!("Failed to parse '{}' as Integer", n))?;
-                        Ok(ConstantExpression::new(
-                            Value::new(num),
-                            column.clone(),
-                            Vec::new(),
-                        ))
-                    },
-                    TypeId::BigInt => {
-                        let num = n.parse::<i64>()
-                            .map_err(|_| format!("Failed to parse '{}' as BigInt", n))?;
-                        Ok(ConstantExpression::new(
-                            Value::new(num),
-                            column.clone(),
-                            Vec::new(),
-                        ))
-                    },
-                    TypeId::Decimal => {
-                        let num = n.parse::<f64>()
-                            .map_err(|_| format!("Failed to parse '{}' as Decimal", n))?;
-                        Ok(ConstantExpression::new(
-                            Value::new(num),
-                            column.clone(),
-                            Vec::new(),
-                        ))
-                    },
-                    _ => Err(format!("Cannot convert number to {:?}", type_id)),
+            (sqlparser::ast::Value::Number(n, _), type_id) => match type_id {
+                TypeId::SmallInt => {
+                    let num = n
+                        .parse::<i16>()
+                        .map_err(|_| format!("Failed to parse '{}' as SmallInt", n))?;
+                    Ok(ConstantExpression::new(
+                        Value::new(num),
+                        column.clone(),
+                        Vec::new(),
+                    ))
                 }
+                TypeId::Integer => {
+                    let num = n
+                        .parse::<i32>()
+                        .map_err(|_| format!("Failed to parse '{}' as Integer", n))?;
+                    Ok(ConstantExpression::new(
+                        Value::new(num),
+                        column.clone(),
+                        Vec::new(),
+                    ))
+                }
+                TypeId::BigInt => {
+                    let num = n
+                        .parse::<i64>()
+                        .map_err(|_| format!("Failed to parse '{}' as BigInt", n))?;
+                    Ok(ConstantExpression::new(
+                        Value::new(num),
+                        column.clone(),
+                        Vec::new(),
+                    ))
+                }
+                TypeId::Decimal => {
+                    let num = n
+                        .parse::<f64>()
+                        .map_err(|_| format!("Failed to parse '{}' as Decimal", n))?;
+                    Ok(ConstantExpression::new(
+                        Value::new(num),
+                        column.clone(),
+                        Vec::new(),
+                    ))
+                }
+                _ => Err(format!("Cannot convert number to {:?}", type_id)),
             },
 
             // Handle string values
-            (sqlparser::ast::Value::SingleQuotedString(s) | sqlparser::ast::Value::DoubleQuotedString(s), type_id) => {
+            (
+                sqlparser::ast::Value::SingleQuotedString(s)
+                | sqlparser::ast::Value::DoubleQuotedString(s),
+                type_id,
+            ) => {
                 match type_id {
                     TypeId::VarChar => Ok(ConstantExpression::new(
                         Value::new(s.clone()),
@@ -939,33 +940,27 @@ impl QueryPlanner {
                             column.clone(),
                             Vec::new(),
                         ))
-                    },
+                    }
                     _ => Err(format!("Cannot convert string to {:?}", type_id)),
                 }
-            },
+            }
 
             // Handle boolean values
-            (sqlparser::ast::Value::Boolean(b), TypeId::Boolean) => {
-                Ok(ConstantExpression::new(
-                    Value::new(*b),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
+            (sqlparser::ast::Value::Boolean(b), TypeId::Boolean) => Ok(ConstantExpression::new(
+                Value::new(*b),
+                column.clone(),
+                Vec::new(),
+            )),
 
             // Handle NULL values
-            (sqlparser::ast::Value::Null, _) => {
-                Ok(ConstantExpression::new(
-                    Value::new(Val::Null),
-                    column.clone(),
-                    Vec::new(),
-                ))
-            },
+            (sqlparser::ast::Value::Null, _) => Ok(ConstantExpression::new(
+                Value::new(Val::Null),
+                column.clone(),
+                Vec::new(),
+            )),
 
             // Handle unsupported combinations
-            (value, type_id) => {
-                Err(format!("Cannot convert {:?} to {:?}", value, type_id))
-            }
+            (value, type_id) => Err(format!("Cannot convert {:?} to {:?}", value, type_id)),
         }
     }
 }
