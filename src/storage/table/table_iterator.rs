@@ -278,13 +278,13 @@ mod tests {
         name: &str,
         schema: Schema,
         table_heap: Arc<TableHeap>,
-    ) -> Arc<TableInfo> {
-        Arc::new(TableInfo::new(
+    ) -> TableInfo {
+        TableInfo::new(
             schema,
             name.to_string(),
             table_heap,
             1, // table_oid
-        ))
+        )
     }
     #[test]
     fn test_table_iterator_create() {

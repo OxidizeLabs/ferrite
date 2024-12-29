@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableScanNode {
     /// The table being scanned
-    table_info: Arc<TableInfo>,
+    table_info: TableInfo,
     /// Output schema of the scan
     output_schema: Arc<Schema>,
     /// Table alias if any (used in query plans)
@@ -17,7 +17,7 @@ pub struct TableScanNode {
 impl TableScanNode {
     /// Create a new table scan node
     pub fn new(
-        table_info: Arc<TableInfo>,
+        table_info: TableInfo,
         output_schema: Arc<Schema>,
         table_alias: Option<String>,
     ) -> Self {
@@ -29,7 +29,7 @@ impl TableScanNode {
     }
 
     /// Get the table metadata
-    pub fn get_table_info(&self) -> &Arc<TableInfo> {
+    pub fn get_table_info(&self) -> &TableInfo {
         &self.table_info
     }
 
@@ -45,7 +45,7 @@ impl TableScanNode {
 
     /// Create a scan iterator for this table
     pub fn scan(&self) -> TableScanIterator {
-        TableScanIterator::new(self.table_info.clone())
+        TableScanIterator::new(Arc::from(self.table_info.clone()))
     }
 }
 
@@ -172,13 +172,13 @@ mod tests {
         name: &str,
         schema: Schema,
         table_heap: Arc<TableHeap>,
-    ) -> Arc<TableInfo> {
-        Arc::new(TableInfo::new(
+    ) -> TableInfo {
+        TableInfo::new(
             schema,
             name.to_string(),
             table_heap,
             1, // table_oid
-        ))
+        )
     }
 
     #[test]
