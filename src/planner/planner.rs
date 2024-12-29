@@ -132,123 +132,17 @@ impl QueryPlanner {
     }
 
     fn plan_select(&self, select: &Box<Select>) -> Result<PlanNode, String> {
-        if select.from.len() != 1 {
-            return Err("Only single table queries are supported".to_string());
-        }
-
-        // Start with base table scan
-        let table_name = match &select.from[0].relation {
-            TableFactor::Table { name, .. } => name.to_string(),
-            _ => return Err("Only simple table scans are supported".to_string()),
-        };
-
-        // Get schema and table info from catalog
-        let catalog_guard = self.catalog.read();
-        let table_info = catalog_guard
-            .get_table(&table_name)
-            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))?;
-        let schema = table_info.get_table_schema();
-        let table_oid = table_info.get_table_oidt();
+        // Validate and extract table information
+        let (table_name, schema, table_oid) = self.prepare_table_scan(select)?;
 
         // Start building the plan from bottom up
-        let mut current_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            None,
-        ));
+        let mut current_plan = self.create_base_scan_plan(&schema, table_oid, &table_name);
 
-        // Add WHERE clause if present
-        if let Some(where_clause) = &select.selection {
-            let filter_expr = self.parse_expression(where_clause, &schema)?;
-            current_plan = PlanNode::Filter(FilterNode::new(
-                schema.clone(),
-                table_oid,
-                table_name.clone(),
-                filter_expr,
-                current_plan,
-            ));
-        }
+        // Apply filtering if WHERE clause is present
+        current_plan = self.apply_where_filter(select, current_plan, &schema, table_oid, &table_name)?;
 
-        // Check if we need aggregation (either due to GROUP BY or aggregate functions)
-        let has_group_by = match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
-            GroupByExpr::All(_) => true,
-        };
-        let has_aggregates = self.has_aggregate_functions(&select.projection);
-
-        if has_group_by || has_aggregates {
-            // Parse aggregate functions from SELECT list
-            let (agg_exprs, agg_types) = self.parse_aggregates(&select.projection, &schema)?;
-
-            // Parse GROUP BY expressions if present
-            let group_by_exprs = if has_group_by {
-                match &select.group_by {
-                    GroupByExpr::Expressions(exprs, _modifiers) => {
-                        let mut result = Vec::new();
-                        for expr in exprs {
-                            result.push(Arc::new(self.parse_expression(expr, &schema)?));
-                        }
-                        result
-                    }
-                    GroupByExpr::All(_modifiers) => {
-                        // For GROUP BY ALL, group by all columns
-                        let mut exprs = Vec::new();
-                        for i in 0..schema.get_column_count() {
-                            let col = schema.get_column(i as usize).unwrap();
-                            exprs.push(Arc::new(Expression::ColumnRef(
-                                ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
-                            )));
-                        }
-                        exprs
-                    }
-                }
-            } else {
-                vec![] // Empty for global aggregation
-            };
-
-            let output_schema = if has_group_by {
-                // When we have GROUP BY, output schema includes group by columns + aggregate results
-                let mut columns = Vec::new();
-                for expr in &group_by_exprs {
-                    columns.push(expr.get_return_type().clone());
-                }
-                for expr in &agg_exprs {
-                    columns.push(expr.get_return_type().clone());
-                }
-                Schema::new(columns)
-            } else {
-                // For global aggregation, output schema only includes aggregate results
-                let columns = agg_exprs
-                    .iter()
-                    .map(|expr| expr.get_return_type().clone())
-                    .collect();
-                Schema::new(columns)
-            };
-
-            current_plan = PlanNode::Aggregation(AggregationPlanNode::new(
-                output_schema,
-                vec![current_plan],
-                group_by_exprs,
-                agg_exprs,
-                agg_types,
-            ));
-        }
-
-        // Add projection based on SELECT list
-        current_plan = match &select.projection[..] {
-            [SelectItem::Wildcard(_)] => current_plan,
-            _ => {
-                let proj_exprs = self.parse_projection_expressions(&select.projection, &schema)?;
-                let proj_schema = self.create_projection_schema(&proj_exprs)?;
-
-                PlanNode::Projection(ProjectionNode::new(
-                    Arc::from(proj_schema),
-                    proj_exprs,
-                    current_plan,
-                ))
-            }
-        };
+        // Handle aggregation and projection
+        current_plan = self.process_aggregation_and_projection(select, current_plan, &schema)?;
 
         Ok(current_plan)
     }
@@ -611,7 +505,7 @@ impl QueryPlanner {
                         AggregationType::CountStar,
                         Expression::Constant(ConstantExpression::new(
                             Value::new(1),
-                            Column::new("const", TypeId::Integer),
+                            Column::new("count", TypeId::Integer), // Return type for COUNT
                             vec![],
                         )),
                     ),
@@ -622,41 +516,38 @@ impl QueryPlanner {
                                 AggregationType::CountStar,
                                 Expression::Constant(ConstantExpression::new(
                                     Value::new(1),
-                                    Column::new("const", TypeId::Integer),
+                                    Column::new("count", TypeId::Integer),
                                     vec![],
                                 )),
                             )
                         } else {
                             match &list.args[0] {
                                 FunctionArg::Named { .. } => {
-                                    return Err(
-                                        "Named arguments not supported in aggregate functions"
-                                            .to_string(),
-                                    );
+                                    return Err("Named arguments not supported in aggregate functions".to_string());
                                 }
                                 FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                                    FunctionArgExpr::Expr(expr) => (
-                                        AggregationType::Count,
-                                        self.parse_expression(expr, schema)?,
-                                    ),
+                                    FunctionArgExpr::Expr(expr) => {
+                                        let inner_expr = self.parse_expression(expr, schema)?;
+                                        // For COUNT, we always return an Integer column regardless of input type
+                                        let count_col = Column::new("count", TypeId::Integer);
+                                        (AggregationType::Count, inner_expr)
+                                    }
                                     FunctionArgExpr::Wildcard => (
                                         AggregationType::CountStar,
                                         Expression::Constant(ConstantExpression::new(
                                             Value::new(1),
-                                            Column::new("const", TypeId::Integer),
+                                            Column::new("count", TypeId::Integer),
                                             vec![],
                                         )),
                                     ),
                                     FunctionArgExpr::QualifiedWildcard(_) => {
-                                        return Err("Qualified wildcards not supported in aggregate functions".to_string());
+                                        return Err("Qualified wildcards not supported".to_string());
                                     }
                                 },
                             }
                         }
                     }
-                    FunctionArguments::Subquery(_) => {
-                        return Err("Subqueries not supported in aggregate functions".to_string());
-                    }
+                    _ => return Err("Subqueries not supported in aggregate functions".to_string()),
                 }
             }
             "SUM" | "MIN" | "MAX" => {
@@ -715,148 +606,117 @@ impl QueryPlanner {
             match item {
                 SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
                     if let Expr::Function(func) = expr {
-                        let (agg_expr, agg_type) = self.parse_aggregate_function(func, schema)?;
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_types.push(agg_type);
+                        match self.parse_aggregate_function(func, schema) {
+                            Ok((agg_expr, agg_type)) => {
+                                agg_exprs.push(Arc::new(agg_expr));
+                                agg_types.push(agg_type);
+                            }
+                            Err(_) => continue, // Skip non-aggregate functions
+                        }
                     }
                 }
-                _ => continue,
+                SelectItem::Wildcard(_) => {}, // Ignore wildcard for aggregates
+                _ => {}
             }
         }
 
         Ok((agg_exprs, agg_types))
     }
 
+    fn process_aggregation(
+        &self,
+        select: &Box<Select>,
+        mut current_plan: PlanNode,
+        base_schema: &Schema,
+        has_group_by: bool,
+        has_aggregates: bool
+    ) -> Result<PlanNode, String> {
+        // Parse aggregate functions
+        let (agg_exprs, agg_types) = self.parse_aggregates(&select.projection, base_schema)?;
+
+        // Determine group by expressions and wrap them in Arc
+        let group_by_exprs = self.determine_group_by_expressions(select, base_schema, has_group_by)?
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<Arc<Expression>>>();
+
+        // Create output schema for aggregation
+        let output_schema = self.create_aggregation_output_schema(
+            &group_by_exprs.iter().map(|e| e.as_ref()).collect::<Vec<&Expression>>(),
+            &agg_exprs,
+            has_group_by
+        );
+
+        // Create aggregation plan node
+        current_plan = PlanNode::Aggregation(AggregationPlanNode::new(
+            output_schema,
+            vec![current_plan],
+            group_by_exprs,  // Now a Vec<Arc<Expression>>
+            agg_exprs,
+            agg_types,
+        ));
+
+        // Add projection for aggregation results
+        current_plan = self.project_aggregation_results(select, current_plan)?;
+
+        Ok(current_plan)
+    }
+
     fn parse_projection_expressions(
         &self,
-        items: &Vec<SelectItem>,
+        projection: &[SelectItem],
         schema: &Schema,
     ) -> Result<Vec<Expression>, String> {
-        let mut proj_exprs = Vec::new();
+        let mut expressions = Vec::new();
 
-        for item in items {
+        for item in projection {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    proj_exprs.push(self.parse_expression(expr, schema)?);
-                }
-                SelectItem::ExprWithAlias { expr, .. } => {
-                    proj_exprs.push(self.parse_expression(expr, schema)?);
-                }
+                    match expr {
+                        Expr::Function(func) => {
+                            // Handle aggregate functions in projection
+                            let (agg_expr, _) = self.parse_aggregate_function(func, schema)?;
+                            expressions.push(Expression::ColumnRef(ColumnRefExpression::new(
+                                0,  // tuple index
+                                expressions.len(),  // Use current position as column index
+                                Column::new("count", TypeId::Integer),  // Fixed column type for aggregates
+                                vec![]
+                            )));
+                        },
+                        _ => {
+                            expressions.push(self.parse_expression(expr, schema)?);
+                        }
+                    }
+                },
                 SelectItem::Wildcard(_) => {
                     // Add all columns from schema
                     for i in 0..schema.get_column_count() {
                         let col = schema.get_column(i as usize).unwrap();
-                        proj_exprs.push(Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            i as usize,
-                            col.clone(),
-                            vec![],
-                        )));
+                        expressions.push(Expression::ColumnRef(
+                            ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
+                        ));
                     }
-                }
-                _ => return Err("Unsupported projection item".to_string()),
+                },
+                _ => return Err("Unsupported projection type".to_string()),
             }
         }
-
-        Ok(proj_exprs)
+        Ok(expressions)
     }
 
-    fn create_projection_schema(&self, proj_exprs: &Vec<Expression>) -> Result<Schema, String> {
-        let mut columns = Vec::new();
-
-        for expr in proj_exprs {
-            columns.push(expr.get_return_type().clone());
-        }
-
-        Ok(Schema::new(columns))
-    }
-
-    fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
-        projection.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.is_aggregate_function(expr)
+    fn create_projection_schema_for_aggregate(
+        &self,
+        agg_expr: &Expression,
+        agg_type: AggregationType,
+    ) -> Column {
+        match agg_type {
+            AggregationType::Count | AggregationType::CountStar => {
+                Column::new("count", TypeId::Integer)
             }
-            _ => false,
-        })
-    }
-
-    fn is_aggregate_function(&self, expr: &Expr) -> bool {
-        if let Expr::Function(func) = expr {
-            let name = func.name.to_string().to_uppercase();
-            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
-        } else {
-            false
-        }
-    }
-
-    fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
-        let mut columns = Vec::new();
-
-        for col_def in column_defs {
-            let column_name = col_def.name.to_string();
-            let type_id = self.convert_sql_type(&col_def.data_type)?;
-
-            // Handle VARCHAR/STRING types specifically with length
-            let column = match &col_def.data_type {
-                DataType::Varchar(_) | DataType::String(_) => {
-                    // Default length for variable length types
-                    Column::new_varlen(&column_name, type_id, 255)
-                }
-                _ => Column::new(&column_name, type_id),
-            };
-
-            columns.push(column);
-        }
-
-        Ok(columns)
-    }
-
-    fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
-        match sql_type {
-            DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
-            DataType::TinyInt(_) => Ok(TypeId::TinyInt),
-            DataType::SmallInt(_) => Ok(TypeId::SmallInt),
-            DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
-            DataType::BigInt(_) => Ok(TypeId::BigInt),
-            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
-            DataType::Varchar(_) | DataType::String(_) | DataType::Text => Ok(TypeId::VarChar),
-            DataType::Array(_) => Ok(TypeId::Vector),
-            DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
-            _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
-        }
-    }
-
-    fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
-        if source.get_column_count() != target.get_column_count() {
-            return false;
-        }
-
-        for i in 0..source.get_column_count() {
-            let source_col = source.get_column(i as usize).unwrap();
-            let target_col = target.get_column(i as usize).unwrap();
-
-            if !self.types_compatible(source_col.get_type(), target_col.get_type()) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn types_compatible(&self, source_type: TypeId, target_type: TypeId) -> bool {
-        // Add your type compatibility rules here
-        // For example:
-        match (source_type, target_type) {
-            // Same types are always compatible
-            (a, b) if a == b => true,
-            _ => false,
-        }
-    }
-
-    fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
-        match table_name {
-            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
-            _ => Err("Only single table INSERT statements are supported".to_string()),
+            AggregationType::Sum => agg_expr.get_return_type().clone(),
+            AggregationType::Min | AggregationType::Max => agg_expr.get_return_type().clone(),
+            // We can either make this exhaustive or have a default case
+            #[allow(unreachable_patterns)]
+            _ => agg_expr.get_return_type().clone()  // Default to input type
         }
     }
 
@@ -962,6 +822,319 @@ impl QueryPlanner {
             // Handle unsupported combinations
             (value, type_id) => Err(format!("Cannot convert {:?} to {:?}", value, type_id)),
         }
+    }
+
+    fn create_aggregation_output_schema(
+        &self,
+        group_by_exprs: &[&Expression],
+        agg_exprs: &[Arc<Expression>],
+        has_group_by: bool
+    ) -> Schema {
+        if has_group_by {
+            // Include both group by and aggregate columns
+            let mut columns = group_by_exprs
+                .iter()
+                .map(|expr| expr.get_return_type().clone())
+                .collect::<Vec<_>>();
+
+            columns.extend(
+                agg_exprs
+                    .iter()
+                    .map(|expr| expr.get_return_type().clone())
+            );
+
+            Schema::new(columns)
+        } else {
+            // For global aggregation, output schema has one column per aggregate
+            let columns = agg_exprs
+                .iter()
+                .map(|expr| expr.get_return_type().clone())
+                .collect();
+            Schema::new(columns)
+        }
+    }
+
+    fn create_projection_schema(&self, proj_exprs: &[Expression]) -> Result<Schema, String> {
+        let columns = proj_exprs
+            .iter()
+            .enumerate()
+            .map(|(idx, expr)| {
+                match expr {
+                    Expression::ColumnRef(col_ref) => col_ref.get_return_type().clone(),
+                    Expression::Constant(const_expr) => const_expr.get_return_type().clone(),
+                    Expression::Comparison(comp_expr) => comp_expr.get_return_type().clone(),
+                    Expression::Arithmetic(arith_expr) => arith_expr.get_return_type().clone(),
+                    Expression::Logic(logic_expr) => logic_expr.get_return_type().clone(),
+                    _ => Column::new(&format!("expr_{}", idx), TypeId::Invalid)
+                }
+            })
+            .collect::<Vec<Column>>();
+
+        if columns.is_empty() {
+            Err("Cannot create projection schema with no columns".to_string())
+        } else {
+            Ok(Schema::new(columns))
+        }
+    }
+
+    /// Create base sequential scan plan node
+    fn create_base_scan_plan(&self, schema: &Schema, table_oid: u64, table_name: &str) -> PlanNode {
+        PlanNode::SeqScan(SeqScanPlanNode::new(
+            schema.clone(),
+            table_oid,
+            table_name.to_string(),
+            None,
+        ))
+    }
+
+    fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
+        projection.iter().any(|item| match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                self.is_aggregate_function(expr)
+            }
+            _ => false,
+        })
+    }
+
+    fn is_aggregate_function(&self, expr: &Expr) -> bool {
+        if let Expr::Function(func) = expr {
+            let name = func.name.to_string().to_uppercase();
+            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
+        } else {
+            false
+        }
+    }
+
+    fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
+        let mut columns = Vec::new();
+
+        for col_def in column_defs {
+            let column_name = col_def.name.to_string();
+            let type_id = self.convert_sql_type(&col_def.data_type)?;
+
+            // Handle VARCHAR/STRING types specifically with length
+            let column = match &col_def.data_type {
+                DataType::Varchar(_) | DataType::String(_) => {
+                    // Default length for variable length types
+                    Column::new_varlen(&column_name, type_id, 255)
+                }
+                _ => Column::new(&column_name, type_id),
+            };
+
+            columns.push(column);
+        }
+
+        Ok(columns)
+    }
+
+    fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
+        match sql_type {
+            DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
+            DataType::TinyInt(_) => Ok(TypeId::TinyInt),
+            DataType::SmallInt(_) => Ok(TypeId::SmallInt),
+            DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
+            DataType::BigInt(_) => Ok(TypeId::BigInt),
+            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
+            DataType::Varchar(_) | DataType::String(_) | DataType::Text => Ok(TypeId::VarChar),
+            DataType::Array(_) => Ok(TypeId::Vector),
+            DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
+            _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+        }
+    }
+
+    fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
+        if source.get_column_count() != target.get_column_count() {
+            return false;
+        }
+
+        for i in 0..source.get_column_count() {
+            let source_col = source.get_column(i as usize).unwrap();
+            let target_col = target.get_column(i as usize).unwrap();
+
+            if !self.types_compatible(source_col.get_type(), target_col.get_type()) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn types_compatible(&self, source_type: TypeId, target_type: TypeId) -> bool {
+        // Add your type compatibility rules here
+        // For example:
+        match (source_type, target_type) {
+            // Same types are always compatible
+            (a, b) if a == b => true,
+            _ => false,
+        }
+    }
+
+    fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
+        match table_name {
+            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
+            _ => Err("Only single table INSERT statements are supported".to_string()),
+        }
+    }
+
+    /// Validate and extract table information for the SELECT statement
+    fn prepare_table_scan(&self, select: &Box<Select>) -> Result<(String, Schema, u64), String> {
+        if select.from.len() != 1 {
+            return Err("Only single table queries are supported".to_string());
+        }
+
+        // Extract table name
+        let table_name = match &select.from[0].relation {
+            TableFactor::Table { name, .. } => name.to_string(),
+            _ => return Err("Only simple table scans are supported".to_string()),
+        };
+
+        // Retrieve table information from catalog
+        let catalog_guard = self.catalog.read();
+        let table_info = catalog_guard
+            .get_table(&table_name)
+            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))?;
+
+        let schema = table_info.get_table_schema();
+        let table_oid = table_info.get_table_oidt();
+
+        Ok((table_name, schema, table_oid))
+    }
+
+    /// Apply WHERE clause filter if present
+    fn apply_where_filter(
+        &self,
+        select: &Box<Select>,
+        current_plan: PlanNode,
+        schema: &Schema,
+        table_oid: u64,
+        table_name: &str
+    ) -> Result<PlanNode, String> {
+        if let Some(where_clause) = &select.selection {
+            let filter_expr = self.parse_expression(where_clause, schema)?;
+            Ok(PlanNode::Filter(FilterNode::new(
+                schema.clone(),
+                table_oid,
+                table_name.to_string(),
+                filter_expr,
+                current_plan,
+            )))
+        } else {
+            Ok(current_plan)
+        }
+    }
+
+    /// Process aggregation and projection
+    fn process_aggregation_and_projection(
+        &self,
+        select: &Box<Select>,
+        mut current_plan: PlanNode,
+        base_schema: &Schema
+    ) -> Result<PlanNode, String> {
+        // Check if aggregation is needed
+        let has_group_by = match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
+            GroupByExpr::All(_) => true,
+        };
+        let has_aggregates = self.has_aggregate_functions(&select.projection);
+
+        // If no aggregation is needed, handle simple projection
+        if !has_group_by && !has_aggregates {
+            return self.handle_simple_projection(select, current_plan, base_schema);
+        }
+
+        // Process aggregation
+        current_plan = self.process_aggregation(
+            select,
+            current_plan,
+            base_schema,
+            has_group_by,
+            has_aggregates
+        )?;
+
+        Ok(current_plan)
+    }
+
+    /// Handle simple projection for non-aggregate queries
+    fn handle_simple_projection(
+        &self,
+        select: &Box<Select>,
+        mut current_plan: PlanNode,
+        schema: &Schema
+    ) -> Result<PlanNode, String> {
+        match &select.projection[..] {
+            [SelectItem::Wildcard(_)] => Ok(current_plan),
+            _ => {
+                let proj_exprs = self.parse_projection_expressions(&select.projection, schema)?;
+                let proj_schema = self.create_projection_schema(&proj_exprs)?;
+
+                Ok(PlanNode::Projection(ProjectionNode::new(
+                    Arc::new(proj_schema),
+                    proj_exprs,
+                    current_plan,
+                )))
+            }
+        }
+    }
+
+    /// Determine group by expressions
+    fn determine_group_by_expressions(
+        &self,
+        select: &Box<Select>,
+        base_schema: &Schema,
+        has_group_by: bool
+    ) -> Result<Vec<Expression>, String> {
+        if !has_group_by {
+            return Ok(Vec::new());
+        }
+
+        match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => {
+                exprs.iter()
+                    .map(|expr| self.parse_expression(expr, base_schema))
+                    .collect()
+            },
+            GroupByExpr::All(_) => {
+                // If GROUP BY ALL, use all columns from the input schema
+                (0..base_schema.get_column_count())
+                    .map(|i| {
+                        let col = base_schema.get_column(i as usize).unwrap();
+                        Ok(Expression::ColumnRef(
+                            ColumnRefExpression::new(0, i as usize, col.clone(), vec![])
+                        ))
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Project aggregation results
+    fn project_aggregation_results(
+        &self,
+        select: &Box<Select>,
+        mut current_plan: PlanNode
+    ) -> Result<PlanNode, String> {
+        let proj_exprs = match &select.projection[..] {
+            [SelectItem::Wildcard(_)] => {
+                // Add all columns from aggregation output
+                let agg_schema = current_plan.get_output_schema();
+                (0..agg_schema.get_column_count())
+                    .map(|i| {
+                        let col = agg_schema.get_column(i as usize).unwrap();
+                        Expression::ColumnRef(
+                            ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
+                        )
+                    })
+                    .collect()
+            },
+            _ => self.parse_projection_expressions(&select.projection, current_plan.get_output_schema())?
+        };
+
+        let proj_schema = self.create_projection_schema(&proj_exprs)?;
+        Ok(PlanNode::Projection(ProjectionNode::new(
+            Arc::new(proj_schema),
+            proj_exprs,
+            current_plan,
+        )))
     }
 }
 
