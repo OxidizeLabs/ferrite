@@ -1360,13 +1360,13 @@ mod tests {
     use crate::catalogue::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
+    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::fs;
-    use crate::recovery::log_manager::LogManager;
 
     pub struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

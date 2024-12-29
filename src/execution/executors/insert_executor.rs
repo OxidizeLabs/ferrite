@@ -125,7 +125,7 @@ impl AbstractExecutor for InsertExecutor {
                     self.context.read()
                         .get_transaction()
                         .get_transaction_id(),
-                    false
+                    false,
                 );
 
                 debug!(
@@ -438,7 +438,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_insert_transaction_rollback() {
         let test_ctx = TestContext::new("insert_rollback");
         let table_name = "test_rollback_table";

@@ -66,7 +66,7 @@ impl ExpressionOps for ArrayExpression {
         self.evaluate_children(|child| {
             child.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
         })
-        .map_err(|e| ExpressionError::Array(e))
+            .map_err(|e| ExpressionError::Array(e))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {

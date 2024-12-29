@@ -4,10 +4,10 @@ use crate::common::config::{IndexOidT, TableOidT};
 use crate::storage::index::index::Index;
 use crate::storage::table::table_heap::TableHeap;
 use core::fmt;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use log::{info, warn};
 
 pub enum IndexType {
     BPlusTreeIndex,
@@ -17,7 +17,7 @@ pub enum IndexType {
 }
 
 /// The TableInfo struct maintains metadata about a table.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableInfo {
     /// The table schema
     schema: Schema,
@@ -224,7 +224,7 @@ impl Catalog {
             schema.clone(),
             table_name.to_string(),
             table,
-            table_oid
+            table_oid,
         );
 
         // Add to catalog maps
@@ -487,7 +487,7 @@ mod unit_tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::fs;
 
     pub struct TestContext {

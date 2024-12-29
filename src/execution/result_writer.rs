@@ -65,7 +65,7 @@ impl CliResultWriter {
                 } else {
                     "═"
                 }
-                .repeat(*width)
+                    .repeat(*width)
             );
             if idx < self.column_widths.len() - 1 {
                 print!("{}", cross);

@@ -271,7 +271,7 @@ mod tests {
         }
 
         // Verify second expression
-        match exprs[1].clone(){
+        match exprs[1].clone() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::VarChar);
                 assert_eq!(mock.get_name(), "name");

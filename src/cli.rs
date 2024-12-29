@@ -375,8 +375,8 @@ pub fn run_cli() -> Result<(), Box<dyn Error>> {
             args.db_name.unwrap_or_else(|| "default_db".to_string())
         ),
         buffer_pool_size: args.buffer_size.unwrap_or(1024),
-        enable_logging: false,
-        enable_managed_transactions: false,
+        enable_logging: true,
+        enable_managed_transactions: true,
         lru_k: args.k_value.unwrap_or(2),
         lru_sample_size: args.frames.unwrap_or(7),
     };

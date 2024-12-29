@@ -95,7 +95,7 @@ impl TableIterator {
 
         current_rid.get_page_id() > self.stop_at_rid.get_page_id()
             || (current_rid.get_page_id() == self.stop_at_rid.get_page_id()
-                && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
+            && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
     }
 
     /// Advances the iterator to the next position.

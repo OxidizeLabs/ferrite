@@ -8,6 +8,7 @@ use crate::execution::executors::aggregation_executor::AggregationExecutor;
 use crate::execution::executors::create_table_executor::CreateTableExecutor;
 use crate::execution::executors::filter_executor::FilterExecutor;
 use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::executors::projection_executor::ProjectionExecutor;
 use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::execution::executors::values_executor::ValuesExecutor;
@@ -19,7 +20,6 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
-use crate::execution::executors::projection_executor::ProjectionExecutor;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,

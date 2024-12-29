@@ -112,24 +112,21 @@ impl ExecutorContext {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
-    use crate::common::config::TxnId;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::execution::executors::mock_executor::MockExecutor;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use std::sync::Arc;
     use parking_lot::RwLock;
+    use std::collections::HashMap;
     use std::fs;
-    use crate::common::rid::RID;
-    use crate::execution::executors::mock_executor::MockExecutor;
-    use crate::types_db::value::Value;
+    use std::sync::Arc;
 
     struct TestContext {
         transaction: Arc<Transaction>,
@@ -149,12 +146,10 @@ mod tests {
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
             // Initialize components
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
                 10,
@@ -241,7 +236,9 @@ mod tests {
         new_options.add_check(CheckOption::EnableNljCheck);
         executor_context.set_check_options(new_options);
 
-        assert!(executor_context.get_check_options().has_check(&CheckOption::EnableNljCheck));
+        assert!(executor_context
+            .get_check_options()
+            .has_check(&CheckOption::EnableNljCheck));
     }
 
     #[test]
@@ -257,8 +254,16 @@ mod tests {
         )));
 
         // Add mock executors
-        let left_exec = Box::new(MockExecutor::new(vec![], Default::default(), executor_context.clone()));
-        let right_exec = Box::new(MockExecutor::new(vec![], Default::default(), executor_context.clone()));
+        let left_exec = Box::new(MockExecutor::new(
+            vec![],
+            Default::default(),
+            executor_context.clone(),
+        ));
+        let right_exec = Box::new(MockExecutor::new(
+            vec![],
+            Default::default(),
+            executor_context.clone(),
+        ));
 
         let mut executor_context_guard = executor_context.write();
         executor_context_guard.add_check_option(left_exec, right_exec);
@@ -267,7 +272,9 @@ mod tests {
 
         // Initialize check options
         executor_context_guard.init_check_options();
-        assert!(executor_context_guard.get_check_options().has_check(&CheckOption::EnableNljCheck));
+        assert!(executor_context_guard
+            .get_check_options()
+            .has_check(&CheckOption::EnableNljCheck));
     }
 
     #[test]
@@ -331,21 +338,33 @@ mod tests {
         )));
 
         // Add executors and initialize
-        let left_exec = Box::new(MockExecutor::new(vec![], Default::default(), executor_context.clone()));
-        let right_exec = Box::new(MockExecutor::new(vec![], Default::default(), executor_context.clone()));
+        let left_exec = Box::new(MockExecutor::new(
+            vec![],
+            Default::default(),
+            executor_context.clone(),
+        ));
+        let right_exec = Box::new(MockExecutor::new(
+            vec![],
+            Default::default(),
+            executor_context.clone(),
+        ));
 
         let mut executor_context_guard = executor_context.write();
         executor_context_guard.add_check_option(left_exec, right_exec);
         executor_context_guard.init_check_options();
 
         // Verify NLJ check is enabled
-        assert!(executor_context_guard.get_check_options().has_check(&CheckOption::EnableNljCheck));
+        assert!(executor_context_guard
+            .get_check_options()
+            .has_check(&CheckOption::EnableNljCheck));
 
         // Clear executors and reinitialize
         executor_context_guard.nlj_check_exec_set.clear();
         executor_context_guard.init_check_options();
 
         // Verify NLJ check is not enabled when no executors present
-        assert!(!executor_context_guard.get_check_options().has_check(&CheckOption::EnableNljCheck));
+        assert!(!executor_context_guard
+            .get_check_options()
+            .has_check(&CheckOption::EnableNljCheck));
     }
 }

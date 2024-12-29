@@ -1,6 +1,7 @@
 use crate::catalogue::column::Column;
 use crate::catalogue::schema::Schema;
 use crate::common::exception::ExpressionError;
+use crate::execution::expressions::aggregate_expression::AggregateExpression;
 use crate::execution::expressions::arithmetic_expression::ArithmeticExpression;
 use crate::execution::expressions::array_expression::ArrayExpression;
 use crate::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -14,7 +15,6 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::execution::expressions::aggregate_expression::AggregateExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {

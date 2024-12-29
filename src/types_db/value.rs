@@ -465,7 +465,7 @@ mod unit_tests {
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]))
-        .expect("Serialization failed");
+            .expect("Serialization failed");
         let deserialized_vector: Val =
             bincode::deserialize(&binary_vector).expect("Deserialization failed");
         assert_eq!(

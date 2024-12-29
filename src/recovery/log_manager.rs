@@ -1,7 +1,7 @@
 use crate::common::config::{Lsn, INVALID_LSN, LOG_BUFFER_SIZE};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use log::{error, info};
+use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,7 +28,8 @@ impl LogManager {
     /// # Returns
     /// A new `LogManager` instance.
     pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
-        Self {
+        debug!("Creating new LogManager instance");
+        let manager = Self {
             next_lsn: AtomicU64::new(0),
             persistent_lsn: AtomicU64::new(INVALID_LSN),
             log_buffer: vec![0; LOG_BUFFER_SIZE as usize],
@@ -36,47 +37,63 @@ impl LogManager {
             stop_flag: Arc::new(RwLock::new(false)),
             flush_thread: None,
             disk_manager,
-        }
+        };
+        debug!("LogManager initialized with buffer size: {}", LOG_BUFFER_SIZE);
+        manager
     }
 
     /// Runs the flush thread which writes the log buffer's content to the disk.
     pub fn run_flush_thread(&mut self) {
+        debug!("Starting flush thread");
         let flush_buffer = self.flush_buffer.clone();
         let disk_manager = Arc::clone(&self.disk_manager);
         let stop_flag = Arc::clone(&self.stop_flag);
 
         self.flush_thread = Some(thread::spawn(move || {
-            info!(
-                "Flush thread started on thread: {:?}",
-                thread::current().id()
-            );
+            info!("Flush thread started on thread: {:?}", thread::current().id());
+            debug!("Flush thread entering main loop");
 
             while {
                 let stop_flag = stop_flag.read();
                 !*stop_flag
             } {
-                // Perform flush to disk
-                disk_manager
-                    .write_log(&flush_buffer)
-                    .expect("Failed to write log");
+                trace!("Flush thread performing disk write");
+                match disk_manager.write_log(&flush_buffer) {
+                    Ok(_) => trace!("Log buffer successfully flushed to disk"),
+                    Err(e) => {
+                        error!("Failed to write log to disk: {}", e);
+                        // Continue running despite error - we'll retry on next iteration
+                    }
+                }
             }
+            info!("Flush thread terminating");
         }));
+        debug!("Flush thread spawned successfully");
     }
 
     pub fn shut_down(&mut self) {
+        info!("Initiating LogManager shutdown");
         // Set the stop flag to indicate that the worker thread should stop
         {
             let mut stop_flag = self.stop_flag.write();
-            *stop_flag = true; // Set the flag to true
+            debug!("Setting stop flag to true");
+            *stop_flag = true;
         }
 
         // Wait for the worker thread to finish
         if let Some(handle) = self.flush_thread.take() {
-            if let Err(e) = handle.join() {
-                // Handle potential panics from the worker thread
-                error!("Flush thread panicked during shutdown: {:?}", e);
+            debug!("Waiting for flush thread to terminate");
+            match handle.join() {
+                Ok(_) => info!("Flush thread terminated successfully"),
+                Err(e) => {
+                    error!("Flush thread panicked during shutdown: {:?}", e);
+                    warn!("Some log records may not have been written to disk");
+                }
             }
+        } else {
+            debug!("No flush thread was running");
         }
+        info!("LogManager shutdown complete");
     }
 
     /// Appends a log record to the log buffer.
@@ -87,24 +104,38 @@ impl LogManager {
     /// # Returns
     /// The log sequence number (LSN) of the appended log record.
     pub fn append_log_record(&mut self, log_record: &LogRecord) -> Lsn {
+        trace!("Appending log record: {:?}", log_record);
         let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
+        debug!("Assigned LSN {} to log record", lsn);
 
         // Serialize log record and write to log buffer
         let log_record_bytes = log_record.to_string();
-        self.log_buffer
-            .extend_from_slice((&log_record_bytes).as_ref());
+        let record_size = log_record_bytes.len();
+        trace!("Serialized log record size: {} bytes", record_size);
+
+        // Check if buffer has enough space
+        if self.log_buffer.len() + record_size > LOG_BUFFER_SIZE as usize {
+            warn!("Log buffer approaching capacity, may need to force flush");
+        }
+
+        self.log_buffer.extend_from_slice((&log_record_bytes).as_ref());
+        debug!("Log record successfully appended to buffer");
 
         lsn
     }
 
     /// Returns the next log sequence number (LSN).
     pub fn get_next_lsn(&self) -> Lsn {
-        self.next_lsn.load(Ordering::SeqCst)
+        let lsn = self.next_lsn.load(Ordering::SeqCst);
+        trace!("Retrieved next LSN: {}", lsn);
+        lsn
     }
 
     /// Returns the persistent log sequence number (LSN).
     pub fn get_persistent_lsn(&self) -> Lsn {
-        self.persistent_lsn.load(Ordering::SeqCst)
+        let lsn = self.persistent_lsn.load(Ordering::SeqCst);
+        trace!("Retrieved persistent LSN: {}", lsn);
+        lsn
     }
 
     /// Sets the persistent log sequence number (LSN).
@@ -112,16 +143,20 @@ impl LogManager {
     /// # Parameters
     /// - `lsn`: The log sequence number to set.
     pub fn set_persistent_lsn(&mut self, lsn: Lsn) {
+        debug!("Setting persistent LSN to {}", lsn);
         self.persistent_lsn.store(lsn, Ordering::SeqCst);
     }
 
     /// Returns a reference to the log buffer.
     pub fn get_log_buffer(&self) -> &[u8] {
+        trace!("Accessing log buffer, current size: {}", self.log_buffer.len());
         &self.log_buffer
     }
 
     pub fn get_log_buffer_size(&self) -> usize {
-        self.log_buffer.len()
+        let size = self.log_buffer.len();
+        trace!("Retrieved log buffer size: {}", size);
+        size
     }
 }
 
@@ -129,13 +164,18 @@ impl LogManager {
 mod tests {
     use super::*;
     use crate::common::config::TxnId;
-    use crate::common::rid::RID;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
-    use crate::storage::table::tuple::Tuple;
     use std::fs;
     use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
+
+    fn init_test_logger() {
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Trace)
+            .is_test(true)
+            .try_init();
+    }
 
     struct TestContext {
         log_file_path: String,
@@ -145,6 +185,9 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
+            init_test_logger();
+            debug!("Creating new test context for: {}", test_name);
+
             let log_file_path = format!("tests/data/{}_{}.log", test_name, chrono::Utc::now().timestamp());
             let disk_manager = Arc::new(FileDiskManager::new(
                 "dummy.db".to_string(),
@@ -161,8 +204,11 @@ mod tests {
         }
 
         fn cleanup(&self) {
+            debug!("Cleaning up test context");
             if Path::new(&self.log_file_path).exists() {
-                let _ = fs::remove_file(&self.log_file_path);
+                if let Err(e) = fs::remove_file(&self.log_file_path) {
+                    warn!("Failed to clean up log file: {}", e);
+                }
             }
         }
     }
@@ -365,5 +411,33 @@ mod tests {
         // Test multiple shutdown calls (should handle gracefully)
         ctx.log_manager.shut_down();
         ctx.log_manager.shut_down(); // Second shutdown should not panic
+    }
+
+    #[test]
+    fn test_log_level_transitions() {
+        let mut ctx = TestContext::new("log_level_test");
+
+        // Test trace-level logging
+        trace!("Testing trace-level logging");
+        let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
+        ctx.log_manager.append_log_record(&log_record);
+
+        // Test debug-level logging
+        debug!("Testing debug-level logging");
+        ctx.log_manager.set_persistent_lsn(42);
+
+        // Test info-level logging
+        info!("Testing info-level logging");
+        ctx.log_manager.run_flush_thread();
+
+        // Test warning-level logging
+        warn!("Testing warning-level logging");
+        for _ in 0..1000 {  // Fill buffer to trigger warning
+            ctx.log_manager.append_log_record(&log_record);
+        }
+
+        // Test error-level logging
+        error!("Testing error-level logging");
+        ctx.log_manager.shut_down();
     }
 }

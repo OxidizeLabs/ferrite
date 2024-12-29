@@ -239,15 +239,15 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use std::collections::HashMap;
-    use std::sync::Arc;
-    use parking_lot::RwLock;
-    use chrono::Utc;
-    use tempfile::TempDir;
     use crate::catalogue::catalogue::Catalog;
     use crate::planner::planner::QueryPlanner;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use chrono::Utc;
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     /// Test context that manages the lifetime of test resources
     struct TestContext {
@@ -275,7 +275,7 @@ mod tests {
             let disk_manager = Arc::new(FileDiskManager::new(
                 db_path.to_str().unwrap().to_string(),
                 log_path.to_str().unwrap().to_string(),
-                100
+                100,
             ));
 
             // Setup buffer pool components
@@ -551,7 +551,7 @@ mod tests {
             match ctx.planner.explain(sql) {
                 Ok(explanation) => {
                     println!("Explanation:\n{}", explanation);
-                },
+                }
                 Err(e) => {
                     println!("Error in query '{}': {}", sql, e);
                     panic!("Query planning failed");
