@@ -469,6 +469,7 @@ mod tests {
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
@@ -476,9 +477,8 @@ mod tests {
     use crate::types_db::value::Val::Integer;
     use crate::types_db::value::Value;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::collections::HashMap;
-    use crate::recovery::log_manager::LogManager;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -524,7 +524,8 @@ mod tests {
             )));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction_manager =
+                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             Self {
