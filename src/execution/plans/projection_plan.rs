@@ -29,7 +29,7 @@ impl ProjectionNode {
     }
 
     /// Get a reference to the child plan
-    pub fn get_child(&self) -> &PlanNode {
+    pub fn get_child_plan(&self) -> &PlanNode {
         &self.child
     }
 }
@@ -164,12 +164,12 @@ mod tests {
 
     fn create_mock_table_scan(ctx: &TestContext, name: &str, schema: Schema) -> PlanNode {
         let table_heap = Arc::new(TableHeap::new(ctx.bpm.clone()));
-        let table_info = Arc::new(TableInfo::new(
+        let table_info = TableInfo::new(
             schema.clone(),
             name.to_string(),
             table_heap,
             1,
-        ));
+        );
         PlanNode::TableScan(TableScanNode::new(table_info, Arc::from(schema), None))
     }
 

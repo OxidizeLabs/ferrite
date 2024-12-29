@@ -19,6 +19,7 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
+use crate::execution::executors::projection_executor::ProjectionExecutor;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,
@@ -156,6 +157,19 @@ impl ExecutorEngine {
                     child_executor,
                     Arc::new(aggregation_plan.clone()),
                     context,
+                );
+                Ok(Box::new(executor))
+            }
+            Projection(projection_plan) => {
+                info!("Creating projection executor");
+                // Create child executor first
+                let child_executor =
+                    self.create_executor(&projection_plan.get_child_plan(), context.clone())?;
+
+                let executor = ProjectionExecutor::new(
+                    child_executor,
+                    context,
+                    Arc::new(projection_plan.clone()),
                 );
                 Ok(Box::new(executor))
             }
