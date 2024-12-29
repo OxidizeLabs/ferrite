@@ -509,7 +509,6 @@ mod concurrency {
     use std::thread;
 
     #[test]
-    #[ignore]
     fn reads() {
         let ctx = TestContext::new("concurrent_reads");
         let bpm = ctx.bpm();
@@ -546,7 +545,6 @@ mod concurrency {
     }
 
     #[test]
-    #[ignore]
     fn reads_and_writes() {
         let ctx = TestContext::new("concurrent_reads_and_writes");
         let bpm = ctx.bpm();

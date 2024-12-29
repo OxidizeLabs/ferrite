@@ -2,6 +2,8 @@ use crate::catalogue::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
+use crate::concurrency::transaction::TransactionState;
+use crate::concurrency::transaction_manager::get_tuple_and_undo_link;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
@@ -13,8 +15,6 @@ use crate::types_db::value::Val;
 use log::{debug, error};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-use crate::concurrency::transaction::TransactionState;
-use crate::concurrency::transaction_manager::get_tuple_and_undo_link;
 
 pub struct FilterExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -122,7 +122,7 @@ impl AbstractExecutor for FilterExecutor {
             let (meta, _, _) = get_tuple_and_undo_link(
                 &txn_mgr_guard,
                 &table_heap,
-                rid
+                rid,
             );
 
             // Check transaction visibility
@@ -160,6 +160,7 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::execution::executors::table_scan_executor::TableScanExecutor;
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::comparison_expression::{
@@ -167,6 +168,8 @@ mod tests {
     };
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::execution::plans::abstract_plan::PlanNode;
+    use crate::execution::plans::table_scan_plan::TableScanNode;
+    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableHeap;
@@ -174,12 +177,9 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
-    use crate::execution::executors::table_scan_executor::TableScanExecutor;
-    use crate::execution::plans::table_scan_plan::TableScanNode;
-    use crate::recovery::log_manager::LogManager;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -410,13 +410,13 @@ mod tests {
         // Create an empty executor as the child executor
         let child_executor = Box::new(EmptyExecutor::new(
             Arc::clone(&executor_context),
-            schema.clone()
+            schema.clone(),
         ));
 
         let mut executor = FilterExecutor::new(
             child_executor,
             executor_context,
-            filter_plan
+            filter_plan,
         );
         executor.init();
 
@@ -479,13 +479,13 @@ mod tests {
         // Create an empty executor as the child executor
         let child_executor = Box::new(EmptyExecutor::new(
             Arc::clone(&executor_context),
-            schema.clone()
+            schema.clone(),
         ));
 
         let mut executor = FilterExecutor::new(
             child_executor,
             executor_context,
-            filter_plan
+            filter_plan,
         );
         executor.init();
 
@@ -531,13 +531,13 @@ mod tests {
         // Create an empty executor as the child executor
         let child_executor = Box::new(EmptyExecutor::new(
             Arc::clone(&executor_context),
-            schema.clone()
+            schema.clone(),
         ));
 
         let mut executor = FilterExecutor::new(
             child_executor,
             executor_context,
-            filter_plan
+            filter_plan,
         );
         executor.init();
 
@@ -603,7 +603,7 @@ mod tests {
         let table_scan_plan = Arc::new(TableScanNode::new(
             table_info.clone(),
             Arc::new(schema.clone()),
-            None
+            None,
         ));
 
         // Create filter plan
@@ -612,14 +612,14 @@ mod tests {
         // Create child executor (table scan)
         let child_executor = Box::new(TableScanExecutor::new(
             Arc::clone(&executor_context),
-            table_scan_plan
+            table_scan_plan,
         ));
 
         // Create filter executor
         let mut executor = FilterExecutor::new(
             child_executor,
             executor_context,
-            filter_plan
+            filter_plan,
         );
 
         // Initialize the executor

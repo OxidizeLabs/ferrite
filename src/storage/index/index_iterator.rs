@@ -70,8 +70,7 @@ where
     K: KeyType,
     V: ValueType,
     C: KeyComparator<K>,
-{
-}
+{}
 
 impl<K, V, C> Debug for IndexIterator<K, V, C>
 where

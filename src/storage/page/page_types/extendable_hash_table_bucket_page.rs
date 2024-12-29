@@ -198,16 +198,14 @@ unsafe impl Sync for TypeErasedBucketPage {}
 
 // Update ExtendableHTableBucketPage to implement Send and Sync
 unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Send
-    for ExtendableHTableBucketPage<T, KEY_SIZE>
-{
-}
+for ExtendableHTableBucketPage<T, KEY_SIZE>
+{}
 unsafe impl<T: Clone + 'static, const KEY_SIZE: usize> Sync
-    for ExtendableHTableBucketPage<T, KEY_SIZE>
-{
-}
+for ExtendableHTableBucketPage<T, KEY_SIZE>
+{}
 
 impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait
-    for ExtendableHTableBucketPage<T, KEY_SIZE>
+for ExtendableHTableBucketPage<T, KEY_SIZE>
 {
     fn get_key_size(&self) -> usize {
         KEY_SIZE
@@ -259,7 +257,7 @@ impl<T: Clone + 'static, const KEY_SIZE: usize> BucketPageTrait
 }
 
 impl<T: Clone + 'static, const KEY_SIZE: usize> PageTrait
-    for ExtendableHTableBucketPage<T, KEY_SIZE>
+for ExtendableHTableBucketPage<T, KEY_SIZE>
 {
     fn get_page_id(&self) -> PageId {
         self.base.get_page_id()

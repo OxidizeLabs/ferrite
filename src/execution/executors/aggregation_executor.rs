@@ -277,69 +277,69 @@ impl AggregationExecutor {
                     // Summing with existing Integer value
                     (
                         Some(Value {
-                            value_: Val::Integer(sum),
-                            ..
-                        }),
+                                 value_: Val::Integer(sum),
+                                 ..
+                             }),
                         Val::Integer(new_val),
                     ) => Ok(Value::new(*sum + *new_val)),
                     (
                         Some(Value {
-                            value_: Val::Integer(sum),
-                            ..
-                        }),
+                                 value_: Val::Integer(sum),
+                                 ..
+                             }),
                         Val::BigInt(new_val),
                     ) => Ok(Value::new(*sum + *new_val as i32)),
                     (
                         Some(Value {
-                            value_: Val::Integer(sum),
-                            ..
-                        }),
+                                 value_: Val::Integer(sum),
+                                 ..
+                             }),
                         Val::Decimal(new_val),
                     ) => Ok(Value::new(*sum + *new_val as i32)),
 
                     // Summing with existing BigInt value
                     (
                         Some(Value {
-                            value_: Val::BigInt(sum),
-                            ..
-                        }),
+                                 value_: Val::BigInt(sum),
+                                 ..
+                             }),
                         Val::Integer(new_val),
                     ) => Ok(Value::new((*sum + *new_val as i64) as i32)),
                     (
                         Some(Value {
-                            value_: Val::BigInt(sum),
-                            ..
-                        }),
+                                 value_: Val::BigInt(sum),
+                                 ..
+                             }),
                         Val::BigInt(new_val),
                     ) => Ok(Value::new((*sum + *new_val) as i32)),
                     (
                         Some(Value {
-                            value_: Val::BigInt(sum),
-                            ..
-                        }),
+                                 value_: Val::BigInt(sum),
+                                 ..
+                             }),
                         Val::Decimal(new_val),
                     ) => Ok(Value::new((*sum as f64 + *new_val) as i32)),
 
                     // Summing with existing Decimal value
                     (
                         Some(Value {
-                            value_: Val::Decimal(sum),
-                            ..
-                        }),
+                                 value_: Val::Decimal(sum),
+                                 ..
+                             }),
                         Val::Integer(new_val),
                     ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
                     (
                         Some(Value {
-                            value_: Val::Decimal(sum),
-                            ..
-                        }),
+                                 value_: Val::Decimal(sum),
+                                 ..
+                             }),
                         Val::BigInt(new_val),
                     ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
                     (
                         Some(Value {
-                            value_: Val::Decimal(sum),
-                            ..
-                        }),
+                                 value_: Val::Decimal(sum),
+                                 ..
+                             }),
                         Val::Decimal(new_val),
                     ) => Ok(Value::new((*sum + *new_val) as i32)),
 

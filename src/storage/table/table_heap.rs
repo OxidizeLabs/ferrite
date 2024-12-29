@@ -302,7 +302,7 @@ impl TableHeap {
         } else {
             None
         }
-        .unwrap_or(RID::new(INVALID_PAGE_ID, 0));
+            .unwrap_or(RID::new(INVALID_PAGE_ID, 0));
 
         debug!(
             "Creating iterator: start_rid = {:?}, stop_at_rid = {:?}",

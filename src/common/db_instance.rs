@@ -1,4 +1,3 @@
-use std::net::Shutdown::Write;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
@@ -16,7 +15,6 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-use crate::recovery::log_record::{LogRecord, LogRecordType};
 
 /// Trait for writing query results in a tabular format
 pub trait ResultWriter {
@@ -62,8 +60,8 @@ impl Default for DBConfig {
             db_filename: "test.db".to_string(),
             db_log_filename: "test.log".to_string(),
             buffer_pool_size: 1024,
-            enable_logging: false,
-            enable_managed_transactions: false,
+            enable_logging: true,
+            enable_managed_transactions: true,
             lru_k: 10,
             lru_sample_size: 7,
         }
@@ -91,7 +89,8 @@ impl DBInstance {
             Default::default(),
         )));
 
-        let transaction_manager = Self::create_transaction_manager(catalog.clone(), log_manager.clone().unwrap())?;
+        let transaction_manager =
+            Self::create_transaction_manager(catalog.clone(), log_manager.clone().unwrap())?;
         let lock_manager = Self::create_lock_manager(&transaction_manager.clone().unwrap())?;
 
         let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(Arc::clone(&catalog))));
@@ -350,9 +349,13 @@ impl DBInstance {
         })
     }
 
-    fn create_transaction_manager(catalog: Arc<RwLock<Catalog>>, log_manager: Arc<RwLock<LogManager>>) -> Result<Option<Arc<RwLock<TransactionManager>>>, DBError> {
+    fn create_transaction_manager(
+        catalog: Arc<RwLock<Catalog>>,
+        log_manager: Arc<RwLock<LogManager>>,
+    ) -> Result<Option<Arc<RwLock<TransactionManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-transaction-manager")) {
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction_manager =
+                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             Some(transaction_manager)
         } else {
             None

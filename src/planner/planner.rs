@@ -615,7 +615,7 @@ impl QueryPlanner {
                         }
                     }
                 }
-                SelectItem::Wildcard(_) => {}, // Ignore wildcard for aggregates
+                SelectItem::Wildcard(_) => {} // Ignore wildcard for aggregates
                 _ => {}
             }
         }
@@ -629,7 +629,7 @@ impl QueryPlanner {
         mut current_plan: PlanNode,
         base_schema: &Schema,
         has_group_by: bool,
-        has_aggregates: bool
+        has_aggregates: bool,
     ) -> Result<PlanNode, String> {
         // Parse aggregate functions
         let (agg_exprs, agg_types) = self.parse_aggregates(&select.projection, base_schema)?;
@@ -644,7 +644,7 @@ impl QueryPlanner {
         let output_schema = self.create_aggregation_output_schema(
             &group_by_exprs.iter().map(|e| e.as_ref()).collect::<Vec<&Expression>>(),
             &agg_exprs,
-            has_group_by
+            has_group_by,
         );
 
         // Create aggregation plan node
@@ -680,14 +680,14 @@ impl QueryPlanner {
                                 0,  // tuple index
                                 expressions.len(),  // Use current position as column index
                                 Column::new("count", TypeId::Integer),  // Fixed column type for aggregates
-                                vec![]
+                                vec![],
                             )));
-                        },
+                        }
                         _ => {
                             expressions.push(self.parse_expression(expr, schema)?);
                         }
                     }
-                },
+                }
                 SelectItem::Wildcard(_) => {
                     // Add all columns from schema
                     for i in 0..schema.get_column_count() {
@@ -696,7 +696,7 @@ impl QueryPlanner {
                             ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
                         ));
                     }
-                },
+                }
                 _ => return Err("Unsupported projection type".to_string()),
             }
         }
@@ -828,7 +828,7 @@ impl QueryPlanner {
         &self,
         group_by_exprs: &[&Expression],
         agg_exprs: &[Arc<Expression>],
-        has_group_by: bool
+        has_group_by: bool,
     ) -> Schema {
         if has_group_by {
             // Include both group by and aggregate columns
@@ -1007,7 +1007,7 @@ impl QueryPlanner {
         current_plan: PlanNode,
         schema: &Schema,
         table_oid: u64,
-        table_name: &str
+        table_name: &str,
     ) -> Result<PlanNode, String> {
         if let Some(where_clause) = &select.selection {
             let filter_expr = self.parse_expression(where_clause, schema)?;
@@ -1028,7 +1028,7 @@ impl QueryPlanner {
         &self,
         select: &Box<Select>,
         mut current_plan: PlanNode,
-        base_schema: &Schema
+        base_schema: &Schema,
     ) -> Result<PlanNode, String> {
         // Check if aggregation is needed
         let has_group_by = match &select.group_by {
@@ -1048,7 +1048,7 @@ impl QueryPlanner {
             current_plan,
             base_schema,
             has_group_by,
-            has_aggregates
+            has_aggregates,
         )?;
 
         Ok(current_plan)
@@ -1059,7 +1059,7 @@ impl QueryPlanner {
         &self,
         select: &Box<Select>,
         mut current_plan: PlanNode,
-        schema: &Schema
+        schema: &Schema,
     ) -> Result<PlanNode, String> {
         match &select.projection[..] {
             [SelectItem::Wildcard(_)] => Ok(current_plan),
@@ -1081,7 +1081,7 @@ impl QueryPlanner {
         &self,
         select: &Box<Select>,
         base_schema: &Schema,
-        has_group_by: bool
+        has_group_by: bool,
     ) -> Result<Vec<Expression>, String> {
         if !has_group_by {
             return Ok(Vec::new());
@@ -1092,7 +1092,7 @@ impl QueryPlanner {
                 exprs.iter()
                     .map(|expr| self.parse_expression(expr, base_schema))
                     .collect()
-            },
+            }
             GroupByExpr::All(_) => {
                 // If GROUP BY ALL, use all columns from the input schema
                 (0..base_schema.get_column_count())
@@ -1111,7 +1111,7 @@ impl QueryPlanner {
     fn project_aggregation_results(
         &self,
         select: &Box<Select>,
-        mut current_plan: PlanNode
+        mut current_plan: PlanNode,
     ) -> Result<PlanNode, String> {
         let proj_exprs = match &select.projection[..] {
             [SelectItem::Wildcard(_)] => {
@@ -1125,7 +1125,7 @@ impl QueryPlanner {
                         )
                     })
                     .collect()
-            },
+            }
             _ => self.parse_projection_expressions(&select.projection, current_plan.get_output_schema())?
         };
 

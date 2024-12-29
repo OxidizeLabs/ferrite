@@ -80,11 +80,9 @@ impl TransactionManager {
             panic!("txn not in running state");
         }
 
-        if txn.get_isolation_level() == IsolationLevel::Serializable {
-            if !self.verify_transaction(&txn) {
-                self.abort(txn);
-                return false;
-            }
+        if !self.verify_transaction(&txn) {
+            self.abort(txn);
+            return false;
         }
 
         // Write commit log record
@@ -427,20 +425,26 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::logger::initialize_logger;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
     use crate::concurrency::lock_manager::LockManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::fs;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
+
+    fn init_test_logger() {
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Trace)
+            .is_test(true)
+            .try_init();
+    }
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -456,7 +460,7 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            initialize_logger();
+            init_test_logger();
 
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
@@ -512,7 +516,7 @@ mod tests {
             Tuple::new(
                 &[Value::from(id), Value::from(value)],
                 self.schema.clone(),
-                RID::new(0, 0)  // Default RID that will be updated on insert
+                RID::new(0, 0),  // Default RID that will be updated on insert
             )
         }
 

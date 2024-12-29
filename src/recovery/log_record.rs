@@ -42,6 +42,7 @@ pub enum LogRecordType {
 ///--------------------------
 /// | HEADER | prev_page_id | page_id |
 ///--------------------------
+#[derive(Debug)]
 pub struct LogRecord {
     size: i32,
     lsn: Lsn,
@@ -239,6 +240,7 @@ impl LogRecord {
             page_id: Some(page_id),
         }
     }
+
     /// Returns the page id
     pub fn get_page_id(&self) -> Option<&PageId> {
         self.page_id.as_ref()
@@ -674,11 +676,8 @@ mod tests {
         let rid = tuple.get_rid();
 
         // Test valid sequence: Begin -> Insert -> MarkDelete -> ApplyDelete -> Commit
-        let begin_record = LogRecord::new_transaction_record(
-            DUMMY_TXN_ID,
-            DUMMY_PREV_LSN,
-            LogRecordType::Begin,
-        );
+        let begin_record =
+            LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Begin);
 
         let insert_record = LogRecord::new_insert_delete_record(
             DUMMY_TXN_ID,
@@ -712,8 +711,14 @@ mod tests {
 
         assert_eq!(begin_record.get_log_record_type(), LogRecordType::Begin);
         assert_eq!(insert_record.get_log_record_type(), LogRecordType::Insert);
-        assert_eq!(mark_delete_record.get_log_record_type(), LogRecordType::MarkDelete);
-        assert_eq!(apply_delete_record.get_log_record_type(), LogRecordType::ApplyDelete);
+        assert_eq!(
+            mark_delete_record.get_log_record_type(),
+            LogRecordType::MarkDelete
+        );
+        assert_eq!(
+            apply_delete_record.get_log_record_type(),
+            LogRecordType::ApplyDelete
+        );
         assert_eq!(commit_record.get_log_record_type(), LogRecordType::Commit);
     }
 }

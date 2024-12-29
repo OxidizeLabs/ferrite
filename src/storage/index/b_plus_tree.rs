@@ -260,7 +260,7 @@ impl PrintableBPlusTree {
                     node.keys,
                     " ".repeat(padding)
                 )
-                .unwrap();
+                    .unwrap();
                 for child in &node.children {
                     new_queue.push(child);
                 }

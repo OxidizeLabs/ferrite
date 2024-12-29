@@ -692,7 +692,7 @@ impl BufferPoolManager {
         self.free_list.read().len()
     }
 
-pub fn get_replacer(&self) -> Option<RwLockReadGuard<LRUKReplacer>> {
+    pub fn get_replacer(&self) -> Option<RwLockReadGuard<LRUKReplacer>> {
         Some(self.replacer.read())
     }
 

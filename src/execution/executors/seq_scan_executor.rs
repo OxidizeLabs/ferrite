@@ -202,16 +202,16 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
-    use crate::recovery::log_manager::LogManager;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
