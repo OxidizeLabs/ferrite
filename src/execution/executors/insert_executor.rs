@@ -117,48 +117,52 @@ impl AbstractExecutor for InsertExecutor {
 
         // Get tuple from child executor (VALUES or SELECT)
         if let Some(child_executor) = self.child_executor.as_mut() {
-            match child_executor.next() {
-                Some((mut tuple, _)) => {
-                    debug!("Got tuple from child executor: {:?}", tuple.get_values());
+            if let Some((mut tuple, _)) = child_executor.next() {
+                debug!("Got tuple from child executor: {:?}", tuple.get_values());
 
-                    // Create tuple metadata
-                    let time_stamp = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_nanos() as u64;
-                    let tuple_meta = TupleMeta::new(time_stamp, false);
+                // Create tuple metadata
+                let tuple_meta = TupleMeta::new(
+                    self.context.read()
+                        .get_transaction()
+                        .get_transaction_id(),
+                    false
+                );
 
-                    debug!(
-                        "Inserting tuple with timestamp {} into table '{}'",
-                        time_stamp,
-                        self.plan.get_table_name()
-                    );
+                debug!(
+                    "Inserting tuple with transaction ID {} into table '{}'",
+                    tuple_meta.get_timestamp(),
+                    self.plan.get_table_name()
+                );
 
-                    // Insert tuple into table heap
-                    match self.table_heap.insert_tuple(&tuple_meta, &mut tuple) {
-                        Ok(rid) => {
-                            info!(
-                                "Successfully inserted tuple into '{}' at RID {:?}: {:?}",
-                                self.plan.get_table_name(),
-                                rid,
-                                tuple.get_values()
-                            );
-                            Some((tuple, rid))
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to insert tuple into table '{}': {}",
-                                self.plan.get_table_name(),
-                                e
-                            );
-                            None
-                        }
+                // Insert tuple into table heap
+                match self.table_heap.insert_tuple(&tuple_meta, &mut tuple) {
+                    Ok(rid) => {
+                        info!(
+                            "Successfully inserted tuple into '{}' at RID {:?}: {:?}",
+                            self.plan.get_table_name(),
+                            rid,
+                            tuple.get_values()
+                        );
+
+                        // Add to transaction's write set
+                        self.context.read()
+                            .get_transaction()
+                            .append_write_set(self.plan.get_table_oid() as u32, rid);
+
+                        Some((tuple, rid))
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to insert tuple into table '{}': {}",
+                            self.plan.get_table_name(),
+                            e
+                        );
+                        None
                     }
                 }
-                None => {
-                    debug!("No more tuples available from child executor");
-                    None
-                }
+            } else {
+                debug!("No more tuples available from child executor");
+                None
             }
         } else {
             error!("No child executor available for insert operation");
@@ -189,13 +193,13 @@ mod tests {
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::execution::plans::values_plan::ValuesNode;
+    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use chrono::Utc;
-    use parking_lot::{Mutex, RwLock};
-    use crate::recovery::log_manager::LogManager;
+    use parking_lot::RwLock;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
