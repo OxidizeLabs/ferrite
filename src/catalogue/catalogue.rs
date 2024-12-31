@@ -1,53 +1,15 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
-use crate::common::config::{IndexOidT, TableOidT};
-use crate::storage::index::index::Index;
-use crate::storage::table::table_heap::TableHeap;
+use crate::common::config::{IndexOidT, TableOidT, TxnId};
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::storage::index::b_plus_tree_i::BPlusTree;
+use crate::storage::index::index::{Index, IndexInfo, IndexType};
+use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use core::fmt;
 use log::{info, warn};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-
-pub enum IndexType {
-    BPlusTreeIndex,
-    HashTableIndex,
-    STLOrderedIndex,
-    STLUnorderedIndex,
-}
-
-/// The TableInfo struct maintains metadata about a table.
-#[derive(Debug, Clone)]
-pub struct TableInfo {
-    /// The table schema
-    schema: Schema,
-    /// The table name
-    name: String,
-    /// An owning pointer to the table heap
-    table: Arc<TableHeap>,
-    /// The table OID
-    oid: TableOidT,
-}
-
-/// The IndexInfo struct maintains metadata about an index.
-pub struct IndexInfo {
-    /// The schema for the index key
-    key_schema: Schema,
-    /// The name of the index
-    name: String,
-    /// An owning pointer to the index
-    index: Box<dyn Index>,
-    /// The unique OID for the index
-    index_oid: IndexOidT,
-    /// The name of the table on which the index is created
-    table_name: String,
-    /// The size of the index key, in bytes
-    key_size: usize,
-    /// Is primary key index?
-    is_primary_key: bool,
-    /// The index type
-    index_type: IndexType,
-}
 
 /// The Catalog is a non-persistent catalog that is designed for
 /// use by executors within the DBMS execution engine. It handles
@@ -57,102 +19,9 @@ pub struct Catalog {
     tables: HashMap<TableOidT, TableInfo>,
     table_names: HashMap<String, TableOidT>,
     next_table_oid: TableOidT,
-    indexes: HashMap<IndexOidT, Box<IndexInfo>>,
-    index_names: HashMap<String, HashMap<String, IndexOidT>>,
+    indexes: HashMap<IndexOidT, IndexInfo>,
+    index_names: HashMap<String, IndexOidT>,
     next_index_oid: IndexOidT,
-}
-
-impl TableInfo {
-    /// Constructs a new TableInfo instance.
-    ///
-    /// # Parameters
-    /// - `schema`: The table schema.
-    /// - `name`: The table name.
-    /// - `table`: An owning pointer to the table heap.
-    /// - `oid`: The unique OID for the table.
-    pub fn new(schema: Schema, name: String, table: Arc<TableHeap>, oid: TableOidT) -> Self {
-        TableInfo {
-            schema,
-            name,
-            table,
-            oid,
-        }
-    }
-
-    pub fn get_table_schema(&self) -> Schema {
-        self.schema.clone()
-    }
-
-    pub fn get_table_oidt(&self) -> TableOidT {
-        self.oid
-    }
-
-    pub fn get_table_heap(&self) -> Arc<TableHeap> {
-        self.table.clone()
-    }
-
-    pub fn get_table_name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl IndexInfo {
-    /// Constructs a new IndexInfo instance.
-    ///
-    /// # Parameters
-    /// - `key_schema`: The schema for the index key.
-    /// - `name`: The name of the index.
-    /// - `index`: An owning pointer to the index.
-    /// - `index_oid`: The unique OID for the index.
-    /// - `table_name`: The name of the table on which the index is created.
-    /// - `key_size`: The size of the index key, in bytes.
-    /// - `is_primary_key`: Indicates if it is a primary key index.
-    /// - `index_type`: The index type.
-    pub fn new(
-        key_schema: Schema,
-        name: String,
-        index: Box<dyn Index>,
-        index_oid: IndexOidT,
-        table_name: String,
-        key_size: usize,
-        is_primary_key: bool,
-        index_type: IndexType,
-    ) -> Self {
-        IndexInfo {
-            key_schema,
-            name,
-            index,
-            index_oid,
-            table_name,
-            key_size,
-            is_primary_key,
-            index_type,
-        }
-    }
-
-    pub fn get_key_schema(&self) -> &Schema {
-        &self.key_schema
-    }
-
-    pub fn get_index_oid(&self) -> IndexOidT {
-        self.index_oid
-    }
-
-    pub fn get_index_name(&self) -> &str {
-        self.table_name.as_str()
-    }
-
-    pub fn get_index_type(&self) -> &IndexType {
-        &self.index_type
-    }
-
-    pub fn get_key_size(&self) -> usize {
-        self.key_size
-    }
-
-    pub fn is_primary_key(&self) -> bool {
-        self.is_primary_key
-    }
 }
 
 impl Catalog {
@@ -167,9 +36,9 @@ impl Catalog {
         next_index_oid: IndexOidT,
         next_table_oid: TableOidT,
         tables: HashMap<TableOidT, TableInfo>,
-        indexes: HashMap<IndexOidT, Box<IndexInfo>>,
+        indexes: HashMap<IndexOidT, IndexInfo>,
         table_names: HashMap<String, TableOidT>,
-        index_names: HashMap<String, HashMap<String, IndexOidT>>,
+        index_names: HashMap<String, IndexOidT>,
     ) -> Self {
         Catalog {
             bpm,
@@ -220,19 +89,17 @@ impl Catalog {
         let table_oid = self.next_table_oid;
 
         // Create table info
-        let table_info = TableInfo::new(
-            schema.clone(),
-            table_name.to_string(),
-            table,
-            table_oid,
-        );
+        let table_info = TableInfo::new(schema.clone(), table_name.to_string(), table, table_oid);
 
         // Add to catalog maps
         self.table_names.insert(table_name.to_string(), table_oid);
         self.tables.insert(table_oid, table_info);
 
         // Print confirmation
-        info!("Table '{}' created successfully with OID {}", table_name, table_oid);
+        info!(
+            "Table '{}' created successfully with OID {}",
+            table_name, table_oid
+        );
 
         // Return reference to the newly created table info
         self.tables.get(&table_oid)
@@ -262,98 +129,77 @@ impl Catalog {
         self.tables.get(&table_oid)
     }
 
-    // /// Creates a new index, populates existing data of the table, and returns its metadata.
-    // ///
-    // /// # Parameters
-    // /// - `txn`: The transaction in which the table is being created.
-    // /// - `index_name`: The name of the new index.
-    // /// - `table_name`: The name of the table.
-    // /// - `schema`: The schema of the table.
-    // /// - `key_schema`: The schema of the key.
-    // /// - `key_attrs`: Key attributes.
-    // /// - `key_size`: Size of the key.
-    // /// - `hash_function`: The hash function for the index.
-    // ///
-    // /// # Returns
-    // /// A (non-owning) pointer to the metadata of the new table.
-    // pub fn create_index<KeyType: Eq + Hash + Clone, ValueType, KeyComparator>(
-    //     &mut self,
-    //     txn: &Transaction,
-    //     index_name: &str,
-    //     table_name: &str,
-    //     schema: Schema,
-    //     key_schema: Schema,
-    //     key_attrs: Vec<usize>,
-    //     key_size: usize,
-    //     hash_function: HashFunction<KeyType>,
-    //     is_primary_key: bool,
-    //     index_type: IndexType,
-    // ) -> Option<&IndexInfo> {
-    //     if !self.table_names.contains_key(table_name) {
-    //         return None;
-    //     }
-    //
-    //     let table_indexes = self.index_names.entry(table_name.to_string()).or_default();
-    //     if table_indexes.contains_key(index_name) {
-    //         return None;
-    //     }
-    //
-    //     let meta = Box::new(IndexMetadata::new(index_name.to_string(), table_name.to_string(), &schema, key_attrs, is_primary_key));
-    //     let index: Box<dyn Index> = match index_type {
-    //         // IndexType::HashTableIndex => Box::new(ExtendableHashTableIndex::new(Arc::from(meta), self.bpm.clone(), hash_function)),
-    //         IndexType::BPlusTreeIndex => Box::new(BPlusTreeIndex::new(meta, self.bpm.clone(), ())),
-    //         // IndexType::STLOrderedIndex => Box::new(STLOrderedIndex::new(meta, self.bpm.clone())),
-    //         // IndexType::STLUnorderedIndex => Box::new(STLUnorderedIndex::new(meta, self.bpm.clone(), hash_function)),
-    //         _ => {}
-    //     };
-    //
-    //     let table_meta = self.get_table(table_name)?;
-    //     let mut iter = table_meta.table.make_iterator();
-    //     while !iter.is_end() {
-    //         let (meta, tuple) = iter.next().unwrap();
-    //         index.insert_entry(tuple.key_from_tuple(key_schema.clone(), key_attrs.clone()), tuple.get_rid(), txn);
-    //         iter.next();
-    //     }
-    //
-    //     let index_oid = self.next_index_oid.add(1);
-    //     let index_info = Box::new(IndexInfo::new(key_schema, index_name.to_string(), index, index_oid, table_name.to_string(), key_size, is_primary_key, index_type));
-    //
-    //     self.indexes.insert(index_oid, index_info);
-    //     table_indexes.insert(index_name.to_string(), index_oid);
-    //
-    //     self.indexes.get(&index_oid).map(|i| &**i)
-    // }
+    /// Creates a new index, populates existing data of the table, and returns its metadata.
+    pub fn create_index(
+        &mut self,
+        txn_id: TxnId,
+        index_name: &str,
+        table_name: &str,
+        key_schema: Schema,
+        key_attrs: Vec<usize>,
+        key_size: usize,
+        is_primary_key: bool,
+        index_type: IndexType,
+    ) -> Option<&IndexInfo> {
+        // Check if table exists
+        if !self.table_names.contains_key(table_name) {
+            warn!("Cannot create index: table '{}' does not exist", table_name);
+            return None;
+        }
 
-    /// Gets the index `index_name` for table `table_name`.
-    ///
-    /// # Parameters
-    /// - `index_name`: The name of the index for which to query.
-    /// - `table_name`: The name of the table on which to perform the query.
-    ///
-    /// # Returns
-    /// A (non-owning) pointer to the metadata for the index.
-    pub fn get_index(&self, index_name: &str, table_name: &str) -> Option<&IndexInfo> {
-        self.index_names
-            .get(table_name)
-            .and_then(|table_indexes| {
-                table_indexes
-                    .get(index_name)
-                    .and_then(|&index_oid| self.indexes.get(&index_oid))
-            })
-            .map(|i| &**i)
-    }
+        // Check if index already exists
+        if self.index_names.contains_key(index_name) {
+            warn!("Cannot create index: index '{}' already exists", index_name);
+            return None;
+        }
 
-    /// Gets the index `index_name` for table identified by `table_oid`.
-    ///
-    /// # Parameters
-    /// - `index_name`: The name of the index for which to query.
-    /// - `table_oid`: The OID of the table on which to perform the query.
-    ///
-    /// # Returns
-    /// A (non-owning) pointer to the metadata for the index.
-    pub fn get_index_by_oid(&self, index_name: &str, table_oid: TableOidT) -> Option<&IndexInfo> {
-        let table_meta = self.tables.get(&table_oid)?;
-        self.get_index(index_name, &table_meta.name)
+        // Create index metadata
+        let index_oid = self.next_index_oid;
+
+        // Create the appropriate index based on index type
+        let index: Box<dyn Index> = match index_type {
+            IndexType::BPlusTreeIndex => {
+                // Initialize B+Tree with appropriate order (e.g. 4)
+                let order = 4; // This could be made configurable
+                Box::new(BPlusTree::new(order))
+            }
+        };
+
+        // Create index info and insert it into catalog
+        let index_info = IndexInfo::new(
+            key_schema.clone(),
+            index_name.to_string(),
+            index_oid,
+            table_name.to_string(),
+            key_size,
+            is_primary_key,
+            index_type,
+            key_attrs.clone(),
+        );
+
+        // Update catalog maps first so we can access the index through the catalog
+        self.index_names.insert(index_name.to_string(), index_oid);
+        self.indexes.insert(index_oid, index_info);
+        self.next_index_oid += 1;
+
+        // Now populate the index using the stored version
+        if let Some(table_info) = self.get_table(table_name) {
+            let table_heap = table_info.get_table_heap();
+            let mut iter = table_heap.make_iterator();
+
+            // Get reference to the index we just created
+            if let Some(index_info) = self.indexes.get(&index_oid) {
+                // Populate index with existing table data
+                while let Some((_, tuple)) = iter.next() {
+                    let key_tuple = tuple.key_from_tuple(key_schema.clone(), key_attrs.clone());
+                    let transaction = Transaction::new(txn_id, IsolationLevel::ReadUncommitted);
+                    index.insert_entry(&key_tuple, tuple.get_rid(), &transaction);
+                }
+            }
+        }
+
+        // Return reference to the newly created index info
+        self.indexes.get(&index_oid)
     }
 
     /// Gets the index identified by `index_oid`.
@@ -364,7 +210,7 @@ impl Catalog {
     /// # Returns
     /// A (non-owning) pointer to the metadata for the index.
     pub fn get_index_by_index_oid(&self, index_oid: IndexOidT) -> Option<&IndexInfo> {
-        self.indexes.get(&index_oid).map(|i| &**i)
+        self.indexes.get(&index_oid)
     }
 
     /// Gets all the indexes for the table identified by `table_name`.
@@ -376,18 +222,16 @@ impl Catalog {
     /// A vector of `IndexInfo` for each index on the given table. Returns an empty vector
     /// if the table exists but no indexes have been created for it.
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&IndexInfo> {
-        self.table_names
-            .get(table_name)
-            .and_then(|&_table_oid| {
-                self.index_names.get(table_name).map(|table_indexes| {
-                    table_indexes
-                        .values()
-                        .filter_map(|&index_oid| self.indexes.get(&index_oid))
-                        .map(|i| &**i)
-                        .collect()
-                })
-            })
-            .unwrap_or_default()
+        // First verify the table exists
+        if !self.table_names.contains_key(table_name) {
+            return Vec::new();
+        }
+
+        // Collect all indexes where table_name matches
+        self.indexes
+            .values()
+            .filter(|index_info| index_info.get_index_name() == table_name)
+            .collect()
     }
 
     /// Gets the names of all tables.
@@ -404,19 +248,6 @@ impl Catalog {
                 .get(&table_oid)
                 .map(|table_schema| table_schema.get_table_schema())
         })
-    }
-}
-
-/// Formatter implementation for `IndexType`.
-impl Display for IndexType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            IndexType::BPlusTreeIndex => "BPlusTree",
-            IndexType::HashTableIndex => "Hash",
-            IndexType::STLOrderedIndex => "STLOrdered",
-            IndexType::STLUnorderedIndex => "STLUnordered",
-        };
-        write!(f, "{}", name)
     }
 }
 
@@ -450,7 +281,7 @@ impl Display for Catalog {
             if !table_indexes.is_empty() {
                 writeln!(f, "  Indexes:")?;
                 for index in table_indexes {
-                    writeln!(f, "    - {}", index.name)?;
+                    writeln!(f, "    - {}", index.get_index_name())?;
                 }
             }
 
@@ -458,19 +289,6 @@ impl Display for Catalog {
         }
 
         Ok(())
-    }
-}
-
-impl PartialEq for TableInfo {
-    fn eq(&self, other: &Self) -> bool {
-        // Compare schema
-        self.schema == other.schema &&
-            // Compare table name
-            self.name == other.name &&
-            // Compare table OID
-            self.oid == other.oid &&
-            // Compare table heap Arc by comparing the internal pointer
-            Arc::ptr_eq(&self.table, &other.table)
     }
 }
 
@@ -534,8 +352,13 @@ mod unit_tests {
                 Default::default(),
             )));
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager.clone())));
-            let lock_manager = Arc::new(RwLock::new(LockManager::new(Arc::clone(&transaction_manager.clone()))));
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
+                catalog,
+                log_manager.clone(),
+            )));
+            let lock_manager = Arc::new(RwLock::new(LockManager::new(Arc::clone(
+                &transaction_manager.clone(),
+            ))));
 
             Self {
                 bpm,

@@ -101,7 +101,6 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::TableInfo;
     use crate::catalogue::column::Column;
     use crate::catalogue::schema::Schema;
     use crate::common::logger::initialize_logger;
@@ -109,7 +108,7 @@ mod tests {
     use crate::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::table_heap::TableHeap;
+    use crate::storage::table::table_heap::{TableHeap, TableInfo};
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
     use parking_lot::RwLock;

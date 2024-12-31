@@ -124,7 +124,7 @@ impl Tuple {
     pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: Vec<usize>) -> Tuple {
         let key_values: Vec<Value> = key_attrs
             .iter()
-            .map(|&attr| self.get_value(attr as usize).clone())
+            .map(|&attr| self.get_value(attr).clone())
             .collect();
 
         Tuple::new(&*key_values, key_schema, self.rid)

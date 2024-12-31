@@ -1,5 +1,6 @@
 use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
-use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::catalogue::schema::Schema;
+use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::storage::page::page::PageTrait;
 use crate::storage::page::page_guard::PageGuard;
@@ -18,6 +19,19 @@ pub struct TableHeap {
     first_page_id: PageId,
     latch: RwLock<()>,
     last_page_id: PageId,
+}
+
+/// The TableInfo struct maintains metadata about a table.
+#[derive(Debug, Clone)]
+pub struct TableInfo {
+    /// The table schema
+    schema: Schema,
+    /// The table name
+    name: String,
+    /// An owning pointer to the table heap
+    table: Arc<TableHeap>,
+    /// The table OID
+    oid: TableOidT,
 }
 
 impl TableHeap {
@@ -302,7 +316,7 @@ impl TableHeap {
         } else {
             None
         }
-            .unwrap_or(RID::new(INVALID_PAGE_ID, 0));
+        .unwrap_or(RID::new(INVALID_PAGE_ID, 0));
 
         debug!(
             "Creating iterator: start_rid = {:?}, stop_at_rid = {:?}",
@@ -479,6 +493,40 @@ impl TableHeap {
     }
 }
 
+impl TableInfo {
+    /// Constructs a new TableInfo instance.
+    ///
+    /// # Parameters
+    /// - `schema`: The table schema.
+    /// - `name`: The table name.
+    /// - `table`: An owning pointer to the table heap.
+    /// - `oid`: The unique OID for the table.
+    pub fn new(schema: Schema, name: String, table: Arc<TableHeap>, oid: TableOidT) -> Self {
+        TableInfo {
+            schema,
+            name,
+            table,
+            oid,
+        }
+    }
+
+    pub fn get_table_schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    pub fn get_table_oidt(&self) -> TableOidT {
+        self.oid
+    }
+
+    pub fn get_table_heap(&self) -> Arc<TableHeap> {
+        self.table.clone()
+    }
+
+    pub fn get_table_name(&self) -> &str {
+        &self.name
+    }
+}
+
 impl Debug for TableHeap {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableHeap")
@@ -488,6 +536,19 @@ impl Debug for TableHeap {
             .field("num_pages", &self.get_num_pages())
             .field("num_tuples", &self.get_num_tuples())
             .finish()
+    }
+}
+
+impl PartialEq for TableInfo {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare schema
+        self.schema == other.schema &&
+            // Compare table name
+            self.name == other.name &&
+            // Compare table OID
+            self.oid == other.oid &&
+            // Compare table heap Arc by comparing the internal pointer
+            Arc::ptr_eq(&self.table, &other.table)
     }
 }
 
