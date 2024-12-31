@@ -1,8 +1,8 @@
-use crate::catalogue::catalogue::TableInfo;
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::table_iterator::TableScanIterator;
 use std::sync::Arc;
+use crate::storage::table::table_heap::TableInfo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableScanNode {

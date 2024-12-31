@@ -1,6 +1,8 @@
-use crate::storage::page::page_types::b_plus_tree_leaf_page::DB_PAGE_SIZE;
 use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
 use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
+
+pub const DB_PAGE_SIZE: usize = 4096;
+
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 

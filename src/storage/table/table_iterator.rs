@@ -1,8 +1,7 @@
-use crate::catalogue::catalogue::TableInfo;
 use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::storage::page::page_types::table_page::TablePage;
-use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;

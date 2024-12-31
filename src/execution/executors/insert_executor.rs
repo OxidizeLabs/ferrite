@@ -10,7 +10,6 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct InsertExecutor {
     context: Arc<RwLock<ExecutorContext>>,

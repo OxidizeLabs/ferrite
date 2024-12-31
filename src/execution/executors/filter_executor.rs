@@ -1,5 +1,4 @@
 use crate::catalogue::schema::Schema;
-use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::TransactionState;
@@ -9,11 +8,10 @@ use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::filter_plan::FilterNode;
-use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
 use log::{debug, error};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct FilterExecutor {

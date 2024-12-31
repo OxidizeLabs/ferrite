@@ -1,8 +1,6 @@
 use crate::common::config::*;
 use crate::common::exception::PageError;
-use crate::storage::page::page::PageType::{
-    Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table,
-};
+use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
@@ -25,7 +23,7 @@ pub enum PageType {
 /// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
 /// held in main memory. Page also contains book-keeping information that is used by the buffer pool manager, e.g.
 /// pin count, dirty flag, page id, etc.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Page {
     /// The actual data that is stored within a page.
     data: Box<[u8; DB_PAGE_SIZE as usize]>,
@@ -204,7 +202,7 @@ impl PageType {
             ExtendedHashTableDirectory(page) => page.serialize(),
             ExtendedHashTableHeader(page) => unimplemented!(),
             ExtendedHashTableBucket(page) => unimplemented!(),
-            Table(page) => unimplemented!(),
+            Table(page) => page.serialize(),
         }
     }
 
