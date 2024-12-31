@@ -1,83 +1,103 @@
-use std::sync::Arc;
-
 use crate::catalogue::schema::Schema;
+use crate::common::config::IndexOidT;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::table::tuple::Tuple;
+use core::fmt;
+use std::fmt::{Display, Formatter};
 
-/// Holds metadata of an index object.
-pub struct IndexMetadata {
-    name: String,
-    table_name: String,
-    key_attrs: Vec<usize>,
-    key_schema: Arc<Schema>,
-    is_primary_key: bool,
+pub enum IndexType {
+    BPlusTreeIndex,
+    // HashTableIndex,
+    // STLOrderedIndex,
+    // STLUnorderedIndex,
 }
 
-impl IndexMetadata {
-    /// Constructs a new `IndexMetadata` instance.
+/// The IndexInfo struct maintains metadata about an index.
+pub struct IndexInfo {
+    /// The schema for the index key
+    key_schema: Schema,
+    /// The name of the index
+    name: String,
+    /// The unique OID for the index
+    index_oid: IndexOidT,
+    /// The name of the table on which the index is created
+    table_name: String,
+    /// The size of the index key, in bytes
+    key_size: usize,
+    /// Is primary key index?
+    is_primary_key: bool,
+    /// The index type
+    index_type: IndexType,
+    /// The key attributes (column indices) in the table
+    key_attrs: Vec<usize>,
+}
+
+impl IndexInfo {
+    /// Constructs a new IndexInfo instance.
     ///
     /// # Parameters
-    /// - `index_name`: The name of the index.
+    /// - `key_schema`: The schema for the index key.
+    /// - `name`: The name of the index.
+    /// - `index`: An owning pointer to the index.
+    /// - `index_oid`: The unique OID for the index.
     /// - `table_name`: The name of the table on which the index is created.
-    /// - `tuple_schema`: The schema of the indexed key.
-    /// - `key_attrs`: The mapping from indexed columns to base table columns.
-    /// - `is_primary_key`: Whether this index is a primary key.
+    /// - `key_size`: The size of the index key, in bytes.
+    /// - `is_primary_key`: Indicates if it is a primary key index.
+    /// - `index_type`: The index type.
     pub fn new(
-        index_name: String,
+        key_schema: Schema,
+        name: String,
+        index_oid: IndexOidT,
         table_name: String,
-        tuple_schema: &Schema,
-        key_attrs: Vec<usize>,
+        key_size: usize,
         is_primary_key: bool,
+        index_type: IndexType,
+        key_attrs: Vec<usize>,
     ) -> Self {
-        let key_schema = Arc::new(Schema::copy_schema(tuple_schema, &key_attrs));
-        Self {
-            name: index_name,
-            table_name,
-            key_attrs,
+        IndexInfo {
             key_schema,
+            name,
+            index_oid,
+            table_name,
+            key_size,
             is_primary_key,
+            index_type,
+            key_attrs,
         }
     }
 
-    /// Returns the name of the index.
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the name of the table on which the index is created.
-    pub fn get_table_name(&self) -> &str {
-        &self.table_name
-    }
-
-    /// Returns a schema object pointer that represents the indexed key.
     pub fn get_key_schema(&self) -> &Schema {
         &self.key_schema
     }
 
-    /// Returns the number of columns inside the index key.
-    pub fn get_index_column_count(&self) -> u32 {
-        self.key_attrs.len() as u32
-    }
-
-    /// Returns the mapping relation between indexed columns and base table columns.
+    /// Returns the key attributes (column indices) for this index
     pub fn get_key_attrs(&self) -> &Vec<usize> {
         &self.key_attrs
     }
 
-    /// Returns whether this index is a primary key.
-    pub fn is_primary_key(&self) -> bool {
-        self.is_primary_key
+    pub fn get_index_oid(&self) -> IndexOidT {
+        self.index_oid
     }
 
-    /// Returns a string representation for debugging.
-    pub fn to_string(&self) -> String {
-        format!(
-            "IndexMetadata[Name = {}, Type = B+Tree, Table name = {}] :: {}",
-            self.name,
-            self.table_name,
-            self.key_schema.to_string()
-        )
+    pub fn get_index_name(&self) -> &str {
+        self.table_name.as_str()
+    }
+
+    pub fn get_index_type(&self) -> &IndexType {
+        &self.index_type
+    }
+
+    pub fn get_key_size(&self) -> usize {
+        self.key_size
+    }
+
+    pub fn get_index_column_count(&self) -> u32 {
+        self.key_schema.get_column_count()
+    }
+
+    pub fn is_primary_key(&self) -> bool {
+        self.is_primary_key
     }
 }
 
@@ -87,12 +107,12 @@ pub trait Index: Send + Sync {
     ///
     /// # Parameters
     /// - `metadata`: An owning pointer to the index metadata.
-    fn new(metadata: Box<IndexMetadata>) -> Self
+    fn new(metadata: Box<IndexInfo>) -> Self
     where
         Self: Sized;
 
     /// Returns a non-owning pointer to the metadata object associated with the index.
-    fn get_metadata(&self) -> &IndexMetadata;
+    fn get_metadata(&self) -> &IndexInfo;
 
     /// Returns the number of indexed columns.
     fn get_index_column_count(&self) -> u32 {
@@ -100,8 +120,8 @@ pub trait Index: Send + Sync {
     }
 
     /// Returns the index name.
-    fn get_name(&self) -> &str {
-        self.get_metadata().get_name()
+    fn get_index_name(&self) -> &str {
+        self.get_metadata().get_index_name()
     }
 
     /// Returns the index key schema.
@@ -118,7 +138,7 @@ pub trait Index: Send + Sync {
     fn to_string(&self) -> String {
         format!(
             "INDEX: ({}){}",
-            self.get_name(),
+            self.get_index_name(),
             self.get_metadata().to_string()
         )
     }
@@ -154,5 +174,32 @@ pub trait Index: Send + Sync {
     /// - `transaction`: The transaction context.
     fn scan_key(&self, key: &Tuple, result: &mut Vec<RID>, transaction: &Transaction) {
         unimplemented!()
+    }
+}
+
+/// Formatter implementation for `IndexType`.
+impl Display for IndexType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            IndexType::BPlusTreeIndex => "BPlusTree",
+            // IndexType::HashTableIndex => "Hash",
+            // IndexType::STLOrderedIndex => "STLOrdered",
+            // IndexType::STLUnorderedIndex => "STLUnordered",
+        };
+        write!(f, "{}", name)
+    }
+}
+
+impl Display for IndexInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            " {{ name: {}, type: {}, table: {}, primary_key: {}, key_size: {} }}",
+            self.name,
+            self.index_type,
+            self.table_name,
+            self.is_primary_key,
+            self.key_size
+        )
     }
 }
