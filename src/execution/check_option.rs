@@ -4,6 +4,7 @@ use std::collections::HashSet;
 pub enum CheckOption {
     EnableNljCheck = 0,
     EnableTopnCheck = 1,
+    EnablePushdownCheck,
 }
 
 #[derive(Default)]

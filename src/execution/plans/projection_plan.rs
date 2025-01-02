@@ -1,18 +1,17 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
     expressions: Vec<Expression>,
     child: Box<PlanNode>,
 }
 
 impl ProjectionNode {
     pub fn new(
-        output_schema: Arc<Schema>,
+        output_schema: Schema,
         expressions: Vec<Expression>,
         child: PlanNode,
     ) -> Self {
@@ -65,7 +64,7 @@ impl AbstractPlanNode for ProjectionNode {
         // Add schema if requested
         if with_schema {
             result.push_str("\n  Schema: [");
-            result.push_str(&self.output_schema.to_string());
+            result.push_str(&self.output_schema.to_string(true));
             result.push(']');
         }
 
@@ -192,10 +191,10 @@ mod tests {
         let ctx = TestContext::new("test_projection_node_creation");
         let input_schema = create_test_schema();
 
-        let output_schema = Arc::new(Schema::new(vec![
+        let output_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-        ]));
+        ]);
 
         let expressions = vec![
             create_mock_expression("id", TypeId::Integer),
@@ -224,7 +223,7 @@ mod tests {
     fn test_projection_node_string_representation() {
         let ctx = TestContext::new("test_projection_node_string_representation");
         let input_schema = create_test_schema();
-        let output_schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
+        let output_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 
         let expressions = vec![create_mock_expression("id", TypeId::Integer)];
 
@@ -244,10 +243,10 @@ mod tests {
     fn test_projection_node_with_different_types() {
         let ctx = TestContext::new("test_projection_node_with_different_types");
         let input_schema = create_test_schema();
-        let output_schema = Arc::new(Schema::new(vec![
+        let output_schema = Schema::new(vec![
             Column::new("result", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-        ]));
+        ]);
 
         let expressions = vec![
             create_mock_expression("result", TypeId::Integer),
@@ -283,10 +282,10 @@ mod tests {
     fn test_projection_children_string() {
         let ctx = TestContext::new("test_projection_children_string");
         let input_schema = create_test_schema();
-        let output_schema = Arc::new(Schema::new(vec![
+        let output_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-        ]));
+        ]);
 
         let expressions = vec![
             create_mock_expression("id", TypeId::Integer),

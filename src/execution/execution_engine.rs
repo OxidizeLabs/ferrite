@@ -1,5 +1,4 @@
 use crate::catalogue::catalogue::Catalog;
-use crate::common::db_instance::ResultWriter;
 use crate::common::exception::DBError;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
@@ -15,11 +14,12 @@ use crate::execution::executors::values_executor::ValuesExecutor;
 use crate::execution::plans::abstract_plan::PlanNode::*;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
-use crate::planner::planner::QueryPlanner;
+use crate::planner::planner::{LogicalToPhysical, QueryPlanner};
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
+use crate::common::result_writer::ResultWriter;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,
@@ -46,30 +46,46 @@ impl ExecutorEngine {
     ) -> Result<PlanNode, DBError> {
         info!("Preparing statement: {}", sql);
 
-        // Generate initial plan using our QueryPlanner
-        let initial_plan = match self.planner.create_plan(sql) {
+        // Generate initial logical plan using our QueryPlanner
+        let initial_logical_plan = match self.planner.create_logical_plan(sql) {
             Ok(plan) => {
                 if self.log_detailed {
-                    debug!("Initial plan generated: {:?}", plan);
+                    debug!("Initial logical plan generated: {:?}", plan);
                 }
                 plan
             }
             Err(e) => {
-                warn!("Failed to create plan: {}", e);
+                warn!("Failed to create logical plan: {}", e);
                 return Err(DBError::PlanError(e));
             }
         };
 
-        // Optimize the plan
-        if check_options.is_modify() {
-            info!("Optimizing plan with modification checks");
-            self.optimizer.optimize(initial_plan, check_options)
+        // Optimize the logical plan
+        let optimized_logical_plan = if check_options.is_modify() {
+            info!("Optimizing logical plan with modification checks");
+            self.optimizer.optimize(initial_logical_plan, check_options)?
         } else {
             if self.log_detailed {
                 debug!("Skipping optimization for read-only query");
             }
-            Ok(initial_plan)
-        }
+            initial_logical_plan
+        };
+
+        // Convert logical plan to physical plan
+        let physical_plan = match optimized_logical_plan.to_physical_plan() {
+            Ok(plan) => {
+                if self.log_detailed {
+                    debug!("Successfully converted to physical plan: {:?}", plan);
+                }
+                plan
+            }
+            Err(e) => {
+                warn!("Failed to convert logical plan to physical plan: {}", e);
+                return Err(DBError::PlanError(e));
+            }
+        };
+
+        Ok(physical_plan)
     }
 
     /// Executes a prepared statement
@@ -79,7 +95,7 @@ impl ExecutorEngine {
         context: Arc<RwLock<ExecutorContext>>,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
-        info!("Starting execution of plan: {:?}", plan.get_type());
+        info!("Starting execution of plan: {:?}", plan);
 
         let result = self.execute_statement_internal(plan, context, writer);
 
@@ -109,7 +125,7 @@ impl ExecutorEngine {
         plan: &PlanNode,
         context: Arc<RwLock<ExecutorContext>>,
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
-        debug!("Creating executor for plan type: {:?}", plan.get_type());
+        debug!("Creating executor for plan type: {:?}", plan);
         match plan {
             Insert(insert_plan) => {
                 info!("Creating insert executor");
@@ -284,7 +300,6 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::db_instance::ResultWriter;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;

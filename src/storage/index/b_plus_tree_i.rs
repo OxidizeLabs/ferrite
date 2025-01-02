@@ -18,10 +18,9 @@ pub enum NodeType {
 #[derive(Debug, Clone)]
 struct BPlusTreeNode {
     node_type: NodeType,
-    keys: Vec<Tuple>, // Using Tuple instead of generic K
+    keys: Vec<Tuple>,
     children: Vec<Arc<RwLock<BPlusTreeNode>>>,
-    values: Vec<RID>, // Using RID instead of generic V
-    // Add a link to the next leaf node
+    values: Vec<RID>,
     next_leaf: Option<Arc<RwLock<BPlusTreeNode>>>,
 }
 
@@ -60,27 +59,6 @@ impl BPlusTree {
         }
     }
 
-    fn compare_keys(&self, key1: &Tuple, key2: &Tuple) -> std::cmp::Ordering {
-        // Compare tuples based on the indexed columns defined in metadata
-        let metadata = self.metadata.as_ref().expect("Metadata not initialized");
-        let key_attrs = metadata.get_key_attrs();
-        for &attr in key_attrs {
-            let val1 = key1.get_value(attr);
-            let val2 = key2.get_value(attr);
-
-            // Use explicit comparisons to handle all comparison cases
-            match (
-                val1.compare_less_than(val2),
-                val1.compare_greater_than(val2),
-            ) {
-                (CmpBool::CmpTrue, _) => return std::cmp::Ordering::Less,
-                (_, CmpBool::CmpTrue) => return std::cmp::Ordering::Greater,
-                _ => continue, // If values are equal, continue to next attribute
-            }
-        }
-        std::cmp::Ordering::Equal
-    }
-
     pub fn insert(&self, key: Tuple, rid: RID) -> bool {
         let mut root_guard = self.root.write();
 
@@ -93,92 +71,6 @@ impl BPlusTree {
         }
 
         self.insert_non_full(&mut root_guard, key, rid)
-    }
-
-    fn insert_non_full(&self, node: &mut BPlusTreeNode, key: Tuple, rid: RID) -> bool {
-        match node.node_type {
-            NodeType::Leaf => {
-                let pos = node
-                    .keys
-                    .iter()
-                    .position(|k| self.compare_keys(k, &key).is_ge())
-                    .unwrap_or(node.keys.len());
-
-                node.keys.insert(pos, key);
-                node.values.insert(pos, rid);
-                true
-            }
-            NodeType::Internal => {
-                // First, find the position where we should insert
-                let pos = node
-                    .keys
-                    .iter()
-                    .position(|k| self.compare_keys(k, &key).is_gt())
-                    .unwrap_or(node.keys.len());
-
-                // Check if we need to split child before getting the write lock
-                let should_split = {
-                    let child_guard = node.children[pos].read();
-                    let needs_split = child_guard.keys.len() == self.order - 1;
-                    drop(child_guard); // Explicitly drop the read guard
-                    needs_split
-                };
-
-                // Split if necessary
-                if should_split {
-                    self.split_child(node, pos);
-                    // Recalculate position after split
-                    let new_pos = if !node.keys.is_empty()
-                        && self.compare_keys(&node.keys[pos], &key).is_lt()
-                    {
-                        pos + 1
-                    } else {
-                        pos
-                    };
-                    let mut child_guard = node.children[new_pos].write();
-                    self.insert_non_full(&mut child_guard, key, rid)
-                } else {
-                    // No split needed, proceed with insertion
-                    let mut child_guard = node.children[pos].write();
-                    self.insert_non_full(&mut child_guard, key, rid)
-                }
-            }
-        }
-    }
-
-    fn split_child(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        debug!("Splitting child at index {}", child_idx);
-
-        let new_node = {
-            let child = &parent.children[child_idx];
-            let mut child_guard = child.write();
-            let middle = self.order / 2;
-
-            let mut new_node = BPlusTreeNode::new(child_guard.node_type.clone());
-
-            // Split keys and values
-            new_node.keys = child_guard.keys.split_off(middle);
-            if let NodeType::Leaf = child_guard.node_type {
-                new_node.values = child_guard.values.split_off(middle);
-                // Maintain leaf node chain
-                new_node.next_leaf = child_guard.next_leaf.take();
-                let new_node_arc = Arc::new(RwLock::new(new_node.clone()));
-                child_guard.next_leaf = Some(Arc::clone(&new_node_arc));
-                debug!("Updated leaf node links during split");
-            } else {
-                new_node.children = child_guard.children.split_off(middle + 1);
-                let mid_key = child_guard.keys.pop().unwrap();
-                parent.keys.insert(child_idx, mid_key);
-            }
-
-            new_node
-        };
-
-        // Insert new node into parent
-        parent
-            .children
-            .insert(child_idx + 1, Arc::new(RwLock::new(new_node)));
-        debug!("Completed node split");
     }
 
     pub fn delete(&self, key: &Tuple, rid: RID) -> bool {
@@ -235,99 +127,6 @@ impl BPlusTree {
         success
     }
 
-    fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
-        let min_keys = (self.order - 1) / 2;
-
-        for (node_arc, child_idx) in path.iter().rev() {
-            let node = node_arc.read();
-            let child = node.children[*child_idx].read();
-
-            if child.keys.len() < min_keys {
-                drop(child);
-                drop(node);
-
-                let mut parent = node_arc.write();
-                self.rebalance_node(&mut parent, *child_idx);
-            } else {
-                // No rebalancing needed at this level
-                break;
-            }
-        }
-    }
-
-    fn rebalance_node(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        let min_keys = (self.order - 1) / 2;
-
-        // Try borrowing from left sibling
-        if child_idx > 0 {
-            let mut left_sibling = parent.children[child_idx - 1].write();
-            if left_sibling.keys.len() > min_keys {
-                let mut child = parent.children[child_idx].write();
-                child.keys.insert(0, parent.keys[child_idx - 1].clone());
-                parent.keys[child_idx - 1] = left_sibling.keys.pop().unwrap();
-
-                if let NodeType::Internal = child.node_type {
-                    child
-                        .children
-                        .insert(0, left_sibling.children.pop().unwrap());
-                } else {
-                    child.values.insert(0, left_sibling.values.pop().unwrap());
-                }
-                return;
-            }
-        }
-
-        // Try borrowing from right sibling
-        if child_idx < parent.children.len() - 1 {
-            let mut right_sibling = parent.children[child_idx + 1].write();
-            if right_sibling.keys.len() > min_keys {
-                let mut child = parent.children[child_idx].write();
-                child.keys.push(parent.keys[child_idx].clone());
-                parent.keys[child_idx] = right_sibling.keys.remove(0);
-
-                if let NodeType::Internal = child.node_type {
-                    child.children.push(right_sibling.children.remove(0));
-                } else {
-                    child.values.push(right_sibling.values.remove(0));
-                }
-                return;
-            }
-        }
-
-        // If we can't borrow, we need to merge
-        self.merge_nodes(parent, child_idx);
-    }
-
-    fn merge_nodes(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        let merge_idx = if child_idx > 0 {
-            child_idx - 1
-        } else {
-            child_idx
-        };
-        let (left_idx, right_idx) = (merge_idx, merge_idx + 1);
-
-        {
-            let mut left = parent.children[left_idx].write();
-            let mut right = parent.children[right_idx].write();
-
-            // Move parent key down
-            left.keys.push(parent.keys[merge_idx].clone());
-
-            // Move all keys and children from right to left
-            left.keys.extend(right.keys.drain(..));
-            if let NodeType::Internal = left.node_type {
-                left.children.extend(right.children.drain(..));
-            } else {
-                left.values.extend(right.values.drain(..));
-            }
-        }
-
-        // Remove the merged node from parent
-        parent.keys.remove(merge_idx);
-        parent.children.remove(right_idx);
-    }
-
-    // Range scan support
     pub fn scan_range(&self, start_key: &Tuple, end_key: &Tuple, result: &mut Vec<(Tuple, RID)>) {
         debug!(
             "Starting range scan from key {:?} to {:?}",
@@ -560,6 +359,205 @@ impl BPlusTree {
         }
 
         result
+    }
+
+    fn insert_non_full(&self, node: &mut BPlusTreeNode, key: Tuple, rid: RID) -> bool {
+        match node.node_type {
+            NodeType::Leaf => {
+                let pos = node
+                    .keys
+                    .iter()
+                    .position(|k| self.compare_keys(k, &key).is_ge())
+                    .unwrap_or(node.keys.len());
+
+                node.keys.insert(pos, key);
+                node.values.insert(pos, rid);
+                true
+            }
+            NodeType::Internal => {
+                // First, find the position where we should insert
+                let pos = node
+                    .keys
+                    .iter()
+                    .position(|k| self.compare_keys(k, &key).is_gt())
+                    .unwrap_or(node.keys.len());
+
+                // Check if we need to split child before getting the write lock
+                let should_split = {
+                    let child_guard = node.children[pos].read();
+                    let needs_split = child_guard.keys.len() == self.order - 1;
+                    drop(child_guard); // Explicitly drop the read guard
+                    needs_split
+                };
+
+                // Split if necessary
+                if should_split {
+                    self.split_child(node, pos);
+                    // Recalculate position after split
+                    let new_pos = if !node.keys.is_empty()
+                        && self.compare_keys(&node.keys[pos], &key).is_lt()
+                    {
+                        pos + 1
+                    } else {
+                        pos
+                    };
+                    let mut child_guard = node.children[new_pos].write();
+                    self.insert_non_full(&mut child_guard, key, rid)
+                } else {
+                    // No split needed, proceed with insertion
+                    let mut child_guard = node.children[pos].write();
+                    self.insert_non_full(&mut child_guard, key, rid)
+                }
+            }
+        }
+    }
+
+    fn split_child(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+        debug!("Splitting child at index {}", child_idx);
+
+        let new_node = {
+            let child = &parent.children[child_idx];
+            let mut child_guard = child.write();
+            let middle = self.order / 2;
+
+            let mut new_node = BPlusTreeNode::new(child_guard.node_type.clone());
+
+            // Split keys and values
+            new_node.keys = child_guard.keys.split_off(middle);
+            if let NodeType::Leaf = child_guard.node_type {
+                new_node.values = child_guard.values.split_off(middle);
+                // Maintain leaf node chain
+                new_node.next_leaf = child_guard.next_leaf.take();
+                let new_node_arc = Arc::new(RwLock::new(new_node.clone()));
+                child_guard.next_leaf = Some(Arc::clone(&new_node_arc));
+                debug!("Updated leaf node links during split");
+            } else {
+                new_node.children = child_guard.children.split_off(middle + 1);
+                let mid_key = child_guard.keys.pop().unwrap();
+                parent.keys.insert(child_idx, mid_key);
+            }
+
+            new_node
+        };
+
+        // Insert new node into parent
+        parent
+            .children
+            .insert(child_idx + 1, Arc::new(RwLock::new(new_node)));
+        debug!("Completed node split");
+    }
+
+    fn compare_keys(&self, key1: &Tuple, key2: &Tuple) -> std::cmp::Ordering {
+        // Compare tuples based on the indexed columns defined in metadata
+        let metadata = self.metadata.as_ref().expect("Metadata not initialized");
+        let key_attrs = metadata.get_key_attrs();
+        for &attr in key_attrs {
+            let val1 = key1.get_value(attr);
+            let val2 = key2.get_value(attr);
+
+            // Use explicit comparisons to handle all comparison cases
+            match (
+                val1.compare_less_than(val2),
+                val1.compare_greater_than(val2),
+            ) {
+                (CmpBool::CmpTrue, _) => return std::cmp::Ordering::Less,
+                (_, CmpBool::CmpTrue) => return std::cmp::Ordering::Greater,
+                _ => continue, // If values are equal, continue to next attribute
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
+        let min_keys = (self.order - 1) / 2;
+
+        for (node_arc, child_idx) in path.iter().rev() {
+            let node = node_arc.read();
+            let child = node.children[*child_idx].read();
+
+            if child.keys.len() < min_keys {
+                drop(child);
+                drop(node);
+
+                let mut parent = node_arc.write();
+                self.rebalance_node(&mut parent, *child_idx);
+            } else {
+                // No rebalancing needed at this level
+                break;
+            }
+        }
+    }
+
+    fn rebalance_node(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+        let min_keys = (self.order - 1) / 2;
+
+        // Try borrowing from left sibling
+        if child_idx > 0 {
+            let mut left_sibling = parent.children[child_idx - 1].write();
+            if left_sibling.keys.len() > min_keys {
+                let mut child = parent.children[child_idx].write();
+                child.keys.insert(0, parent.keys[child_idx - 1].clone());
+                parent.keys[child_idx - 1] = left_sibling.keys.pop().unwrap();
+
+                if let NodeType::Internal = child.node_type {
+                    child
+                        .children
+                        .insert(0, left_sibling.children.pop().unwrap());
+                } else {
+                    child.values.insert(0, left_sibling.values.pop().unwrap());
+                }
+                return;
+            }
+        }
+
+        // Try borrowing from right sibling
+        if child_idx < parent.children.len() - 1 {
+            let mut right_sibling = parent.children[child_idx + 1].write();
+            if right_sibling.keys.len() > min_keys {
+                let mut child = parent.children[child_idx].write();
+                child.keys.push(parent.keys[child_idx].clone());
+                parent.keys[child_idx] = right_sibling.keys.remove(0);
+
+                if let NodeType::Internal = child.node_type {
+                    child.children.push(right_sibling.children.remove(0));
+                } else {
+                    child.values.push(right_sibling.values.remove(0));
+                }
+                return;
+            }
+        }
+
+        // If we can't borrow, we need to merge
+        self.merge_nodes(parent, child_idx);
+    }
+
+    fn merge_nodes(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+        let merge_idx = if child_idx > 0 {
+            child_idx - 1
+        } else {
+            child_idx
+        };
+        let (left_idx, right_idx) = (merge_idx, merge_idx + 1);
+
+        {
+            let mut left = parent.children[left_idx].write();
+            let mut right = parent.children[right_idx].write();
+
+            // Move parent key down
+            left.keys.push(parent.keys[merge_idx].clone());
+
+            // Move all keys and children from right to left
+            left.keys.extend(right.keys.drain(..));
+            if let NodeType::Internal = left.node_type {
+                left.children.extend(right.children.drain(..));
+            } else {
+                left.values.extend(right.values.drain(..));
+            }
+        }
+
+        // Remove the merged node from parent
+        parent.keys.remove(merge_idx);
+        parent.children.remove(right_idx);
     }
 }
 

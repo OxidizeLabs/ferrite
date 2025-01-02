@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
     left: Box<PlanNode>,
     right: Box<PlanNode>,
     predicate: Arc<Expression>,
@@ -15,7 +15,7 @@ pub struct NestedLoopJoinNode {
 
 impl NestedLoopJoinNode {
     pub fn new(
-        output_schema: Arc<Schema>,
+        output_schema: Schema,
         left: Box<PlanNode>,
         right: Box<PlanNode>,
         predicate: Arc<Expression>,
@@ -36,7 +36,7 @@ impl NestedLoopJoinNode {
     pub fn get_right(&self) -> &Box<PlanNode> {
         &self.right
     }
-    pub fn get_output_schema(&self) -> &Arc<Schema> {
+    pub fn get_output_schema(&self) -> &Schema {
         &self.output_schema
     }
 }

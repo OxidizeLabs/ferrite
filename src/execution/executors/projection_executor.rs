@@ -254,10 +254,10 @@ mod tests {
         ];
 
         // Create output schema (projecting only id and name)
-        let output_schema = Arc::new(Schema::new(vec![
+        let output_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-        ]));
+        ]);
 
         // Create column reference expressions
         let expressions = vec![

@@ -5,4 +5,3 @@ pub mod executor_context;
 pub mod executors;
 pub mod expressions;
 pub mod plans;
-pub mod result_writer;
