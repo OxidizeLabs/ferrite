@@ -15,19 +15,7 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-
-/// Trait for writing query results in a tabular format
-pub trait ResultWriter {
-    fn begin_table(&mut self, bordered: bool);
-    fn end_table(&mut self);
-    fn begin_header(&mut self);
-    fn end_header(&mut self);
-    fn begin_row(&mut self);
-    fn end_row(&mut self);
-    fn write_cell(&mut self, content: &str);
-    fn write_header_cell(&mut self, content: &str);
-    fn one_cell(&mut self, content: &str);
-}
+use crate::common::result_writer::ResultWriter;
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]

@@ -56,6 +56,10 @@ impl Schema {
         &self.columns
     }
 
+    pub fn get_columns_mut(&mut self) -> &mut Vec<Column> {
+        &mut self.columns
+    }
+
     pub fn get_column(&self, column_index: usize) -> Option<&Column> {
         self.columns.get(column_index)
     }

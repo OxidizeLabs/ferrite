@@ -3,7 +3,7 @@ use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::execution::plans::create_plan::CreateTablePlanNode;
+use crate::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, info, warn};
 use parking_lot::RwLock;

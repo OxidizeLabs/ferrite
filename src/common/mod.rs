@@ -7,3 +7,4 @@ pub mod macros;
 pub mod rid;
 pub(crate) mod statement_type;
 pub mod util;
+pub mod result_writer;

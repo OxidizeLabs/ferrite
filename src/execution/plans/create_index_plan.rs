@@ -2,19 +2,25 @@ use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CreateTablePlanNode {
+pub struct CreateIndexPlanNode {
     output_schema: Schema,
     table_name: String,
+    index_name: String,
     if_not_exists: bool,
 }
 
-impl CreateTablePlanNode {
-    pub fn new(output_schema: Schema, table_name: String, if_not_exists: bool) -> Self {
+impl CreateIndexPlanNode {
+    pub fn new(output_schema: Schema, table_name: String, index_name: String, if_not_exists: bool) -> Self {
         Self {
             output_schema,
             table_name,
+            index_name,
             if_not_exists,
         }
+    }
+
+    pub fn get_index_name(&self) -> &str {
+        &self.index_name
     }
 
     pub fn get_table_name(&self) -> &str {
@@ -26,7 +32,7 @@ impl CreateTablePlanNode {
     }
 }
 
-impl AbstractPlanNode for CreateTablePlanNode {
+impl AbstractPlanNode for CreateIndexPlanNode {
     fn get_output_schema(&self) -> &Schema {
         &self.output_schema
     }
@@ -41,7 +47,7 @@ impl AbstractPlanNode for CreateTablePlanNode {
     }
 
     fn to_string(&self, with_schema: bool) -> String {
-        let mut result = format!("CreateTable {{ table: {} }}", self.table_name);
+        let mut result = format!("CreateIndex {{ index: {} }}", self.index_name);
         if with_schema {
             result.push_str(&format!("\nSchema: {}", self.output_schema));
         }

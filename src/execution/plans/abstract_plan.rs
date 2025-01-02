@@ -1,6 +1,6 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
-use crate::execution::plans::create_plan::CreateTablePlanNode;
+use crate::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
 use crate::execution::plans::hash_join_plan::HashJoinNode;
@@ -236,7 +236,6 @@ impl Display for PlanNode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
@@ -311,7 +310,7 @@ mod tests {
 
         fn setup_sample_tables(&mut self) -> Result<(), String> {
             // Create users table
-            self.planner.create_plan(
+            self.planner.create_logical_plan(
                 "CREATE TABLE users (
                     id INTEGER,
                     name VARCHAR(255),
@@ -321,7 +320,7 @@ mod tests {
             )?;
 
             // Create orders table
-            self.planner.create_plan(
+            self.planner.create_logical_plan(
                 "CREATE TABLE orders (
                     id INTEGER,
                     user_id INTEGER,
@@ -331,7 +330,7 @@ mod tests {
             )?;
 
             // Create products table
-            self.planner.create_plan(
+            self.planner.create_logical_plan(
                 "CREATE TABLE products (
                     id INTEGER,
                     name VARCHAR(255),
@@ -513,7 +512,7 @@ mod tests {
         let mut ctx = TestContext::new("test_table_schema_creation");
 
         // Manually create a table and verify its schema
-        let create_result = ctx.planner.create_plan(
+        let create_result = ctx.planner.create_logical_plan(
             "CREATE TABLE test_table (
                 id INTEGER,
                 name VARCHAR(255),
@@ -611,7 +610,7 @@ mod tests {
         let mut ctx = TestContext::new("debug_schema_creation");
 
         // Manually create a table and print out details
-        let create_result = ctx.planner.create_plan(
+        let create_result = ctx.planner.create_logical_plan(
             "CREATE TABLE test_debug (
                 id INTEGER,
                 name VARCHAR(255),

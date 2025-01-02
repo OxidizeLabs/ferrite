@@ -245,7 +245,7 @@ mod tests {
     fn test_nlj_check_executor_management() {
         let ctx = TestContext::new("nlj_executors");
 
-        let mut executor_context = Arc::new(RwLock::new(ExecutorContext::new(
+        let executor_context = Arc::new(RwLock::new(ExecutorContext::new(
             Arc::clone(&ctx.transaction),
             Arc::clone(&ctx.transaction_manager),
             Arc::clone(&ctx.catalog),
@@ -329,7 +329,7 @@ mod tests {
     fn test_check_options_initialization() {
         let ctx = TestContext::new("check_options_init");
 
-        let mut executor_context = Arc::new(RwLock::new(ExecutorContext::new(
+        let executor_context = Arc::new(RwLock::new(ExecutorContext::new(
             Arc::clone(&ctx.transaction),
             Arc::clone(&ctx.transaction_manager),
             Arc::clone(&ctx.catalog),

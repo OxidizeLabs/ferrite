@@ -1,6 +1,6 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalogue::schema::Schema;
-use crate::common::config::{IndexOidT, TableOidT, TxnId};
+use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::storage::index::b_plus_tree_i::BPlusTree;
 use crate::storage::index::index::{Index, IndexInfo, IndexType};
@@ -132,7 +132,7 @@ impl Catalog {
     /// Creates a new index, populates existing data of the table, and returns its metadata.
     pub fn create_index(
         &mut self,
-        txn_id: TxnId,
+        // txn_id: TxnId,
         index_name: &str,
         table_name: &str,
         key_schema: Schema,
@@ -188,11 +188,11 @@ impl Catalog {
             let mut iter = table_heap.make_iterator();
 
             // Get reference to the index we just created
-            if let Some(index_info) = self.indexes.get(&index_oid) {
+            if let Some(_) = self.indexes.get(&index_oid) {
                 // Populate index with existing table data
                 while let Some((_, tuple)) = iter.next() {
                     let key_tuple = tuple.key_from_tuple(key_schema.clone(), key_attrs.clone());
-                    let transaction = Transaction::new(txn_id, IsolationLevel::ReadUncommitted);
+                    let transaction = Transaction::new(0, IsolationLevel::ReadUncommitted);
                     index.insert_entry(&key_tuple, tuple.get_rid(), &transaction);
                 }
             }
