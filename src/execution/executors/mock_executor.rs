@@ -6,25 +6,25 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
+use crate::execution::plans::table_scan_plan::TableScanNode;
 
 pub struct MockExecutor {
-    tuples: Vec<(Vec<Value>, RID)>,
-    current_index: usize,
-    schema: Schema,
     context: Arc<RwLock<ExecutorContext>>,
+    plan: Arc<MockScanNode>,
+    current_index: usize,
+    tuples: Vec<(Vec<Value>, RID)>,
+    schema: Schema,
 }
 
 impl MockExecutor {
-    pub fn new(
-        tuples: Vec<(Vec<Value>, RID)>,
-        schema: Schema,
-        context: Arc<RwLock<ExecutorContext>>,
-    ) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<MockScanNode>,     current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
         Self {
-            tuples,
-            current_index: 0,
-            schema,
             context,
+            plan,
+            current_index,
+            tuples,
+            schema,
         }
     }
 }
