@@ -3,13 +3,11 @@ use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
-use crate::execution::expressions::abstract_expression::ExpressionOps;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Val;
 use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -74,33 +72,6 @@ impl SeqScanExecutor {
             initialized: false,
         }
     }
-
-    fn apply_predicate(&self, tuple: &Tuple) -> bool {
-        if let Some(predicate) = self.plan.get_filter_predicate() {
-            debug!("Evaluating predicate on tuple: {:?}", tuple.get_values());
-            match predicate.evaluate(tuple, self.plan.get_output_schema()) {
-                Ok(value) => match value.get_value() {
-                    Val::Boolean(b) => {
-                        debug!("Predicate evaluation result: {}", b);
-                        *b
-                    }
-                    _ => {
-                        error!(
-                            "Predicate evaluation did not return boolean value, got: {:?}",
-                            value
-                        );
-                        false
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to evaluate predicate: {}", e);
-                    false
-                }
-            }
-        } else {
-            true // No predicate to apply
-        }
-    }
 }
 
 impl AbstractExecutor for SeqScanExecutor {
@@ -129,15 +100,6 @@ impl AbstractExecutor for SeqScanExecutor {
             stop_rid,
         ));
         self.initialized = true;
-
-        debug!(
-            "SeqScanExecutor initialized with {} predicate",
-            if self.plan.get_filter_predicate().is_some() {
-                "a"
-            } else {
-                "no"
-            }
-        );
     }
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
@@ -146,29 +108,24 @@ impl AbstractExecutor for SeqScanExecutor {
             self.init();
         }
 
-        // Cache predicate presence to avoid borrow conflicts
-        let has_predicate = self.plan.get_filter_predicate().is_some();
-        debug!("Starting scan iteration (has predicate: {})", has_predicate);
+        // Get iterator reference
+        let iter = self.iterator.as_mut()?;
 
         // Keep trying until we find a valid tuple or reach the end
-        while let Some(iter) = &mut self.iterator {
+        loop {
             match iter.next() {
                 Some((meta, tuple)) => {
-                    debug!("Found tuple with RID {:?}", tuple.get_rid());
+                    let rid = tuple.get_rid();
+                    debug!("Found tuple with RID {:?}", rid);
 
                     // Skip deleted tuples
                     if meta.is_deleted() {
-                        debug!("Skipping deleted tuple with RID {:?}", tuple.get_rid());
+                        debug!("Skipping deleted tuple with RID {:?}", rid);
                         continue;
                     }
 
-                    // Apply predicate if it exists
-                    if !has_predicate || self.apply_predicate(&tuple) {
-                        debug!("Returning matching tuple with RID {:?}", tuple.get_rid());
-                        return Some((tuple.clone(), tuple.get_rid()));
-                    } else {
-                        debug!("Tuple did not satisfy predicate, continuing scan");
-                    }
+                    // Return valid tuple
+                    return Some((tuple, rid));
                 }
                 None => {
                     info!("Reached end of table scan");
@@ -176,9 +133,6 @@ impl AbstractExecutor for SeqScanExecutor {
                 }
             }
         }
-
-        error!("No iterator available for table scan");
-        None
     }
 
     fn get_output_schema(&self) -> Schema {
@@ -193,7 +147,8 @@ impl AbstractExecutor for SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::types_db::value::Val;
+use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
@@ -348,7 +303,6 @@ mod tests {
             schema.clone(),
             table_info.get_table_oidt(),
             table_name.to_string(),
-            None,
         ));
 
         let context = Arc::new(RwLock::new(ExecutorContext::new(
@@ -421,7 +375,6 @@ mod tests {
             schema.clone(),
             table_info.get_table_oidt(),
             table_name.to_string(),
-            None,
         ));
 
         let context = Arc::new(RwLock::new(ExecutorContext::new(
