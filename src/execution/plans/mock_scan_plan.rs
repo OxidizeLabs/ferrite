@@ -1,7 +1,7 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct MockScanNode {
     output_schema: Schema,
     table: String,
@@ -15,6 +15,10 @@ impl MockScanNode {
             table,
             children,
         }
+    }
+
+    pub fn get_table_name(&self) -> String {
+        self.table.clone()
     }
 }
 
