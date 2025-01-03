@@ -1,8 +1,5 @@
 use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::LockMode;
-use crate::concurrency::transaction::TransactionState;
-use crate::concurrency::transaction_manager::get_tuple_and_undo_link;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
@@ -63,79 +60,46 @@ impl FilterExecutor {
             }
         }
     }
-
-    fn acquire_table_lock(&self) -> Result<(), String> {
-        let txn = self.context.read().get_transaction();
-        let context_guard = self.context.read();
-        let lock_manager = context_guard.get_lock_manager();
-
-        // Since txn is now Arc<Transaction>, we don't need &mut
-        if let Err(e) = lock_manager.lock_table(txn, LockMode::Exclusive, self.plan.get_table_oid())
-        {
-            return Err(format!("Failed to acquire table lock: {:?}", e));
-        }
-        Ok(())
-    }
 }
 
 impl AbstractExecutor for FilterExecutor {
     fn init(&mut self) {
-        debug!("Initializing SeqScanExecutor");
-
-        // Acquire table lock
-        if let Err(e) = self.acquire_table_lock() {
-            error!("Failed to acquire table lock: {}", e);
+        if self.initialized {
+            debug!("FilterExecutor already initialized");
             return;
         }
 
+        debug!("Initializing FilterExecutor");
+        self.child_executor.init();
         self.initialized = true;
-
-        debug!("SeqScanExecutor initialized successfully");
+        debug!("FilterExecutor initialized successfully");
     }
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
         if !self.initialized {
+            debug!("FilterExecutor not initialized, initializing now");
             self.init();
         }
 
-        // Keep trying until we find a valid tuple or reach the end
-        while let Some((tuple, rid)) = self.child_executor.next() {
-            // Acquire context lock first
-            let context_guard = self.context.read();
-            let txn = context_guard.get_transaction();
-            let txn_mgr = context_guard.get_transaction_manager();
-            let txn_mgr_guard = txn_mgr.read();
+        loop {
+            match self.child_executor.next() {
+                Some((tuple, rid)) => {
+                    debug!("Processing tuple with RID {:?}", rid);
 
-            // Get table heap from catalog
-            let table_heap = {
-                let catalog = context_guard.get_catalog();
-                let catalog_guard = catalog.read();
-                let table_info = catalog_guard
-                    .get_table(self.plan.get_table_name())
-                    .expect("Table not found");
-                table_info.get_table_heap()
-            };
-
-            // Check if tuple is visible to current transaction
-            let (meta, _, _) = get_tuple_and_undo_link(
-                &txn_mgr_guard,
-                &table_heap,
-                rid,
-            );
-
-            // Check transaction visibility
-            let is_visible = meta.get_timestamp() == txn.get_transaction_id() ||
-                (!meta.is_deleted() && txn_mgr_guard.get_transaction(&meta.get_timestamp())
-                    .map_or(false, |t| t.get_state() == TransactionState::Committed));
-
-            if is_visible && self.apply_predicate(&tuple) {
-                debug!("Found matching tuple with RID: {:?}", rid);
-                return Some((tuple, rid));
+                    if self.apply_predicate(&tuple) {
+                        debug!("Found matching tuple with RID {:?}", rid);
+                        return Some((tuple, rid));
+                    } else {
+                        debug!("Tuple did not match predicate, continuing...");
+                        continue;
+                    }
+                }
+                None => {
+                    debug!("No more tuples from child executor");
+                    return None;
+                }
             }
         }
-
-        debug!("No more tuples match the filter criteria");
-        None
     }
 
     fn get_output_schema(&self) -> Schema {
@@ -391,25 +355,31 @@ mod tests {
         let schema = create_test_schema();
 
         // Create catalog and table
-        let mut catalog = create_catalog(&test_context);
-        let table_info = catalog.create_table("test_table", schema.clone()).unwrap();
+        let mut catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let mut binding = catalog.write();
+        let table_info = binding.create_table("test_table", schema.clone()).unwrap();
 
         // Set up test data
         let table_heap = table_info.get_table_heap();
         setup_test_table(&table_heap, &schema);
 
-        let catalog = Arc::new(RwLock::new(catalog));
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan first
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info.clone(),
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
 
         // Create filter for age = 28 (should match David)
         let filter_plan = create_age_filter(28, ComparisonType::Equal, &schema);
-
-        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
-
-        // Create an empty executor as the child executor
-        let child_executor = Box::new(EmptyExecutor::new(
-            Arc::clone(&executor_context),
-            schema.clone(),
-        ));
 
         let mut executor = FilterExecutor::new(
             child_executor,
@@ -435,17 +405,20 @@ mod tests {
         assert_eq!(results[0].1, 28);
     }
 
+
     #[test]
     fn test_filter_greater_than() {
         let test_context = TestContext::new("filter_gt_test");
         let schema = create_test_schema();
 
-        // Create catalog and table
-        let mut catalog = create_catalog(&test_context);
-        let table_info = catalog.create_table("test_table", schema.clone()).unwrap();
+        // Create catalog and table with Arc<RwLock> wrapping
+        let mut catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let mut binding = catalog.write();
+        let table_info = binding.create_table("test_table", schema.clone()).unwrap();
 
         // Set up test data
         let table_heap = table_info.get_table_heap();
+        debug!("Inserting test data:");
         let test_data = vec![
             (1, "Alice", 25),
             (2, "Bob", 30),
@@ -454,7 +427,6 @@ mod tests {
             (5, "Eve", 32),
         ];
 
-        println!("Inserting test data:");
         for (id, name, age) in &test_data {
             let values = vec![
                 Value::new(*id),
@@ -464,22 +436,29 @@ mod tests {
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0, false);
             table_heap.insert_tuple(&meta, &mut tuple).unwrap();
-            println!("Inserted: id={}, name={}, age={}", id, name, age);
+            debug!("Inserted: id={}, name={}, age={}", id, name, age);
         }
 
-        let catalog = Arc::new(RwLock::new(catalog));
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info.clone(),
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor as the child
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
 
         // Create filter for age > 30
         let filter_plan = create_age_filter(30, ComparisonType::GreaterThan, &schema);
 
-        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
-
-        // Create an empty executor as the child executor
-        let child_executor = Box::new(EmptyExecutor::new(
-            Arc::clone(&executor_context),
-            schema.clone(),
-        ));
-
+        // Create and initialize filter executor
         let mut executor = FilterExecutor::new(
             child_executor,
             executor_context,
@@ -487,21 +466,20 @@ mod tests {
         );
         executor.init();
 
-        // Collect filtered results with logging
+        // Collect filtered results
         let mut results = Vec::new();
         while let Some((tuple, _)) = executor.next() {
-            let tuple_values = tuple.get_values();
-            let age = match tuple_values[2].get_value() {
+            let age = match tuple.get_value(2).get_value() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer value for age"),
             };
-            println!("Found matching tuple with age: {}", age);
+            debug!("Found matching tuple with age: {}", age);
             results.push(age);
         }
 
-        // Log all results before assertions
-        println!("All matching ages: {:?}", results);
+        debug!("All matching ages: {:?}", results);
 
+        // Verify the results
         assert!(
             results.iter().all(|&age| age > 30),
             "All ages should be > 30"
