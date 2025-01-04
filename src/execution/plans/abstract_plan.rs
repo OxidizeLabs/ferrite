@@ -21,6 +21,7 @@ use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -44,6 +45,7 @@ pub enum PlanType {
     // InitCheck,
     Window,
     CreateTable,
+    CreateIndex,
     TableScan,
 }
 
@@ -69,6 +71,7 @@ pub enum PlanNode {
     MockScan(MockScanNode),
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
+    CreateIndex(CreateIndexPlanNode),
     Empty,
 }
 
@@ -147,7 +150,9 @@ impl PlanNode {
             PlanNode::MockScan(node) => node,
             PlanNode::Window(node) => node,
             PlanNode::CreateTable(node) => node,
+            PlanNode::CreateIndex(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
+
         }
     }
 
@@ -161,24 +166,24 @@ impl PlanNode {
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
             }
-            // PlanNode::IndexScan(node) => {
-            //     result.push_str(&format!("{}→ IndexScan\n", indent));
-            //     result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
-            //     result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
-            // }
+            PlanNode::IndexScan(node) => {
+                result.push_str(&format!("{}→ IndexScan\n", indent));
+                result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
+                result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
+            }
             PlanNode::Filter(node) => {
                 result.push_str(&format!("{}→ Filter\n", indent));
                 result.push_str(&format!("{}   Predicate: {}\n", indent, node.get_filter_predicate()));
                 result.push_str(&node.get_child_plan().explain_internal(depth + 1));
             }
-            // PlanNode::HashJoin(node) => {
-            //     result.push_str(&format!("{}→ HashJoin\n", indent));
-            //     result.push_str(&format!("{}   Condition: {}\n", indent, node.get_join_predicate()));
-            //     result.push_str(&format!("{}   Left Child:\n", indent));
-            //     result.push_str(&node.get_left_child().explain_internal(depth + 1));
-            //     result.push_str(&format!("{}   Right Child:\n", indent));
-            //     result.push_str(&node.get_right_child().explain_internal(depth + 1));
-            // }
+            PlanNode::HashJoin(node) => {
+                result.push_str(&format!("{}→ HashJoin\n", indent));
+                result.push_str(&format!("{}   Condition: {}\n", indent, node.get_join()));
+                result.push_str(&format!("{}   Left Child:\n", indent));
+                result.push_str(&node.get_left_child().explain_internal(depth + 1));
+                result.push_str(&format!("{}   Right Child:\n", indent));
+                result.push_str(&node.get_right_child().explain_internal(depth + 1));
+            }
             PlanNode::Aggregation(node) => {
                 result.push_str(&format!("{}→ Aggregation\n", indent));
                 result.push_str(&format!("{}   Group By: {:?}\n", indent, node.get_group_bys()));
@@ -201,24 +206,24 @@ impl PlanNode {
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
             }
-            // PlanNode::NestedLoopJoin(node) => {
-            //     result.push_str(&format!("{}→ NestedLoopJoin\n", indent));
-            //     result.push_str(&format!("{}   Condition: {}\n", indent, node.get_join_predicate()));
-            //     result.push_str(&format!("{}   Left Child:\n", indent));
-            //     result.push_str(&node.get_left_child().explain_internal(depth + 1));
-            //     result.push_str(&format!("{}   Right Child:\n", indent));
-            //     result.push_str(&node.get_right_child().explain_internal(depth + 1));
-            // }
-            // PlanNode::Sort(node) => {
-            //     result.push_str(&format!("{}→ Sort\n", indent));
-            //     result.push_str(&format!("{}   Order By: {:?}\n", indent, node.get_sort_keys()));
-            //     result.push_str(&node.get_child().explain_internal(depth + 1));
-            // }
-            // PlanNode::Limit(node) => {
-            //     result.push_str(&format!("{}→ Limit\n", indent));
-            //     result.push_str(&format!("{}   Limit: {}\n", indent, node.get_limit()));
-            //     result.push_str(&node.get_child().explain_internal(depth + 1));
-            // }
+            PlanNode::NestedLoopJoin(node) => {
+                result.push_str(&format!("{}→ NestedLoopJoin\n", indent));
+                result.push_str(&format!("{}   Condition: {}\n", indent, node.get_join()));
+                result.push_str(&format!("{}   Left Child:\n", indent));
+                result.push_str(&node.get_left_child().explain_internal(depth + 1));
+                result.push_str(&format!("{}   Right Child:\n", indent));
+                result.push_str(&node.get_right_child().explain_internal(depth + 1));
+            }
+            PlanNode::Sort(node) => {
+                result.push_str(&format!("{}→ Sort\n", indent));
+                result.push_str(&format!("{}   Order By: {:?}\n", indent, node.get_order_bys()));
+                result.push_str(&node.get_children().iter().map(|_|self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
+            }
+            PlanNode::Limit(node) => {
+                result.push_str(&format!("{}→ Limit\n", indent));
+                result.push_str(&format!("{}   Limit: {}\n", indent, node.get_limit()));
+                result.push_str(&node.get_children().iter().map(|_|self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
+            }
             PlanNode::Empty => {
                 result.push_str(&format!("{}→ Empty\n", indent));
             }
