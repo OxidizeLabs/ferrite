@@ -196,11 +196,29 @@ impl QueryPlanner {
         &mut self,
         create_table: &CreateTable,
     ) -> Result<Box<LogicalPlan>, String> {
-        let columns = self.convert_column_defs(&create_table.columns)?;
-        let schema = Schema::new(columns);
         let table_name = create_table.name.to_string();
 
-        Ok(LogicalPlan::create_table(schema, table_name, create_table.if_not_exists, ))
+        // Check if table already exists
+        {
+            let catalog = self.catalog.read();
+            if catalog.get_table(&table_name).is_some() {
+                // If table exists and IF NOT EXISTS flag is set, return success
+                if create_table.if_not_exists {
+                    // Create a dummy plan that will effectively be a no-op
+                    let columns = self.convert_column_defs(&create_table.columns)?;
+                    let schema = Schema::new(columns);
+                    return Ok(LogicalPlan::create_table(schema, table_name, true));
+                }
+                // Otherwise return error
+                return Err(format!("Table '{}' already exists", table_name));
+            }
+        }
+
+        // If we get here, table doesn't exist, proceed with normal creation
+        let columns = self.convert_column_defs(&create_table.columns)?;
+        let schema = Schema::new(columns);
+
+        Ok(LogicalPlan::create_table(schema, table_name, create_table.if_not_exists))
     }
 
     fn plan_create_index_logical(
@@ -1575,359 +1593,234 @@ fn extract_join_keys(predicate: &Arc<Expression>) -> Result<(Vec<Arc<Expression>
     Ok((vec![], vec![]))
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
-//     use crate::buffer::lru_k_replacer::LRUKReplacer;
-//     use crate::common::logger::initialize_logger;
-//     use crate::storage::disk::disk_manager::FileDiskManager;
-//     use crate::storage::disk::disk_scheduler::DiskScheduler;
-//     use crate::types_db::type_id::TypeId;
-//     use chrono::Utc;
-//     use sqlparser::ast::Ident;
-//     use std::collections::HashMap;
-//
-//     struct TestContext {
-//         catalog: Arc<RwLock<Catalog>>,
-//         planner: QueryPlanner,
-//         _db_file: String,
-//         _log_file: String,
-//         _disk_manager: Arc<FileDiskManager>,
-//     }
-//
-//     impl TestContext {
-//         fn new(test_name: &str) -> Self {
-//             initialize_logger();
-//             const BUFFER_POOL_SIZE: usize = 5;
-//             const K: usize = 2;
-//
-//             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-//             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-//             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-//
-//             let disk_manager =
-//                 Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-//             let disk_scheduler =
-//                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-//             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-//             let bpm = Arc::new(BufferPoolManager::new(
-//                 BUFFER_POOL_SIZE,
-//                 disk_scheduler,
-//                 disk_manager.clone(),
-//                 replacer.clone(),
-//             ));
-//
-//             let catalog = Arc::new(RwLock::new(Catalog::new(
-//                 bpm,
-//                 0,              // next_index_oid
-//                 0,              // next_table_oid
-//                 HashMap::new(), // tables
-//                 HashMap::new(), // indexes
-//                 HashMap::new(), // table_names
-//                 HashMap::new(), // index_names
-//             )));
-//
-//             let planner = QueryPlanner::new(Arc::clone(&catalog));
-//
-//             Self {
-//                 catalog,
-//                 planner,
-//                 _db_file: db_file,
-//                 _log_file: log_file,
-//                 _disk_manager: disk_manager,
-//             }
-//         }
-//     }
-//
-//     impl Drop for TestContext {
-//         fn drop(&mut self) {
-//             let _ = std::fs::remove_file(&self._db_file);
-//             let _ = std::fs::remove_file(&self._log_file);
-//         }
-//     }
-//
-//     #[test]
-//     fn test_create_table_plan() {
-//         let mut ctx = TestContext::new("create_table_test");
-//
-//         // Create a table
-//         let sql = "CREATE TABLE users (id INTEGER, name VARCHAR(255), age INTEGER)";
-//         let plan = ctx.planner.create_logical_plan(sql).unwrap();
-//
-//         match plan {
-//             PlanNode::CreateTable(create_table) => {
-//                 assert_eq!(create_table.get_table_name(), "users");
-//                 assert_eq!(create_table.if_not_exists(), false);
-//
-//                 let schema = create_table.get_output_schema();
-//                 assert_eq!(schema.get_column_count(), 3);
-//
-//                 let columns = schema.get_columns();
-//                 assert_eq!(columns[0].get_name(), "id");
-//                 assert_eq!(columns[0].get_type(), TypeId::Integer);
-//                 assert_eq!(columns[1].get_name(), "name");
-//                 assert_eq!(columns[1].get_type(), TypeId::VarChar);
-//                 assert_eq!(columns[2].get_name(), "age");
-//                 assert_eq!(columns[2].get_type(), TypeId::Integer);
-//
-//                 // Verify table was added to catalog
-//                 let catalog = ctx.catalog.read();
-//                 let table = catalog.get_table("users");
-//                 assert!(table.is_some());
-//                 assert_eq!(table.unwrap().get_table_schema(), schema.clone());
-//             }
-//             _ => panic!("Expected CreateTable plan node"),
-//         }
-//     }
-//
-//     #[test]
-//     fn test_select_queries() {
-//         let mut ctx = TestContext::new("select_queries_test");
-//
-//         // First create a table
-//         let create_sql = "CREATE TABLE users (id INTEGER, name VARCHAR(255), age INTEGER)";
-//         ctx.planner.create_logical_plan(create_sql).unwrap();
-//
-//         // Test simple select
-//         let select_sql = "SELECT * FROM users";
-//         let plan = ctx.planner.create_logical_plan(select_sql).unwrap();
-//
-//         match plan {
-//             PlanNode::SeqScan(scan) => {
-//                 assert_eq!(scan.get_table_name(), "users");
-//                 assert_eq!(scan.get_output_schema().get_column_count(), 3);
-//             }
-//             _ => panic!("Expected SeqScan plan node"),
-//         }
-//
-//         // Test select with filter
-//         let filter_sql = "SELECT * FROM users WHERE age > 25";
-//         let plan = ctx.planner.create_logical_plan(filter_sql).unwrap();
-//
-//         match plan {
-//             PlanNode::Filter(filter) => {
-//                 assert_eq!(filter.get_table_name(), "users");
-//                 match filter.get_child_plan() {
-//                     PlanNode::SeqScan(scan) => {
-//                         assert_eq!(scan.get_table_name(), "users");
-//                         assert_eq!(scan.get_output_schema().get_column_count(), 3);
-//                     }
-//                     _ => panic!("Expected SeqScan as child of Filter"),
-//                 }
-//             }
-//             _ => panic!("Expected Filter plan node"),
-//         }
-//     }
-//
-//     #[test]
-//     fn test_insert_plan() {
-//         let mut ctx = TestContext::new("insert_test");
-//
-//         // Create table first
-//         let create_sql = "CREATE TABLE users (id INTEGER, name VARCHAR(255))";
-//         ctx.planner.create_logical_plan(create_sql).unwrap();
-//
-//         // Test insert
-//         let insert_sql = "INSERT INTO users VALUES (1, 'test')";
-//         let plan = ctx.planner.create_logical_plan(insert_sql).unwrap();
-//
-//         match plan {
-//             PlanNode::Insert(insert) => {
-//                 assert_eq!(insert.get_table_name(), "users");
-//
-//                 // Check child plan (Values node)
-//                 match insert.get_child() {
-//                     // Double dereference to get to the inner PlanNode
-//                     PlanNode::Values(values) => {
-//                         assert_eq!(values.get_output_schema().get_column_count(), 2);
-//                     }
-//                     _ => panic!("Expected Values node as child of Insert"),
-//                 }
-//
-//                 // Verify schema matches table schema
-//                 let catalog = ctx.catalog.read();
-//                 let table_schema = catalog.get_table_schema("users").unwrap();
-//                 assert_eq!(insert.get_output_schema(), &table_schema);
-//             }
-//             _ => panic!("Expected Insert plan node"),
-//         }
-//     }
-//
-//     #[test]
-//     fn test_error_handling() {
-//         let mut ctx = TestContext::new("error_handling_test");
-//
-//         // Test invalid SQL
-//         let invalid_sql = "INVALID SQL";
-//         assert!(ctx.planner.create_logical_plan(invalid_sql).is_err());
-//
-//         // Test selecting from non-existent table
-//         let select_sql = "SELECT * FROM nonexistent_table";
-//         assert!(ctx.planner.create_logical_plan(select_sql).is_err());
-//
-//         // Test creating duplicate table
-//         let create_sql = "CREATE TABLE users (id INTEGER)";
-//         ctx.planner.create_logical_plan(create_sql).unwrap();
-//         assert!(ctx.planner.create_logical_plan(create_sql).is_err());
-//
-//         // Test insert into non-existent table
-//         let insert_sql = "INSERT INTO nonexistent_table VALUES (1)";
-//         assert!(ctx.planner.create_logical_plan(insert_sql).is_err());
-//     }
-//
-//     #[test]
-//     fn test_select_with_where() {
-//         let mut ctx = TestContext::new("select_where_test");
-//
-//         // First create a table
-//         let create_sql = "CREATE TABLE users (id INTEGER, name VARCHAR(255), age INTEGER)";
-//         ctx.planner.create_logical_plan(create_sql).unwrap();
-//
-//         // Test select with different comparison operators
-//         let test_cases = vec![
-//             (
-//                 "SELECT * FROM users WHERE age > 25",
-//                 ComparisonType::GreaterThan,
-//             ),
-//             ("SELECT * FROM users WHERE age = 30", ComparisonType::Equal),
-//             (
-//                 "SELECT * FROM users WHERE age < 40",
-//                 ComparisonType::LessThan,
-//             ),
-//             (
-//                 "SELECT * FROM users WHERE age >= 25",
-//                 ComparisonType::GreaterThanOrEqual,
-//             ),
-//             (
-//                 "SELECT * FROM users WHERE age <= 40",
-//                 ComparisonType::LessThanOrEqual,
-//             ),
-//             (
-//                 "SELECT * FROM users WHERE age != 35",
-//                 ComparisonType::NotEqual,
-//             ),
-//         ];
-//
-//         for (sql, expected_comp_type) in test_cases {
-//             let plan = ctx.planner.create_logical_plan(sql).unwrap();
-//
-//             match plan {
-//                 Box::new(LogicalPlanType::Filter {..}) => {
-//                     assert_eq!(filter.get_table_name(), "users");
-//
-//                     // Verify predicate
-//                     match filter.get_filter_predicate() {
-//                         Expression::Comparison(comp) => {
-//                             assert_eq!(comp.get_comp_type(), expected_comp_type);
-//
-//                             // Verify left side is column reference
-//                             match comp.get_left().as_ref() {
-//                                 Expression::ColumnRef(col_ref) => {
-//                                     assert_eq!(col_ref.get_return_type().to_string(true), "age");
-//                                 }
-//                                 _ => panic!("Expected ColumnRef on left side of comparison"),
-//                             }
-//                         }
-//                         _ => panic!("Expected Comparison expression"),
-//                     }
-//
-//                     // Verify child plan
-//                     match filter.get_child_plan() {
-//                         PlanNode::SeqScan(scan) => {
-//                             assert_eq!(scan.get_table_name(), "users");
-//                             assert_eq!(scan.get_output_schema().get_column_count(), 3);
-//                         }
-//                         _ => panic!("Expected SeqScan as child of Filter"),
-//                     }
-//                 }
-//                 _ => panic!("Expected Filter plan node"),
-//             }
-//         }
-//     }
-//
-//     #[test]
-//     fn test_parse_column_reference() {
-//         let mut ctx = TestContext::new("column_ref_test");
-//
-//         // Create a table with a schema
-//         ctx.planner
-//             .create_logical_plan("CREATE TABLE test_table (id INTEGER, age INTEGER, name VARCHAR(255))")
-//             .unwrap();
-//
-//         // Get the schema from the catalog
-//         let catalog = ctx.catalog.read();
-//         let schema = catalog.get_table("test_table").unwrap().get_table_schema();
-//
-//         // Create an identifier expression
-//         let ident = Expr::Identifier(Ident {
-//             value: "age".to_string(),
-//             quote_style: None,
-//         });
-//
-//         // Parse the expression
-//         let result = ctx.planner.parse_expression(&ident, &schema);
-//         assert!(result.is_ok());
-//
-//         match result.unwrap() {
-//             Expression::ColumnRef(col_ref) => {
-//                 assert_eq!(col_ref.get_column_index(), 1); // age is the second column
-//                 assert_eq!(col_ref.get_return_type().get_type(), TypeId::Integer);
-//             }
-//             _ => panic!("Expected ColumnRef expression"),
-//         }
-//     }
-//
-//     #[test]
-//     fn test_parse_binary_op_with_columns() {
-//         let mut ctx = TestContext::new("binary_op_test");
-//
-//         // Create a table with a schema
-//         ctx.planner
-//             .create_logical_plan("CREATE TABLE test_table (id INTEGER, age INTEGER, name VARCHAR(255))")
-//             .unwrap();
-//
-//         // Get the schema from the catalog
-//         let catalog = ctx.catalog.read();
-//         let schema = catalog.get_table("test_table").unwrap().get_table_schema();
-//
-//         // Create a binary operation: age > 25
-//         let expr = Expr::BinaryOp {
-//             left: Box::new(Expr::Identifier(Ident {
-//                 value: "age".to_string(),
-//                 quote_style: None,
-//             })),
-//             op: BinaryOperator::Gt,
-//             right: Box::new(Expr::Value(sqlparser::ast::Value::Number(
-//                 "25".to_string(),
-//                 false,
-//             ))),
-//         };
-//
-//         // Parse the expression
-//         let result = ctx.planner.parse_expression(&expr, &schema);
-//         assert!(result.is_ok());
-//
-//         match result.unwrap() {
-//             Expression::Comparison(comp) => {
-//                 assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
-//
-//                 match comp.get_left().as_ref() {
-//                     Expression::ColumnRef(col_ref) => {
-//                         assert_eq!(col_ref.get_column_index(), 1);
-//                         assert_eq!(col_ref.get_return_type().get_type(), TypeId::Integer);
-//                     }
-//                     _ => panic!("Expected ColumnRef expression for left side"),
-//                 }
-//
-//                 match comp.get_right().as_ref() {
-//                     Expression::Constant(const_expr) => {
-//                         assert_eq!(const_expr.get_value(), &Value::from(25));
-//                     }
-//                     _ => panic!("Expected Constant expression for right side"),
-//                 }
-//             }
-//             _ => panic!("Expected Comparison expression"),
-//         }
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use sqlparser::ast::Ident;
+    use std::collections::HashMap;
+
+    // Test fixture that encapsulates common test setup
+    struct TestFixture {
+        catalog: Arc<RwLock<Catalog>>,
+        planner: QueryPlanner,
+        _db_file: String,
+        _log_file: String,
+        _disk_manager: Arc<FileDiskManager>,
+    }
+
+    impl TestFixture {
+        fn new(test_name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 5;
+            const K: usize = 2;
+
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+            let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+            let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            ));
+
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                bpm,
+                0,              // next_index_oid
+                0,              // next_table_oid
+                HashMap::new(), // tables
+                HashMap::new(), // indexes
+                HashMap::new(), // table_names
+                HashMap::new(), // index_names
+            )));
+
+            let planner = QueryPlanner::new(Arc::clone(&catalog));
+
+            Self {
+                catalog,
+                planner,
+                _db_file: db_file,
+                _log_file: log_file,
+                _disk_manager: disk_manager,
+            }
+        }
+
+        // Helper to create a table and verify it was created successfully
+        fn create_table(&mut self, table_name: &str, columns: &str, if_not_exists: bool) -> Result<(), String> {
+            let if_not_exists_clause = if if_not_exists { "IF NOT EXISTS " } else { "" };
+            let create_sql = format!("CREATE TABLE {}{} ({})", if_not_exists_clause, table_name, columns);
+            let create_plan = self.planner.create_logical_plan(&create_sql)?;
+
+            // Convert to physical plan and execute
+            let physical_plan = create_plan.to_physical_plan()?;
+            match physical_plan {
+                PlanNode::CreateTable(create_table) => {
+                    let mut catalog = self.catalog.write();
+                    catalog.create_table(
+                        create_table.get_table_name(),
+                        create_table.get_output_schema().clone());
+                    Ok(())
+                }
+                _ => Err("Expected CreateTable plan node".to_string()),
+            }
+        }
+
+        // Helper to verify a table exists in the catalog
+        fn assert_table_exists(&self, table_name: &str) {
+            let catalog = self.catalog.read();
+            assert!(catalog.get_table(table_name).is_some(), "Table '{}' should exist", table_name);
+        }
+
+        // Helper to verify a table's schema
+        fn assert_table_schema(&self, table_name: &str, expected_columns: &[(String, TypeId)]) {
+            let catalog = self.catalog.read();
+            let schema = catalog.get_table_schema(table_name).unwrap();
+
+            assert_eq!(schema.get_column_count() as usize, expected_columns.len());
+
+            for (i, (name, type_id)) in expected_columns.iter().enumerate() {
+                let column = schema.get_column(i).unwrap();
+                assert_eq!(column.get_name(), name);
+                assert_eq!(column.get_type(), *type_id);
+            }
+        }
+    }
+
+    impl Drop for TestFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self._db_file);
+            let _ = std::fs::remove_file(&self._log_file);
+        }
+    }
+
+    mod create_table_tests {
+        use super::*;
+
+        #[test]
+        fn test_create_simple_table() {
+            let mut fixture = TestFixture::new("create_simple_table");
+
+            fixture.create_table("users", "id INTEGER, name VARCHAR(255)", false).unwrap();
+
+            fixture.assert_table_exists("users");
+            fixture.assert_table_schema("users", &[
+                ("id".to_string(), TypeId::Integer),
+                ("name".to_string(), TypeId::VarChar),
+            ]);
+        }
+
+        #[test]
+        fn test_create_table_if_not_exists() {
+            let mut fixture = TestFixture::new("create_table_if_not_exists");
+
+            // First creation should succeed
+            // First creation should succeed
+            fixture.create_table("users", "id INTEGER", false).unwrap();
+
+            // Second creation without IF NOT EXISTS should fail
+            assert!(fixture.create_table("users", "id INTEGER", false).is_err());
+
+            // Creation with IF NOT EXISTS should not fail
+            assert!(fixture.create_table("users", "id INTEGER", true).is_ok());
+        }
+    }
+
+    mod select_tests {
+        use super::*;
+
+        // Helper function to set up a test table
+        fn setup_test_table(fixture: &mut TestFixture) {
+            fixture.create_table(
+                "users",
+                "id INTEGER, name VARCHAR(255), age INTEGER",
+                false
+            ).unwrap();
+        }
+
+        #[test]
+        fn test_simple_select() {
+            let mut fixture = TestFixture::new("simple_select");
+            setup_test_table(&mut fixture);
+
+            let select_sql = "SELECT * FROM users";
+            let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::TableScan { table_name, schema, .. } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 3);
+                }
+                _ => panic!("Expected TableScan plan node"),
+            }
+        }
+
+        #[test]
+        fn test_select_with_filter() {
+            let mut fixture = TestFixture::new("select_with_filter");
+            setup_test_table(&mut fixture);
+
+            let select_sql = "SELECT * FROM users WHERE age > 25";
+            let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Filter { predicate } => {
+                    match predicate.as_ref() {
+                        Expression::Comparison(comp) => {
+                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
+                        }
+                        _ => panic!("Expected Comparison expression"),
+                    }
+                }
+                _ => panic!("Expected Filter plan node"),
+            }
+        }
+    }
+
+    mod insert_tests {
+        use super::*;
+
+        fn setup_test_table(fixture: &mut TestFixture) {
+            fixture.create_table(
+                "users",
+                "id INTEGER, name VARCHAR(255)",
+                false
+            ).unwrap();
+        }
+
+        #[test]
+        fn test_simple_insert() {
+            let mut fixture = TestFixture::new("simple_insert");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users VALUES (1, 'test')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert { table_name, schema, .. } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+    }
+}
