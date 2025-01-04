@@ -132,7 +132,6 @@ impl Catalog {
     /// Creates a new index, populates existing data of the table, and returns its metadata.
     pub fn create_index(
         &mut self,
-        // txn_id: TxnId,
         index_name: &str,
         table_name: &str,
         key_schema: Schema,
@@ -153,22 +152,12 @@ impl Catalog {
             return None;
         }
 
-        // Create index metadata
         let index_oid = self.next_index_oid;
-
-        // Create the appropriate index based on index type
-        let index: Box<dyn Index> = match index_type {
-            IndexType::BPlusTreeIndex => {
-                // Initialize B+Tree with appropriate order (e.g. 4)
-                let order = 4; // This could be made configurable
-                Box::new(BPlusTree::new(order))
-            }
-        };
 
         // Create index info and insert it into catalog
         let index_info = IndexInfo::new(
             key_schema.clone(),
-            index_name.to_string(),
+            index_name.parse().unwrap(),
             index_oid,
             table_name.to_string(),
             key_size,
@@ -177,9 +166,20 @@ impl Catalog {
             key_attrs.clone(),
         );
 
-        // Update catalog maps first so we can access the index through the catalog
+        // Update catalog maps
         self.index_names.insert(index_name.to_string(), index_oid);
-        self.indexes.insert(index_oid, index_info);
+        self.indexes.insert(index_oid, index_info.clone());
+
+        // Create the appropriate index
+        let index: Box<dyn Index> = match index_type {
+            IndexType::BPlusTreeIndex => {
+                let order = 4;
+                Box::new(BPlusTree::new_with_metadata(
+                    order,
+                    Box::new(index_info)
+                ))
+            }
+        };
         self.next_index_oid += 1;
 
         // Now populate the index using the stored version
@@ -230,7 +230,7 @@ impl Catalog {
         // Collect all indexes where table_name matches
         self.indexes
             .values()
-            .filter(|index_info| index_info.get_index_name() == table_name)
+            .filter(|index_info| index_info.get_table_name() == table_name)
             .collect()
     }
 
@@ -529,5 +529,239 @@ mod unit_tests {
         // Test equality
         assert_eq!(info1, info2);
         assert_ne!(info1, info3);
+    }
+
+    #[test]
+    fn test_create_duplicate_table() {
+        let ctx = TestContext::new("test_create_duplicate_table");
+        let bpm = ctx.bpm();
+        let mut catalog = create_catalog(bpm);
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // First creation should succeed
+        let result1 = catalog.create_table("duplicate_table", schema.clone());
+        assert!(result1.is_some());
+
+        // Second creation with same name should fail
+        let result2 = catalog.create_table("duplicate_table", schema.clone());
+        assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_create_index_operations() {
+        let ctx = TestContext::new("test_create_index_operations");
+        let bpm = ctx.bpm();
+        let mut catalog = create_catalog(bpm);
+
+        // Create a table first
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        catalog.create_table("test_table", schema.clone());
+
+        // Test creating an index
+        let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let index_info = catalog.create_index(
+            "test_index",
+            "test_table",
+            key_schema,
+            vec![0],
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(index_info.is_some());
+
+        // Test creating duplicate index (should fail)
+        let key_schema2 = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let duplicate_index = catalog.create_index(
+            "test_index",
+            "test_table",
+            key_schema2,
+            vec![0],
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(duplicate_index.is_none());
+
+        // Test creating index on non-existent table (should fail)
+        let key_schema3 = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let invalid_table_index = catalog.create_index(
+            "another_index",
+            "nonexistent_table",
+            key_schema3,
+            vec![0],
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(invalid_table_index.is_none());
+    }
+
+    #[test]
+    fn test_get_table_indexes() {
+        let ctx = TestContext::new("test_get_table_indexes");
+        let bpm = ctx.bpm();
+        let mut catalog = create_catalog(bpm);
+
+        // Create a table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let table_info = catalog.create_table("indexed_table", schema.clone());
+        assert!(table_info.is_some(), "Failed to create table");
+
+        info!("Table created successfully: {}", table_info.unwrap().get_table_name());
+
+        // Test getting indexes for non-existent table
+        let no_table_indexes = catalog.get_table_indexes("nonexistent_table");
+        assert!(no_table_indexes.is_empty());
+
+        // Create multiple indexes
+        let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let index1 = catalog.create_index(
+            "index1",
+            "indexed_table",
+            key_schema.clone(),
+            vec![0],
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(index1.is_some(), "Failed to create index1");
+        info!("Index1 created with name: {}", index1.unwrap().get_index_name());
+        info!("Index1 created for table: {}", index1.unwrap().get_table_name());
+
+        let key_schema2 = Schema::new(vec![Column::new("name", TypeId::VarChar)]);
+        let index2 = catalog.create_index(
+            "index2",
+            "indexed_table",
+            key_schema2,
+            vec![1],
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(index2.is_some(), "Failed to create index2");
+        info!("Index2 created with name: {}", index2.unwrap().get_index_name());
+        info!("Index2 created for table: {}", index2.unwrap().get_table_name());
+
+        // Debug: Print all indexes in catalog
+        info!("All indexes in catalog:");
+        for (oid, index_info) in &catalog.indexes {
+            info!("Index OID {}: name='{}', table='{}'",
+                  oid,
+                  index_info.get_index_name(),
+                  index_info.get_table_name());
+        }
+
+        // Debug: Print table existence check
+        info!("Checking indexes for table 'indexed_table'");
+        info!("Table exists in table_names: {}", catalog.table_names.contains_key("indexed_table"));
+
+        // Get all indexes for the table
+        let table_indexes = catalog.get_table_indexes("indexed_table");
+        info!("Retrieved {} indexes for table", table_indexes.len());
+
+        // Debug: Print retrieved indexes
+        for index_info in &table_indexes {
+            info!("Retrieved index: name='{}', table='{}'",
+                  index_info.get_index_name(),
+                  index_info.get_table_name());
+        }
+
+        assert_eq!(table_indexes.len(), 2,
+                   "Expected 2 indexes for indexed_table, got {}. Indexes in catalog: {}",
+                   table_indexes.len(),
+                   catalog.indexes.len());
+
+        // Verify the index details
+        let index_names: Vec<&str> = table_indexes.iter()
+            .map(|info| info.get_index_name().as_str())
+            .collect();
+        assert!(index_names.contains(&"index1"),
+                "index1 not found in table indexes. Found indexes: {:?}",
+                index_names);
+        assert!(index_names.contains(&"index2"),
+                "index2 not found in table indexes. Found indexes: {:?}",
+                index_names);
+    }
+
+    #[test]
+    fn test_schema_operations() {
+        let ctx = TestContext::new("test_schema_operations");
+        let bpm = ctx.bpm();
+        let mut catalog = create_catalog(bpm);
+
+        // Create a complex schema
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+            Column::new("email", TypeId::VarChar),
+        ]);
+
+        // Create table with schema
+        catalog.create_table("schema_test", schema.clone());
+
+        // Test retrieving schema
+        let retrieved_schema = catalog.get_table_schema("schema_test");
+        assert!(retrieved_schema.is_some());
+        let retrieved_schema = retrieved_schema.unwrap();
+
+        // Verify schema details
+        assert_eq!(retrieved_schema.get_column_count(), 4);
+        assert_eq!(retrieved_schema.get_column(0).unwrap().get_name(), "id");
+        assert_eq!(retrieved_schema.get_column(1).unwrap().get_name(), "name");
+        assert_eq!(retrieved_schema.get_column(2).unwrap().get_name(), "age");
+        assert_eq!(retrieved_schema.get_column(3).unwrap().get_name(), "email");
+
+        // Test schema for non-existent table
+        let nonexistent_schema = catalog.get_table_schema("nonexistent_table");
+        assert!(nonexistent_schema.is_none());
+    }
+
+    #[test]
+    fn test_index_lookup_operations() {
+        let ctx = TestContext::new("test_index_lookup_operations");
+        let bpm = ctx.bpm();
+        let mut catalog = create_catalog(bpm);
+
+        // Create a table
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        catalog.create_table("lookup_test", table_schema.clone());
+
+        // Create an index
+        let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let index_info = catalog.create_index(
+            "id_index",
+            "lookup_test",
+            key_schema,
+            vec![0],
+            4,
+            true,
+            IndexType::BPlusTreeIndex,
+        );
+        assert!(index_info.is_some());
+        let index_oid = index_info.unwrap().get_index_oid();
+
+        // Test index lookup by OID
+        let retrieved_index = catalog.get_index_by_index_oid(index_oid);
+        assert!(retrieved_index.is_some());
+        assert_eq!(retrieved_index.unwrap().get_index_name(), "id_index");
+
+        // Test lookup with invalid OID
+        let invalid_index = catalog.get_index_by_index_oid(999);
+        assert!(invalid_index.is_none());
     }
 }

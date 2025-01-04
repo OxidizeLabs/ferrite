@@ -8,6 +8,10 @@ use log::debug;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::sync::Arc;
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::catalogue::schema::Schema;
+use crate::common::config::IndexOidT;
+use crate::storage::index::index::IndexType::BPlusTreeIndex;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -29,7 +33,6 @@ pub struct BPlusTree {
     order: usize,
     metadata: Option<Box<IndexInfo>>,
 }
-
 impl BPlusTreeNode {
     fn new(node_type: NodeType) -> Self {
         BPlusTreeNode {
@@ -51,7 +54,7 @@ impl BPlusTree {
         }
     }
 
-    pub fn with_metadata(order: usize, metadata: Box<IndexInfo>) -> Self {
+    pub fn new_with_metadata(order: usize, metadata: Box<IndexInfo>) -> Self {
         BPlusTree {
             root: Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf))),
             order,
@@ -563,7 +566,7 @@ impl BPlusTree {
 
 impl Index for BPlusTree {
     fn new(metadata: Box<IndexInfo>) -> Self {
-        BPlusTree::with_metadata(4, metadata)
+        BPlusTree::new_with_metadata(4, metadata)
     }
 
     fn get_metadata(&self) -> &IndexInfo {
@@ -722,7 +725,7 @@ mod test_utils {
 
     pub fn create_test_tree(order: usize) -> BPlusTree {
         let metadata = create_test_metadata(order);
-        BPlusTree::with_metadata(order, Box::new(metadata))
+        BPlusTree::new_with_metadata(order, Box::new(metadata))
     }
 }
 
