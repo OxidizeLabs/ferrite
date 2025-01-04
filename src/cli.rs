@@ -304,7 +304,7 @@ impl DBCommandExecutor {
                 // Prepare indexes string
                 let indexes = catalog_read.get_table_indexes(&name)
                     .iter()
-                    .map(|idx| idx.get_index_name())
+                    .map(|idx| idx.get_index_name().as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
 

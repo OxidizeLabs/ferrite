@@ -8,10 +8,6 @@ use log::debug;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::sync::Arc;
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::catalogue::schema::Schema;
-use crate::common::config::IndexOidT;
-use crate::storage::index::index::IndexType::BPlusTreeIndex;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {

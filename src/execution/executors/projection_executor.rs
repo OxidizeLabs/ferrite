@@ -140,6 +140,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
+    use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -278,11 +279,15 @@ mod tests {
         // Create executor context with test context
         let (_, context) = create_test_executor_context();
 
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+
         // Create child executor with correct parameters
         let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
             tuples,
             input_schema,
-            context.clone(),
         ));
 
         // Create projection plan

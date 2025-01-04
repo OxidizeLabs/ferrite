@@ -18,7 +18,7 @@ pub struct IndexInfo {
     /// The schema for the index key
     key_schema: Schema,
     /// The name of the index
-    name: String,
+    index_name: String,
     /// The unique OID for the index
     index_oid: IndexOidT,
     /// The name of the table on which the index is created
@@ -47,7 +47,7 @@ impl IndexInfo {
     /// - `index_type`: The index type.
     pub fn new(
         key_schema: Schema,
-        name: String,
+        index_name: String,
         index_oid: IndexOidT,
         table_name: String,
         key_size: usize,
@@ -57,7 +57,7 @@ impl IndexInfo {
     ) -> Self {
         IndexInfo {
             key_schema,
-            name,
+            index_name,
             index_oid,
             table_name,
             key_size,
@@ -80,8 +80,8 @@ impl IndexInfo {
         self.index_oid
     }
 
-    pub fn get_index_name(&self) -> &str {
-        self.table_name.as_str()
+    pub fn get_index_name(&self) -> &String {
+        &self.index_name
     }
 
     pub fn get_index_type(&self) -> &IndexType {
@@ -98,6 +98,10 @@ impl IndexInfo {
 
     pub fn is_primary_key(&self) -> bool {
         self.is_primary_key
+    }
+
+    pub fn get_table_name(&self) -> &String {
+        &self.table_name
     }
 }
 
@@ -195,11 +199,34 @@ impl Display for IndexInfo {
         write!(
             f,
             " {{ name: {}, type: {}, table: {}, primary_key: {}, key_size: {} }}",
-            self.name,
+            self.index_name,
             self.index_type,
             self.table_name,
             self.is_primary_key,
             self.key_size
         )
+    }
+}
+
+impl Clone for IndexInfo {
+    fn clone(&self) -> Self {
+        IndexInfo::new(
+            self.get_key_schema().clone(),
+            self.get_index_name().parse().unwrap(),
+            self.get_index_oid(),
+            self.get_table_name().parse().unwrap(),
+            self.get_key_size(),
+            self.is_primary_key(),
+            self.get_index_type().clone(),
+            self.get_key_attrs().clone(),
+        )
+    }
+}
+
+impl Clone for IndexType {
+    fn clone(&self) -> Self {
+        match *self {
+            IndexType::BPlusTreeIndex => IndexType::BPlusTreeIndex,
+        }
     }
 }

@@ -5,7 +5,7 @@ use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use log::{debug, error, info};
+use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use crate::common::config::PageId;

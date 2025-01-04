@@ -7,7 +7,6 @@ use crate::types_db::value::Value;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
-use crate::execution::plans::table_scan_plan::TableScanNode;
 
 pub struct MockExecutor {
     context: Arc<RwLock<ExecutorContext>>,
