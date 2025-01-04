@@ -127,6 +127,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
+    use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     struct TestContext {
         transaction: Arc<Transaction>,
@@ -253,17 +254,11 @@ mod tests {
             Arc::clone(&ctx.lock_manager),
         )));
 
+        let mock_plan = Arc::new(MockScanNode::new(Default::default(), "mock_table".to_string(), vec![]));
+
         // Add mock executors
-        let left_exec = Box::new(MockExecutor::new(
-            vec![],
-            Default::default(),
-            executor_context.clone(),
-        ));
-        let right_exec = Box::new(MockExecutor::new(
-            vec![],
-            Default::default(),
-            executor_context.clone(),
-        ));
+        let left_exec = Box::new(MockExecutor::new(executor_context.clone(), mock_plan.clone(), 0, vec![], Default::default()));
+        let right_exec = Box::new(MockExecutor::new(executor_context.clone(), mock_plan, 0, vec![], Default::default()));
 
         let mut executor_context_guard = executor_context.write();
         executor_context_guard.add_check_option(left_exec, right_exec);
@@ -337,17 +332,11 @@ mod tests {
             Arc::clone(&ctx.lock_manager),
         )));
 
-        // Add executors and initialize
-        let left_exec = Box::new(MockExecutor::new(
-            vec![],
-            Default::default(),
-            executor_context.clone(),
-        ));
-        let right_exec = Box::new(MockExecutor::new(
-            vec![],
-            Default::default(),
-            executor_context.clone(),
-        ));
+        let mock_plan = Arc::new(MockScanNode::new(Default::default(), "".to_string(), vec![]));
+
+        // Add mock executors
+        let left_exec = Box::new(MockExecutor::new(executor_context.clone(), mock_plan.clone(), 0, vec![], Default::default()));
+        let right_exec = Box::new(MockExecutor::new(executor_context.clone(), mock_plan, 0, vec![], Default::default()));
 
         let mut executor_context_guard = executor_context.write();
         executor_context_guard.add_check_option(left_exec, right_exec);

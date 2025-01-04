@@ -158,7 +158,6 @@ mod tests {
                 schema,
                 0,
                 table_name.to_string(),
-                None,
             ))
         }
     }
