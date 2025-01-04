@@ -6,15 +6,17 @@ pub struct CreateIndexPlanNode {
     output_schema: Schema,
     table_name: String,
     index_name: String,
+    key_attrs: Vec<usize>,
     if_not_exists: bool,
 }
 
 impl CreateIndexPlanNode {
-    pub fn new(output_schema: Schema, table_name: String, index_name: String, if_not_exists: bool) -> Self {
+    pub fn new(output_schema: Schema, table_name: String, index_name: String, key_attrs: Vec<usize>, if_not_exists: bool) -> Self {
         Self {
             output_schema,
             table_name,
             index_name,
+            key_attrs,
             if_not_exists,
         }
     }
@@ -25,6 +27,10 @@ impl CreateIndexPlanNode {
 
     pub fn get_table_name(&self) -> &str {
         &self.table_name
+    }
+
+    pub fn get_key_attrs(&self) -> &[usize] {
+        &self.key_attrs
     }
 
     pub fn if_not_exists(&self) -> bool {

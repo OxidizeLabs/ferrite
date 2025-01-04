@@ -21,16 +21,21 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::{
-    BinaryOperator, ColumnDef, CreateTable, DataType, Expr, Function, FunctionArg, FunctionArgExpr,
-    FunctionArguments, GroupByExpr, Insert, JoinOperator, ObjectName, Query, Select, SelectItem,
-    SetExpr, Statement, TableFactor, UnaryOperator,
-};
+use sqlparser::ast::{BinaryOperator, ColumnDef, CreateIndex, CreateTable, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, Insert, JoinOperator, ObjectName, Query, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
+use crate::execution::plans::abstract_plan::PlanNode::IndexScan;
+use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
+use crate::execution::plans::delete_plan::DeleteNode;
+use crate::execution::plans::index_scan_plan::IndexScanNode;
+use crate::execution::plans::limit_plan::LimitNode;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
+use crate::execution::plans::sort_plan::SortNode;
+use crate::execution::plans::topn_plan::TopNNode;
+use crate::execution::plans::update_plan::UpdateNode;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -40,10 +45,16 @@ pub enum LogicalPlanType {
         if_not_exists: bool,
     },
     CreateIndex {
+        schema: Schema,
         table_name: String,
         index_name: String,
-        columns: Vec<String>,
+        key_attrs: Vec<usize>,
         if_not_exists: bool,
+    },
+    MockScan {
+        table_name: String,
+        schema: Schema,
+        table_oid: u64,
     },
     TableScan {
         table_name: String,
@@ -52,9 +63,10 @@ pub enum LogicalPlanType {
     },
     IndexScan {
         table_name: String,
-        index_name: String,
-        schema: Schema,
         table_oid: u64,
+        index_name: String,
+        index_oid: u64,
+        schema: Schema,
     },
     Filter {
         predicate: Arc<Expression>,
@@ -106,14 +118,13 @@ pub enum LogicalPlanType {
     },
     Limit {
         limit: usize,
-        offset: usize,
         schema: Schema,
     },
     TopN {
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
         schema: Schema,
-    },
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +136,10 @@ pub struct LogicalPlan {
 pub struct QueryPlanner {
     catalog: Arc<RwLock<Catalog>>,
     log_detailed: bool,
+}
+
+pub trait LogicalToPhysical {
+    fn to_physical_plan(&self) -> Result<PlanNode, String>;
 }
 
 impl QueryPlanner {
@@ -170,6 +185,7 @@ impl QueryPlanner {
 
         match &ast[0] {
             Statement::CreateTable(create_table) => self.plan_create_table_logical(create_table),
+            Statement::CreateIndex(create_index) => self.plan_create_index_logical(create_index),
             Statement::Query(query) => self.plan_query_logical(query),
             Statement::Insert(insert) => self.plan_insert_logical(insert),
             _ => Err("Unsupported statement type".to_string()),
@@ -184,19 +200,43 @@ impl QueryPlanner {
         let schema = Schema::new(columns);
         let table_name = create_table.name.to_string();
 
-        // Add table to catalog
-        let mut catalog_guard = self.catalog.write();
-        if catalog_guard
-            .create_table(&table_name, schema.clone())
-            .is_some()
+        Ok(LogicalPlan::create_table(schema, table_name, create_table.if_not_exists, ))
+    }
+
+    fn plan_create_index_logical(
+        &mut self,
+        create_index: &CreateIndex,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let index_name = create_index.clone().name.expect("Index Name not available").to_string();
+        let table_name = match &create_index.table_name {
+            ObjectName(parts) if parts.len() == 1 => parts[0].value.clone(),
+            _ => return Err("Only single table indices are supported".to_string()),
+        };
+
+        let catalog_guard = self.catalog.read();
+        let table_schema = catalog_guard.get_table_schema(&table_name)
+            .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
+
+        let mut key_attrs = Vec::new();
+        let mut columns = Vec::new();
+
+        for col_name in &create_index.columns {
+            let idx = table_schema.get_column_index(&col_name.to_string())
+                .ok_or_else(|| format!("Column {} not found in table", col_name))?;
+            key_attrs.push(idx);
+            columns.push(table_schema.get_column(idx).unwrap().clone());
+        }
+
+        let schema = Schema::new(columns.clone());
+        drop(catalog_guard);
         {
-            Ok(LogicalPlan::create_table(
+            Ok(LogicalPlan::create_index(
                 schema,
                 table_name,
-                create_table.if_not_exists,
+                index_name,
+                key_attrs,
+                create_index.if_not_exists,
             ))
-        } else {
-            Err(format!("Table '{}' already exists", table_name))
         }
     }
 
@@ -288,7 +328,7 @@ impl QueryPlanner {
             }
 
             let mut value_exprs = Vec::new();
-            for (i, expr) in row.iter().enumerate() {
+            for (_, expr) in row.iter().enumerate() {
                 let value_expr = Arc::new(self.parse_expression(expr, schema)?);
                 value_exprs.push(value_expr);
             }
@@ -1027,6 +1067,19 @@ impl LogicalPlan {
                     indent = indent
                 ));
             }
+            LogicalPlanType::MockScan {
+                table_name,
+                schema,
+                ..
+            } => {
+                result.push_str(&format!("→ MockScan: {}\n", table_name));
+                result.push_str(&format!(
+                    "{:indent$}   Schema: {}\n",
+                    "",
+                    schema,
+                    indent = indent
+                ));
+            }
             LogicalPlanType::Filter { predicate } => {
                 result.push_str(&format!("→ Filter: {}\n", predicate));
             }
@@ -1128,6 +1181,19 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn create_index(schema: Schema, table_name: String, index_name: String, key_attrs: Vec<usize>, if_not_exists: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::CreateIndex {
+                schema,
+                table_name,
+                index_name,
+                key_attrs,
+                if_not_exists
+            },
+            vec![]
+        ))
+    }
+
     pub fn table_scan(table_name: String, schema: Schema, table_oid: u64) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::TableScan {
@@ -1196,6 +1262,17 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn mock_scan(table_name: String, schema: Schema, table_oid: u64) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::MockScan {
+                table_name,
+                schema,
+                table_oid,
+            },
+            vec![],
+        ))
+    }
+
     pub fn get_schema(&self) -> Schema {
         match &self.plan_type {
             // Plans with explicit schemas
@@ -1239,14 +1316,11 @@ impl LogicalPlan {
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
+            LogicalPlanType::MockScan { .. } => {
+                self.get_schema()
+            }
         }
     }
-}
-
-impl QueryPlanner {}
-
-pub trait LogicalToPhysical {
-    fn to_physical_plan(&self) -> Result<PlanNode, String>;
 }
 
 impl LogicalToPhysical for LogicalPlan {
@@ -1261,17 +1335,28 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name.clone(),
                 *if_not_exists,
             ))),
-
             LogicalPlanType::CreateIndex {
+                schema,
                 table_name,
                 index_name,
-                columns,
+                key_attrs,
                 if_not_exists,
-            } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("CreateIndex physical plan not yet implemented".to_string())
-            }
-
+            } => Ok(PlanNode::CreateIndex(CreateIndexPlanNode::new(
+                schema.clone(),
+                table_name.clone(),
+                index_name.clone(),
+                key_attrs.clone(),
+                *if_not_exists,
+            ))),
+            LogicalPlanType::MockScan {
+                table_name,
+                schema,
+                table_oid,
+            } => Ok(PlanNode::MockScan(MockScanNode::new(
+                schema.clone(),
+                table_name.clone(),
+                vec![],
+            ))),
             LogicalPlanType::TableScan {
                 table_name,
                 schema,
@@ -1280,18 +1365,23 @@ impl LogicalToPhysical for LogicalPlan {
                 schema.clone(),
                 *table_oid,
                 table_name.clone(),
-                None,
             ))),
 
             LogicalPlanType::IndexScan {
                 table_name,
-                index_name,
-                schema,
                 table_oid,
-            } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("IndexScan physical plan not yet implemented".to_string())
-            }
+                index_name,
+                index_oid,
+                schema
+            } => Ok(IndexScan(IndexScanNode::new(
+                schema.clone(),
+                table_name.clone(),
+                *table_oid,
+                index_name.clone(),
+                *index_oid,
+                vec![],
+                self.children.iter().map(|_|self.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
 
             LogicalPlanType::Filter { predicate } => {
                 let child_plan = self.children[0].to_physical_plan()?;
@@ -1337,8 +1427,12 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("Delete physical plan not yet implemented".to_string())
+                Ok(PlanNode::Delete(DeleteNode::new(
+                    schema.clone(),
+                    table_name.clone(),
+                    table_oid.clone(),
+                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                )))
             }
 
             LogicalPlanType::Update {
@@ -1347,8 +1441,13 @@ impl LogicalToPhysical for LogicalPlan {
                 table_oid,
                 update_expressions,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("Update physical plan not yet implemented".to_string())
+                Ok(PlanNode::Update(UpdateNode::new(
+                    schema.clone(),
+                    table_name.clone(),
+                    *table_oid,
+                    update_expressions.clone(),
+                    self.children.iter().map(|_|self.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                )))
             }
 
             LogicalPlanType::Values { rows, schema } => {
@@ -1368,7 +1467,7 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
             } => {
                 let child_plan = self.children[0].to_physical_plan()?;
-                let agg_types = vec![AggregationType::CountStar; aggregates.len()]; // This should be derived from the aggregates
+                let agg_types = vec![AggregationType::CountStar; aggregates.len()];
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
                     schema.clone(),
                     vec![child_plan],
@@ -1383,7 +1482,20 @@ impl LogicalToPhysical for LogicalPlan {
                 right_schema,
                 predicate,
                 join_type,
-            } => Err("NestedLoopJoin physical plan not yet implemented".to_string()),
+            } => {
+                let left_child = self.children[0].to_physical_plan()?;
+                let right_child = self.children[1].to_physical_plan()?;
+
+                // let output_schema = Schema::merge(left_schema, right_schema);
+                // Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
+                //     output_schema,
+                //     predicate.clone(),
+                //     join_type.clone(),
+                //     vec![left_child, right_child],
+                // )))
+                Err("NestedLoopJoin not implemented".to_string())
+
+            }
 
             LogicalPlanType::HashJoin {
                 left_schema,
@@ -1391,25 +1503,48 @@ impl LogicalToPhysical for LogicalPlan {
                 predicate,
                 join_type,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("HashJoin physical plan not yet implemented".to_string())
+                // Extract join key expressions from the predicate
+                // let (left_keys, right_keys) = extract_join_keys(predicate)?;
+                //
+                // let output_schema = Schema::merge(left_schema, right_schema);
+                // Ok(PlanNode::HashJoin(HashJoinNode::new(
+                //     output_schema,
+                //     left_keys,
+                //     right_keys,
+                //     join(TableFactor::Table {
+                //         name: ObjectName(vec![]),
+                //         alias: None,
+                //         args: None,
+                //         with_hints: vec![],
+                //         version: None,
+                //         with_ordinality: false,
+                //         partitions: vec![],
+                //     }),
+                //     self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                // )))
+                Err("HashJoin not implemented".to_string())
             }
 
             LogicalPlanType::Sort {
                 sort_expressions,
                 schema,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("Sort physical plan not yet implemented".to_string())
+                Ok(PlanNode::Sort(SortNode::new(
+                    schema.clone(),
+                    sort_expressions.clone(),
+                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                )))
             }
 
             LogicalPlanType::Limit {
                 limit,
-                offset,
                 schema,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("Limit physical plan not yet implemented".to_string())
+                Ok(PlanNode::Limit(LimitNode::new(
+                    limit.clone(),
+                    schema.clone(),
+                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                )))
             }
 
             LogicalPlanType::TopN {
@@ -1417,11 +1552,27 @@ impl LogicalToPhysical for LogicalPlan {
                 sort_expressions,
                 schema,
             } => {
-                // Note: We'll need to implement the corresponding physical node
-                Err("TopN physical plan not yet implemented".to_string())
+                Ok(PlanNode::TopN(TopNNode::new(
+                    schema.clone(),
+                    sort_expressions.clone(),
+                    k.clone(),
+                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                )))
             }
         }
     }
+}
+
+/// Helper function to extract join keys from a join predicate
+fn extract_join_keys(predicate: &Arc<Expression>) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+    // This is a simplified implementation - in practice, you'd need to:
+    // 1. Parse the predicate to identify equijoin conditions
+    // 2. Separate expressions that reference only left table columns
+    // 3. Separate expressions that reference only right table columns
+    // 4. Ensure they form valid join keys
+
+    // For now, we'll return empty vectors
+    Ok((vec![], vec![]))
 }
 
 // #[cfg(test)]

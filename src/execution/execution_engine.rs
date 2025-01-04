@@ -20,6 +20,8 @@ use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
 use crate::common::result_writer::ResultWriter;
+use crate::execution::executors::create_index_executor::CreateIndexExecutor;
+use crate::execution::executors::mock_executor::MockExecutor;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,
@@ -137,16 +139,20 @@ impl ExecutorEngine {
                 let executor = SeqScanExecutor::new(context, Arc::new(scan_plan.clone()));
                 Ok(Box::new(executor))
             }
-            CreateTable(create_plan) => {
+            CreateTable(create_table_plan) => {
                 info!("Creating table creation executor");
                 let executor =
-                    CreateTableExecutor::new(context, Arc::from(create_plan.clone()), false);
+                    CreateTableExecutor::new(context, Arc::from(create_table_plan.clone()), false);
+                Ok(Box::new(executor))
+            }
+            CreateIndex(create_index_plan) => {
+                info!("Creating index creation executor");
+                let executor = CreateIndexExecutor::new(context, Arc::from(create_index_plan.clone()), false);
                 Ok(Box::new(executor))
             }
             Filter(filter_plan) => {
                 info!("Creating filter executor for WHERE clause");
                 debug!("Filter predicate: {:?}", filter_plan.get_filter_predicate());
-                // Create child executor first
                 let child_executor =
                     self.create_executor(filter_plan.get_child_plan(), context.clone())?;
                 let executor =
@@ -159,7 +165,7 @@ impl ExecutorEngine {
                 Ok(Box::new(executor))
             }
             TableScan(table_scan_plan) => {
-                info!("Creating table scanner");
+                info!("Creating table scan executor");
                 let executor = TableScanExecutor::new(context, Arc::new(table_scan_plan.clone()));
                 Ok(Box::new(executor))
             }
@@ -189,6 +195,11 @@ impl ExecutorEngine {
                 );
                 Ok(Box::new(executor))
             }
+            MockScan(mock_scan_plan) => {
+                info!("Creating mock scan executor");
+                let executor = MockExecutor::new(context, Arc::new(mock_scan_plan.clone()), 0, vec![], Default::default());
+                Ok(Box::new(executor))
+            }
             _ => {
                 warn!("Unsupported plan type: {:?}", plan.get_type());
                 Err(DBError::NotImplemented(format!(
@@ -214,7 +225,7 @@ impl ExecutorEngine {
 
         // Handle different types of statements
         match plan {
-            Insert(_) | CreateTable(_) => {
+            Insert(_) | CreateTable(_) | CreateIndex(_) => {
                 debug!("Executing modification statement");
                 let mut has_results = false;
 
@@ -233,6 +244,8 @@ impl ExecutorEngine {
             }
             // For SELECT and other queries that produce output (including filtered results)
             _ => {
+                debug!("Plan: {}", plan.explain());
+
                 let mut has_results = false;
                 let mut row_count = 0;
 
