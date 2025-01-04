@@ -52,7 +52,7 @@ impl ExecutorEngine {
         let initial_logical_plan = match self.planner.create_logical_plan(sql) {
             Ok(plan) => {
                 if self.log_detailed {
-                    debug!("Initial logical plan generated: {:?}", plan);
+                    debug!("Initial logical plan generated: \n{}", plan);
                 }
                 plan
             }

@@ -633,7 +633,7 @@ mod tests {
         // This should create a serialization failure
         txn2.set_read_ts(base_ts);  // Set read_ts to be less than txn1's commit_ts
 
-        let mut tuple2 = ctx.create_test_tuple(1, 200);
+        let tuple2 = ctx.create_test_tuple(1, 200);
         let meta2 = TupleMeta::new(txn2.get_transaction_id(), false);
 
         // Add to write set before attempting update
