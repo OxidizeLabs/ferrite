@@ -16,7 +16,7 @@ use crate::storage::page::page_types::extendable_hash_table_directory_page::Exte
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -452,26 +452,20 @@ impl BufferPoolManager {
             }
         };
 
-        debug!("Step 2: Update the page's pin count and state");
+        trace!("Step 2: Update the page's pin count and state");
         // Step 2: Update the page's pin count and state
         let should_make_evictable = {
-            debug!("Step 2a: Acquire pages list write lock");
+            trace!("Step 2a: Acquire pages list write lock");
             let mut pages = self.pages.write();
 
-            debug!("Step 2c: Get mutable reference to page in pages list");
+            trace!("Step 2c: Get mutable reference to page in pages list");
             if let Some(page_arc) = pages.get_mut(frame_id as usize).and_then(Option::as_mut) {
                 // Temporarily release the `pages` lock after getting the page reference.
                 let page_arc = Arc::clone(page_arc);
                 drop(pages); // Drop the `pages` lock before acquiring the page lock
 
-                debug!("Step 2ci: Acquire page write lock");
+                trace!("Step 2ci: Acquire page write lock");
                 let mut page = page_arc.write();
-
-                debug!(
-                    "Unpinning page {} with current pin count {}",
-                    page_id,
-                    page.as_page_trait().get_pin_count()
-                );
 
                 if page.as_page_trait().get_pin_count() > 0 {
                     page.as_page_trait_mut().decrement_pin_count();
@@ -494,12 +488,12 @@ impl BufferPoolManager {
                     return false;
                 }
             } else {
-                debug!("Page {} was not found in the pages array", page_id);
+                trace!("Page {} was not found in the pages array", page_id);
                 return false;
             }
         };
 
-        debug!("Step 3: Make the page evictable if needed, outside of the main locks");
+        trace!("Step 3: Make the page evictable if needed, outside of the main locks");
         // Step 3: Make the page evictable if needed, outside of the main locks
         if should_make_evictable {
             let replacer = self.replacer.write();
