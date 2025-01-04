@@ -1,16 +1,46 @@
-use crate::binder::table_ref::bound_join_ref::JoinType;
 use crate::catalogue::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use sqlparser::ast::Join;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HashJoinNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
     left_key_expressions: Vec<Arc<Expression>>,
     right_key_expressions: Vec<Arc<Expression>>,
-    join_type: Vec<JoinType>,
+    join: Join,
     children: Vec<PlanNode>,
+}
+
+impl HashJoinNode {
+    pub fn new(
+        output_schema: Schema,
+        left_key_expressions: Vec<Arc<Expression>>,
+        right_key_expressions: Vec<Arc<Expression>>,
+        join: Join,
+        children: Vec<PlanNode>,
+    ) -> Self {
+        Self {
+            output_schema,
+            left_key_expressions,
+            right_key_expressions,
+            join,
+            children,
+        }
+    }
+
+    pub fn get_join(&self) -> &Join {
+        &self.join
+    }
+
+    pub fn get_left_child(&self) -> &PlanNode {
+        &self.children[0]
+    }
+
+    pub fn get_right_child(&self) -> &PlanNode {
+        &self.children[1]
+    }
 }
 
 impl AbstractPlanNode for HashJoinNode {
@@ -56,6 +86,25 @@ impl AbstractPlanNode for HashJoinNode {
     ///
     /// * `indent` - The number of spaces to indent the output.
     fn children_to_string(&self, indent: usize) -> String {
-        unimplemented!()
+        let indent_str = " ".repeat(indent);
+        let mut result = String::new();
+
+        // Add left child
+        result.push_str(&format!(
+            "{}Left Child: {}\n",
+            indent_str,
+            self.get_children()[0].plan_node_to_string()
+        ));
+        result.push_str(&self.get_children()[0].children_to_string(indent + 2));
+
+        // Add right child
+        result.push_str(&format!(
+            "{}Right Child: {}\n",
+            indent_str,
+            self.get_children()[1].plan_node_to_string()
+        ));
+        result.push_str(&self.get_children()[1].children_to_string(indent + 2));
+
+        result
     }
 }
