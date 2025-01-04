@@ -6,11 +6,40 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexScanNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
+    table_name: String,
     table_id: TableOidT,
+    index_name: String,
     index_id: IndexOidT,
     predicate_keys: Vec<Arc<Expression>>,
-    filter_predicate: Option<Arc<Expression>>,
+    children: Vec<PlanNode>,
+}
+
+impl IndexScanNode {
+    pub fn new(
+        output_schema: Schema,
+        table_name: String,
+        table_id: TableOidT,
+        index_name: String,
+        index_id: IndexOidT,
+        predicate_keys: Vec<Arc<Expression>>,
+        children: Vec<PlanNode>,
+    ) -> Self{
+        Self {
+            output_schema,
+            table_name,
+            table_id,
+            index_name,
+            index_id,
+            predicate_keys,
+            children
+        }
+    }
+
+    pub fn get_index_name(&self) -> String {
+        self.index_name.to_string()
+    }
+
 }
 
 impl AbstractPlanNode for IndexScanNode {
@@ -19,8 +48,7 @@ impl AbstractPlanNode for IndexScanNode {
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        static CHILDREN: Vec<PlanNode> = Vec::new();
-        &CHILDREN
+        &self.children
     }
 
     fn get_type(&self) -> PlanType {
@@ -52,6 +80,16 @@ impl AbstractPlanNode for IndexScanNode {
     /// * `indent` - The number of spaces to indent the output.
     fn children_to_string(&self, indent: usize) -> String {
         let indent_str = " ".repeat(indent);
-        format!("{}Child: {}", indent_str, self.plan_node_to_string())
+        let mut result = String::new();
+
+        // Add left child
+        result.push_str(&format!("{}Left Child: {}\n", indent_str, self.get_children()[0].plan_node_to_string()));
+        result.push_str(&self.get_children()[0].children_to_string(indent + 2));
+
+        // Add right child
+        result.push_str(&format!("{}Right Child: {}\n", indent_str, self.get_children()[1].plan_node_to_string()));
+        result.push_str(&self.get_children()[1].children_to_string(indent + 2));
+
+        result
     }
 }
