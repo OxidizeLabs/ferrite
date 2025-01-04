@@ -6,10 +6,28 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateNode {
-    output_schema: Arc<Schema>,
+    output_schema: Schema,
+    table_name: String,
     table_id: TableOidT,
     target_expressions: Vec<Arc<Expression>>,
-    child: Box<PlanNode>,
+    children: Vec<PlanNode>,
+}
+
+impl UpdateNode {
+    pub fn new(output_schema: Schema,
+               table_name: String,
+               table_id: TableOidT,
+               target_expressions: Vec<Arc<Expression>>,
+               children: Vec<PlanNode>
+    ) -> Self {
+        Self {
+            output_schema,
+            table_name,
+            table_id,
+            target_expressions,
+            children,
+        }
+    }
 }
 
 impl AbstractPlanNode for UpdateNode {
@@ -55,6 +73,16 @@ impl AbstractPlanNode for UpdateNode {
     /// * `indent` - The number of spaces to indent the output.
     fn children_to_string(&self, indent: usize) -> String {
         let indent_str = " ".repeat(indent);
-        format!("{}Child: {}", indent_str, self.child.plan_node_to_string())
+        let mut result = String::new();
+
+        // Add left child
+        result.push_str(&format!("{}Left Child: {}\n", indent_str, self.get_children()[0].plan_node_to_string()));
+        result.push_str(&self.get_children()[0].children_to_string(indent + 2));
+
+        // Add right child
+        result.push_str(&format!("{}Right Child: {}\n", indent_str, self.get_children()[1].plan_node_to_string()));
+        result.push_str(&self.get_children()[1].children_to_string(indent + 2));
+
+        result
     }
 }
