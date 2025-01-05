@@ -24,11 +24,13 @@ struct BPlusTreeNode {
     next_leaf: Option<Arc<RwLock<BPlusTreeNode>>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct BPlusTree {
     root: Arc<RwLock<BPlusTreeNode>>,
     order: usize,
-    metadata: Option<Box<IndexInfo>>,
+    metadata: Arc<IndexInfo>,
 }
+
 impl BPlusTreeNode {
     fn new(node_type: NodeType) -> Self {
         BPlusTreeNode {
@@ -42,20 +44,16 @@ impl BPlusTreeNode {
 }
 
 impl BPlusTree {
-    pub fn new(order: usize) -> Self {
+    pub fn new(order: usize, metadata: Arc<IndexInfo>) -> Self {
         BPlusTree {
             root: Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf))),
             order,
-            metadata: None,
+            metadata,
         }
     }
 
-    pub fn new_with_metadata(order: usize, metadata: Box<IndexInfo>) -> Self {
-        BPlusTree {
-            root: Arc::new(RwLock::new(BPlusTreeNode::new(NodeType::Leaf))),
-            order,
-            metadata: Some(metadata),
-        }
+    pub fn get_metadata(&self) -> Arc<IndexInfo> {
+        Arc::clone(&self.metadata)
     }
 
     pub fn insert(&self, key: Tuple, rid: RID) -> bool {
@@ -63,13 +61,24 @@ impl BPlusTree {
 
         // Split root if full
         if root_guard.keys.len() == self.order - 1 {
-            let new_root = BPlusTreeNode::new(NodeType::Internal);
+            debug!("Root is full, creating new root");
+            let mut new_root = BPlusTreeNode::new(NodeType::Internal);
             let old_root = std::mem::replace(&mut *root_guard, new_root);
-            root_guard.children.push(Arc::new(RwLock::new(old_root)));
-            self.split_child(&mut root_guard, 0);
-        }
 
-        self.insert_non_full(&mut root_guard, key, rid)
+            // Put old root as first child
+            root_guard.children.push(Arc::new(RwLock::new(old_root)));
+
+            if !self.split_child(&mut *root_guard, 0) {
+                debug!("Root split failed");
+                return false;
+            }
+
+            drop(root_guard);
+            debug!("Root split complete, proceeding with insertion");
+            self.insert_non_full(&mut *self.root.write(), key, rid)
+        } else {
+            self.insert_non_full(&mut root_guard, key, rid)
+        }
     }
 
     pub fn delete(&self, key: &Tuple, rid: RID) -> bool {
@@ -381,6 +390,16 @@ impl BPlusTree {
                     .position(|k| self.compare_keys(k, &key).is_gt())
                     .unwrap_or(node.keys.len());
 
+                // Ensure the children vector is long enough
+                if pos >= node.children.len() {
+                    debug!(
+                        "Position {} is out of bounds for children vector length {}",
+                        pos,
+                        node.children.len()
+                    );
+                    return false;
+                }
+
                 // Check if we need to split child before getting the write lock
                 let should_split = {
                     let child_guard = node.children[pos].read();
@@ -389,21 +408,28 @@ impl BPlusTree {
                     needs_split
                 };
 
-                // Split if necessary
                 if should_split {
                     self.split_child(node, pos);
                     // Recalculate position after split
                     let new_pos = if !node.keys.is_empty()
+                        && pos < node.keys.len()
                         && self.compare_keys(&node.keys[pos], &key).is_lt()
                     {
                         pos + 1
                     } else {
                         pos
                     };
+
+                    // Verify new position is valid
+                    if new_pos >= node.children.len() {
+                        debug!("New position {} after split is out of bounds for children vector length {}",
+                          new_pos, node.children.len());
+                        return false;
+                    }
+
                     let mut child_guard = node.children[new_pos].write();
                     self.insert_non_full(&mut child_guard, key, rid)
                 } else {
-                    // No split needed, proceed with insertion
                     let mut child_guard = node.children[pos].write();
                     self.insert_non_full(&mut child_guard, key, rid)
                 }
@@ -411,57 +437,90 @@ impl BPlusTree {
         }
     }
 
-    fn split_child(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+    fn split_child(&self, parent: &mut BPlusTreeNode, child_idx: usize) -> bool {
+        if child_idx >= parent.children.len() {
+            debug!(
+                "Child index {} out of bounds (len={})",
+                child_idx,
+                parent.children.len()
+            );
+            return false;
+        }
+
         debug!("Splitting child at index {}", child_idx);
 
-        let new_node = {
+        let (new_node, split_key) = {
             let child = &parent.children[child_idx];
             let mut child_guard = child.write();
             let middle = self.order / 2;
 
             let mut new_node = BPlusTreeNode::new(child_guard.node_type.clone());
 
-            // Split keys and values
-            new_node.keys = child_guard.keys.split_off(middle);
-            if let NodeType::Leaf = child_guard.node_type {
-                new_node.values = child_guard.values.split_off(middle);
-                // Maintain leaf node chain
-                new_node.next_leaf = child_guard.next_leaf.take();
-                let new_node_arc = Arc::new(RwLock::new(new_node.clone()));
-                child_guard.next_leaf = Some(Arc::clone(&new_node_arc));
-                debug!("Updated leaf node links during split");
-            } else {
-                new_node.children = child_guard.children.split_off(middle + 1);
-                let mid_key = child_guard.keys.pop().unwrap();
-                parent.keys.insert(child_idx, mid_key);
-            }
+            match child_guard.node_type {
+                NodeType::Leaf => {
+                    // For leaf nodes:
+                    new_node.keys = child_guard.keys.split_off(middle);
+                    new_node.values = child_guard.values.split_off(middle);
 
-            new_node
+                    // Update leaf chain
+                    new_node.next_leaf = child_guard.next_leaf.take();
+                    let new_node_arc = Arc::new(RwLock::new(new_node.clone()));
+                    child_guard.next_leaf = Some(Arc::clone(&new_node_arc));
+
+                    debug!("Leaf split - splitting at position {}", middle);
+                    (new_node.clone(), new_node.keys[0].clone())
+                }
+                NodeType::Internal => {
+                    // For internal nodes:
+                    // First get the middle key
+                    let mid_key = child_guard.keys[middle].clone();
+
+                    // Split keys - be careful about indices
+                    new_node.keys = child_guard.keys[middle + 1..].to_vec();
+                    child_guard.keys.truncate(middle);
+
+                    // Split children
+                    new_node.children = child_guard.children[middle + 1..].to_vec();
+                    child_guard.children.truncate(middle + 1);
+
+                    debug!("Internal split - middle key at position {}", middle);
+                    (new_node, mid_key)
+                }
+            }
         };
 
-        // Insert new node into parent
+        // Insert split key and new node into parent
+        debug!(
+            "Parent before split - keys: {}, children: {}",
+            parent.keys.len(),
+            parent.children.len()
+        );
+        parent.keys.insert(child_idx, split_key);
         parent
             .children
             .insert(child_idx + 1, Arc::new(RwLock::new(new_node)));
-        debug!("Completed node split");
+        debug!(
+            "Parent after split - keys: {}, children: {}",
+            parent.keys.len(),
+            parent.children.len()
+        );
+        true
     }
 
+    // Update compare_keys to use metadata directly
     fn compare_keys(&self, key1: &Tuple, key2: &Tuple) -> std::cmp::Ordering {
-        // Compare tuples based on the indexed columns defined in metadata
-        let metadata = self.metadata.as_ref().expect("Metadata not initialized");
-        let key_attrs = metadata.get_key_attrs();
+        let key_attrs = self.metadata.get_key_attrs();
         for &attr in key_attrs {
             let val1 = key1.get_value(attr);
             let val2 = key2.get_value(attr);
 
-            // Use explicit comparisons to handle all comparison cases
             match (
                 val1.compare_less_than(val2),
                 val1.compare_greater_than(val2),
             ) {
                 (CmpBool::CmpTrue, _) => return std::cmp::Ordering::Less,
                 (_, CmpBool::CmpTrue) => return std::cmp::Ordering::Greater,
-                _ => continue, // If values are equal, continue to next attribute
+                _ => continue,
             }
         }
         std::cmp::Ordering::Equal
@@ -562,32 +621,28 @@ impl BPlusTree {
 
 impl Index for BPlusTree {
     fn new(metadata: Box<IndexInfo>) -> Self {
-        BPlusTree::new_with_metadata(4, metadata)
+        // Use a reasonable default order, or extract from metadata
+        let order = 4; // Could also be configurable through metadata
+        BPlusTree::new(order, Arc::new(*metadata))
     }
 
-    fn get_metadata(&self) -> &IndexInfo {
-        self.metadata
-            .as_ref()
-            .expect("Index metadata not initialized")
+    fn get_metadata(&self) -> Arc<IndexInfo> {
+        Arc::clone(&self.metadata)
     }
-
     fn insert_entry(&self, key: &Tuple, rid: RID, _transaction: &Transaction) -> bool {
-        let metadata = self.get_metadata();
-        let key_schema = metadata.get_key_schema().clone();
-        let key_attrs = metadata.get_key_attrs().clone();
+        // Create key tuple using the metadata
+        let key_schema = self.metadata.get_key_schema().clone();
+        let key_attrs = self.metadata.get_key_attrs().clone();
         let key_tuple = key.key_from_tuple(key_schema, key_attrs);
 
-        // Moving insert logic here instead of calling self.insert
+        // Rest of the insertion logic
         let mut root_guard = self.root.write();
-
-        // Split root if full
         if root_guard.keys.len() == self.order - 1 {
             let new_root = BPlusTreeNode::new(NodeType::Internal);
             let old_root = std::mem::replace(&mut *root_guard, new_root);
             root_guard.children.push(Arc::new(RwLock::new(old_root)));
             self.split_child(&mut root_guard, 0);
         }
-
         self.insert_non_full(&mut root_guard, key_tuple, rid)
     }
 
@@ -706,12 +761,12 @@ mod test_utils {
         Tuple::new(&values, schema.clone(), RID::new(0, 0))
     }
 
-    pub fn create_test_metadata(order: usize) -> IndexInfo {
+    pub fn create_test_metadata() -> IndexInfo {
         IndexInfo::new(
-            create_key_schema(), // Use key schema for metadata
-            "test_index".to_string(),
+            create_key_schema(),
+            "index_name".to_string(),
             0,
-            "test_table".to_string(),
+            "table_name".to_string(),
             4,
             false,
             IndexType::BPlusTreeIndex,
@@ -719,9 +774,8 @@ mod test_utils {
         )
     }
 
-    pub fn create_test_tree(order: usize) -> BPlusTree {
-        let metadata = create_test_metadata(order);
-        BPlusTree::new_with_metadata(order, Box::new(metadata))
+    pub fn create_test_tree(order: usize, index_info: Arc<IndexInfo>) -> Arc<RwLock<BPlusTree>> {
+        Arc::new(RwLock::new(BPlusTree::new(order, index_info)))
     }
 }
 
@@ -732,33 +786,35 @@ mod unit_tests {
 
     #[test]
     fn test_create_tree() {
-        let tree = create_test_tree(4);
-        let root = tree.root.read();
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_guard = tree.read();
+        let root = tree_guard.root.read();
         assert_eq!(root.node_type, NodeType::Leaf);
         assert!(root.keys.is_empty());
         assert!(root.values.is_empty());
-
-        // Verify metadata is initialized
-        assert!(tree.metadata.is_some());
     }
 
     #[test]
     fn test_compare_keys() {
         let schema = create_test_schema();
+        let index_info = create_test_metadata();
+
         let tuple1 = create_tuple(1, "value1", &schema);
         let tuple2 = create_tuple(2, "value2", &schema);
-        let tree = create_test_tree(4);
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_read_guard = tree.read();
 
         assert_eq!(
-            tree.compare_keys(&tuple1, &tuple2),
+            tree_read_guard.compare_keys(&tuple1, &tuple2),
             std::cmp::Ordering::Less
         );
         assert_eq!(
-            tree.compare_keys(&tuple2, &tuple1),
+            tree_read_guard.compare_keys(&tuple2, &tuple1),
             std::cmp::Ordering::Greater
         );
         assert_eq!(
-            tree.compare_keys(&tuple1, &tuple1),
+            tree_read_guard.compare_keys(&tuple1, &tuple1),
             std::cmp::Ordering::Equal
         );
     }
@@ -773,11 +829,10 @@ mod unit_tests {
 
     #[test]
     fn test_metadata_initialization() {
-        let tree = create_test_tree(4);
-        let metadata = tree
-            .metadata
-            .as_ref()
-            .expect("Metadata should be initialized");
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_read_guard = tree.read();
+        let metadata = tree_read_guard.get_metadata();
         assert_eq!(metadata.get_key_attrs(), &vec![0]);
         assert_eq!(metadata.get_key_schema().get_column_count(), 1);
         assert_eq!(metadata.get_index_column_count(), 1);
@@ -804,29 +859,33 @@ mod basic_behavior_tests {
     #[test]
     fn test_basic_insertion() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
         let tuple1 = create_tuple(1, "value1", &schema);
         let tuple2 = create_tuple(2, "value2", &schema);
 
-        assert!(tree.insert(tuple1.clone(), RID::new(0, 1)));
-        assert!(tree.insert(tuple2.clone(), RID::new(0, 2)));
+        assert!(tree_write_guard.insert(tuple1.clone(), RID::new(0, 1)));
+        assert!(tree_write_guard.insert(tuple2.clone(), RID::new(0, 2)));
 
-        let root = tree.root.read();
+        let root = tree_write_guard.root.read();
         assert!(!root.keys.is_empty());
     }
 
     #[test]
     fn test_basic_deletion() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
         let tuple = create_tuple(1, "value1", &schema);
         let rid = RID::new(0, 1);
 
-        tree.insert(tuple.clone(), rid);
-        assert!(tree.delete(&tuple, rid));
+        tree_write_guard.insert(tuple.clone(), rid);
+        assert!(tree_write_guard.delete(&tuple, rid));
 
         let mut result = Vec::new();
-        tree.scan_key(
+        tree_write_guard.scan_key(
             &tuple,
             &mut result,
             &Transaction::new(0, IsolationLevel::ReadUncommitted),
@@ -838,12 +897,14 @@ mod basic_behavior_tests {
     fn test_range_scan() {
         initialize_logger();
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         // Insert test data ensuring full tuples
         for i in 1..=5 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.insert_entry(
+            tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
                 &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
@@ -851,13 +912,13 @@ mod basic_behavior_tests {
         }
 
         // Visualize tree to understand its structure
-        println!("Tree Structure:\n{}", tree.visualize());
+        println!("Tree Structure:\n{}", tree_write_guard.visualize());
 
         // Test scanning range [2, 4]
         let start = create_tuple(2, "value2", &schema);
         let end = create_tuple(4, "value4", &schema);
         let mut result = Vec::new();
-        tree.scan_range(&start, &end, &mut result);
+        tree_write_guard.scan_range(&start, &end, &mut result);
 
         // Debug print results
         println!("Range Scan Results:");
@@ -890,29 +951,33 @@ mod basic_behavior_tests {
     #[test]
     fn test_empty_range_scan() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_read_guard = tree.read();
 
         let start = create_tuple(2, "value2", &schema);
         let end = create_tuple(4, "value4", &schema);
         let mut result = Vec::new();
-        tree.scan_range(&start, &end, &mut result);
+        tree_read_guard.scan_range(&start, &end, &mut result);
         assert!(result.is_empty(), "Expected empty result for empty tree");
     }
 
     #[test]
     fn test_single_value_range_scan() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         let tuple = create_tuple(3, "value3", &schema);
-        tree.insert_entry(
+        tree_write_guard.insert_entry(
             &tuple,
             RID::new(0, 3),
             &Transaction::new(0, IsolationLevel::ReadCommitted),
         );
 
         let mut result = Vec::new();
-        tree.scan_range(&tuple, &tuple, &mut result);
+        tree_write_guard.scan_range(&tuple, &tuple, &mut result);
         assert_eq!(result.len(), 1, "Expected single value for point query");
 
         // Verify the value
@@ -926,13 +991,15 @@ mod basic_behavior_tests {
     #[test]
     fn test_leaf_node_links() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         // Insert enough values to cause splits
         for i in (0..10).rev() {
             // Insert in reverse order
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.insert_entry(
+            tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
                 &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
@@ -943,7 +1010,7 @@ mod basic_behavior_tests {
         let start = create_tuple(0, "value0", &schema);
         let end = create_tuple(9, "value9", &schema);
         let mut result = Vec::new();
-        tree.scan_range(&start, &end, &mut result);
+        tree_write_guard.scan_range(&start, &end, &mut result);
 
         // Verify all values are present and in order
         assert_eq!(result.len(), 10, "Should have found all 10 values");
@@ -971,85 +1038,151 @@ mod concurrency_tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::config::TxnId;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use std::sync::Arc;
+    use log::debug;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
 
     #[test]
     fn test_concurrent_insertions() {
+        initialize_logger();
         let schema = create_test_schema();
-        let tree = Arc::new(create_test_tree(4));
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
         let mut handles = vec![];
+        let success_flags = Vec::from_iter((0..10).map(|_| Arc::new(AtomicBool::new(false))));
 
+        // Spawn insertion threads
         for i in 0..10 {
-            let tree_clone = Arc::clone(&tree);
             let schema_clone = schema.clone();
+            let tree_clone = Arc::clone(&tree);
+            let success_flag = Arc::clone(&success_flags[i]);
 
             let handle = thread::spawn(move || {
-                let tuple = create_tuple(i, &format!("value{}", i), &schema_clone);
-                tree_clone.insert(tuple, RID::new(0, i as u32));
+                let tuple = create_tuple(i as i32, &format!("value{}", i), &schema_clone);
+                let result = {
+                    let tree_guard = tree_clone.write();
+                    debug!("Thread {} acquiring write lock for insertion", i);
+                    let success = tree_guard.insert_entry(
+                        &tuple,
+                        RID::new(0, i as u32),
+                        &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
+                    );
+                    debug!("Thread {} completed insertion: {}", i, success);
+                    success
+                };
+                success_flag.store(result, Ordering::SeqCst);
             });
             handles.push(handle);
         }
 
+        // Wait for all insertions to complete
         for handle in handles {
             handle.join().unwrap();
         }
 
+        // Verify all insertions were successful
+        for (i, flag) in success_flags.iter().enumerate() {
+            assert!(flag.load(Ordering::SeqCst), "Insertion {} failed", i);
+        }
+
+        // Verify we can read back all values
+        let tree_guard = tree.read();
+        debug!("Tree state after insertions:\n{}", tree_guard.visualize());
+
         let mut result = Vec::new();
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.scan_key(
+            result.clear();
+            tree_guard.scan_key(
                 &tuple,
                 &mut result,
-                &Transaction::new(i as TxnId, IsolationLevel::ReadUncommitted),
+                &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
             );
-            assert!(!result.is_empty());
-            result.clear();
+            assert!(!result.is_empty(), "Value {} not found in tree", i);
         }
     }
 
     #[test]
     fn test_concurrent_reads_and_writes() {
+        initialize_logger();
         let schema = create_test_schema();
-        let tree = Arc::new(create_test_tree(4));
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
         let mut handles = vec![];
 
         // Insert initial data
-        for i in 0..5 {
-            let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.insert(tuple, RID::new(0, i as u32));
+        {
+            let tree_guard = tree.write();
+            debug!("Inserting initial data");
+            for i in 0..5 {
+                let tuple = create_tuple(i, &format!("value{}", i), &schema);
+                let success = tree_guard.insert_entry(
+                    &tuple,
+                    RID::new(0, i as u32),
+                    &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
+                );
+                assert!(success, "Initial insertion {} failed", i);
+            }
+            debug!("Initial tree state:\n{}", tree_guard.visualize());
         }
 
         // Reader threads
-        for _ in 0..3 {
-            let tree_clone = Arc::clone(&tree);
+        for id in 0..3 {
             let schema_clone = schema.clone();
+            let tree_clone = Arc::clone(&tree);
             let handle = thread::spawn(move || {
                 let tuple = create_tuple(1, "value1", &schema_clone);
                 let mut result = Vec::new();
-                tree_clone.scan_key(
+                let tree_guard = tree_clone.read();
+                debug!("Reader {} scanning for key 1", id);
+                tree_guard.scan_key(
                     &tuple,
                     &mut result,
-                    &Transaction::new(0, IsolationLevel::ReadUncommitted),
+                    &Transaction::new(0, IsolationLevel::ReadCommitted),
                 );
+                assert!(!result.is_empty(), "Reader {} failed to find value", id);
             });
             handles.push(handle);
         }
 
         // Writer threads
         for i in 5..8 {
-            let tree_clone = Arc::clone(&tree);
             let schema_clone = schema.clone();
+            let tree_clone = Arc::clone(&tree);
             let handle = thread::spawn(move || {
                 let tuple = create_tuple(i, &format!("value{}", i), &schema_clone);
-                tree_clone.insert(tuple, RID::new(0, i as u32));
+                let tree_guard = tree_clone.write();
+                debug!("Writer inserting value {}", i);
+                let success = tree_guard.insert_entry(
+                    &tuple,
+                    RID::new(0, i as u32),
+                    &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
+                );
+                assert!(success, "Writer insertion {} failed", i);
             });
             handles.push(handle);
         }
 
         for handle in handles {
             handle.join().unwrap();
+        }
+
+        // Verify final state
+        let tree_guard = tree.read();
+        debug!("Final tree state:\n{}", tree_guard.visualize());
+
+        let mut result = Vec::new();
+        for i in 0..8 {
+            let tuple = create_tuple(i, &format!("value{}", i), &schema);
+            result.clear();
+            tree_guard.scan_key(
+                &tuple,
+                &mut result,
+                &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
+            );
+            assert!(!result.is_empty(), "Value {} not found in final state", i);
         }
     }
 }
@@ -1063,30 +1196,34 @@ mod edge_case_tests {
     #[test]
     fn test_empty_tree_operations() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
         let tuple = create_tuple(1, "value1", &schema);
 
         let mut result = Vec::new();
-        tree.scan_key(
+        tree_write_guard.scan_key(
             &tuple,
             &mut result,
             &Transaction::new(0, IsolationLevel::ReadUncommitted),
         );
         assert!(result.is_empty());
-        assert!(!tree.delete(&tuple, RID::new(0, 1)));
+        assert!(!tree_write_guard.delete(&tuple, RID::new(0, 1)));
     }
 
     #[test]
     fn test_duplicate_keys() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
         let tuple = create_tuple(1, "value1", &schema);
 
-        assert!(tree.insert(tuple.clone(), RID::new(0, 1)));
-        assert!(tree.insert(tuple.clone(), RID::new(0, 2))); // Different RID
+        assert!(tree_write_guard.insert(tuple.clone(), RID::new(0, 1)));
+        assert!(tree_write_guard.insert(tuple.clone(), RID::new(0, 2))); // Different RID
 
         let mut result = Vec::new();
-        tree.scan_key(
+        tree_write_guard.scan_key(
             &tuple,
             &mut result,
             &Transaction::new(0, IsolationLevel::ReadCommitted),
@@ -1097,25 +1234,29 @@ mod edge_case_tests {
     #[test]
     fn test_max_order_boundary() {
         let schema = create_test_schema();
-        let tree = create_test_tree(3);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree.insert(tuple, RID::new(0, i as u32)));
+            assert!(tree_write_guard.insert(tuple, RID::new(0, i as u32)));
         }
     }
 
     #[test]
     fn test_delete_root_entries() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
         let tuple = create_tuple(1, "value1", &schema);
         let rid = RID::new(0, 1);
 
-        tree.insert(tuple.clone(), rid);
-        assert!(tree.delete(&tuple, rid));
+        tree_write_guard.insert(tuple.clone(), rid);
+        assert!(tree_write_guard.delete(&tuple, rid));
 
-        let root = tree.root.read();
+        let root = tree_write_guard.root.read();
         assert!(root.keys.is_empty());
         assert_eq!(root.node_type, NodeType::Leaf);
     }
@@ -1139,33 +1280,38 @@ mod visualization_tests {
     #[test]
     fn test_tree_visualization() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         // Empty tree
-        println!("Empty tree:\n{}", tree.visualize());
+        println!("Empty tree:\n{}", tree_write_guard.visualize());
 
         // Insert one value
         let tuple = create_tuple(1, "value1", &schema);
-        tree.insert_entry(
+        tree_write_guard.insert_entry(
             &tuple,
             RID::new(0, 1),
             &Transaction::new(0, IsolationLevel::ReadUncommitted),
         );
-        println!("\nTree with one value:\n{}", tree.visualize());
+        println!("\nTree with one value:\n{}", tree_write_guard.visualize());
 
         // Insert more values to cause splits
         for i in 2..=7 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.insert_entry(
+            tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
                 &Transaction::new(i as TxnId, IsolationLevel::ReadCommitted),
             );
         }
-        println!("\nTree with multiple splits:\n{}", tree.visualize());
+        println!(
+            "\nTree with multiple splits:\n{}",
+            tree_write_guard.visualize()
+        );
 
         // Verify visualization contains key information
-        let viz = tree.visualize();
+        let viz = tree_write_guard.visualize();
         assert!(viz.contains("Root"));
         assert!(viz.contains("Leaf"));
         assert!(viz.contains("Leaf Node Links"));
@@ -1174,27 +1320,29 @@ mod visualization_tests {
     #[test]
     fn test_visualization_with_operations() {
         let schema = create_test_schema();
-        let tree = create_test_tree(4);
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(4, Arc::from(index_info));
+        let tree_write_guard = tree.write();
 
         // Insert values in mixed order
         let values = vec![3, 1, 4, 2, 5];
         for &i in &values {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree.insert_entry(
+            tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
                 &Transaction::new(i as TxnId, IsolationLevel::ReadUncommitted),
             );
-            println!("\nAfter inserting {}:\n{}", i, tree.visualize());
+            println!("\nAfter inserting {}:\n{}", i, tree_write_guard.visualize());
         }
 
         // Do a range scan
         let start = create_tuple(2, "value2", &schema);
         let end = create_tuple(4, "value4", &schema);
         let mut result = Vec::new();
-        tree.scan_range(&start, &end, &mut result);
+        tree_write_guard.scan_range(&start, &end, &mut result);
 
-        println!("\nFinal tree state:\n{}", tree.visualize());
+        println!("\nFinal tree state:\n{}", tree_write_guard.visualize());
         println!(
             "\nRange scan result: {:?}",
             result
