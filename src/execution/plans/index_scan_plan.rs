@@ -40,6 +40,18 @@ impl IndexScanNode {
         self.index_name.to_string()
     }
 
+    pub fn get_table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn get_index_id(&self) -> IndexOidT {
+        self.index_id
+    }
+
+    pub fn get_predicate_keys(&self) -> &Vec<Arc<Expression>> {
+        &self.predicate_keys
+    }
+
 }
 
 impl AbstractPlanNode for IndexScanNode {

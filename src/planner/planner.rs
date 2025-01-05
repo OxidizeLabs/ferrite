@@ -9,33 +9,37 @@ use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
+use crate::execution::plans::abstract_plan::PlanNode::IndexScan;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
+use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
+use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
+use crate::execution::plans::index_scan_plan::IndexScanNode;
 use crate::execution::plans::insert_plan::InsertNode;
+use crate::execution::plans::limit_plan::LimitNode;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
+use crate::execution::plans::sort_plan::SortNode;
+use crate::execution::plans::topn_plan::TopNNode;
+use crate::execution::plans::update_plan::UpdateNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::{BinaryOperator, ColumnDef, CreateIndex, CreateTable, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, Insert, JoinOperator, ObjectName, Query, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator};
+use sqlparser::ast::{
+    BinaryOperator, ColumnDef, CreateIndex, CreateTable, DataType, Expr, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, Insert, JoinOperator, ObjectName, Query,
+    Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator,
+};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::abstract_plan::PlanNode::IndexScan;
-use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
-use crate::execution::plans::delete_plan::DeleteNode;
-use crate::execution::plans::index_scan_plan::IndexScanNode;
-use crate::execution::plans::limit_plan::LimitNode;
-use crate::execution::plans::mock_scan_plan::MockScanNode;
-use crate::execution::plans::sort_plan::SortNode;
-use crate::execution::plans::topn_plan::TopNNode;
-use crate::execution::plans::update_plan::UpdateNode;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -124,7 +128,7 @@ pub enum LogicalPlanType {
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
         schema: Schema,
-    }
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -218,28 +222,38 @@ impl QueryPlanner {
         let columns = self.convert_column_defs(&create_table.columns)?;
         let schema = Schema::new(columns);
 
-        Ok(LogicalPlan::create_table(schema, table_name, create_table.if_not_exists))
+        Ok(LogicalPlan::create_table(
+            schema,
+            table_name,
+            create_table.if_not_exists,
+        ))
     }
 
     fn plan_create_index_logical(
         &mut self,
         create_index: &CreateIndex,
     ) -> Result<Box<LogicalPlan>, String> {
-        let index_name = create_index.clone().name.expect("Index Name not available").to_string();
+        let index_name = create_index
+            .clone()
+            .name
+            .expect("Index Name not available")
+            .to_string();
         let table_name = match &create_index.table_name {
             ObjectName(parts) if parts.len() == 1 => parts[0].value.clone(),
             _ => return Err("Only single table indices are supported".to_string()),
         };
 
         let catalog_guard = self.catalog.read();
-        let table_schema = catalog_guard.get_table_schema(&table_name)
+        let table_schema = catalog_guard
+            .get_table_schema(&table_name)
             .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
 
         let mut key_attrs = Vec::new();
         let mut columns = Vec::new();
 
         for col_name in &create_index.columns {
-            let idx = table_schema.get_column_index(&col_name.to_string())
+            let idx = table_schema
+                .get_column_index(&col_name.to_string())
                 .ok_or_else(|| format!("Column {} not found in table", col_name))?;
             key_attrs.push(idx);
             columns.push(table_schema.get_column(idx).unwrap().clone());
@@ -1086,9 +1100,7 @@ impl LogicalPlan {
                 ));
             }
             LogicalPlanType::MockScan {
-                table_name,
-                schema,
-                ..
+                table_name, schema, ..
             } => {
                 result.push_str(&format!("→ MockScan: {}\n", table_name));
                 result.push_str(&format!(
@@ -1199,16 +1211,22 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn create_index(schema: Schema, table_name: String, index_name: String, key_attrs: Vec<usize>, if_not_exists: bool) -> Box<Self> {
+    pub fn create_index(
+        schema: Schema,
+        table_name: String,
+        index_name: String,
+        key_attrs: Vec<usize>,
+        if_not_exists: bool,
+    ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateIndex {
                 schema,
                 table_name,
                 index_name,
                 key_attrs,
-                if_not_exists
+                if_not_exists,
             },
-            vec![]
+            vec![],
         ))
     }
 
@@ -1280,6 +1298,25 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn index_scan(
+        table_name: String,
+        table_oid: u64,
+        index_name: String,
+        index_oid: u64,
+        schema: Schema
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::IndexScan {
+                table_name,
+                table_oid,
+                index_name,
+                index_oid,
+                schema,
+            },
+            vec![]
+        ))
+    }
+
     pub fn mock_scan(table_name: String, schema: Schema, table_oid: u64) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::MockScan {
@@ -1334,9 +1371,7 @@ impl LogicalPlan {
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
-            LogicalPlanType::MockScan { .. } => {
-                self.get_schema()
-            }
+            LogicalPlanType::MockScan { .. } => self.get_schema(),
         }
     }
 }
@@ -1390,7 +1425,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_oid,
                 index_name,
                 index_oid,
-                schema
+                schema,
             } => Ok(IndexScan(IndexScanNode::new(
                 schema.clone(),
                 table_name.clone(),
@@ -1398,7 +1433,10 @@ impl LogicalToPhysical for LogicalPlan {
                 index_name.clone(),
                 *index_oid,
                 vec![],
-                self.children.iter().map(|_|self.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
+                self.children
+                    .iter()
+                    .map(|_| self.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
             ))),
 
             LogicalPlanType::Filter { predicate } => {
@@ -1444,29 +1482,31 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name,
                 schema,
                 table_oid,
-            } => {
-                Ok(PlanNode::Delete(DeleteNode::new(
-                    schema.clone(),
-                    table_name.clone(),
-                    table_oid.clone(),
-                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                )))
-            }
+            } => Ok(PlanNode::Delete(DeleteNode::new(
+                schema.clone(),
+                table_name.clone(),
+                table_oid.clone(),
+                self.children
+                    .iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
 
             LogicalPlanType::Update {
                 table_name,
                 schema,
                 table_oid,
                 update_expressions,
-            } => {
-                Ok(PlanNode::Update(UpdateNode::new(
-                    schema.clone(),
-                    table_name.clone(),
-                    *table_oid,
-                    update_expressions.clone(),
-                    self.children.iter().map(|_|self.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                )))
-            }
+            } => Ok(PlanNode::Update(UpdateNode::new(
+                schema.clone(),
+                table_name.clone(),
+                *table_oid,
+                update_expressions.clone(),
+                self.children
+                    .iter()
+                    .map(|_| self.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
 
             LogicalPlanType::Values { rows, schema } => {
                 let physical_rows: Vec<Vec<Arc<Expression>>> = rows
@@ -1512,7 +1552,6 @@ impl LogicalToPhysical for LogicalPlan {
                 //     vec![left_child, right_child],
                 // )))
                 Err("NestedLoopJoin not implemented".to_string())
-
             }
 
             LogicalPlanType::HashJoin {
@@ -1546,43 +1585,45 @@ impl LogicalToPhysical for LogicalPlan {
             LogicalPlanType::Sort {
                 sort_expressions,
                 schema,
-            } => {
-                Ok(PlanNode::Sort(SortNode::new(
-                    schema.clone(),
-                    sort_expressions.clone(),
-                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                )))
-            }
+            } => Ok(PlanNode::Sort(SortNode::new(
+                schema.clone(),
+                sort_expressions.clone(),
+                self.children
+                    .iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
 
-            LogicalPlanType::Limit {
-                limit,
-                schema,
-            } => {
-                Ok(PlanNode::Limit(LimitNode::new(
-                    limit.clone(),
-                    schema.clone(),
-                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                )))
-            }
+            LogicalPlanType::Limit { limit, schema } => Ok(PlanNode::Limit(LimitNode::new(
+                limit.clone(),
+                schema.clone(),
+                self.children
+                    .iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
 
             LogicalPlanType::TopN {
                 k,
                 sort_expressions,
                 schema,
-            } => {
-                Ok(PlanNode::TopN(TopNNode::new(
-                    schema.clone(),
-                    sort_expressions.clone(),
-                    k.clone(),
-                    self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                )))
-            }
+            } => Ok(PlanNode::TopN(TopNNode::new(
+                schema.clone(),
+                sort_expressions.clone(),
+                k.clone(),
+                self.children
+                    .iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?,
+            ))),
         }
     }
 }
 
 /// Helper function to extract join keys from a join predicate
-fn extract_join_keys(predicate: &Arc<Expression>) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+fn extract_join_keys(
+    predicate: &Arc<Expression>,
+) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
     // This is a simplified implementation - in practice, you'd need to:
     // 1. Parse the predicate to identify equijoin conditions
     // 2. Separate expressions that reference only left table columns
@@ -1603,7 +1644,6 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
-    use sqlparser::ast::Ident;
     use std::collections::HashMap;
 
     // Test fixture that encapsulates common test setup
@@ -1625,8 +1665,10 @@ mod tests {
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-            let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -1657,9 +1699,17 @@ mod tests {
         }
 
         // Helper to create a table and verify it was created successfully
-        fn create_table(&mut self, table_name: &str, columns: &str, if_not_exists: bool) -> Result<(), String> {
+        fn create_table(
+            &mut self,
+            table_name: &str,
+            columns: &str,
+            if_not_exists: bool,
+        ) -> Result<(), String> {
             let if_not_exists_clause = if if_not_exists { "IF NOT EXISTS " } else { "" };
-            let create_sql = format!("CREATE TABLE {}{} ({})", if_not_exists_clause, table_name, columns);
+            let create_sql = format!(
+                "CREATE TABLE {}{} ({})",
+                if_not_exists_clause, table_name, columns
+            );
             let create_plan = self.planner.create_logical_plan(&create_sql)?;
 
             // Convert to physical plan and execute
@@ -1669,7 +1719,8 @@ mod tests {
                     let mut catalog = self.catalog.write();
                     catalog.create_table(
                         create_table.get_table_name(),
-                        create_table.get_output_schema().clone());
+                        create_table.get_output_schema().clone(),
+                    );
                     Ok(())
                 }
                 _ => Err("Expected CreateTable plan node".to_string()),
@@ -1679,7 +1730,11 @@ mod tests {
         // Helper to verify a table exists in the catalog
         fn assert_table_exists(&self, table_name: &str) {
             let catalog = self.catalog.read();
-            assert!(catalog.get_table(table_name).is_some(), "Table '{}' should exist", table_name);
+            assert!(
+                catalog.get_table(table_name).is_some(),
+                "Table '{}' should exist",
+                table_name
+            );
         }
 
         // Helper to verify a table's schema
@@ -1711,13 +1766,18 @@ mod tests {
         fn test_create_simple_table() {
             let mut fixture = TestFixture::new("create_simple_table");
 
-            fixture.create_table("users", "id INTEGER, name VARCHAR(255)", false).unwrap();
+            fixture
+                .create_table("users", "id INTEGER, name VARCHAR(255)", false)
+                .unwrap();
 
             fixture.assert_table_exists("users");
-            fixture.assert_table_schema("users", &[
-                ("id".to_string(), TypeId::Integer),
-                ("name".to_string(), TypeId::VarChar),
-            ]);
+            fixture.assert_table_schema(
+                "users",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                ],
+            );
         }
 
         #[test]
@@ -1741,11 +1801,9 @@ mod tests {
 
         // Helper function to set up a test table
         fn setup_test_table(fixture: &mut TestFixture) {
-            fixture.create_table(
-                "users",
-                "id INTEGER, name VARCHAR(255), age INTEGER",
-                false
-            ).unwrap();
+            fixture
+                .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
+                .unwrap();
         }
 
         #[test]
@@ -1757,7 +1815,9 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::TableScan { table_name, schema, .. } => {
+                LogicalPlanType::TableScan {
+                    table_name, schema, ..
+                } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 3);
                 }
@@ -1774,14 +1834,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Filter { predicate } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter plan node"),
             }
         }
@@ -1791,11 +1849,9 @@ mod tests {
         use super::*;
 
         fn setup_test_table(fixture: &mut TestFixture) {
-            fixture.create_table(
-                "users",
-                "id INTEGER, name VARCHAR(255)",
-                false
-            ).unwrap();
+            fixture
+                .create_table("users", "id INTEGER, name VARCHAR(255)", false)
+                .unwrap();
         }
 
         #[test]
@@ -1807,7 +1863,9 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Insert { table_name, schema, .. } => {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 2);
 

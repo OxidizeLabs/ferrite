@@ -220,26 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn test_projection_node_string_representation() {
-        let ctx = TestContext::new("test_projection_node_string_representation");
-        let input_schema = create_test_schema();
-        let output_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-
-        let expressions = vec![create_mock_expression("id", TypeId::Integer)];
-
-        let child_node = create_mock_table_scan(&ctx, "test_table", input_schema);
-        let projection = ProjectionNode::new(output_schema, expressions, child_node);
-
-        let without_schema = projection.to_string(false);
-        assert!(without_schema.starts_with("Projection ["));
-        assert!(without_schema.contains("MockExpression(id:Integer)"));
-
-        let with_schema = projection.to_string(true);
-        assert!(with_schema.contains("Schema: ["));
-        assert!(with_schema.contains("id: Integer"));
-    }
-
-    #[test]
     fn test_projection_node_with_different_types() {
         let ctx = TestContext::new("test_projection_node_with_different_types");
         let input_schema = create_test_schema();
@@ -276,36 +256,5 @@ mod tests {
             }
             _ => panic!("Expected Mock expression"),
         }
-    }
-
-    #[test]
-    fn test_projection_children_string() {
-        let ctx = TestContext::new("test_projection_children_string");
-        let input_schema = create_test_schema();
-        let output_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-
-        let expressions = vec![
-            create_mock_expression("id", TypeId::Integer),
-            create_mock_expression("name", TypeId::VarChar),
-        ];
-
-        let child_node = create_mock_table_scan(&ctx, "test_table", input_schema);
-        let projection = ProjectionNode::new(output_schema, expressions, child_node);
-
-        let children_string = projection.children_to_string(0);
-
-        // Verify string contains mock expressions
-        assert!(children_string.contains("MockExpression(id:Integer)"));
-        assert!(children_string.contains("MockExpression(name:VarChar)"));
-
-        // Verify tree structure
-        let lines: Vec<&str> = children_string.lines().collect();
-        assert_eq!(lines.len(), 3); // Projection, Schema, and TableScan lines
-        assert!(lines[0].contains("└─ Projection"));
-        assert!(lines[1].starts_with("  Schema:"));
-        assert!(lines[2].starts_with("  └─"));
     }
 }

@@ -120,7 +120,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                     info!(
                         "Successfully created index '{}' with OID {}",
                         index_name,
-                        index_info.get_index_oid()
+                        index_info.0.get_index_oid()
                     );
                 }
                 None => {
