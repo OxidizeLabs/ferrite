@@ -5,7 +5,12 @@ use crate::concurrency::transaction::Transaction;
 use crate::storage::table::tuple::Tuple;
 use core::fmt;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use parking_lot::RwLock;
+use crate::storage::index::b_plus_tree_i::BPlusTree;
+use crate::storage::index::index_iterator::IndexIterator;
 
+#[derive(Debug)]
 pub enum IndexType {
     BPlusTreeIndex,
     // HashTableIndex,
@@ -14,6 +19,8 @@ pub enum IndexType {
 }
 
 /// The IndexInfo struct maintains metadata about an index.
+/// The IndexInfo struct maintains metadata about an index.
+#[derive(Debug)]
 pub struct IndexInfo {
     /// The schema for the index key
     key_schema: Schema,
@@ -103,6 +110,15 @@ impl IndexInfo {
     pub fn get_table_name(&self) -> &String {
         &self.table_name
     }
+
+    // Creates an iterator for scanning the index
+    pub fn create_iterator(&self,
+                           tree: Arc<RwLock<BPlusTree>>,
+                           start_key: Option<Tuple>,
+                           end_key: Option<Tuple>
+    ) -> IndexIterator {
+        IndexIterator::new(tree, start_key, end_key)
+    }
 }
 
 /// Base class for derived indices of different types.
@@ -115,27 +131,24 @@ pub trait Index: Send + Sync {
     where
         Self: Sized;
 
-    /// Returns a non-owning pointer to the metadata object associated with the index.
-    fn get_metadata(&self) -> &IndexInfo;
-
     /// Returns the number of indexed columns.
     fn get_index_column_count(&self) -> u32 {
         self.get_metadata().get_index_column_count()
     }
 
     /// Returns the index name.
-    fn get_index_name(&self) -> &str {
-        self.get_metadata().get_index_name()
+    fn get_index_name(&self) -> String {
+        self.get_metadata().get_index_name().clone()
     }
 
     /// Returns the index key schema.
-    fn get_key_schema(&self) -> &Schema {
-        self.get_metadata().get_key_schema()
+    fn get_key_schema(&self) -> Schema {
+        self.get_metadata().get_key_schema().clone()
     }
 
     /// Returns the index key attributes.
-    fn get_key_attrs(&self) -> &Vec<usize> {
-        self.get_metadata().get_key_attrs()
+    fn get_key_attrs(&self) -> Vec<usize> {
+        self.get_metadata().get_key_attrs().clone()
     }
 
     /// Returns a string representation for debugging.
@@ -179,6 +192,22 @@ pub trait Index: Send + Sync {
     fn scan_key(&self, key: &Tuple, result: &mut Vec<RID>, transaction: &Transaction) {
         unimplemented!()
     }
+
+    /// Creates an iterator for scanning the index
+    fn create_iterator(
+        &self,
+        start_key: Option<Tuple>,
+        end_key: Option<Tuple>
+    ) -> IndexIterator {
+        unimplemented!()
+    }
+
+    /// Creates an iterator for scanning a specific key
+    fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
+        self.create_iterator(Some(key.clone()), Some(key.clone()))
+    }
+
+    fn get_metadata(&self) -> Arc<IndexInfo>;
 }
 
 /// Formatter implementation for `IndexType`.
