@@ -21,6 +21,7 @@ use std::env;
 use std::sync::Arc;
 use crate::common::result_writer::ResultWriter;
 use crate::execution::executors::create_index_executor::CreateIndexExecutor;
+use crate::execution::executors::index_scan_executor::IndexScanExecutor;
 use crate::execution::executors::mock_executor::MockExecutor;
 
 pub struct ExecutorEngine {
@@ -198,6 +199,11 @@ impl ExecutorEngine {
             MockScan(mock_scan_plan) => {
                 info!("Creating mock scan executor");
                 let executor = MockExecutor::new(context, Arc::new(mock_scan_plan.clone()), 0, vec![], Default::default());
+                Ok(Box::new(executor))
+            }
+            IndexScan(index_plan) => {
+                info!("Creating index plan");
+                let executor = IndexScanExecutor::new(context, Arc::new(index_plan.clone()));
                 Ok(Box::new(executor))
             }
             _ => {
