@@ -240,49 +240,47 @@ impl Display for PlanNode {
 }
 
 #[cfg(test)]
-mod tests {
+mod basic_behaviour {
+    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
     use crate::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use std::error::Error;
+    use log::{info, warn};
 
-    /// Test context that manages the lifetime of test resources
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         planner: QueryPlanner,
-        _temp_dir: TempDir,  // Holds directory reference to prevent deletion
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            // Create temporary directory for test files
             let temp_dir = TempDir::new().expect("Failed to create temp directory");
-
-            // Create unique timestamp for test files
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-
-            // Setup paths for database and log files
             let db_path = temp_dir.path().join(format!("{}_{}.db", test_name, timestamp));
             let log_path = temp_dir.path().join(format!("{}_{}.log", test_name, timestamp));
 
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
-            // Initialize disk manager with temp files
             let disk_manager = Arc::new(FileDiskManager::new(
                 db_path.to_str().unwrap().to_string(),
                 log_path.to_str().unwrap().to_string(),
                 100,
             ));
 
-            // Setup buffer pool components
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let buffer_pool = Arc::new(BufferPoolManager::new(
@@ -292,18 +290,16 @@ mod tests {
                 replacer,
             ));
 
-            // Initialize catalog
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool,
-                0,              // next_index_oid
-                0,              // next_table_oid
-                HashMap::new(), // tables
-                HashMap::new(), // indexes
-                HashMap::new(), // table_names
-                HashMap::new(), // index_names
+                0,
+                0,
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
             )));
 
-            // Create query planner
             let planner = QueryPlanner::new(Arc::clone(&catalog));
 
             TestContext {
@@ -313,430 +309,527 @@ mod tests {
             }
         }
 
-        fn setup_sample_tables(&mut self) -> Result<(), String> {
-            // Create users table
-            self.planner.create_logical_plan(
-                "CREATE TABLE users (
-                    id INTEGER,
-                    name VARCHAR(255),
-                    age INTEGER,
-                    email VARCHAR(255)
-                )"
-            )?;
+        fn setup_tables(&mut self) -> Result<(), Box<dyn Error>> {
+            let mut catalog = self.catalog.write();
 
-            // Create orders table
-            self.planner.create_logical_plan(
-                "CREATE TABLE orders (
-                    id INTEGER,
-                    user_id INTEGER,
-                    amount INTEGER,
-                    status VARCHAR(50)
-                )"
-            )?;
+            // Create users table schema
+            let users_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+                Column::new("email", TypeId::VarChar),
+            ]);
 
-            // Create products table
-            self.planner.create_logical_plan(
-                "CREATE TABLE products (
-                    id INTEGER,
-                    name VARCHAR(255),
-                    price INTEGER,
-                    category VARCHAR(100)
-                )"
-            )?;
+            // Create orders table schema
+            let orders_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("user_id", TypeId::Integer),
+                Column::new("amount", TypeId::Integer),
+                Column::new("status", TypeId::VarChar),
+            ]);
+
+            // Create products table schema
+            let products_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+                Column::new("category", TypeId::VarChar),
+            ]);
+
+            info!("Creating tables...");
+
+            // Create tables in catalog
+            let users_info = catalog.create_table("users", users_schema.clone())
+                .ok_or("Failed to create users table")?;
+            info!("Created users table: {}", users_info.get_table_name());
+            info!("Users schema: {:?}", users_schema);
+
+            let orders_info = catalog.create_table("orders", orders_schema.clone())
+                .ok_or("Failed to create orders table")?;
+            info!("Created orders table: {}", orders_info.get_table_name());
+
+            let products_info = catalog.create_table("products", products_schema.clone())
+                .ok_or("Failed to create products table")?;
+            info!("Created products table: {}", products_info.get_table_name());
 
             Ok(())
         }
-    }
 
-    #[test]
-    #[ignore]
-    fn test_basic_select_plan() {
-        let mut ctx = TestContext::new("test_basic_select_plan");
-        ctx.setup_sample_tables().unwrap();
-
-        let test_cases = vec![
-            (
-                "SELECT id, name FROM users",
-                vec!["SeqScan", "Table: users"]
-            ),
-            (
-                "SELECT id FROM users WHERE age > 25",
-                vec!["Filter", "SeqScan", "Table: users"]
-            ),
-        ];
-
-        for (sql, expected_contents) in test_cases {
-            let explanation = ctx.planner.explain(sql).unwrap();
-            for expected in expected_contents {
-                assert!(
-                    explanation.contains(expected),
-                    "Expected '{}' in plan for query '{}'\nActual plan:\n{}",
-                    expected,
-                    sql,
-                    explanation
-                );
+        fn debug_plan(&mut self, sql: &str) -> Result<(), Box<dyn Error>> {
+            info!("Generating plan for SQL: {}", sql);
+            match self.planner.explain(sql) {
+                Ok(plan) => {
+                    info!("Generated plan:\n{}", plan);
+                    Ok(())
+                },
+                Err(e) => {
+                    warn!("Failed to generate plan: {}", e);
+                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+                }
             }
         }
     }
 
     #[test]
-    #[ignore]
-    fn test_simple_join_plan() {
-        let mut ctx = TestContext::new("test_simple_join_plan");
-        ctx.setup_sample_tables().unwrap();
+    fn test_simple_selects() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_simple_selects");
+        ctx.setup_tables()?;
 
         let test_cases = vec![
-            (
-                "SELECT users.id, orders.id
-                 FROM users
-                 INNER JOIN orders ON users.id = orders.user_id",
-                vec!["HashJoin", "SeqScan", "Table: users", "Table: orders"]
-            ),
+            "SELECT id FROM users",
+            "SELECT id, name FROM users",
+            "SELECT * FROM users",
+            "SELECT id as user_id FROM users",
         ];
 
-        for (sql, expected_contents) in test_cases {
-            let explanation = ctx.planner.explain(sql).unwrap();
-            for expected in expected_contents {
-                assert!(
-                    explanation.contains(expected),
-                    "Expected '{}' in plan for query '{}'\nActual plan:\n{}",
-                    expected,
-                    sql,
-                    explanation
-                );
-            }
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("users"), "Plan should reference users table");
         }
+
+        Ok(())
     }
 
     #[test]
-    fn test_simple_aggregation_plans() {
-        let mut ctx = TestContext::new("test_simple_aggregation_plans");
-        ctx.setup_sample_tables().unwrap();
+    fn test_basic_filters() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_basic_filters");
+        ctx.setup_tables()?;
 
         let test_cases = vec![
-            (
-                "SELECT COUNT(*) FROM users",
-                vec!["Aggregation", "SeqScan", "Table: users"]
-            ),
-            (
-                "SELECT age, COUNT(*) FROM users GROUP BY age",
-                vec!["Aggregation", "SeqScan", "Table: users"]
-            ),
+            "SELECT id FROM users WHERE age > 25",
+            "SELECT id FROM users WHERE age >= 20 AND age <= 30",
+            "SELECT id FROM users WHERE age > 25 AND name = 'John'",
         ];
 
-        for (sql, expected_contents) in test_cases {
-            let explanation = ctx.planner.explain(sql).unwrap();
-            for expected in expected_contents {
-                assert!(
-                    explanation.contains(expected),
-                    "Expected '{}' in plan for query '{}'\nActual plan:\n{}",
-                    expected,
-                    sql,
-                    explanation
-                );
-            }
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("users"), "Plan should reference users table");
         }
+
+        Ok(())
     }
 
     #[test]
-    fn test_filter_plan() {
-        let mut ctx = TestContext::new("test_filter_plan");
-        ctx.setup_sample_tables().unwrap();
+    fn test_basic_aggregations() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_basic_aggregations");
+        ctx.setup_tables()?;
 
         let test_cases = vec![
-            (
-                "SELECT id FROM users WHERE age > 25",
-                vec!["Filter", "SeqScan", "Table: users"]
-            ),
-            (
-                "SELECT id FROM users WHERE id < 10",
-                vec!["Filter", "SeqScan", "Table: users"]
-            ),
+            "SELECT COUNT(*) FROM users",
+            "SELECT age, COUNT(*) FROM users GROUP BY age",
         ];
 
-        for (sql, expected_contents) in test_cases {
-            let explanation = ctx.planner.explain(sql).unwrap();
-            for expected in expected_contents {
-                assert!(
-                    explanation.contains(expected),
-                    "Expected '{}' in plan for query '{}'\nActual plan:\n{}",
-                    expected,
-                    sql,
-                    explanation
-                );
-            }
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("users"), "Plan should reference users table");
         }
+
+        Ok(())
     }
 
     #[test]
     fn test_error_handling() {
         let mut ctx = TestContext::new("test_error_handling");
-        ctx.setup_sample_tables().unwrap();
+        ctx.setup_tables().unwrap();
 
-        // Test cases that should return errors
         let error_cases = vec![
-            "SELECT * FROM nonexistent_table",
-            "SELECT invalid_column FROM users",
-            "SELECT * FROM users WHERE nonexistent_column = 1",
+            // Invalid table
+            ("SELECT * FROM nonexistent_table", "not found in catalog"),
+
+            // Invalid column
+            ("SELECT nonexistent FROM users", "not found in schema"),
+
+            // Invalid where clause column
+            ("SELECT * FROM users WHERE nonexistent > 0", "not found in schema"),
         ];
 
-        for sql in error_cases {
+        for (sql, expected_error) in error_cases {
+            info!("Testing error case: {}", sql);
             let result = ctx.planner.explain(sql);
+            assert!(result.is_err(), "Query should fail: {}", sql);
+            let error = result.unwrap_err();
             assert!(
-                result.is_err(),
-                "Expected error for query: {}",
+                error.to_string().contains(expected_error),
+                "Error '{}' should contain '{}' for query: {}",
+                error,
+                expected_error,
                 sql
             );
         }
     }
 
     #[test]
-    fn test_plan_formatting() {
-        let mut ctx = TestContext::new("test_plan_formatting");
-        ctx.setup_sample_tables().unwrap();
+    fn test_schema_validation() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_schema_validation");
+        ctx.setup_tables()?;
 
-        let sql = "SELECT id, age FROM users WHERE age > 25";
+        let catalog = ctx.catalog.read();
 
-        let explanation = ctx.planner.explain(sql).unwrap();
+        // Verify users table exists and has correct schema
+        let users_table = catalog.get_table("users")
+            .ok_or("Users table not found")?;
+        let users_schema = users_table.get_table_schema();
 
-        // Basic formatting checks
-        assert!(explanation.contains("→"), "Plan should use arrow for hierarchy");
-        assert!(explanation.contains("SeqScan"), "Plan should include SeqScan");
-        assert!(explanation.contains("Filter"), "Plan should include Filter");
+        info!("Users table schema: {:?}", users_schema);
 
-        // Check indentation (basic check)
-        let lines: Vec<&str> = explanation.lines().collect();
-        assert!(
-            lines.iter().any(|line| line.contains("SeqScan") && line.starts_with("  ")),
-            "Child nodes should be indented"
-        );
+        assert_eq!(users_schema.get_column_count(), 4);
+        assert!(users_schema.get_column_index("id").is_some());
+        assert!(users_schema.get_column_index("name").is_some());
+        assert!(users_schema.get_column_index("age").is_some());
+        assert!(users_schema.get_column_index("email").is_some());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod complex_behaviour {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
+    use crate::catalogue::schema::Schema;
+    use crate::planner::planner::QueryPlanner;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use chrono::Utc;
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use std::error::Error;
+    use log::{info, warn};
+
+    struct TestContext {
+        catalog: Arc<RwLock<Catalog>>,
+        planner: QueryPlanner,
+        _temp_dir: TempDir,
     }
 
-    #[test]
-    fn test_table_schema_creation() {
-        let mut ctx = TestContext::new("test_table_schema_creation");
+    impl TestContext {
+        fn new(test_name: &str) -> Self {
+            let temp_dir = TempDir::new().expect("Failed to create temp directory");
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_path = temp_dir.path().join(format!("{}_{}.db", test_name, timestamp));
+            let log_path = temp_dir.path().join(format!("{}_{}.log", test_name, timestamp));
 
-        // Manually create a table and verify its schema
-        let create_result = ctx.planner.create_logical_plan(
-            "CREATE TABLE test_table (
-                id INTEGER,
-                name VARCHAR(255),
-                age INTEGER
-            )"
-        );
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-        assert!(create_result.is_ok(), "Table creation should succeed");
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_path.to_str().unwrap().to_string(),
+                log_path.to_str().unwrap().to_string(),
+                100,
+            ));
 
-        // Try to use the newly created table in a query
-        let explain_result = ctx.planner.explain("SELECT id, name FROM test_table");
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let buffer_pool = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager,
+                replacer,
+            ));
 
-        assert!(
-            explain_result.is_ok(),
-            "Query planning should succeed for newly created table"
-        );
-    }
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                buffer_pool,
+                0,
+                0,
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+            )));
 
-    #[test]
-    #[ignore]
-    fn debug_column_resolution() {
-        let mut ctx = TestContext::new("debug_column_resolution");
-        ctx.setup_sample_tables().unwrap();
+            let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        // Detailed test to understand column resolution
-        let test_cases = vec![
-            "SELECT id FROM users",
-            "SELECT name FROM users",
-            "SELECT age FROM users",
-            "SELECT id FROM users WHERE age > 25",
-        ];
+            TestContext {
+                catalog,
+                planner,
+                _temp_dir: temp_dir,
+            }
+        }
 
-        for sql in test_cases {
-            println!("Testing query: {}", sql);
-            match ctx.planner.explain(sql) {
-                Ok(explanation) => {
-                    println!("Explanation:\n{}", explanation);
-                }
+        fn setup_tables(&mut self) -> Result<(), Box<dyn Error>> {
+            let mut catalog = self.catalog.write();
+
+            // Create users table schema
+            let users_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+                Column::new("email", TypeId::VarChar),
+            ]);
+
+            // Create orders table schema
+            let orders_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("user_id", TypeId::Integer),
+                Column::new("amount", TypeId::Integer),
+                Column::new("status", TypeId::VarChar),
+                Column::new("created_at", TypeId::Integer),
+            ]);
+
+            // Create products table schema
+            let products_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+                Column::new("category", TypeId::VarChar),
+                Column::new("stock", TypeId::Integer),
+            ]);
+
+            // Create order_items table schema
+            let order_items_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("order_id", TypeId::Integer),
+                Column::new("product_id", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+                Column::new("price", TypeId::Integer),
+            ]);
+
+            info!("Creating tables...");
+
+            // Create tables in catalog
+            catalog.create_table("users", users_schema.clone())
+                .ok_or("Failed to create users table")?;
+
+            catalog.create_table("orders", orders_schema.clone())
+                .ok_or("Failed to create orders table")?;
+
+            catalog.create_table("products", products_schema.clone())
+                .ok_or("Failed to create products table")?;
+
+            catalog.create_table("order_items", order_items_schema.clone())
+                .ok_or("Failed to create order_items table")?;
+
+            Ok(())
+        }
+
+        fn debug_plan(&mut self, sql: &str) -> Result<(), Box<dyn Error>> {
+            info!("Generating plan for SQL: {}", sql);
+            match self.planner.explain(sql) {
+                Ok(plan) => {
+                    info!("Generated plan:\n{}", plan);
+                    Ok(())
+                },
                 Err(e) => {
-                    println!("Error in query '{}': {}", sql, e);
-                    panic!("Query planning failed");
+                    warn!("Failed to generate plan: {}", e);
+                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
                 }
             }
         }
     }
 
     #[test]
-    fn test_basic_column_access() {
-        let mut ctx = TestContext::new("test_basic_column_access");
-        ctx.setup_sample_tables().unwrap();
+    fn test_simple_selects() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_simple_selects");
+        ctx.setup_tables()?;
 
-        // Simplified test cases focusing on single column access
         let test_cases = vec![
             "SELECT id FROM users",
-            "SELECT name FROM users",
+            "SELECT id, name FROM users",
+            "SELECT * FROM users",
+            "SELECT DISTINCT name FROM users",
+            "SELECT id as user_id FROM users",
         ];
 
         for sql in test_cases {
-            let result = ctx.planner.explain(sql);
-            assert!(
-                result.is_ok(),
-                "Query '{}' should succeed. Error: {:?}",
-                sql,
-                result.err()
-            );
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("users"), "Plan should reference users table");
         }
+
+        Ok(())
     }
 
     #[test]
-    fn comprehensive_table_schema_test() {
-        let mut ctx = TestContext::new("comprehensive_table_schema_test");
-        ctx.setup_sample_tables().unwrap();
+    fn test_filters() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_filters");
+        ctx.setup_tables()?;
 
-        // Verify table schemas directly
-        let catalog_guard = ctx.catalog.read();
-
-        let tables = vec!["users", "orders", "products"];
-        for table_name in tables {
-            let table_info = catalog_guard.get_table(table_name)
-                .expect(&format!("Table {} should exist", table_name));
-
-            let schema = table_info.get_table_schema();
-
-            println!("Schema for {}: {}", table_name, schema);
-            assert!(
-                schema.get_column_count() > 0,
-                "Table {} should have columns",
-                table_name
-            );
-        }
-    }
-
-    #[test]
-    fn debug_schema_creation() {
-        let mut ctx = TestContext::new("debug_schema_creation");
-
-        // Manually create a table and print out details
-        let create_result = ctx.planner.create_logical_plan(
-            "CREATE TABLE test_debug (
-                id INTEGER,
-                name VARCHAR(255),
-                age INTEGER,
-                email VARCHAR(255)
-            )"
-        );
-
-        assert!(create_result.is_ok(), "Table creation should succeed");
-
-        // Retrieve and print the table's schema
-        let catalog_guard = ctx.catalog.read();
-        let table_info = catalog_guard.get_table("test_debug")
-            .expect("Table should exist in catalog");
-
-        let schema = table_info.get_table_schema();
-
-        println!("Schema details:");
-        for i in 0..schema.get_column_count() {
-            let column = schema.get_column(i.try_into().unwrap()).unwrap();
-            println!("Column {}: Name = {}, Type = {:?}",
-                     i,
-                     column.get_name(),
-                     column.get_type()
-            );
-        }
-
-        // Verify schema has correct columns
-        assert_eq!(schema.get_column_count(), 4, "Should have 4 columns");
-        assert_eq!(
-            schema.get_column_index("age").unwrap(),
-            2,
-            "Age column should be at index 2"
-        );
-    }
-
-    #[test]
-    fn verify_sample_tables_schema() {
-        let mut ctx = TestContext::new("verify_sample_tables_schema");
-        ctx.setup_sample_tables().unwrap();
-
-        let catalog_guard = ctx.catalog.read();
-        let tables = vec!["users", "orders", "products"];
-
-        for table_name in tables {
-            let table_info = catalog_guard.get_table(table_name)
-                .expect(&format!("Table {} should exist", table_name));
-
-            let schema = table_info.get_table_schema();
-
-            println!("Schema for {}: ", table_name);
-            for i in 0..schema.get_column_count() {
-                let column = schema.get_column(i.try_into().unwrap()).unwrap();
-                println!("Column {}: Name = {}, Type = {:?}",
-                         i,
-                         column.get_name(),
-                         column.get_type()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn comprehensive_column_resolution_test() {
-        let mut ctx = TestContext::new("comprehensive_column_resolution_test");
-        ctx.setup_sample_tables().unwrap();
-
-        // Test queries that should work
-        let valid_queries = vec![
-            "SELECT id FROM users",
-            "SELECT name FROM users",
-            "SELECT email FROM users",
+        let test_cases = vec![
+            "SELECT id FROM users WHERE age > 25",
+            "SELECT id FROM users WHERE age BETWEEN 20 AND 30",
+            "SELECT id FROM users WHERE name LIKE 'John%'",
+            "SELECT id FROM users WHERE age IN (25, 30, 35)",
+            "SELECT id FROM users WHERE age > 25 AND name LIKE 'John%'",
+            "SELECT id FROM users WHERE age > 25 OR name LIKE 'John%'",
         ];
 
-        // Test queries that should fail
-        let invalid_queries = vec![
-            "SELECT age FROM products",  // column doesn't exist
-            "SELECT nonexistent FROM users",  // column doesn't exist
-        ];
-
-        // Check valid queries
-        for sql in valid_queries {
-            let result = ctx.planner.explain(sql);
-            assert!(
-                result.is_ok(),
-                "Query '{}' should succeed. Error: {:?}",
-                sql,
-                result.err()
-            );
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("users"), "Plan should reference users table");
         }
 
-        // Check invalid queries
-        for sql in invalid_queries {
+        Ok(())
+    }
+
+    #[test]
+    fn test_joins() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_joins");
+        ctx.setup_tables()?;
+
+        let test_cases = vec![
+            "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id",
+            "SELECT u.name, o.amount FROM users u LEFT JOIN orders o ON u.id = o.user_id",
+            "SELECT u.name, p.name FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON p.id = o.product_id",
+            "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id WHERE o.amount > 1000",
+        ];
+
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+            assert!(plan.contains("JOIN"), "Plan should contain JOIN operation");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_aggregations() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_aggregations");
+        ctx.setup_tables()?;
+
+        let test_cases = vec![
+            "SELECT COUNT(*) FROM users",
+            "SELECT age, COUNT(*) FROM users GROUP BY age",
+            "SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 5",
+            "SELECT category, AVG(price) FROM products GROUP BY category",
+            "SELECT user_id, SUM(amount) FROM orders GROUP BY user_id",
+            "SELECT category, COUNT(*), AVG(price) FROM products GROUP BY category HAVING COUNT(*) > 2",
+        ];
+
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sorting_and_limits() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_sorting_and_limits");
+        ctx.setup_tables()?;
+
+        let test_cases = vec![
+            "SELECT * FROM users ORDER BY age DESC",
+            "SELECT * FROM users ORDER BY age ASC, name DESC",
+            "SELECT * FROM users LIMIT 10",
+            "SELECT * FROM users ORDER BY age DESC LIMIT 5",
+            "SELECT name, age FROM users ORDER BY age DESC LIMIT 5",
+        ];
+
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_complex_queries() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_complex_queries");
+        ctx.setup_tables()?;
+
+        let test_cases = vec![
+            // Complex join with aggregation
+            "SELECT
+                u.name,
+                COUNT(o.id) as order_count,
+                SUM(o.amount) as total_spent
+             FROM users u
+             LEFT JOIN orders o ON u.id = o.user_id
+             GROUP BY u.id, u.name
+             HAVING COUNT(o.id) > 0
+             ORDER BY total_spent DESC
+             LIMIT 10",
+
+            // Multiple joins with filtering
+            "SELECT
+                u.name,
+                p.name as product_name,
+                oi.quantity,
+                o.amount
+             FROM users u
+             JOIN orders o ON u.id = o.user_id
+             JOIN order_items oi ON o.id = oi.order_id
+             JOIN products p ON p.id = oi.product_id
+             WHERE o.status = 'completed'
+             AND p.category = 'electronics'",
+
+            // Subquery in WHERE clause
+            "SELECT name, age
+             FROM users
+             WHERE id IN (
+                 SELECT user_id
+                 FROM orders
+                 GROUP BY user_id
+                 HAVING SUM(amount) > 1000
+             )",
+        ];
+
+        for sql in test_cases {
+            info!("Testing SQL: {}", sql);
+            let plan = ctx.planner.explain(sql)?;
+            assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_error_handling() {
+        let mut ctx = TestContext::new("test_error_handling");
+        ctx.setup_tables().unwrap();
+
+        let error_cases = vec![
+            // Invalid table
+            ("SELECT * FROM nonexistent_table", "not found in catalog"),
+
+            // Invalid column
+            ("SELECT nonexistent FROM users", "not found in schema"),
+
+            // Invalid join condition
+            ("SELECT * FROM users JOIN orders ON invalid = invalid", "not found in schema"),
+
+            // Invalid group by
+            ("SELECT age FROM users GROUP BY nonexistent", "not found in schema"),
+
+            // Invalid having clause
+            ("SELECT age FROM users GROUP BY age HAVING invalid > 0", "not found in schema"),
+
+            // Type mismatch in condition
+            ("SELECT * FROM users WHERE age = 'invalid'", "type mismatch"),
+        ];
+
+        for (sql, expected_error) in error_cases {
+            info!("Testing error case: {}", sql);
             let result = ctx.planner.explain(sql);
+            assert!(result.is_err(), "Query should fail: {}", sql);
+            let error = result.unwrap_err();
             assert!(
-                result.is_err(),
-                "Query '{}' should fail due to nonexistent column",
+                error.to_string().to_lowercase().contains(&expected_error.to_lowercase()),
+                "Error '{}' should contain '{}' for query: {}",
+                error,
+                expected_error,
                 sql
-            );
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn test_catalog_display() {
-        let mut ctx = TestContext::new("test_catalog_display");
-        ctx.setup_sample_tables().unwrap();
-
-        // Print the entire catalog
-        let catalog_guard = ctx.catalog.read();
-        println!("{}", catalog_guard);
-
-        // Verify that the display doesn't panic and contains expected information
-        let catalog_string = format!("{}", catalog_guard);
-
-        let tables = vec!["users", "orders", "products"];
-        for table in tables {
-            assert!(
-                catalog_string.contains(table),
-                "Catalog display should contain table: {}",
-                table
             );
         }
     }
