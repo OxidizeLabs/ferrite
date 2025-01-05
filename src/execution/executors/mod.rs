@@ -10,3 +10,4 @@ pub mod values_executor;
 pub mod projection_executor;
 pub mod create_index_executor;
 pub mod mock_scan_executor;
+pub mod index_scan_executor;

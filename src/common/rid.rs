@@ -4,7 +4,7 @@ use std::fmt;
 use std::hash::Hash;
 
 /// Represents a Record ID (RID) in the table.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct RID {
     page_id: PageId,
     slot_num: u32,

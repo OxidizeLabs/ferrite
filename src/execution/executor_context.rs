@@ -30,9 +30,14 @@ impl ExecutorContext {
         lock_manager: Arc<LockManager>,
     ) -> Self {
         debug!(
-            "Creating ExecutorContext for transaction {}",
-            transaction.get_transaction_id()
-        );
+        "Creating ExecutorContext for transaction {}",
+        transaction.get_transaction_id()
+    );
+
+        // Create check options and enable necessary optimizations
+        let mut options = CheckOptions::new();
+        options.add_check(CheckOption::EnablePushdownCheck);  // Enable predicate pushdown
+        options.add_check(CheckOption::EnableTopnCheck);      // Enable sort/limit optimization
 
         Self {
             transaction,
@@ -41,7 +46,7 @@ impl ExecutorContext {
             transaction_manager,
             lock_manager,
             nlj_check_exec_set: VecDeque::new(),
-            check_options: Arc::new(CheckOptions::new()),
+            check_options: Arc::new(options),
             is_delete: false,
         }
     }
@@ -90,13 +95,16 @@ impl ExecutorContext {
     }
 
     pub fn init_check_options(&mut self) {
-        // Initialize check options based on the current state
         let mut options = CheckOptions::new();
 
         // Add default checks if needed
         if !self.nlj_check_exec_set.is_empty() {
             options.add_check(CheckOption::EnableNljCheck);
         }
+
+        // Always enable these optimizations
+        options.add_check(CheckOption::EnablePushdownCheck);
+        options.add_check(CheckOption::EnableTopnCheck);
 
         self.check_options = Arc::new(options);
     }

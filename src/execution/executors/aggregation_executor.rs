@@ -770,7 +770,7 @@ mod tests {
         );
     }
 
-    #[tesin, Mt]
+    #[test]
     fn test_min_max_aggregation() {
         let test_context = TestContext::new("agg_min_max");
         let input_schema = Schema::new(vec![
