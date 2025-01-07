@@ -9,6 +9,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use crate::storage::index::b_plus_tree_i::BPlusTree;
 use crate::storage::index::index_iterator::IndexIterator;
+use crate::types_db::value::Value;
 
 #[derive(Debug)]
 pub enum IndexType {
@@ -74,6 +75,13 @@ impl IndexInfo {
         }
     }
 
+
+    pub fn create_dummy_key(&self) -> Tuple {
+        let key_schema = self.get_key_schema();
+        Tuple::new(&[Value::new(0)], key_schema.clone(), RID::new(0,0))
+    }
+
+
     pub fn get_key_schema(&self) -> &Schema {
         &self.key_schema
     }
@@ -114,10 +122,11 @@ impl IndexInfo {
     // Creates an iterator for scanning the index
     pub fn create_iterator(&self,
                            tree: Arc<RwLock<BPlusTree>>,
+                           batch_size: usize,
                            start_key: Option<Tuple>,
                            end_key: Option<Tuple>
     ) -> IndexIterator {
-        IndexIterator::new(tree, start_key, end_key)
+        IndexIterator::new(tree, batch_size, start_key, end_key)
     }
 }
 
@@ -179,7 +188,7 @@ pub trait Index: Send + Sync {
     /// - `key`: The index key.
     /// - `rid`: The RID associated with the key (unused).
     /// - `transaction`: The transaction context.
-    fn delete_entry(&self, key: &Tuple, rid: RID, transaction: &Transaction) {
+    fn delete_entry(&self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool {
         unimplemented!()
     }
 
