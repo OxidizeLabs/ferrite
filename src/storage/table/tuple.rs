@@ -30,6 +30,10 @@ impl TupleMeta {
     pub fn is_deleted(&self) -> bool {
         self.is_deleted
     }
+
+    pub fn mark_as_deleted(&mut self) {
+        self.is_deleted = true
+    }
 }
 
 /// Represents a tuple in the database.
