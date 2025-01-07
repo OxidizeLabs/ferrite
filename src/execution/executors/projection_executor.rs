@@ -130,6 +130,7 @@ mod tests {
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::plans::abstract_plan::PlanNode;
+    use crate::execution::plans::mock_scan_plan::MockScanNode;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -140,7 +141,6 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
-    use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

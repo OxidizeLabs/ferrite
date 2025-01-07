@@ -1,12 +1,16 @@
 use crate::catalogue::catalogue::Catalog;
 use crate::common::exception::DBError;
+use crate::common::result_writer::ResultWriter;
 use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::executors::aggregation_executor::AggregationExecutor;
+use crate::execution::executors::create_index_executor::CreateIndexExecutor;
 use crate::execution::executors::create_table_executor::CreateTableExecutor;
 use crate::execution::executors::filter_executor::FilterExecutor;
+use crate::execution::executors::index_scan_executor::IndexScanExecutor;
 use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::executors::mock_executor::MockExecutor;
 use crate::execution::executors::projection_executor::ProjectionExecutor;
 use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::execution::executors::table_scan_executor::TableScanExecutor;
@@ -19,10 +23,6 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::env;
 use std::sync::Arc;
-use crate::common::result_writer::ResultWriter;
-use crate::execution::executors::create_index_executor::CreateIndexExecutor;
-use crate::execution::executors::index_scan_executor::IndexScanExecutor;
-use crate::execution::executors::mock_executor::MockExecutor;
 
 pub struct ExecutorEngine {
     // buffer_pool_manager: Arc<BufferPoolManager>,

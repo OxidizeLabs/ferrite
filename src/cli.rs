@@ -1,5 +1,6 @@
 use crate::common::db_instance::{DBConfig, DBInstance};
 use crate::common::logger::initialize_logger;
+use crate::common::result_writer::{CliResultWriter, ResultWriter};
 use clap::Parser;
 use colored::*;
 use log::{debug, info, warn};
@@ -7,7 +8,6 @@ use parking_lot::Mutex;
 use rustyline::DefaultEditor;
 use std::error::Error;
 use std::sync::Arc;
-use crate::common::result_writer::{CliResultWriter, ResultWriter};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

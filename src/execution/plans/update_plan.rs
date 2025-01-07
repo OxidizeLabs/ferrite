@@ -18,7 +18,7 @@ impl UpdateNode {
                table_name: String,
                table_id: TableOidT,
                target_expressions: Vec<Arc<Expression>>,
-               children: Vec<PlanNode>
+               children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema,

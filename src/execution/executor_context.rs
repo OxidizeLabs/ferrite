@@ -128,6 +128,7 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::execution::executors::mock_executor::MockExecutor;
+    use crate::execution::plans::mock_scan_plan::MockScanNode;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -135,7 +136,6 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
-    use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     struct TestContext {
         transaction: Arc<Transaction>,

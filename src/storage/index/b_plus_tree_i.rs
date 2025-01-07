@@ -1443,7 +1443,7 @@ mod advanced_tests {
             for &num in &numbers {
                 let tuple = create_tuple(num, &format!("random{}", num), &schema);
                 assert!(
-                    tree_guard.insert(tuple, RID::new(0, num as u32),),
+                    tree_guard.insert(tuple, RID::new(0, num as u32), ),
                     "Insertion of random key {} failed",
                     num
                 );

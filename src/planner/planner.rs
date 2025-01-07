@@ -1313,7 +1313,7 @@ impl LogicalPlan {
         table_oid: u64,
         index_name: String,
         index_oid: u64,
-        schema: Schema
+        schema: Schema,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::IndexScan {
@@ -1323,7 +1323,7 @@ impl LogicalPlan {
                 index_oid,
                 schema,
             },
-            vec![]
+            vec![],
         ))
     }
 

@@ -1,5 +1,6 @@
 use crate::catalogue::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
+use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
@@ -21,7 +22,6 @@ use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -152,7 +152,6 @@ impl PlanNode {
             PlanNode::CreateTable(node) => node,
             PlanNode::CreateIndex(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
-
         }
     }
 
@@ -217,12 +216,12 @@ impl PlanNode {
             PlanNode::Sort(node) => {
                 result.push_str(&format!("{}→ Sort\n", indent));
                 result.push_str(&format!("{}   Order By: {:?}\n", indent, node.get_order_bys()));
-                result.push_str(&node.get_children().iter().map(|_|self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
+                result.push_str(&node.get_children().iter().map(|_| self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
             }
             PlanNode::Limit(node) => {
                 result.push_str(&format!("{}→ Limit\n", indent));
                 result.push_str(&format!("{}   Limit: {}\n", indent, node.get_limit()));
-                result.push_str(&node.get_children().iter().map(|_|self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
+                result.push_str(&node.get_children().iter().map(|_| self.explain_internal(depth + 1)).collect::<Vec<String>>().join(" "));
             }
             PlanNode::Empty => {
                 result.push_str(&format!("{}→ Empty\n", indent));
@@ -252,12 +251,12 @@ mod basic_behaviour {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
+    use log::{info, warn};
     use parking_lot::RwLock;
     use std::collections::HashMap;
+    use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use std::error::Error;
-    use log::{info, warn};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -361,7 +360,7 @@ mod basic_behaviour {
                 Ok(plan) => {
                     info!("Generated plan:\n{}", plan);
                     Ok(())
-                },
+                }
                 Err(e) => {
                     warn!("Failed to generate plan: {}", e);
                     Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
@@ -501,12 +500,12 @@ mod complex_behaviour {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
+    use log::{info, warn};
     use parking_lot::RwLock;
     use std::collections::HashMap;
+    use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use std::error::Error;
-    use log::{info, warn};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -620,7 +619,7 @@ mod complex_behaviour {
                 Ok(plan) => {
                     info!("Generated plan:\n{}", plan);
                     Ok(())
-                },
+                }
                 Err(e) => {
                     warn!("Failed to generate plan: {}", e);
                     Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))

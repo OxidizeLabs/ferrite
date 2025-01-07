@@ -2,6 +2,7 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalogue::catalogue::Catalog;
 use crate::common::exception::DBError;
+use crate::common::result_writer::ResultWriter;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
@@ -15,7 +16,6 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-use crate::common::result_writer::ResultWriter;
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]

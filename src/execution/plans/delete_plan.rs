@@ -11,7 +11,7 @@ pub struct DeleteNode {
     output_schema: Schema,
     table_name: String,
     table_id: TableOidT,
-    children: Vec<PlanNode>
+    children: Vec<PlanNode>,
 }
 
 impl DeleteNode {
@@ -89,7 +89,6 @@ impl AbstractPlanNode for DeleteNode {
 
         result
     }
-
 }
 
 #[cfg(test)]
@@ -164,7 +163,7 @@ mod tests {
             schema.clone(),
             table_name,
             0,
-            vec![child1, child2, child3]
+            vec![child1, child2, child3],
         );
 
         let children_string = delete_node.children_to_string(2);
@@ -193,7 +192,7 @@ mod tests {
             schema.clone(),
             table_name,
             0,
-            vec![child1, child2]
+            vec![child1, child2],
         );
 
         // Test with different indentation levels
