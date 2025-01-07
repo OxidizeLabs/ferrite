@@ -350,20 +350,15 @@ impl AbstractExecutor for IndexScanExecutor {
 
 #[cfg(test)]
 mod index_scan_executor_tests {
-    use std::collections::HashMap;
-    use std::fs;
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::common::config::{IndexOidT, TableOidT, INVALID_TXN_ID};
-    use crate::common::logger::initialize_logger;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::storage::index::index::IndexType;
-    use crate::types_db::type_id::TypeId;
-    use std::sync::Arc;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
+    use crate::catalogue::column::Column;
+    use crate::common::config::{IndexOidT, TableOidT};
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::execution::execution_engine::ExecutorEngine;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -372,8 +367,13 @@ mod index_scan_executor_tests {
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::index::index::IndexType;
     use crate::storage::table::tuple::TupleMeta;
+    use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::sync::Arc;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -548,20 +548,20 @@ mod index_scan_executor_tests {
             0,
             0,
             Column::new("id", TypeId::Integer),
-            vec![]
+            vec![],
         )));
 
         let right = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(value),
             Column::new("const", TypeId::Integer),
-            vec![]
+            vec![],
         )));
 
         Arc::new(Expression::Comparison(ComparisonExpression::new(
             left,
             right,
             op,
-            vec![]
+            vec![],
         )))
     }
 

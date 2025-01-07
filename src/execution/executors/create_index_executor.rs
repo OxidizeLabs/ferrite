@@ -260,7 +260,7 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
-            HashMap::new()
+            HashMap::new(),
         )
     }
 
@@ -296,7 +296,7 @@ mod tests {
             "test_table".to_string(),
             "test_index".to_string(),
             key_attrs,
-            false
+            false,
         ));
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
@@ -320,7 +320,7 @@ mod tests {
             catalog_guard.create_table("test_table", schema.clone());
         }
 
-        let columns = vec![0,1];
+        let columns = vec![0, 1];
 
         let exec_context = create_test_executor_context(&test_context, catalog.clone());
         let plan = Arc::new(CreateIndexPlanNode::new(
@@ -328,7 +328,7 @@ mod tests {
             "test_table".to_string(),
             "test_index".to_string(),
             columns,
-            false
+            false,
         ));
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
@@ -369,7 +369,7 @@ mod tests {
             "test_index".to_string(),
             "test_table".to_string(),
             columns,
-            true
+            true,
         ));
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
@@ -392,7 +392,7 @@ mod tests {
             "test_index".to_string(),
             "nonexistent_table".to_string(),
             columns,
-            false
+            false,
         ));
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
@@ -430,7 +430,7 @@ mod tests {
                 "test_table".to_string(),
                 format!("test_index_{}", i),
                 columns.clone(),
-                false
+                false,
             ));
             executors.push(CreateIndexExecutor::new(exec_context.clone(), plan, false));
         }
@@ -468,7 +468,7 @@ mod tests {
             "test_table".to_string(),
             "test_index".to_string(),
             key_attrs.clone(),
-            false
+            false,
         ));
 
         let mut executor1 = CreateIndexExecutor::new(exec_context.clone(), plan1, false);
@@ -489,7 +489,7 @@ mod tests {
             "test_table".to_string(),
             "test_index".to_string(),
             key_attrs.clone(),
-            false
+            false,
         ));
 
         let mut executor2 = CreateIndexExecutor::new(exec_context.clone(), plan2, false);
@@ -509,7 +509,7 @@ mod tests {
             "test_table".to_string(),
             "test_index".to_string(),
             key_attrs,
-            true
+            true,
         ));
 
         let mut executor3 = CreateIndexExecutor::new(exec_context, plan3, false);

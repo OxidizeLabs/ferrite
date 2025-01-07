@@ -2,14 +2,14 @@ use crate::catalogue::schema::Schema;
 use crate::common::config::IndexOidT;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
-use crate::storage::table::tuple::Tuple;
-use core::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use parking_lot::RwLock;
 use crate::storage::index::b_plus_tree_i::BPlusTree;
 use crate::storage::index::index_iterator::IndexIterator;
+use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
+use core::fmt;
+use parking_lot::RwLock;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum IndexType {
@@ -78,7 +78,7 @@ impl IndexInfo {
 
     pub fn create_dummy_key(&self) -> Tuple {
         let key_schema = self.get_key_schema();
-        Tuple::new(&[Value::new(0)], key_schema.clone(), RID::new(0,0))
+        Tuple::new(&[Value::new(0)], key_schema.clone(), RID::new(0, 0))
     }
 
 
@@ -124,7 +124,7 @@ impl IndexInfo {
                            tree: Arc<RwLock<BPlusTree>>,
                            batch_size: usize,
                            start_key: Option<Tuple>,
-                           end_key: Option<Tuple>
+                           end_key: Option<Tuple>,
     ) -> IndexIterator {
         IndexIterator::new(tree, batch_size, start_key, end_key)
     }
@@ -206,7 +206,7 @@ pub trait Index: Send + Sync {
     fn create_iterator(
         &self,
         start_key: Option<Tuple>,
-        end_key: Option<Tuple>
+        end_key: Option<Tuple>,
     ) -> IndexIterator {
         unimplemented!()
     }

@@ -24,7 +24,7 @@ impl IndexScanNode {
         index_id: IndexOidT,
         predicate_keys: Vec<Arc<Expression>>,
         children: Vec<PlanNode>,
-    ) -> Self{
+    ) -> Self {
         Self {
             output_schema,
             table_name,
@@ -32,7 +32,7 @@ impl IndexScanNode {
             index_name,
             index_id,
             predicate_keys,
-            children
+            children,
         }
     }
 
@@ -51,7 +51,6 @@ impl IndexScanNode {
     pub fn get_predicate_keys(&self) -> &Vec<Arc<Expression>> {
         &self.predicate_keys
     }
-
 }
 
 impl AbstractPlanNode for IndexScanNode {

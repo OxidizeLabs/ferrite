@@ -7,10 +7,10 @@ use crate::storage::index::index::{Index, IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use core::fmt;
 use log::{info, warn};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 /// The Catalog is a non-persistent catalog that is designed for
 /// use by executors within the DBMS execution engine. It handles
@@ -222,7 +222,7 @@ impl Catalog {
         &mut self,
         index_oid: IndexOidT,
         index_info: Arc<IndexInfo>,
-        btree: Arc<RwLock<BPlusTree>>
+        btree: Arc<RwLock<BPlusTree>>,
     ) {
         self.indexes.insert(index_oid, (index_info, btree));
     }

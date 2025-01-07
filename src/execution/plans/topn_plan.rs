@@ -15,7 +15,7 @@ impl TopNNode {
     pub fn new(output_schema: Schema,
                order_bys: Vec<Arc<Expression>>,
                k: usize,
-               children: Vec<PlanNode>,) -> Self {
+               children: Vec<PlanNode>, ) -> Self {
         Self {
             output_schema,
             order_bys,

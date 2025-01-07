@@ -264,7 +264,7 @@ impl TablePage {
                 DB_PAGE_SIZE,
                 buffer.len()
             )
-            .into());
+                .into());
         }
 
         // Read header information (20 bytes)

@@ -1,16 +1,16 @@
 use crate::catalogue::schema::Schema;
+use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::common::config::PageId;
-use crate::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::types_db::type_id::TypeId;
 
 pub struct MockScanExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -41,7 +41,7 @@ impl MockScanExecutor {
         // Generate 3 mock tuples for testing
         for i in 0..3 {
             let mut values = Vec::new();
-            for (col_idx, column) in schema.get_columns().iter().enumerate() {
+            for (_col_idx, column) in schema.get_columns().iter().enumerate() {
                 // Generate appropriate mock value based on column type
                 let value = match column.get_type() {
                     TypeId::Integer => Value::new(i),

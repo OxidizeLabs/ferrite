@@ -147,8 +147,7 @@ impl AbstractExecutor for SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::types_db::value::Val;
-use super::*;
+    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalogue::catalogue::Catalog;
@@ -162,6 +161,7 @@ use super::*;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;

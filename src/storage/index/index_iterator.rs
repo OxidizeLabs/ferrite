@@ -4,7 +4,6 @@ use crate::storage::table::tuple::Tuple;
 use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::types_db::value::Value;
 
 /// An iterator over entries in a B+ tree index.
 #[derive(Debug)]
@@ -16,7 +15,6 @@ pub struct IndexIterator {
     end_key: Option<Tuple>,
     batch_size: usize,
     exhausted: bool,
-    doing_full_scan: bool, // Add flag for full scan
 }
 
 impl IndexIterator {
@@ -48,7 +46,6 @@ impl IndexIterator {
             end_key,
             batch_size,
             exhausted: false,
-            doing_full_scan,
         }
     }
 
@@ -135,20 +132,6 @@ impl IndexIterator {
                 self.exhausted = true;
                 false
             }
-        }
-    }
-
-    /// Check if we've reached the end of the current batch
-    fn is_batch_end(&self) -> bool {
-        self.position >= self.results.len()
-    }
-
-    /// Get current tuple and RID
-    fn get_current(&self) -> Option<(Tuple, RID)> {
-        if self.position < self.results.len() {
-            Some(self.results[self.position].clone())
-        } else {
-            None
         }
     }
 }

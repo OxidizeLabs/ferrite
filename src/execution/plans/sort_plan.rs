@@ -13,9 +13,9 @@ pub struct SortNode {
 impl SortNode {
     pub fn new(output_schema: Schema, order_bys: Vec<Arc<Expression>>, children: Vec<PlanNode>) -> Self {
         Self {
-                output_schema,
-                order_bys,
-                children
+            output_schema,
+            order_bys,
+            children,
         }
     }
 

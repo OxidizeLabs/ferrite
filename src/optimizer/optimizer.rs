@@ -6,9 +6,9 @@ use crate::execution::expressions::abstract_expression::{Expression, ExpressionO
 use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
 use crate::planner::planner::{LogicalPlan, LogicalPlanType};
 use crate::types_db::value::Val;
+use log::{debug, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use log::{debug, info, trace, warn};
 
 
 pub struct Optimizer {
@@ -111,7 +111,7 @@ impl Optimizer {
                                                 index_oid: index_info.get_index_oid(),
                                                 schema: schema.clone(),
                                             },
-                                            vec![]
+                                            vec![],
                                         )));
                                     }
                                 }
@@ -130,14 +130,14 @@ impl Optimizer {
     }
 
     fn apply_index_scan_to_children(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
-            // Recursively try to convert any table scans in child nodes
-            let mut new_children = Vec::new();
-            for child in plan.children.drain(..) {
-                new_children.push(self.apply_index_scan_optimization(child)?);
-            }
-            plan.children = new_children;
-            Ok(plan)
+        // Recursively try to convert any table scans in child nodes
+        let mut new_children = Vec::new();
+        for child in plan.children.drain(..) {
+            new_children.push(self.apply_index_scan_optimization(child)?);
         }
+        plan.children = new_children;
+        Ok(plan)
+    }
 
     /// Phase 1: Early pruning and simplification
     fn apply_early_pruning(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {

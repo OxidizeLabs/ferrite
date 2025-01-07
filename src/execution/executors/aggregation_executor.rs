@@ -10,7 +10,6 @@ use crate::execution::plans::aggregation_plan::{
     AggregateKey, AggregateValue, AggregationPlanNode,
 };
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
 use log::{debug, error};
 use parking_lot::RwLock;
@@ -193,7 +192,7 @@ impl AggregationExecutor {
         // Get or create current aggregates for this group
         let current_aggregates = self.group_values.entry(group_key).or_insert_with(|| {
             AggregateValue {
-                aggregates: agg_values.iter().enumerate().map(|(i, val)| {
+                aggregates: agg_values.iter().enumerate().map(|(i, _val)| {
                     match self.agg_plan.get_aggregate_types()[i] {
                         AggregationType::Min => Value::new(i32::MAX),
                         AggregationType::Max => Value::new(i32::MIN),
@@ -222,14 +221,14 @@ impl AggregationExecutor {
                         _ => 0
                     };
                     current_aggregates.aggregates[i] = Value::new(curr + new);
-                },
+                }
                 AggregationType::Count | AggregationType::CountStar => {
                     let count = match current_aggregates.aggregates[i].get_value() {
                         Val::Integer(v) => *v,
                         _ => 0
                     };
                     current_aggregates.aggregates[i] = Value::new(count + 1);
-                },
+                }
                 AggregationType::Min => {
                     let curr = match current_aggregates.aggregates[i].get_value() {
                         Val::Integer(v) => *v,
@@ -240,7 +239,7 @@ impl AggregationExecutor {
                         _ => curr
                     };
                     current_aggregates.aggregates[i] = Value::new(curr.min(new));
-                },
+                }
                 AggregationType::Max => {
                     let curr = match current_aggregates.aggregates[i].get_value() {
                         Val::Integer(v) => *v,
@@ -251,140 +250,13 @@ impl AggregationExecutor {
                         _ => curr
                     };
                     current_aggregates.aggregates[i] = Value::new(curr.max(new));
-                },
+                }
                 AggregationType::Avg => {
                     // Avg requires tracking count and sum separately
                     // Not implementing for now
                     current_aggregates.aggregates[i] = Value::new(0);
                 }
             }
-        }
-    }
-
-    /// Compute the aggregate value based on aggregation type
-    fn compute_aggregate_value(
-        agg_type: AggregationType,
-        old_value: Option<&Value>,
-        new_value: &Value,
-    ) -> Result<Value, ExpressionError> {
-        match agg_type {
-            AggregationType::Sum => {
-                // Detailed sum computation with comprehensive type conversion
-                match (old_value, new_value.get_value()) {
-                    // Initial sum cases
-                    (None, Val::Integer(val)) => Ok(Value::new(*val)),
-                    (None, Val::BigInt(val)) => Ok(Value::new(*val as i32)),
-                    (None, Val::Decimal(val)) => Ok(Value::new(*val as i32)),
-
-                    // Summing with existing Integer value
-                    (
-                        Some(Value {
-                                 value_: Val::Integer(sum),
-                                 ..
-                             }),
-                        Val::Integer(new_val),
-                    ) => Ok(Value::new(*sum + *new_val)),
-                    (
-                        Some(Value {
-                                 value_: Val::Integer(sum),
-                                 ..
-                             }),
-                        Val::BigInt(new_val),
-                    ) => Ok(Value::new(*sum + *new_val as i32)),
-                    (
-                        Some(Value {
-                                 value_: Val::Integer(sum),
-                                 ..
-                             }),
-                        Val::Decimal(new_val),
-                    ) => Ok(Value::new(*sum + *new_val as i32)),
-
-                    // Summing with existing BigInt value
-                    (
-                        Some(Value {
-                                 value_: Val::BigInt(sum),
-                                 ..
-                             }),
-                        Val::Integer(new_val),
-                    ) => Ok(Value::new((*sum + *new_val as i64) as i32)),
-                    (
-                        Some(Value {
-                                 value_: Val::BigInt(sum),
-                                 ..
-                             }),
-                        Val::BigInt(new_val),
-                    ) => Ok(Value::new((*sum + *new_val) as i32)),
-                    (
-                        Some(Value {
-                                 value_: Val::BigInt(sum),
-                                 ..
-                             }),
-                        Val::Decimal(new_val),
-                    ) => Ok(Value::new((*sum as f64 + *new_val) as i32)),
-
-                    // Summing with existing Decimal value
-                    (
-                        Some(Value {
-                                 value_: Val::Decimal(sum),
-                                 ..
-                             }),
-                        Val::Integer(new_val),
-                    ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
-                    (
-                        Some(Value {
-                                 value_: Val::Decimal(sum),
-                                 ..
-                             }),
-                        Val::BigInt(new_val),
-                    ) => Ok(Value::new((*sum + *new_val as f64) as i32)),
-                    (
-                        Some(Value {
-                                 value_: Val::Decimal(sum),
-                                 ..
-                             }),
-                        Val::Decimal(new_val),
-                    ) => Ok(Value::new((*sum + *new_val) as i32)),
-
-                    // Fallback for unsupported combinations
-                    _ => Err(ExpressionError::InvalidOperation(
-                        "Unsupported sum aggregation".to_string(),
-                    )),
-                }
-            }
-            AggregationType::CountStar | AggregationType::Count => match old_value {
-                Some(val) => match val.get_value() {
-                    Val::Integer(count) => Ok(Value::new(count + 1)),
-                    Val::BigInt(count) => Ok(Value::new((count + 1) as i32)),
-                    _ => Err(ExpressionError::InvalidOperation(
-                        "Invalid count value".to_string(),
-                    )),
-                },
-                None => Ok(Value::new(1i32)),
-            },
-            // Rest of the implementation remains the same
-            AggregationType::Min => match old_value {
-                Some(old) => {
-                    if old.compare_less_than(new_value) == CmpBool::CmpTrue {
-                        Ok(old.clone())
-                    } else {
-                        Ok(new_value.clone())
-                    }
-                }
-                None => Ok(new_value.clone()),
-            },
-            AggregationType::Max => match old_value {
-                Some(old) => {
-                    if old.compare_greater_than(new_value) == CmpBool::CmpTrue {
-                        Ok(old.clone())
-                    } else {
-                        Ok(new_value.clone())
-                    }
-                }
-                None => Ok(new_value.clone()),
-            },
-            AggregationType::Avg => Err(ExpressionError::InvalidOperation(
-                "AVG aggregation not supported".to_string(),
-            )),
         }
     }
 
@@ -451,17 +323,18 @@ mod tests {
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::execution::plans::mock_scan_plan::MockScanNode;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::types::{CmpBool, Type};
     use crate::types_db::value::Val::Integer;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -565,7 +438,7 @@ mod tests {
             Arc::new(mock_scan_plan),
             0,
             vec![],
-            Default::default()
+            Default::default(),
         );
     }
 

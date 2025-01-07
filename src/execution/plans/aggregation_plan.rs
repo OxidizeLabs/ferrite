@@ -79,16 +79,6 @@ impl AggregationPlanNode {
     pub fn get_group_bys2(&self) -> &Vec<Arc<Expression>> {
         &self.group_bys
     }
-
-    /// Infers the schema for the aggregation.
-    pub fn infer_agg_schema(
-        group_bys: &[Arc<Expression>],
-        aggregates: &[Arc<Expression>],
-        agg_types: &[AggregationType],
-    ) -> Schema {
-        // Implementation of schema inference goes here
-        unimplemented!("Schema inference not yet implemented")
-    }
 }
 
 impl AbstractPlanNode for AggregationPlanNode {
@@ -104,7 +94,7 @@ impl AbstractPlanNode for AggregationPlanNode {
         PlanType::Aggregation
     }
 
-    fn to_string(&self, with_schema: bool) -> String {
+    fn to_string(&self, _with_schema: bool) -> String {
         format!("AggregationPlanNode: {:?}", self)
     }
 

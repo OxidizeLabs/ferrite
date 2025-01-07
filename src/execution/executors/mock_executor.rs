@@ -2,11 +2,11 @@ use crate::catalogue::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::plans::mock_scan_plan::MockScanNode;
 
 pub struct MockExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -17,7 +17,7 @@ pub struct MockExecutor {
 }
 
 impl MockExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<MockScanNode>,     current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<MockScanNode>, current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
         Self {
             context,
             plan,

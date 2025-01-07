@@ -71,4 +71,5 @@ impl AbstractPlanNode for LimitNode {
         result.push_str(&self.get_children()[1].children_to_string(indent + 2));
 
         result
-    }}
+    }
+}
