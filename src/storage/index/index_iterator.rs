@@ -1,9 +1,10 @@
 use crate::common::rid::RID;
 use crate::storage::index::b_plus_tree_i::BPlusTree;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error};
-use std::sync::Arc;
+use log::debug;
 use parking_lot::RwLock;
+use std::sync::Arc;
+use crate::types_db::value::Value;
 
 /// An iterator over entries in a B+ tree index.
 #[derive(Debug)]
@@ -15,28 +16,28 @@ pub struct IndexIterator {
     end_key: Option<Tuple>,
     batch_size: usize,
     exhausted: bool,
-    prev_batch_last_key: Option<Tuple>,  // Track last key from previous batch
+    doing_full_scan: bool, // Add flag for full scan
 }
 
 impl IndexIterator {
     /// Create a new index iterator with batched scanning.
     pub fn new(
         tree: Arc<RwLock<BPlusTree>>,
+        batch_size: usize,
         start_key: Option<Tuple>,
         end_key: Option<Tuple>,
     ) -> Self {
-        println!("Creating new IndexIterator");
-        println!("Start key: {:?}", start_key.as_ref().map(|k| k.get_value(0)));
-        println!("End key: {:?}", end_key.as_ref().map(|k| k.get_value(0)));
+        let doing_full_scan = start_key.is_none() && end_key.is_none();
+        let mut results = Vec::with_capacity(batch_size);
 
-        let batch_size = 1000;
-        let mut results: Vec<(_, _)> = Vec::with_capacity(batch_size);
-
-        // Initialize first batch if we have bounds
-        if let (Some(start), Some(end)) = (&start_key, &end_key) {
+        if doing_full_scan {
+            // Initialize with empty keys for full scan
+            let tree_guard = tree.read();
+            let empty_key = tree_guard.get_metadata().create_dummy_key();
+            tree_guard.scan_range(&empty_key, &empty_key, true, &mut results);
+        } else if let (Some(start), Some(end)) = (&start_key, &end_key) {
             let tree_guard = tree.read();
             tree_guard.scan_range(start, end, true, &mut results);
-            println!("Initial scan returned {} results", results.len());
         }
 
         Self {
@@ -47,7 +48,7 @@ impl IndexIterator {
             end_key,
             batch_size,
             exhausted: false,
-            prev_batch_last_key: None,
+            doing_full_scan,
         }
     }
 
@@ -62,6 +63,22 @@ impl IndexIterator {
         println!("- Current position: {}", self.position);
         println!("- Current results length: {}", self.results.len());
 
+        // Handle full scan case
+        if self.start_key.is_none() && self.end_key.is_none() {
+            // Only do the full scan if we haven't done it yet
+            if self.position == 0 && self.results.is_empty() {
+                let tree_guard = self.tree.read();
+                let empty_key = tree_guard.get_metadata().create_dummy_key();
+                tree_guard.scan_range(&empty_key, &empty_key, true, &mut self.results);
+                println!("Full scan returned {} results", self.results.len());
+            }
+
+            // Mark exhausted since we only do one full scan
+            self.exhausted = true;
+            return !self.results.is_empty();
+        }
+
+        // Handle range scan case
         match (&self.start_key, &self.end_key) {
             (Some(start), Some(end)) => {
                 let tree_guard = self.tree.read();
@@ -76,12 +93,8 @@ impl IndexIterator {
 
                     // Check if we've reached the end
                     let cmp = tree_guard.compare_keys(prev_key, end);
-                    if cmp.is_eq() {
-                        println!("- Reached end key");
-                        self.exhausted = true;
-                        return false;
-                    } else if cmp.is_gt() {
-                        println!("- Passed end key");
+                    if cmp.is_eq() || cmp.is_gt() {
+                        println!("- Reached or passed end key");
                         self.exhausted = true;
                         return false;
                     }
@@ -93,27 +106,15 @@ impl IndexIterator {
                     return false;
                 };
 
-                // Always include end for potential last batch
-                println!("- Starting scan from {:?} to {:?} (include_end: true)",
-                         start_key.get_value(0), end.get_value(0));
-
                 self.results.clear();
                 tree_guard.scan_range(&start_key, end, true, &mut self.results);
-                println!("- Scan returned {} results", self.results.len());
-
-                if !self.results.is_empty() {
-                    println!("- First result key: {:?}", self.results[0].0.get_value(0));
-                    println!("- Last result key: {:?}",
-                             self.results.last().unwrap().0.get_value(0));
-                }
+                println!("- Range scan returned {} results", self.results.len());
 
                 // Remove duplicate at boundary except if it's the end key
                 if self.position > 0 && !self.results.is_empty() {
                     let first_key = &self.results[0].0;
-                    let cmp_start = tree_guard.compare_keys(first_key, &start_key);
-                    let cmp_end = tree_guard.compare_keys(first_key, end);
-
-                    if cmp_start.is_eq() && !cmp_end.is_eq() {
+                    if tree_guard.compare_keys(first_key, &start_key).is_eq()
+                        && !tree_guard.compare_keys(first_key, end).is_eq() {
                         println!("- Removing duplicate first item");
                         self.results.remove(0);
                     }
@@ -250,10 +251,7 @@ mod test_utils {
         Tuple::new(&values, schema.clone(), RID::new(0, 0))
     }
 
-    pub fn create_test_metadata(
-        table_name: String,
-        index_name: String,
-    ) -> IndexInfo {
+    pub fn create_test_metadata(table_name: String, index_name: String) -> IndexInfo {
         IndexInfo::new(
             create_key_schema(),
             index_name,
@@ -295,11 +293,7 @@ mod tests {
         let start = create_tuple(2, "value2", &schema);
         let end = create_tuple(4, "value4", &schema);
 
-        let iterator = IndexIterator::new(
-            Arc::clone(&tree),
-            Some(start),
-            Some(end)
-        );
+        let iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert_eq!(results.len(), 3);
@@ -322,11 +316,7 @@ mod tests {
         let start = create_tuple(1, "value1", &schema);
         let end = create_tuple(2000, "value2000", &schema);
 
-        let iterator = IndexIterator::new(
-            Arc::clone(&tree),
-            Some(start),
-            Some(end)
-        );
+        let iterator = IndexIterator::new(Arc::clone(&tree), 10, Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert_eq!(results.len(), 2000);
@@ -340,11 +330,7 @@ mod tests {
         let start = create_tuple(1, "value1", &schema);
         let end = create_tuple(10, "value10", &schema);
 
-        let iterator = IndexIterator::new(
-            Arc::clone(&tree),
-            Some(start),
-            Some(end)
-        );
+        let iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert!(results.is_empty());
@@ -371,8 +357,8 @@ mod tests {
         let end = create_tuple(10, "value10", &schema);
 
         // Use very small batch size to force multiple batches
-        let mut iterator = IndexIterator::new(Arc::clone(&tree), Some(start), Some(end));
-        iterator.batch_size = 3;  // Force small batches
+        let mut iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
+        iterator.batch_size = 3; // Force small batches
 
         // Collect all results and verify
         let results: Vec<RID> = iterator.collect();
