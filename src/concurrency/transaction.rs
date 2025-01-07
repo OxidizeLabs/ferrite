@@ -260,6 +260,13 @@ impl Transaction {
     }
 }
 
+impl Default for Transaction {
+    fn default() -> Self {
+        Transaction::new(0, IsolationLevel::ReadUncommitted)
+    }
+}
+
+
 /// Formatter implementation for `IsolationLevel`.
 impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
