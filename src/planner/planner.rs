@@ -680,6 +680,12 @@ impl QueryPlanner {
                                         return Err("Qualified wildcards not supported".to_string());
                                     }
                                 },
+                                FunctionArg::ExprNamed { .. } => {
+                                    return Err(
+                                        "ExprNamed arguments not supported in aggregate functions"
+                                            .to_string(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -717,6 +723,10 @@ impl QueryPlanner {
                                     return Err(format!("{}(*) is not valid", func_name));
                                 }
                             },
+                            FunctionArg::ExprNamed { .. } => {
+                                return Err("ExprNamed arguments not supported in aggregate functions"
+                                    .to_string());
+                            }
                         }
                     }
                     FunctionArguments::Subquery(_) => {
