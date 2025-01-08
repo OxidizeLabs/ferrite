@@ -216,98 +216,87 @@ impl TablePage {
         self.prev_page_id = page_id;
     }
 
-    /// Serializes the full table page state into a byte vector.
+    /// Serializes the page into a fixed-size byte array
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
-        // Initialize buffer with DB_PAGE_SIZE bytes
-        let mut buffer = [0; DB_PAGE_SIZE as usize];
+        let mut buffer = [0u8; DB_PAGE_SIZE as usize];
+        let mut offset = 0;
 
-        // Header (20 bytes total):
-        // page_id (u64 - 8 bytes
-        // next_page_id (u64) - 8 bytes
-        // prev_page_id (u64) - 8 bytes
-        // num_tuples (u16) - 2 bytes
-        // num_deleted_tuples (u16) - 2 bytes
-        buffer[0..8].copy_from_slice(&self.page_id.to_le_bytes());
-        buffer[8..16].copy_from_slice(&self.next_page_id.to_le_bytes());
-        buffer[16..24].copy_from_slice(&self.prev_page_id.to_le_bytes());
+        // Serialize header
+        buffer[offset..offset + 8].copy_from_slice(&self.page_id.to_le_bytes());
+        offset += 8;
+        buffer[offset..offset + 8].copy_from_slice(&self.next_page_id.to_le_bytes());
+        offset += 8;
+        buffer[offset..offset + 8].copy_from_slice(&self.prev_page_id.to_le_bytes());
+        offset += 8;
+        buffer[offset..offset + 2].copy_from_slice(&self.num_tuples.to_le_bytes());
+        offset += 2;
+        buffer[offset..offset + 2].copy_from_slice(&self.num_deleted_tuples.to_le_bytes());
+        offset += 2;
 
-        buffer[24..26].copy_from_slice(&self.num_tuples.to_le_bytes());
-        buffer[26..28].copy_from_slice(&self.num_deleted_tuples.to_le_bytes());
-        let mut cursor = 28;
+        // Serialize tuple info
+        for (tuple_offset, size, meta) in &self.tuple_info {
+            // Write offset and size
+            buffer[offset..offset + 2].copy_from_slice(&tuple_offset.to_le_bytes());
+            offset += 2;
+            buffer[offset..offset + 2].copy_from_slice(&size.to_le_bytes());
+            offset += 2;
 
-        // Write tuple info entries (13 bytes each)
-        for &(offset, size, ref meta) in &self.tuple_info {
-            if cursor + 13 > DB_PAGE_SIZE as usize {
-                break;
-            }
-            buffer[cursor..cursor + 2].copy_from_slice(&offset.to_le_bytes());
-            buffer[cursor + 2..cursor + 4].copy_from_slice(&size.to_le_bytes());
-            buffer[cursor + 4..cursor + 12].copy_from_slice(&meta.get_timestamp().to_le_bytes());
-            buffer[cursor + 12] = meta.is_deleted() as u8;
-            cursor += 13;
+            // Serialize TupleMeta using bincode
+            let meta_bytes = bincode::serialize(meta).unwrap();
+            let meta_len = meta_bytes.len();
+            buffer[offset..offset + meta_len].copy_from_slice(&meta_bytes);
+            offset += meta_len;
         }
 
-        // Copy page data
-        let remaining_space = DB_PAGE_SIZE as usize - cursor;
-        if remaining_space > 0 {
-            buffer[cursor..].copy_from_slice(&self.data[..remaining_space]);
-        }
+        // Copy the actual data (which contains serialized tuples)
+        buffer[offset..].copy_from_slice(&self.data[offset..]);
 
         buffer
     }
 
-    /// Deserializes a byte vector into a TablePage.
+    /// Deserializes a page from a fixed-size byte array
     pub fn deserialize(buffer: &[u8; DB_PAGE_SIZE as usize]) -> Result<Self, Box<dyn std::error::Error>> {
-        if buffer.len() != DB_PAGE_SIZE as usize {
-            return Err(format!(
-                "Invalid buffer size. Expected {} bytes but got {}",
-                DB_PAGE_SIZE,
-                buffer.len()
-            )
-                .into());
-        }
+        let mut offset = 0;
 
-        // Read header information (20 bytes)
-        let page_id = u64::from_le_bytes(buffer[0..8].try_into()?);
-        let next_page_id = u64::from_le_bytes(buffer[8..16].try_into()?);
-        let prev_page_id = u64::from_le_bytes(buffer[16..24].try_into()?);
-        let num_tuples = u16::from_le_bytes(buffer[24..26].try_into()?);
-        let num_deleted_tuples = u16::from_le_bytes(buffer[26..28].try_into()?);
-        let page_type = u16::from_le_bytes(buffer[28..30].try_into()?);
+        // Deserialize header
+        let page_id = PageId::from_le_bytes(buffer[offset..offset + 8].try_into()?);
+        offset += 8;
+        let next_page_id = PageId::from_le_bytes(buffer[offset..offset + 8].try_into()?);
+        offset += 8;
+        let prev_page_id = PageId::from_le_bytes(buffer[offset..offset + 8].try_into()?);
+        offset += 8;
+        let num_tuples = u16::from_le_bytes(buffer[offset..offset + 2].try_into()?);
+        offset += 2;
+        let num_deleted_tuples = u16::from_le_bytes(buffer[offset..offset + 2].try_into()?);
+        offset += 2;
 
-        let mut cursor = 30;
+        // Create new page
+        let mut page = TablePage::new(page_id);
+        page.next_page_id = next_page_id;
+        page.prev_page_id = prev_page_id;
+        page.num_tuples = num_tuples;
+        page.num_deleted_tuples = num_deleted_tuples;
 
-        // Read tuple info
-        let mut tuple_info = Vec::with_capacity(num_tuples as usize);
+        // Deserialize tuple info
         for _ in 0..num_tuples {
-            if cursor + 13 > buffer.len() {
-                break;
-            }
+            // Read offset and size
+            let tuple_offset = u16::from_le_bytes(buffer[offset..offset + 2].try_into()?);
+            offset += 2;
+            let tuple_size = u16::from_le_bytes(buffer[offset..offset + 2].try_into()?);
+            offset += 2;
 
-            let offset = u16::from_le_bytes(buffer[cursor..cursor + 2].try_into()?);
-            let size = u16::from_le_bytes(buffer[cursor + 2..cursor + 4].try_into()?);
-            let timestamp = u64::from_le_bytes(buffer[cursor + 4..cursor + 12].try_into()?);
-            let is_deleted = buffer[cursor + 12] != 0;
-            cursor += 13;
+            // Deserialize TupleMeta using bincode
+            let meta: TupleMeta = bincode::deserialize(&buffer[offset..offset + std::mem::size_of::<TupleMeta>()])?;
+            offset += std::mem::size_of::<TupleMeta>();
 
-            tuple_info.push((offset, size, TupleMeta::new(timestamp, is_deleted)));
+            // Store tuple info
+            page.tuple_info.push((tuple_offset, tuple_size, meta));
         }
 
-        // Read page data
-        let mut data = Box::new([0; DB_PAGE_SIZE as usize]);
-        data.copy_from_slice(buffer);
+        // Copy the entire buffer to data
+        page.data.copy_from_slice(buffer);
 
-        Ok(Self {
-            data,
-            page_id,
-            pin_count: 0,
-            is_dirty: false,
-            next_page_id,
-            prev_page_id,
-            num_tuples,
-            num_deleted_tuples,
-            tuple_info,
-        })
+        Ok(page)
     }
 
     /// Updates a tuple in place.
@@ -780,71 +769,47 @@ mod concurrency_safety_tests {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
-    use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::types_db::type_id::TypeId::Integer;
+    use crate::catalog::column::Column;
+    use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
     fn create_test_tuple() -> (TupleMeta, Tuple) {
-        let tuple = Tuple::new(
-            &[Value::from(1)],
-            Schema::new(vec![Column::new("col_a", Integer)]),
-            Default::default(),
-        );
-        let tuple_meta = TupleMeta::new(123, false);
-        (tuple_meta, tuple)
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::new(42), Value::new("Test")];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(123, false);
+        (meta, tuple)
     }
 
     #[test]
-    fn test_serialize_deserialize_empty_page() -> Result<(), Box<dyn std::error::Error>> {
-        let original_page = TablePage::new(1);
-        let serialized = original_page.serialize();
-
-        assert_eq!(serialized.len(), DB_PAGE_SIZE as usize);
-
-        let deserialized = TablePage::deserialize(&serialized)?;
-
-        assert_eq!(deserialized.get_page_id(), original_page.get_page_id());
-        assert_eq!(
-            deserialized.get_num_tuples(),
-            original_page.get_num_tuples()
-        );
-        assert_eq!(
-            deserialized.get_next_page_id(),
-            original_page.get_next_page_id()
-        );
-        assert_eq!(
-            deserialized.get_num_deleted_tuples(),
-            original_page.get_num_deleted_tuples()
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_serialize_deserialize_with_single_tuple() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_serialize_deserialize_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         let mut original_page = TablePage::new(1);
-
-        // Create and insert a test tuple
         let (meta, mut tuple) = create_test_tuple();
+        
+        // Insert a tuple
         let rid = original_page.insert_tuple(&meta, &mut tuple).unwrap();
-
+        
+        // Serialize
         let serialized = original_page.serialize();
-        assert_eq!(serialized.len(), DB_PAGE_SIZE as usize);
-
-        let deserialized = TablePage::deserialize(&serialized)?;
-
-        assert_eq!(deserialized.get_num_tuples(), 1);
-
-        // Verify tuple data
-        let original_tuple = original_page.get_tuple(&rid).unwrap();
-        let deserialized_tuple = deserialized.get_tuple(&rid).unwrap();
-
-        assert_eq!(
-            original_tuple.0.get_timestamp(),
-            deserialized_tuple.0.get_timestamp()
-        );
-
+        
+        // Deserialize
+        let deserialized_page = TablePage::deserialize(&serialized)?;
+        
+        // Verify metadata
+        assert_eq!(deserialized_page.get_page_id(), original_page.get_page_id());
+        assert_eq!(deserialized_page.get_num_tuples(), original_page.get_num_tuples());
+        
+        // Verify tuple
+        let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid)?;
+        assert_eq!(deserialized_meta.get_timestamp(), meta.get_timestamp());
+        assert_eq!(deserialized_meta.is_deleted(), meta.is_deleted());
+        assert_eq!(deserialized_tuple.get_values(), tuple.get_values());
+        
         Ok(())
     }
 }
