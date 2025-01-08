@@ -13,7 +13,6 @@ pub struct IndexIterator {
     position: usize,
     start_key: Option<Tuple>,
     end_key: Option<Tuple>,
-    batch_size: usize,
     exhausted: bool,
 }
 
@@ -44,7 +43,6 @@ impl IndexIterator {
             position: 0,
             start_key,
             end_key,
-            batch_size,
             exhausted: false,
         }
     }
@@ -211,8 +209,8 @@ impl IndexIterator {
 #[cfg(test)]
 mod test_utils {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::storage::index::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
@@ -340,8 +338,7 @@ mod tests {
         let end = create_tuple(10, "value10", &schema);
 
         // Use very small batch size to force multiple batches
-        let mut iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
-        iterator.batch_size = 3; // Force small batches
+        let iterator = IndexIterator::new(Arc::clone(&tree), 3, Some(start), Some(end));
 
         // Collect all results and verify
         let results: Vec<RID> = iterator.collect();

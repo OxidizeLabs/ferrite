@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
@@ -92,8 +92,8 @@ impl AbstractPlanNode for FilterNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;

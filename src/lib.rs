@@ -1,6 +1,6 @@
 pub mod binder;
 pub mod buffer;
-pub mod catalogue;
+pub mod catalog;
 pub mod cli;
 pub mod common;
 pub mod concurrency;

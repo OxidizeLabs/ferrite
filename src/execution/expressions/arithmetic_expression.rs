@@ -1,5 +1,5 @@
-use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
+use crate::catalog::column::Column;
+use crate::catalog::schema::Schema;
 use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Unknown};
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};

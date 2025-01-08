@@ -179,7 +179,6 @@ mod tests {
 
     struct TestContext {
         log_file_path: String,
-        disk_manager: Arc<FileDiskManager>,
         log_manager: LogManager,
     }
 
@@ -198,7 +197,6 @@ mod tests {
 
             TestContext {
                 log_file_path,
-                disk_manager,
                 log_manager,
             }
         }
@@ -325,7 +323,6 @@ mod tests {
             begin_lsn,
             LogRecordType::Commit,
         );
-        let commit_lsn = ctx.log_manager.append_log_record(&commit_record);
 
         // Test Abort record
         let abort_record = LogRecord::new_transaction_record(
@@ -343,7 +340,6 @@ mod tests {
         let mut ctx = TestContext::new("large_records_test");
 
         // Create a large log record
-        let large_data = vec![42u8; 1000]; // Large dummy data
         let log_record = LogRecord::new_transaction_record(
             1,
             INVALID_LSN,

@@ -1356,8 +1356,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::recovery::log_manager::LogManager;
@@ -1441,7 +1441,7 @@ mod tests {
 
         // Create a test table
         let mut catalog = ctx.catalog.write();
-        let schema = crate::catalogue::schema::Schema::new(vec![
+        let schema = crate::catalog::schema::Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);

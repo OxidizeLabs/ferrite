@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
@@ -170,7 +170,7 @@ impl Tuple {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::types_db::type_id::TypeId;
 
     fn create_sample_schema() -> Schema {

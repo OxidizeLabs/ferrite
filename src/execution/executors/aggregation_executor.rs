@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
@@ -313,8 +313,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -429,17 +429,6 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
         )
-    }
-
-    fn create_mock_executor(context: Arc<RwLock<ExecutorContext>>) {
-        let mock_scan_plan = MockScanNode::new(Default::default(), "mock_table".to_string(), vec![]);
-        MockExecutor::new(
-            context,
-            Arc::new(mock_scan_plan),
-            0,
-            vec![],
-            Default::default(),
-        );
     }
 
     #[test]

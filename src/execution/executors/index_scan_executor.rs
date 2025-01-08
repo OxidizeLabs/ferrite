@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
@@ -353,14 +353,13 @@ mod index_scan_executor_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::config::{IndexOidT, TableOidT};
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::execution::execution_engine::ExecutorEngine;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
@@ -376,11 +375,6 @@ mod index_scan_executor_tests {
     use std::sync::Arc;
 
     struct TestContext {
-        catalog: Arc<RwLock<Catalog>>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
-        lock_manager: Arc<LockManager>,
-        executor_engine: ExecutorEngine,
         executor_context: Arc<RwLock<ExecutorContext>>,
         db_file: String,
         log_file: String,
@@ -421,7 +415,6 @@ mod index_scan_executor_tests {
             )));
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
-            let executor_engine = ExecutorEngine::new(catalog.clone());
 
             // Create test transaction and executor context
             let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
@@ -434,11 +427,6 @@ mod index_scan_executor_tests {
             )));
 
             Self {
-                catalog,
-                buffer_pool_manager,
-                transaction_manager,
-                lock_manager,
-                executor_engine,
                 executor_context,
                 db_file,
                 log_file,
@@ -591,12 +579,6 @@ mod index_scan_executor_tests {
         while let Some((tuple, _)) = executor.next() {
             count += 1;
             println!("Got tuple: {:?}", tuple);
-            let val0 = tuple.get_value(0);
-            let val1 = tuple.get_value(1);
-            let count_value = Value::new(count);
-            let count_value_10x = Value::new(count * 10);
-            // assert_eq!(val0.compare_equals(&count_value), CmpBool::CmpTrue);
-            // assert_eq!(val1.compare_equals(&count_value_10x), CmpBool::CmpTrue);
         }
         assert_eq!(count, 10);
     }
@@ -668,7 +650,6 @@ mod index_scan_executor_tests {
         while let Some((tuple, _)) = executor.next() {
             count += 1;
             let id = tuple.get_value(0);
-            let val = tuple.get_value(1);
             assert_eq!(id.compare_greater_than_equals(&Value::new(3)), CmpBool::CmpTrue);
             assert_eq!(id.compare_less_than_equals(&Value::new(7)), CmpBool::CmpTrue);
             // assert_eq!(val.compare_equals(&Value::new(100)), CmpBool::CmpTrue);

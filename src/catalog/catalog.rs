@@ -1,5 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::storage::index::b_plus_tree_i::BPlusTree;
@@ -289,11 +289,8 @@ impl Display for Catalog {
 mod unit_tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -303,9 +300,6 @@ mod unit_tests {
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
-        lock_manager: Arc<RwLock<LockManager>>,
-        log_manager: Arc<RwLock<LogManager>>,
         db_file: String,
         db_log_file: String,
     }
@@ -335,29 +329,8 @@ mod unit_tests {
                 replacer.clone(),
             ));
 
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )));
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
-                catalog,
-                log_manager.clone(),
-            )));
-            let lock_manager = Arc::new(RwLock::new(LockManager::new(Arc::clone(
-                &transaction_manager.clone(),
-            ))));
-
             Self {
                 bpm,
-                transaction_manager,
-                lock_manager,
-                log_manager,
                 db_file,
                 db_log_file,
             }
@@ -365,14 +338,6 @@ mod unit_tests {
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.bpm)
-        }
-
-        pub fn lock_manager(&self) -> Arc<RwLock<LockManager>> {
-            Arc::clone(&self.lock_manager)
-        }
-
-        pub fn log_manager(&self) -> Arc<RwLock<LogManager>> {
-            Arc::clone(&self.log_manager)
         }
 
         fn cleanup(&self) {

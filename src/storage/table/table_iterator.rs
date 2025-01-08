@@ -200,8 +200,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
     use crate::execution::plans::table_scan_plan::TableScanNode;

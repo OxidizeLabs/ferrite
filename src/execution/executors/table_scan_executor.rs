@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
@@ -92,8 +92,8 @@ impl AbstractExecutor for TableScanExecutor {
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
-//     use crate::catalogue::catalogue::{Catalog, TableInfo};
-//     use crate::catalogue::column::Column;
+//     use crate::catalog::catalog::{Catalog, TableInfo};
+//     use crate::catalog::column::Column;
 //     use crate::concurrency::transaction::{IsolationLevel, Transaction};
 //     use crate::storage::table::tuple::{Tuple, TupleMeta};
 //     use crate::types_db::type_id::TypeId;

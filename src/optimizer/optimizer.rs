@@ -1,5 +1,5 @@
-use crate::catalogue::catalogue::Catalog;
-use crate::catalogue::schema::Schema;
+use crate::catalog::catalog::Catalog;
+use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::execution::check_option::{CheckOption, CheckOptions};
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -144,7 +144,7 @@ impl Optimizer {
         trace!("Applying early pruning to plan node: {:?}", plan.plan_type);
 
         match &plan.plan_type {
-            LogicalPlanType::Project { expressions, schema } => {
+            LogicalPlanType::Project { expressions, .. } => {
                 if expressions.is_empty() {
                     debug!("Found empty projection, removing unnecessary node");
                     if let Some(child) = plan.children.pop() {
@@ -184,7 +184,7 @@ impl Optimizer {
             }
             LogicalPlanType::Project {
                 expressions,
-                schema,
+                ..
             } => {
                 // Combine consecutive projections
                 if let Some(child) = plan.children.pop() {
@@ -266,16 +266,6 @@ impl Optimizer {
                 Ok(plan)
             }
             _ => self.optimize_sort_and_limit_children(plan),
-        }
-    }
-
-    /// Helper method to extract column name from an expression
-    fn extract_column_name(&self, expr: &Expression) -> Option<String> {
-        match expr {
-            Expression::ColumnRef(col_ref) => {
-                Some(col_ref.get_return_type().get_name().to_string())
-            }
-            _ => None
         }
     }
 

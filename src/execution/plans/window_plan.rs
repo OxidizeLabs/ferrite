@@ -1,6 +1,6 @@
 use crate::binder::bound_order_by::OrderByType;
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::collections::HashMap;
