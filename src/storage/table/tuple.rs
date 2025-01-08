@@ -4,6 +4,8 @@ use crate::common::rid::RID;
 use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
+use crate::catalog::column::Column;
+use crate::types_db::types::Type;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -122,6 +124,24 @@ impl Tuple {
 
     pub fn get_values(&self) -> &Vec<Value> {
         &self.values
+    }
+
+    /// Returns a reference to the schema of this tuple.
+    ///
+    /// This method constructs a schema based on the types of values in the tuple.
+    pub fn get_schema(&self) -> Schema {
+        let columns: Vec<Column> = self.values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                Column::new(
+                    &format!("col_{}", i),  // Default column name
+                    value.get_type_id()     // Get TypeId from the Value
+                )
+            })
+            .collect();
+        
+        Schema::new(columns)
     }
 
     /// Creates a new tuple containing only the key attributes.
@@ -324,5 +344,37 @@ mod tests {
         assert_eq!(tuple.get_value(1), &Value::new(3.14));
         assert_eq!(tuple.get_value(2), &Value::new("Hello"));
         assert_eq!(tuple.get_value(3), &Value::new(true));
+    }
+
+    #[test]
+    fn test_get_schema() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ]);
+        
+        let values = vec![
+            Value::new(1),
+            Value::new("Alice"),
+            Value::new(30),
+        ];
+        
+        let rid = RID::new(0, 0);
+        let tuple = Tuple::new(&values, schema.clone(), rid);
+        
+        let derived_schema = tuple.get_schema();
+        
+        // Check that the number of columns matches
+        assert_eq!(derived_schema.get_column_count(), schema.get_column_count());
+        
+        // Check that the types match for each column
+        for i in 0..schema.get_column_count() {
+            assert_eq!(
+                derived_schema.get_column(i as usize).unwrap().get_type(),
+                schema.get_column(i as usize).unwrap().get_type(),
+                "Type mismatch for column {}", i
+            );
+        }
     }
 }
