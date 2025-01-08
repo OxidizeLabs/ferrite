@@ -758,8 +758,8 @@ impl Index for BPlusTree {
 #[cfg(test)]
 mod test_utils {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::storage::index::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
@@ -1343,15 +1343,7 @@ mod advanced_tests {
     use super::test_utils::*;
     use super::*;
     use crate::concurrency::transaction::Transaction;
-    use crate::types_db::value::{Val, Value};
     use rand::prelude::*;
-
-    fn get_integer_from_value(value: &Value) -> i32 {
-        match value.get_value() {
-            Val::Integer(i) => *i,
-            _ => panic!("Expected integer value"),
-        }
-    }
 
     /// Test ascending order inserts
     #[test]

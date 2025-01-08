@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
@@ -116,8 +116,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -355,7 +355,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create catalog and table
-        let mut catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let mut binding = catalog.write();
         let table_info = binding.create_table("test_table", schema.clone()).unwrap();
 
@@ -412,7 +412,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create catalog and table with Arc<RwLock> wrapping
-        let mut catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let mut binding = catalog.write();
         let table_info = binding.create_table("test_table", schema.clone()).unwrap();
 

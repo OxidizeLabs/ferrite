@@ -401,8 +401,8 @@ impl PageTrait for TablePage {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -513,8 +513,8 @@ mod unit_tests {
 #[cfg(test)]
 mod tuple_operation_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -594,8 +594,8 @@ mod tuple_operation_tests {
 #[cfg(test)]
 mod error_handling_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -650,8 +650,8 @@ mod error_handling_tests {
 #[cfg(test)]
 mod capacity_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -710,8 +710,8 @@ mod capacity_tests {
 #[cfg(test)]
 mod concurrency_safety_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::sync::Arc;
@@ -780,8 +780,8 @@ mod concurrency_safety_tests {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId::Integer;
     use crate::types_db::value::Value;
 

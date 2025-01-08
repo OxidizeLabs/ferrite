@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::exception::ValuesError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
@@ -188,7 +188,7 @@ impl AbstractPlanNode for ValuesNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
 

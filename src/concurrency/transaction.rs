@@ -299,8 +299,8 @@ impl fmt::Display for TransactionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::config::TXN_START_ID;
     use crate::common::rid::RID;
     use crate::execution::expressions::abstract_expression::Expression::Mock;

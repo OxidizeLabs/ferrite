@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
@@ -240,12 +240,11 @@ impl Display for PlanNode {
 
 #[cfg(test)]
 mod basic_behaviour {
-    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -489,12 +488,11 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod complex_behaviour {
-    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;

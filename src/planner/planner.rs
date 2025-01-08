@@ -1,6 +1,6 @@
-use crate::catalogue::catalogue::Catalog;
-use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
+use crate::catalog::catalog::Catalog;
+use crate::catalog::column::Column;
+use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
 use crate::execution::expressions::aggregate_expression::AggregationType;

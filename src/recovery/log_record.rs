@@ -323,8 +323,8 @@ impl LogRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::mem::size_of;

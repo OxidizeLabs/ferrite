@@ -1,5 +1,5 @@
 use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::rid::RID;
 use crate::storage::page::page::PageTrait;
@@ -556,8 +556,8 @@ impl PartialEq for TableInfo {
 mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;

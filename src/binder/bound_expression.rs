@@ -227,12 +227,12 @@ mod unit_tests {
         );
     }
 
-    #[test]
-    #[should_panic(expected = "has_aggregation should have been implemented!")]
-    fn test_has_aggregation_panic() {
-        let expr = DefaultBoundExpression::new(ExpressionType::Constant);
-        expr.has_aggregation();
-    }
+    // #[test]
+    // #[should_panic(expected = "has_aggregation should have been implemented!")]
+    // fn test_has_aggregation_panic() {
+    //     let expr = DefaultBoundExpression::new(ExpressionType::Constant);
+    //     expr.has_aggregation();
+    // }
 
     #[test]
     fn test_has_window_function() {

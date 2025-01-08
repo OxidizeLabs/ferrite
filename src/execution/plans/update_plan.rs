@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};

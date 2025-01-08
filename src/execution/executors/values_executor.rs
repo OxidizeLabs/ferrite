@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
@@ -88,7 +88,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -105,7 +105,7 @@ mod tests {
 
     mod helpers {
         use super::*;
-        use crate::catalogue::catalogue::Catalog;
+        use crate::catalog::catalog::Catalog;
         use crate::execution::plans::abstract_plan::PlanNode;
         use crate::recovery::log_manager::LogManager;
 

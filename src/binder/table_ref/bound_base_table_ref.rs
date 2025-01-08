@@ -1,5 +1,5 @@
 use crate::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use std::any::Any;
 use std::fmt;

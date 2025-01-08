@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::storage::table::tuple::Tuple;

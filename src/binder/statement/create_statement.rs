@@ -1,5 +1,5 @@
 use crate::binder::bound_statement::BoundStatement;
-use crate::catalogue::column::Column;
+use crate::catalog::column::Column;
 use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;

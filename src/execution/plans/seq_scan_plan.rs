@@ -1,5 +1,5 @@
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
@@ -75,7 +75,7 @@ impl From<SeqScanPlanNode> for PlanNode {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::types_db::type_id::TypeId;
 
     fn create_test_schema() -> Schema {
@@ -177,7 +177,7 @@ mod unit_tests {
 #[cfg(test)]
 mod seq_scan_string_tests {
     use super::*;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::types_db::type_id::TypeId;
 
     fn create_test_schema() -> Schema {

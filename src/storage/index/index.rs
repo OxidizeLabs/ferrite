@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::IndexOidT;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;

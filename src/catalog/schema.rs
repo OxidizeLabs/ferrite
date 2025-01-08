@@ -1,4 +1,4 @@
-use crate::catalogue::column::Column;
+use crate::catalog::column::Column;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};

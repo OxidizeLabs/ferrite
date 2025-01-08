@@ -1,4 +1,4 @@
-use crate::catalogue::catalogue::Catalog;
+use crate::catalog::catalog::Catalog;
 use crate::common::config::{TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::concurrency::transaction::{
@@ -24,7 +24,6 @@ pub struct TransactionManager {
     next_txn_id: AtomicU64,
     txn_map: RwLock<HashMap<TxnId, Arc<Transaction>>>,
     running_txns: Watermark,
-    last_commit_ts: AtomicU64,
     catalog: Arc<RwLock<Catalog>>,
     version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
     log_manager: Arc<RwLock<LogManager>>,
@@ -37,7 +36,6 @@ impl TransactionManager {
             next_txn_id: AtomicU64::new(0),
             txn_map: RwLock::new(HashMap::new()),
             running_txns: Watermark::default(),
-            last_commit_ts: AtomicU64::new(0),
             catalog,
             version_info: RwLock::new(HashMap::new()),
             log_manager,
@@ -425,9 +423,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::column::Column;
-    use crate::catalogue::schema::Schema;
-    use crate::concurrency::lock_manager::LockManager;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -447,13 +444,9 @@ mod tests {
     }
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
-        lock_manager: Arc<RwLock<LockManager>>,
-        log_manager: Arc<RwLock<LogManager>>,
         db_file: String,
         db_log_file: String,
-        catalog: Arc<RwLock<Catalog>>,
         table_heap: Arc<TableHeap>,
         schema: Schema,
     }
@@ -488,7 +481,6 @@ mod tests {
                 catalog.clone(),
                 log_manager.clone(),
             )));
-            let lock_manager = Arc::new(RwLock::new(LockManager::new(transaction_manager.clone())));
 
             // Create test schema
             let schema = Schema::new(vec![
@@ -502,12 +494,8 @@ mod tests {
             Self {
                 db_file,
                 db_log_file,
-                bpm,
                 transaction_manager,
-                catalog,
-                log_manager,
                 table_heap,
-                lock_manager,
                 schema,
             }
         }
@@ -632,9 +620,6 @@ mod tests {
         // Set read timestamp to be less than txn1's commit timestamp
         // This should create a serialization failure
         txn2.set_read_ts(base_ts);  // Set read_ts to be less than txn1's commit_ts
-
-        let tuple2 = ctx.create_test_tuple(1, 200);
-        let meta2 = TupleMeta::new(txn2.get_transaction_id(), false);
 
         // Add to write set before attempting update
         txn2.append_write_set(0, rid);

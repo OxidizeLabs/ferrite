@@ -1,4 +1,4 @@
-use crate::catalogue::catalogue::Catalog;
+use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::execution::check_option::CheckOptions;
@@ -399,9 +399,6 @@ mod tests {
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
-        lock_manager: Arc<LockManager>,
         executor_engine: ExecutorEngine,
         executor_context: Arc<RwLock<ExecutorContext>>,
         db_file: String,
@@ -457,9 +454,6 @@ mod tests {
 
             Self {
                 catalog,
-                buffer_pool_manager,
-                transaction_manager,
-                lock_manager,
                 executor_engine,
                 executor_context,
                 db_file,

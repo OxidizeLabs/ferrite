@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
@@ -159,7 +159,7 @@ impl Hash for AggregateKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::column::Column;
+    use crate::catalog::column::Column;
     use crate::container::hash_function::HashFunction;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::plans::mock_scan_plan::MockScanNode;

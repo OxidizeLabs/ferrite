@@ -1,4 +1,4 @@
-use crate::catalogue::schema::Schema;
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
@@ -94,7 +94,7 @@ impl AbstractPlanNode for DeleteNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalogue::schema::Schema;
+    use crate::catalog::schema::Schema;
     use crate::execution::plans::mock_scan_plan::MockScanNode;
 
     fn create_mock_child(name: &str) -> PlanNode {

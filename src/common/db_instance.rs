@@ -1,6 +1,6 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
-use crate::catalogue::catalogue::Catalog;
+use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::lock_manager::LockManager;
@@ -39,7 +39,6 @@ pub struct DBInstance {
     catalog: Arc<RwLock<Catalog>>,
     execution_engine: Arc<Mutex<ExecutorEngine>>,
     config: DBConfig,
-    current_txn: Option<Arc<Transaction>>,
 }
 
 impl Default for DBConfig {
@@ -92,7 +91,6 @@ impl DBInstance {
             catalog,
             execution_engine,
             config,
-            current_txn: None,
         })
     }
 

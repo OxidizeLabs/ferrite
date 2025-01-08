@@ -1,5 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::catalogue::catalogue::Catalog;
+use crate::catalog::catalog::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalogue::catalogue::Catalog;
+    use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;

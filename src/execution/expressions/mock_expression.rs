@@ -1,6 +1,6 @@
 use crate::binder::bound_expression::{BoundExpression, ExpressionType};
-use crate::catalogue::column::Column;
-use crate::catalogue::schema::Schema;
+use crate::catalog::column::Column;
+use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
