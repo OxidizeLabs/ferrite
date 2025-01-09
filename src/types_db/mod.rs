@@ -12,3 +12,4 @@ pub mod types;
 pub mod value;
 pub mod varlen_type;
 pub mod vector_type;
+pub mod invalid_type;

@@ -188,12 +188,11 @@ impl Catalog {
 
             // Get reference to the index we just created
             if let Some(_) = self.indexes.get(&index_oid) {
-                let index_write_guard = index.write();
+                let mut index_write_guard = index.write();
                 // Populate index with existing table data
                 while let Some((_, tuple)) = iter.next() {
-                    let key_tuple = tuple.key_from_tuple(key_schema.clone(), key_attrs.clone());
                     let transaction = Transaction::new(0, IsolationLevel::ReadUncommitted);
-                    index_write_guard.insert_entry(&key_tuple, tuple.get_rid(), &transaction);
+                    index_write_guard.insert_entry(&tuple, tuple.get_rid(), &transaction);
                 }
             }
         }
