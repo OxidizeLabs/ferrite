@@ -178,7 +178,7 @@ pub trait Index: Send + Sync {
     ///
     /// # Returns
     /// Whether insertion is successful.
-    fn insert_entry(&self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool {
+    fn insert_entry(&mut self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool {
         unimplemented!()
     }
 
