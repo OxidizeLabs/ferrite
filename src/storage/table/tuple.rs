@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
@@ -122,6 +123,10 @@ impl Tuple {
         &self.values[column_index]
     }
 
+    pub fn set_values(&mut self, values: Vec<Value>) {
+        self.values = values;
+    }
+
     pub fn get_values(&self) -> &Vec<Value> {
         &self.values
     }
@@ -145,13 +150,12 @@ impl Tuple {
     }
 
     /// Creates a new tuple containing only the key attributes.
-    pub fn key_from_tuple(&self, key_schema: Schema, key_attrs: Vec<usize>) -> Tuple {
+    pub fn keys_from_tuple(&self, key_attrs: Vec<usize>) -> Vec<Value> {
         let key_values: Vec<Value> = key_attrs
             .iter()
             .map(|&attr| self.get_value(attr).clone())
             .collect();
-
-        Tuple::new(&*key_values, key_schema, self.rid)
+        key_values
     }
 
     /// Returns a string representation of the tuple.
@@ -184,6 +188,12 @@ impl Tuple {
             })
             .collect::<Vec<String>>()
             .join(", ")
+    }
+}
+
+impl Display for Tuple {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string_detailed(self.get_schema()))
     }
 }
 
@@ -252,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tuple_key_from_tuple() {
+    fn test_tuple_keys_from_tuple() {
         let (tuple, _schema) = create_sample_tuple();
 
         let key_schema = Schema::new(vec![
@@ -260,11 +270,10 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
         let key_attrs = vec![0, 2];
-        let key_tuple = tuple.key_from_tuple(key_schema.clone(), key_attrs);
+        let keys = tuple.keys_from_tuple(key_attrs);
 
-        assert_eq!(key_tuple.get_value(0), &Value::new(1));
-        assert_eq!(key_tuple.get_value(1), &Value::new(30));
-        assert_eq!(key_tuple.get_rid(), tuple.get_rid());
+        assert_eq!(keys[0], Value::new(1));
+        assert_eq!(keys[1], Value::new(30));
     }
 
     #[test]
