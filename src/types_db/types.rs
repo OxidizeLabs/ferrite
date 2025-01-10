@@ -2,6 +2,7 @@ use crate::types_db::bigint_type::BigIntType;
 use crate::types_db::boolean_type::BooleanType;
 use crate::types_db::decimal_type::DecimalType;
 use crate::types_db::integer_type::IntegerType;
+use crate::types_db::invalid_type::InvalidType;
 use crate::types_db::smallint_type::SmallIntType;
 use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type::TinyIntType;
@@ -19,8 +20,6 @@ pub enum CmpBool {
     CmpTrue = 1,
     CmpNull = 2,
 }
-
-pub struct InvalidType;
 
 pub trait Type {
     fn get_type_id(&self) -> TypeId;
@@ -142,7 +141,7 @@ pub trait Type {
         unimplemented!()
     }
     fn to_string(&self, _val: &Value) -> String {
-        "INVALID".to_string()
+        unimplemented!()
     }
     fn copy(&self, _val: &Value) -> Value {
         unimplemented!()
@@ -155,12 +154,6 @@ pub trait Type {
     }
     fn get_storage_size(&self, _val: &Value) -> u32 {
         unimplemented!()
-    }
-}
-
-impl Type for InvalidType {
-    fn get_type_id(&self) -> TypeId {
-        TypeId::Invalid
     }
 }
 
