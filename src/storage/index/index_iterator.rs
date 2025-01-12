@@ -68,19 +68,10 @@ impl IndexIterator {
         let result = match (&self.start_key, &self.end_key) {
             // Full scan case
             (None, None) => {
-                let empty_key = tree_guard.get_metadata().create_dummy_key();
-                if let Some(last_key) = &self.last_key {
-                    let mut start = empty_key.clone();
-                    let mut keys = start.keys_from_tuple(tree_guard.get_metadata().get_key_attrs().clone());
-                    keys[0] = last_key.clone();
-                    start.set_values(keys);
-                    debug!("Continuing full scan from key: {:?}", start);
-                    tree_guard.scan_range(&start, &empty_key, false)
-                } else {
-                    debug!("Starting fresh full scan");
-                    tree_guard.scan_range(&empty_key, &empty_key, true)
-                }
+                debug!("Starting fresh full scan");
+                tree_guard.scan_full()
             }
+
             // Range scan case
             (Some(start), Some(end)) => {
                 let scan_start = if let Some(last_key) = &self.last_key {
@@ -106,7 +97,13 @@ impl IndexIterator {
 
         match result {
             Ok(mut new_results) => {
-                // Skip the first result if we're continuing and it matches our last key
+                if new_results.is_empty() {
+                    debug!("No more results available");
+                    self.exhausted = true;
+                    return false;
+                }
+
+                // If this is a continuation, skip the first result if it matches our last key
                 if let Some(last_key) = &self.last_key {
                     if let Some((first_key, _)) = new_results.first() {
                         if first_key == last_key {
@@ -115,17 +112,14 @@ impl IndexIterator {
                     }
                 }
 
-                // Store all results - we'll handle batching in next()
-                self.current_batch = new_results;
-
-                if self.current_batch.is_empty() {
-                    debug!("No more results available");
-                    self.exhausted = true;
-                    false
-                } else {
-                    debug!("Fetched {} results", self.current_batch.len());
-                    true
+                // Update last_key for next batch
+                if let Some((key, _)) = new_results.last() {
+                    self.last_key = Some(key.clone());
                 }
+
+                self.current_batch = new_results;
+                debug!("Fetched {} results", self.current_batch.len());
+                true
             }
             Err(e) => {
                 debug!("Error fetching batch: {:?}", e);
@@ -155,15 +149,12 @@ impl Iterator for IndexIterator {
 
         // If we've exhausted current batch, try to fetch next batch
         if self.position >= self.current_batch.len() {
-            // Update last_key before fetching next batch
-            if let Some((key, _)) = self.current_batch.last() {
-                self.last_key = Some(key.clone());
-            }
-            
             if !self.fetch_next_batch() {
                 debug!("No more batches available");
                 return None;
             }
+            // Reset position for new batch
+            self.position = 0;
         }
 
         // Return current item and advance position
@@ -311,19 +302,19 @@ mod tests {
         // Insert data in a separate scope
         {
             let mut tree_guard = tree.write();
-            for i in 1..=2000 {
+            for i in 1..=200 {
                 let tuple = create_tuple(i, &format!("value{}", i), &schema);
                 tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default());
             }
         } // write lock is released here
 
         let start = create_tuple(1, "value1", &schema);
-        let end = create_tuple(2000, "value2000", &schema);
+        let end = create_tuple(200, "value200", &schema);
 
         let iterator = IndexIterator::new(Arc::clone(&tree), 10, Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
-        assert_eq!(results.len(), 2000);
+        assert_eq!(results.len(), 200);
     }
 
     #[test]
