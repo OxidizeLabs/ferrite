@@ -58,9 +58,13 @@ impl BPlusTree {
     }
 
     pub fn insert(&mut self, key: Value, rid: RID) -> bool {
+        debug!("Inserting key {:?} with RID {:?}", key, rid);
+        
         let root_is_full = {
             let root_guard = self.root.read();
-            root_guard.keys.len() == self.order - 1
+            let is_full = root_guard.keys.len() == self.order - 1;
+            debug!("Root node status: keys={}, is_full={}", root_guard.keys.len(), is_full);
+            is_full
         };
 
         if root_is_full {
@@ -93,74 +97,104 @@ impl BPlusTree {
     }
 
     pub fn delete(&self, key: &Value, rid: RID) -> bool {
-        let mut success = false;
-        let mut current_node = Arc::clone(&self.root);
-        let mut path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)> = Vec::new();
+        debug!("Starting delete for key {:?} with RID {:?}", key, rid);
+        let mut nodes_to_check = vec![(Arc::clone(&self.root), Vec::new())];
+        let mut found = false;
 
-        // First, find the leaf node containing the key
-        loop {
+        // Search through all possible paths that could contain our key
+        while let Some((current_node, mut path)) = nodes_to_check.pop() {
             let node = current_node.read();
             match node.node_type {
                 NodeType::Internal => {
-                    let pos = node
-                        .keys
-                        .iter()
-                        .position(|k| k.compare_greater_than(key) == CmpBool::CmpTrue)
-                        .unwrap_or(node.keys.len());
+                    debug!("At internal node with keys: {:?}", node.keys);
+                    
+                    // Find all children that could contain our key
+                    let mut child_indices = Vec::new();
+                    
+                    // Check each key to find potential paths
+                    for (i, k) in node.keys.iter().enumerate() {
+                        if k.compare_greater_than(key) == CmpBool::CmpTrue {
+                            // If this key is greater, we need to check the left child
+                            child_indices.push(i);
+                        } else if k.compare_equals(key) == CmpBool::CmpTrue {
+                            // If this key equals our search key, check both children
+                            child_indices.push(i);
+                            child_indices.push(i + 1);
+                        }
+                    }
+                    
+                    // Always check the rightmost child if we haven't found a greater key
+                    if !child_indices.contains(&(&node.children.len() - 1)) {
+                        child_indices.push(node.children.len() - 1);
+                    }
 
-                    let next_node = Arc::clone(&node.children[pos]);
-                    path.push((Arc::clone(&current_node), pos));
+                    // Add all potential paths to our search queue
+                    for child_idx in child_indices {
+                        debug!("Adding child index {} for checking", child_idx);
+                        let mut new_path = path.clone();
+                        new_path.push((Arc::clone(&current_node), child_idx));
+                        nodes_to_check.push((Arc::clone(&node.children[child_idx]), new_path));
+                    }
                     drop(node);
-                    current_node = next_node;
                 }
                 NodeType::Leaf => {
-                    // Find exact key-RID pair position
-                    let delete_pos = node
-                        .keys
-                        .iter()
-                        .enumerate()
-                        .find(|(idx, k)| {
-                            k.compare_equals(key) == CmpBool::CmpTrue && node.values[*idx] == rid
-                        })
-                        .map(|(idx, _)| idx);
+                    debug!("Processing leaf node with keys: {:?}", node.keys);
+                    
+                    // Check all entries in current leaf
+                    for (i, (k, r)) in node.keys.iter().zip(node.values.iter()).enumerate() {
+                        debug!("Checking entry {} - Key: {:?}, RID: {:?}", i, k, r);
+                        
+                        // Check for exact match
+                        if k.compare_equals(key) == CmpBool::CmpTrue && *r == rid {
+                            debug!("Found matching key-RID pair at position {}", i);
+                            found = true;
+                            drop(node);
+                            let mut node_write = current_node.write();
+                            
+                            // Remove the key and value
+                            node_write.keys.remove(i);
+                            node_write.values.remove(i);
 
-                    // If found, perform deletion
-                    if let Some(pos) = delete_pos {
-                        drop(node);
-                        // Get write lock to perform deletion
-                        let mut node = current_node.write();
-                        node.keys.remove(pos);
-                        node.values.remove(pos);
-                        success = true;
+                            // Check if node needs rebalancing
+                            let is_underfull = node_write.keys.len() < (self.order - 1) / 2;
+                            debug!(
+                                "After deletion: keys={}, min_keys={}, needs_rebalancing={}",
+                                node_write.keys.len(),
+                                (self.order - 1) / 2,
+                                is_underfull
+                            );
+                            drop(node_write);
+
+                            if is_underfull && !path.is_empty() {
+                                debug!("Node is underfull, starting rebalancing");
+                                self.rebalance_after_delete(path);
+                            }
+                            return true;
+                        }
                     }
-                    break;
+                    drop(node);
                 }
             }
         }
 
-        // If we deleted something and node is underfull, rebalance
-        if success {
-            self.rebalance_after_delete(path);
+        if !found {
+            debug!("Key-RID pair not found");
         }
-
-        success
+        false
     }
 
     pub fn scan_range(
         &self,
-        start_tuple: &Tuple,
-        end_tuple: &Tuple,
+        start_key: &Tuple,
+        end_key: &Tuple,
         include_end: bool,
     ) -> Result<Vec<(Value, RID)>, String> {
-        debug!("Starting range scan");
-
-        // Extract key values from tuples
-        let key_attrs = self.metadata.get_key_attrs();
-        let start_key = start_tuple.get_value(key_attrs[0]);
-        let end_key = end_tuple.get_value(key_attrs[0]);
-        debug!("Scanning range: [{:?}, {:?}]", start_key, end_key);
-
+        let start_key = self.extract_key(start_key);
+        let end_key = self.extract_key(end_key);
+        
+        debug!("Starting range scan from {:?} to {:?}", start_key, end_key);
         let mut current_node = Arc::clone(&self.root);
+        let mut entries = Vec::new();
 
         // Find leftmost leaf that could contain our range
         debug!("Finding start leaf node");
@@ -172,10 +206,9 @@ impl BPlusTree {
                     let child_idx = node
                         .keys
                         .iter()
-                        .position(|k| k.compare_greater_than(&start_key) == CmpBool::CmpTrue)
+                        .position(|k| k.compare_greater_than_equals(&start_key) == CmpBool::CmpTrue)
                         .unwrap_or(0);
                     debug!("Selected child index: {}", child_idx);
-
                     let next_node = Arc::clone(&node.children[child_idx]);
                     drop(node);
                     current_node = next_node;
@@ -189,27 +222,26 @@ impl BPlusTree {
 
         // Collect all values in range from leaf nodes
         debug!("Collecting entries from leaves");
-        let mut entries = Vec::new();
-        'scan: loop {
+        loop {
             let node = current_node.read();
             debug!("Processing leaf node with keys: {:?}", node.keys);
 
-            // Add all values from current leaf
+            // Add values from current leaf that are within range
             for (key, rid) in node.keys.iter().zip(node.values.iter()) {
-                debug!("Found entry - Key: {:?}, RID: {:?}", key, rid);
-                // Only add entries within our range
                 if key.compare_less_than(&start_key) == CmpBool::CmpTrue {
                     continue;
                 }
                 if key.compare_greater_than(&end_key) == CmpBool::CmpTrue
                     || (!include_end && key.compare_equals(&end_key) == CmpBool::CmpTrue)
                 {
-                    break 'scan;
+                    debug!("Found key beyond range, ending scan");
+                    return Ok(entries);
                 }
+                debug!("Found entry in range - Key: {:?}, RID: {:?}", key, rid);
                 entries.push((key.clone(), *rid));
             }
 
-            // Move to next leaf
+            // Move to next leaf if it exists
             match &node.next_leaf {
                 Some(next) => {
                     debug!("Moving to next leaf");
@@ -218,27 +250,72 @@ impl BPlusTree {
                     current_node = next_node;
                 }
                 None => {
-                    debug!("Reached last leaf");
-                    break 'scan;
+                    debug!("Reached last leaf, ending scan");
+                    break;
                 }
             }
         }
 
-        debug!("Sorting {} collected entries", entries.len());
-        // Sort entries to handle any out-of-order keys
-        entries.sort_by(|(key1, _), (key2, _)| {
-            if key1.compare_less_than(key2) == CmpBool::CmpTrue {
-                std::cmp::Ordering::Less
-            } else if key1.compare_greater_than(key2) == CmpBool::CmpTrue {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        });
-
-        debug!("Final result contains {} entries", entries.len());
+        debug!("Scan complete, collected {} entries", entries.len());
         Ok(entries)
     }
+
+    pub fn scan_full(&self) -> Result<Vec<(Value, RID)>, String> {
+        debug!("Starting full scan");
+
+        let mut current_node = Arc::clone(&self.root);
+        let mut entries = Vec::new();
+
+        // Find leftmost leaf
+        debug!("Finding leftmost leaf node");
+        loop {
+            let node = current_node.read();
+            match node.node_type {
+                NodeType::Internal => {
+                    debug!("At internal node with keys: {:?}", node.keys);
+                    // Always take leftmost child for full scan
+                    let next_node = Arc::clone(&node.children[0]);
+                    drop(node);
+                    current_node = next_node;
+                }
+                NodeType::Leaf => {
+                    debug!("Found leftmost leaf node");
+                    break;
+                }
+            }
+        }
+
+        // Collect all values from leaf nodes
+        debug!("Collecting entries from leaves");
+        loop {
+            let node = current_node.read();
+            debug!("Processing leaf node with keys: {:?}", node.keys);
+
+            // Pre-allocate space for entries from this leaf
+            entries.reserve(node.keys.len());
+
+            // Add all values from current leaf
+            for (key, rid) in node.keys.iter().zip(node.values.iter()) {
+                debug!("Found entry - Key: {:?}, RID: {:?}", key, rid);
+                entries.push((key.clone(), *rid));
+            }
+
+            // Move to next leaf if it exists
+            if let Some(next) = &node.next_leaf {
+                debug!("Moving to next leaf");
+                let next_node = Arc::clone(next);
+                drop(node);
+                current_node = next_node;
+            } else {
+                debug!("Reached last leaf, ending scan");
+                break;
+            }
+        }
+
+        debug!("Scan complete, collected {} entries", entries.len());
+        Ok(entries)
+    }
+
 
     /// Visualizes the B+ tree structure, showing:
     /// - Internal nodes with their keys
@@ -405,60 +482,117 @@ impl BPlusTree {
 
     // Helper method to find insertion position in sorted order
     fn find_insert_position(&self, keys: &[Value], key: &Value) -> usize {
-        keys.iter()
-            .position(|k| k.compare_greater_than_equals(key) == CmpBool::CmpTrue)
-            .unwrap_or(keys.len())
+        debug!("Finding insert position for key {:?}", key);
+        debug!("Current keys: {:?}", keys);
+        
+        // For duplicate keys, we want to insert after existing equal keys
+        // This ensures proper routing in internal nodes
+        let pos = keys.iter().position(|k| {
+            match k.compare_equals(key) {
+                CmpBool::CmpTrue => false, // Keep looking, want to insert after equals
+                _ => k.compare_greater_than(key) == CmpBool::CmpTrue
+            }
+        }).unwrap_or(keys.len());
+            
+        debug!("Found insert position: {}", pos);
+        pos
     }
 
     // Update insert_non_full to maintain sorted order
     fn insert_non_full(&self, node: &mut BPlusTreeNode, key: Value, rid: RID) -> bool {
+        debug!("Inserting into non-full node: key={:?}, rid={:?}", key, rid);
+        debug!("Current node: type={:?}, keys={:?}", node.node_type, node.keys);
+        
         match node.node_type {
             NodeType::Leaf => {
                 let pos = self.find_insert_position(&node.keys, &key);
-                
-                // Check for duplicate key-RID pair
-                if pos < node.keys.len() {
-                    let has_duplicate = node.keys[pos..].iter().zip(node.values[pos..].iter())
-                        .any(|(k, r)| k.compare_equals(&key) == CmpBool::CmpTrue && *r == rid);
-                    if has_duplicate {
-                        debug!("Duplicate key-RID pair found, skipping insertion");
-                        return false;
+                debug!("Found insert position {} in leaf node", pos);
+
+                // Check for duplicates by scanning all entries with the same key
+                let mut i = pos;
+                // Check entries before pos with same key
+                while i > 0 {
+                    i -= 1;
+                    if node.keys[i].compare_equals(&key) == CmpBool::CmpTrue {
+                        if node.values[i] == rid {
+                            debug!("Found duplicate key-RID pair at position {}", i);
+                            return false;
+                        }
+                    } else {
+                        break;
                     }
                 }
+                // Check entries from pos onwards with same key
+                i = pos;
+                while i < node.keys.len() {
+                    if node.keys[i].compare_equals(&key) == CmpBool::CmpTrue {
+                        if node.values[i] == rid {
+                            debug!("Found duplicate key-RID pair at position {}", i);
+                            return false;
+                        }
+                    } else {
+                        break;
+                    }
+                    i += 1;
+                }
 
-                // Insert the key-RID pair
-                debug!("Inserting key {:?} with RID {:?} at position {}", key, rid, pos);
+                debug!("Inserting at position {}: key={:?}, rid={:?}", pos, key, rid);
                 node.keys.insert(pos, key);
                 node.values.insert(pos, rid);
+                debug!("Leaf node after insertion: keys={:?}", node.keys);
                 true
             }
             NodeType::Internal => {
                 let pos = self.find_insert_position(&node.keys, &key);
-                let child_arc = Arc::clone(&node.children[pos]);
+                debug!("Found child position {} in internal node", pos);
                 
-                // Create a new scope for the write guard
+                // Ensure we don't go past the last child
+                let child_idx = if pos >= node.children.len() {
+                    debug!("Adjusting child index from {} to {}", pos, node.children.len() - 1);
+                    node.children.len() - 1
+                } else {
+                    pos
+                };
+                
+                let child_arc = Arc::clone(&node.children[child_idx]);
+                debug!("Checking child node at position {} of {}", child_idx, node.children.len());
+
                 {
                     let mut child_guard = child_arc.write();
-                    
-                    if child_guard.keys.len() == self.order - 1 {
+                    let needs_split = child_guard.keys.len() == self.order - 1;
+                    debug!("Child node status: keys={}, needs_split={}", 
+                           child_guard.keys.len(), needs_split);
+
+                    if needs_split {
                         drop(child_guard);
-                        self.split_child(node, pos);
+                        debug!("Child node is full, performing split");
+                        self.split_child(node, child_idx);
                         
                         // After split, find new position and get new child
-                        let pos = self.find_insert_position(&node.keys, &key);
-                        let child_arc = Arc::clone(&node.children[pos]);
+                        let new_pos = self.find_insert_position(&node.keys, &key);
+                        debug!("After split, new insert position is {}", new_pos);
+                        
+                        // Again ensure we don't go past the last child
+                        let new_child_idx = if new_pos >= node.children.len() {
+                            debug!("Adjusting new child index from {} to {}", new_pos, node.children.len() - 1);
+                            node.children.len() - 1
+                        } else {
+                            new_pos
+                        };
+                        
+                        let child_arc = Arc::clone(&node.children[new_child_idx]);
                         let mut child_guard = child_arc.write();
                         return self.insert_non_full(&mut *child_guard, key, rid);
                     }
-                    
-                    // No split needed, insert directly
+
+                    debug!("Recursing into child node");
                     self.insert_non_full(&mut *child_guard, key, rid)
                 }
             }
         }
     }
 
-    // Update split_child to maintain sorted order
+    // Update split_child to handle routing keys properly
     fn split_child(&self, parent: &mut BPlusTreeNode, child_idx: usize) -> bool {
         let child = Arc::clone(&parent.children[child_idx]);
         let mut child_guard = child.write();
@@ -468,9 +602,8 @@ impl BPlusTree {
         match child_guard.node_type {
             NodeType::Leaf => {
                 debug!("Splitting leaf node at position {}", middle);
-                // Move half of the entries to the new node
                 let split_point = child_guard.keys.len() / 2;
-                
+
                 // Move entries to new node
                 new_node.keys = child_guard.keys.split_off(split_point);
                 new_node.values = child_guard.values.split_off(split_point);
@@ -480,176 +613,304 @@ impl BPlusTree {
                 let new_node_arc = Arc::new(RwLock::new(new_node));
                 child_guard.next_leaf = Some(Arc::clone(&new_node_arc));
 
-                // Insert the new node into parent
-                // Use the first key of the new node as the separator
+                // For leaf splits, use the first key of the right node as separator
                 let split_key = new_node_arc.read().keys[0].clone();
                 
-                // Find the correct position in parent
-                let parent_pos = child_idx + 1;
-                parent.keys.insert(parent_pos - 1, split_key);
-                parent.children.insert(parent_pos, new_node_arc.clone());
+                let mut insert_pos = self.find_insert_position(&parent.keys, &split_key);
+                insert_pos = insert_pos.min(parent.keys.len());
+                
+                debug!("Inserting separator key at position {} in parent (len={})", 
+                       insert_pos, parent.keys.len());
+                
+                parent.keys.insert(insert_pos, split_key);
+                parent.children.insert(insert_pos + 1, new_node_arc.clone());
 
                 debug!(
-                    "Leaf split complete - Left node: {:?}, Right node: {:?}",
+                    "Leaf split complete - Left node: {:?}, Right node: {:?}, Parent keys: {:?}",
                     child_guard.keys,
-                    new_node_arc.read().keys
+                    new_node_arc.read().keys,
+                    parent.keys
                 );
             }
             NodeType::Internal => {
-                // Move half of the keys and children to the new node
+                debug!("Splitting internal node at position {}", middle);
+                
+                // For internal nodes, we need to handle the middle key differently
                 let split_point = child_guard.keys.len() / 2;
                 
                 // Get the middle key that will move up to the parent
-                let middle_key = child_guard.keys.remove(split_point);
+                let middle_key = child_guard.keys[split_point].clone();
                 
-                // Move entries to new node
-                new_node.keys = child_guard.keys.split_off(split_point);
+                // Move entries to new node (excluding middle key)
+                new_node.keys = child_guard.keys.split_off(split_point + 1);
                 new_node.children = child_guard.children.split_off(split_point + 1);
+                
+                // Remove the middle key from the child (it moves up)
+                child_guard.keys.remove(split_point);
 
-                // Insert the middle key and new node into parent
-                let parent_pos = child_idx + 1;
-                parent.keys.insert(parent_pos - 1, middle_key);
-                parent.children.insert(parent_pos, Arc::new(RwLock::new(new_node)));
+                // For internal splits, ensure the routing key is greater than all keys in left subtree
+                let mut insert_pos = self.find_insert_position(&parent.keys, &middle_key);
+                insert_pos = insert_pos.min(parent.keys.len());
+                
+                debug!("Inserting middle key at position {} in parent", insert_pos);
+                
+                parent.keys.insert(insert_pos, middle_key.clone());
+                parent.children.insert(insert_pos + 1, Arc::new(RwLock::new(new_node.clone())));
+
+                debug!(
+                    "Internal split complete - Left node: {:?}, Middle key: {:?}, Right node: {:?}",
+                    child_guard.keys,
+                    middle_key,
+                    new_node.keys
+                );
             }
         }
         true
     }
 
     fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
-        let min_keys = (self.order - 1) / 2;
+        let mut current_path = path;
+        
+        while !current_path.is_empty() {
+            let (parent_arc, child_idx) = current_path.pop().unwrap();
+            let mut parent = parent_arc.write();
+            
+            // Check if child needs rebalancing
+            let child = Arc::clone(&parent.children[child_idx]);
+            let child_guard = child.read();
+            let min_keys = (self.order - 1) / 2;
+            
+            if child_guard.keys.len() >= min_keys {
+                debug!("Child has enough keys ({} >= {}), no rebalancing needed", 
+                       child_guard.keys.len(), min_keys);
+                return;
+            }
+            drop(child_guard);
 
-        for (node_arc, child_idx) in path.iter().rev() {
-            let node = node_arc.read();
-            let child = node.children[*child_idx].read();
-
-            if child.keys.len() < min_keys {
-                drop(child);
-                drop(node);
-
-                let mut parent = node_arc.write();
-                self.rebalance_node(&mut parent, *child_idx);
+            // Try to borrow from siblings
+            let borrowed = if child_idx > 0 {
+                // Try left sibling
+                let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
+                let left_guard = left_sibling.read();
+                
+                if left_guard.keys.len() > min_keys {
+                    drop(left_guard);
+                    debug!("Borrowing from left sibling");
+                    self.borrow_from_left_sibling(&mut parent, child_idx);
+                    true
+                } else {
+                    drop(left_guard);
+                    false
+                }
             } else {
-                break;
+                false
+            } || if child_idx < parent.children.len() - 1 {
+                // Try right sibling
+                let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
+                let right_guard = right_sibling.read();
+                
+                if right_guard.keys.len() > min_keys {
+                    drop(right_guard);
+                    debug!("Borrowing from right sibling");
+                    self.borrow_from_right_sibling(&mut parent, child_idx);
+                    true
+                } else {
+                    drop(right_guard);
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !borrowed {
+                debug!("Could not borrow from siblings, need to merge");
+                // If we get here, we need to merge
+                if child_idx > 0 {
+                    debug!("Merging with left sibling");
+                    self.merge_with_left_sibling(&mut parent, child_idx);
+                } else if child_idx < parent.children.len() - 1 {
+                    debug!("Merging with right sibling");
+                    self.merge_with_right_sibling(&mut parent, child_idx);
+                }
+
+                // Check if parent needs rebalancing (unless it's the root)
+                if parent.keys.is_empty() && Arc::ptr_eq(&parent_arc, &self.root) {
+                    debug!("Root is empty after merge, updating tree height");
+                    // Root is empty after merge, make the first child the new root
+                    if !parent.children.is_empty() {
+                        let new_root = Arc::clone(&parent.children[0]);
+                        let new_root_node = {
+                            let node = new_root.write();
+                            BPlusTreeNode {
+                                node_type: node.node_type.clone(),
+                                keys: node.keys.clone(),
+                                children: node.children.clone(),
+                                values: node.values.clone(),
+                                next_leaf: node.next_leaf.clone(),
+                            }
+                        };
+                        drop(parent);
+                        let mut root = self.root.write();
+                        *root = new_root_node;
+                    }
+                    return;
+                }
+                
+                if parent.keys.len() < min_keys && !current_path.is_empty() {
+                    debug!("Parent needs rebalancing, continuing up the tree");
+                    continue;
+                }
+            }
+            
+            debug!("Rebalancing complete at this level");
+            break;
+        }
+    }
+
+    fn borrow_from_left_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+        let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
+        let child = Arc::clone(&parent.children[child_idx]);
+        
+        let mut left = left_sibling.write();
+        let mut right = child.write();
+        
+        match right.node_type {
+            NodeType::Leaf => {
+                // Move rightmost entry from left to right
+                let key = left.keys.pop().unwrap();
+                let value = left.values.pop().unwrap();
+                right.keys.insert(0, key.clone());
+                right.values.insert(0, value);
+                // Update parent's separator key
+                parent.keys[child_idx - 1] = key;
+            }
+            NodeType::Internal => {
+                // Move parent's separator down to right child
+                let separator = parent.keys[child_idx - 1].clone();
+                right.keys.insert(0, separator);
+                
+                // Move rightmost child from left to right
+                if !left.children.is_empty() {
+                    let child = Arc::clone(&left.children[left.children.len() - 1]);
+                    left.children.pop();
+                    right.children.insert(0, child);
+                }
+                
+                // Move rightmost key from left to parent
+                parent.keys[child_idx - 1] = left.keys.pop().unwrap();
             }
         }
     }
 
-    fn rebalance_node(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        let min_keys = (self.order - 1) / 2;
-
-        // Try borrowing from left sibling
-        if child_idx > 0 {
-            let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
-            let mut child = parent.children[child_idx].write();
-            let mut left = left_sibling.write();
-
-            if left.keys.len() > min_keys {
-                // Move rightmost key-value pair from left sibling
-                let key = left.keys.pop().unwrap();
-                let value = left.values.pop().unwrap();
-
-                child.keys.insert(0, key.clone());
-                child.values.insert(0, value);
-
-                // Update parent's separator key
-                parent.keys[child_idx - 1] = key;
-                return;
-            }
-        }
-
-        // Try borrowing from right sibling
-        if child_idx < parent.children.len() - 1 {
-            let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
-            let mut child = parent.children[child_idx].write();
-            let mut right = right_sibling.write();
-
-            if right.keys.len() > min_keys {
-                // Move leftmost key-value pair from right sibling
+    fn borrow_from_right_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
+        let child = Arc::clone(&parent.children[child_idx]);
+        let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
+        
+        let mut left = child.write();
+        let mut right = right_sibling.write();
+        
+        match left.node_type {
+            NodeType::Leaf => {
+                // Move leftmost entry from right to left
                 let key = right.keys.remove(0);
                 let value = right.values.remove(0);
-
-                child.keys.push(key.clone());
-                child.values.push(value);
-
+                left.keys.push(key.clone());
+                left.values.push(value);
                 // Update parent's separator key
                 parent.keys[child_idx] = right.keys[0].clone();
-                return;
             }
-        }
-
-        // If we can't borrow, merge with a sibling
-        if child_idx > 0 {
-            self.merge_with_left_sibling(parent, child_idx);
-        } else {
-            self.merge_with_right_sibling(parent, child_idx);
+            NodeType::Internal => {
+                // Move parent's separator down to left child
+                let separator = parent.keys[child_idx].clone();
+                left.keys.push(separator);
+                
+                // Move leftmost child from right to left
+                if !right.children.is_empty() {
+                    let child = Arc::clone(&right.children[0]);
+                    right.children.remove(0);
+                    left.children.push(child);
+                }
+                
+                // Move leftmost key from right to parent
+                parent.keys[child_idx] = right.keys.remove(0);
+            }
         }
     }
 
     fn merge_with_left_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        let left = Arc::clone(&parent.children[child_idx - 1]);
-        let right = Arc::clone(&parent.children[child_idx]);
-
-        let mut left_guard = left.write();
-        let right_guard = right.read();
-
-        // Collect all entries and sort them
-        let mut entries: Vec<_> = left_guard
-            .keys
-            .iter()
-            .cloned()
-            .zip(left_guard.values.iter().cloned())
-            .chain(
-                right_guard
-                    .keys
-                    .iter()
-                    .cloned()
-                    .zip(right_guard.values.iter().cloned()),
-            )
-            .collect();
-
-        entries.sort_by(|(key1, _), (key2, _)| {
-            if key1.compare_less_than(key2) == CmpBool::CmpTrue {
-                std::cmp::Ordering::Less
-            } else if key1.compare_greater_than(key2) == CmpBool::CmpTrue {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Equal
+        debug!("Merging node {} with its left sibling", child_idx);
+        let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
+        let child = Arc::clone(&parent.children[child_idx]);
+        
+        let mut left = left_sibling.write();
+        let mut right = child.write();
+        
+        match right.node_type {
+            NodeType::Leaf => {
+                // Move all entries from right to left
+                left.keys.extend(right.keys.drain(..));
+                left.values.extend(right.values.drain(..));
+                // Update leaf node links
+                left.next_leaf = right.next_leaf.take();
             }
-        });
-
-        // Update left node with sorted entries
-        left_guard.keys.clear();
-        left_guard.values.clear();
-        for (key, rid) in entries {
-            left_guard.keys.push(key);
-            left_guard.values.push(rid);
+            NodeType::Internal => {
+                // Move parent's separator key down to left sibling
+                let separator = parent.keys.remove(child_idx - 1);
+                left.keys.push(separator);
+                
+                // Move all keys and children from right to left
+                left.keys.extend(right.keys.drain(..));
+                left.children.extend(right.children.drain(..));
+            }
         }
-
-        // Update leaf node links
-        left_guard.next_leaf = right_guard.next_leaf.clone();
-
-        // Remove right child and separating key from parent
+        
+        // Remove the right child from parent
         parent.children.remove(child_idx);
-        parent.keys.remove(child_idx - 1);
+        
+        // Remove the separator key from parent if it exists
+        if child_idx - 1 < parent.keys.len() {
+            parent.keys.remove(child_idx - 1);
+        }
+        
+        debug!("Merge complete - Parent keys: {:?}", parent.keys);
     }
 
     fn merge_with_right_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
-        let left = Arc::clone(&parent.children[child_idx]);
-        let right = Arc::clone(&parent.children[child_idx + 1]);
-
-        let mut left_guard = left.write();
-        let right_guard = right.read();
-
-        // Move all keys and values from right to left
-        left_guard.keys.extend(right_guard.keys.iter().cloned());
-        left_guard.values.extend(right_guard.values.iter().cloned());
-
-        // Update leaf node links
-        left_guard.next_leaf = right_guard.next_leaf.clone();
-
-        // Remove right child and separating key from parent
+        debug!("Merging node {} with its right sibling", child_idx);
+        let child = Arc::clone(&parent.children[child_idx]);
+        let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
+        
+        let mut left = child.write();
+        let mut right = right_sibling.write();
+        
+        match left.node_type {
+            NodeType::Leaf => {
+                // Move all entries from right to left
+                left.keys.extend(right.keys.drain(..));
+                left.values.extend(right.values.drain(..));
+                // Update leaf node links
+                left.next_leaf = right.next_leaf.take();
+            }
+            NodeType::Internal => {
+                // Move parent's separator key down to left node
+                let separator = parent.keys.remove(child_idx);
+                left.keys.push(separator);
+                
+                // Move all keys and children from right to left
+                left.keys.extend(right.keys.drain(..));
+                left.children.extend(right.children.drain(..));
+            }
+        }
+        
+        // Remove the right sibling from parent
         parent.children.remove(child_idx + 1);
-        parent.keys.remove(child_idx);
+        
+        // Remove the separator key from parent
+        if child_idx < parent.keys.len() {
+            parent.keys.remove(child_idx);
+        }
+        
+        debug!("Merge complete - Parent keys: {:?}", parent.keys);
     }
 
     fn extract_key(&self, tuple: &Tuple) -> Value {
@@ -678,75 +939,10 @@ impl Index for BPlusTree {
 
     fn delete_entry(&self, tuple: &Tuple, rid: RID, _transaction: &Transaction) -> bool {
         let key = self.extract_key(tuple);
-        let mut current_node = Arc::clone(&self.root);
-        let mut path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)> = Vec::new();
-
-        // Special case for root node if it's a leaf
-        {
-            let root = current_node.read();
-            if root.node_type == NodeType::Leaf {
-                let pos = root
-                    .keys
-                    .iter()
-                    .zip(root.values.iter())
-                    .position(|(k, r)| k.compare_equals(&key) == CmpBool::CmpTrue && *r == rid);
-
-                if let Some(idx) = pos {
-                    drop(root);
-                    let mut root = current_node.write();
-                    root.keys.remove(idx);
-                    root.values.remove(idx);
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        // Find the leaf node containing the key
-        loop {
-            let node = current_node.read();
-            match node.node_type {
-                NodeType::Internal => {
-                    let pos = node
-                        .keys
-                        .iter()
-                        .position(|k| k.compare_greater_than(&key) == CmpBool::CmpTrue)
-                        .unwrap_or(node.keys.len());
-
-                    let next_node = Arc::clone(&node.children[pos]);
-                    path.push((Arc::clone(&current_node), pos));
-                    drop(node);
-                    current_node = next_node;
-                }
-                NodeType::Leaf => {
-                    let pos =
-                        node.keys.iter().zip(node.values.iter()).position(|(k, r)| {
-                            k.compare_equals(&key) == CmpBool::CmpTrue && *r == rid
-                        });
-
-                    if let Some(idx) = pos {
-                        drop(node);
-                        let mut node_write = current_node.write();
-                        node_write.keys.remove(idx);
-                        node_write.values.remove(idx);
-
-                        let is_underfull = node_write.keys.len() < (self.order - 1) / 2;
-                        drop(node_write);
-
-                        if is_underfull && !path.is_empty() {
-                            self.rebalance_after_delete(path);
-                        }
-                        return true;
-                    }
-                    drop(node);
-                    return false;
-                }
-            }
-        }
+        self.delete(&key, rid)
     }
 
     fn scan_key(&self, key: &Tuple, _transaction: &Transaction) -> Result<Vec<(Value, RID)>, String> {
-        // Find the first leaf node that could contain our key
         let result = self.scan_range(key, key, true).unwrap();
         debug!("Scan complete, found {} matching entries", result.len());
         Ok(result)
@@ -1209,7 +1405,6 @@ mod split_behavior_tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::transaction::IsolationLevel;
 
     /// Test leaf node splitting behavior with a small order
     #[test]
@@ -1360,7 +1555,7 @@ mod split_behavior_tests {
         // Insert multiple entries with the same key
         for i in 1..=5 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i), &Default::default()));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
             println!("\nAfter inserting duplicate 1 (#{}):", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1402,7 +1597,10 @@ mod split_behavior_tests {
 
         let values: Vec<i32> = result
             .iter()
-            .map(|(value, _)| get_integer_from_value(value))
+            .map(|(value, _)| match value.get_value() {
+                Val::Integer(i) => *i,
+                _ => panic!("Expected integer value"),
+            })
             .collect();
 
         // Verify ordering
@@ -1456,6 +1654,54 @@ mod split_behavior_tests {
             );
         }
     }
+
+    #[test]
+    fn test_internal_node_split_routing_keys() {
+        initialize_logger();
+        let schema = create_test_schema();
+        let index_info = create_test_metadata();
+        let tree = create_test_tree(3, Arc::from(index_info));
+        let mut tree_guard = tree.write();
+
+        // Insert values that will cause internal node splits
+        for i in 1..=5 {
+            let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
+            assert!(
+                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                "Failed to insert tuple {}", i
+            );
+            println!("Tree after inserting tuple {}:\n{}", i, tree_guard.visualize());
+        }
+
+        println!("Tree after insertions:\n{}", tree_guard.visualize());
+
+        // Verify internal node structure
+        let root = tree_guard.root.read();
+        assert_eq!(root.node_type, NodeType::Internal, "Root should be internal");
+        assert!(!root.keys.is_empty(), "Root should have routing keys");
+
+        // Check each internal node has proper routing keys
+        for (i, child) in root.children.iter().enumerate() {
+            let child_node = child.read();
+            if child_node.node_type == NodeType::Internal {
+                assert!(
+                    !child_node.keys.is_empty(),
+                    "Internal node at position {} should have routing keys", i
+                );
+            }
+        }
+
+        // Try to delete entries to verify routing works
+        drop(root);
+        for i in 1..=5 {
+            let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
+            assert!(
+                tree_guard.delete_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                "Failed to delete tuple {}", i
+            );
+            println!("Tree after deleting tuple {}:\n{}", i, tree_guard.visualize());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1463,8 +1709,6 @@ mod scan_key_tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::transaction::IsolationLevel;
-    use std::collections::HashSet;
 
     /// Test scanning for a key in an empty tree
     #[test]
@@ -1545,7 +1789,7 @@ mod scan_key_tests {
         initialize_logger();
         let schema = create_test_schema();
         let index_info = create_test_metadata();
-        let tree = create_test_tree(3, Arc::from(index_info)); // Small order to force splits
+        let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
 
         // Insert enough duplicates to cause splits
@@ -1645,7 +1889,7 @@ mod scan_key_tests {
         println!("Tree after deletions:\n{}", tree_guard.visualize());
 
         // Search for remaining duplicates
-        let search_tuple = create_tuple(1, "value1_1", &schema);
+        let search_tuple = create_tuple(1, "value", &schema);
         let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
         assert_eq!(result.len(), 3, "Should find remaining 3 duplicates");
 
