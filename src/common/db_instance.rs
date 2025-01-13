@@ -80,7 +80,12 @@ impl DBInstance {
             Self::create_transaction_manager(catalog.clone(), log_manager.clone().unwrap())?;
         let lock_manager = Self::create_lock_manager(&transaction_manager.clone().unwrap())?;
 
-        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(Arc::clone(&catalog))));
+        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(
+            Arc::clone(&catalog),
+            buffer_pool_manager.clone().unwrap(),
+            transaction_manager.clone().unwrap(),
+            lock_manager.clone().unwrap()
+        )));
 
         Ok(Self {
             buffer_pool_manager,
@@ -129,15 +134,13 @@ impl DBInstance {
             txn.get_transaction_id()
         );
 
-        // Create execution context without holding any locks
+        // Create execution context
         let exec_ctx = Arc::new(RwLock::new(ExecutorContext::new(
             txn.clone(),
             self.transaction_manager.clone().unwrap(),
             self.catalog.clone(),
-            self.buffer_pool_manager
-                .clone()
-                .expect("Buffer pool manager required"),
-            self.lock_manager.clone().expect("Lock manager required"),
+            self.buffer_pool_manager.clone().unwrap(),
+            self.lock_manager.clone().unwrap(),
         )));
 
         debug!("Created execution context");
@@ -148,38 +151,21 @@ impl DBInstance {
             let mut ctx_guard = exec_ctx.write();
             ctx_guard.set_check_options(opts);
             ctx_guard.init_check_options();
-            // guard is dropped here
             debug!("Check options configured");
         }
 
-        // Prepare statement without holding context lock
-        debug!("Preparing SQL statement");
-        let plan = {
-            let mut engine = self.execution_engine.lock();
-            let check_options = {
-                let ctx_guard = exec_ctx.read();
-                ctx_guard.get_check_options()
-            };
-            engine.prepare_statement(sql, check_options)?
-        };
-        debug!("Statement prepared successfully");
-
-        // Execute the statement
-        debug!("Executing prepared statement");
+        // Execute the SQL statement
         let result = {
-            let engine = self.execution_engine.lock();
-            engine.execute_statement(&plan, exec_ctx.clone(), writer)
+            let mut engine = self.execution_engine.lock();
+            engine.execute_sql(sql, exec_ctx, writer)
         };
 
         match &result {
-            Ok(has_results) => {
-                debug!(
-                    "Statement execution completed successfully. Results: {}",
-                    has_results
-                );
+            Ok(_) => {
+                debug!("SQL execution completed successfully");
             }
             Err(e) => {
-                warn!("Statement execution failed: {:?}", e);
+                warn!("SQL execution failed: {:?}", e);
                 txn.set_tainted();
             }
         }
@@ -197,8 +183,8 @@ impl DBInstance {
 
         // Create new transaction
         let txn = {
-            let txn_manager = &self.get_transaction_manager();
-            let mut txn_manager_guard = txn_manager.unwrap().write();
+            let txn_manager = self.transaction_manager.as_ref().unwrap();
+            let mut txn_manager_guard = txn_manager.write();
             debug!("Creating new transaction");
             txn_manager_guard.begin(IsolationLevel::ReadUncommitted)
         };
@@ -210,8 +196,8 @@ impl DBInstance {
         match &result {
             Ok(_) => {
                 debug!("Committing transaction {}", txn.get_transaction_id());
-                let txn_manager = &self.get_transaction_manager();
-                let mut txn_manager_guard = txn_manager.unwrap().write();
+                let txn_manager = self.transaction_manager.as_ref().unwrap();
+                let mut txn_manager_guard = txn_manager.write();
                 if !txn_manager_guard.commit(txn.clone()) {
                     warn!("Transaction commit failed");
                     return Err(DBError::Transaction(
@@ -226,8 +212,8 @@ impl DBInstance {
                     txn.get_transaction_id(),
                     e
                 );
-                let txn_manager = &self.get_transaction_manager();
-                let mut txn_manager_guard = txn_manager.unwrap().write();
+                let txn_manager = self.transaction_manager.as_ref().unwrap();
+                let mut txn_manager_guard = txn_manager.write();
                 txn_manager_guard.abort(txn.clone());
                 info!("Transaction rolled back");
             }
