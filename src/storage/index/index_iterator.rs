@@ -68,6 +68,11 @@ impl IndexIterator {
         let result = match (&self.start_key, &self.end_key) {
             // Full scan case
             (None, None) => {
+                if self.last_key.is_some() {
+                    debug!("Already completed full scan");
+                    self.exhausted = true;
+                    return false;
+                }
                 debug!("Starting fresh full scan");
                 tree_guard.scan_full()
             }
@@ -96,20 +101,11 @@ impl IndexIterator {
         };
 
         match result {
-            Ok(mut new_results) => {
+            Ok(new_results) => {
                 if new_results.is_empty() {
                     debug!("No more results available");
                     self.exhausted = true;
                     return false;
-                }
-
-                // If this is a continuation, skip the first result if it matches our last key
-                if let Some(last_key) = &self.last_key {
-                    if let Some((first_key, _)) = new_results.first() {
-                        if first_key == last_key {
-                            new_results.remove(0);
-                        }
-                    }
                 }
 
                 // Update last_key for next batch
