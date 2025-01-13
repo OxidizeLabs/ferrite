@@ -14,7 +14,6 @@ pub struct IndexIterator {
     position: usize,
     start_key: Option<Tuple>,
     end_key: Option<Tuple>,
-    batch_size: usize,
     exhausted: bool,
     last_key: Option<Value>,  // Track the last key we've processed
 }
@@ -23,7 +22,6 @@ impl IndexIterator {
     /// Create a new index iterator with batched scanning.
     pub fn new(
         tree: Arc<RwLock<BPlusTree>>,
-        batch_size: usize,
         start_key: Option<Tuple>,
         end_key: Option<Tuple>,
     ) -> Self {
@@ -33,7 +31,6 @@ impl IndexIterator {
             position: 0,
             start_key,
             end_key,
-            batch_size,
             exhausted: false,
             last_key: None,
         };
@@ -284,7 +281,7 @@ mod tests {
         let start = create_tuple(2, "value2", &schema);
         let end = create_tuple(4, "value4", &schema);
 
-        let iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
+        let iterator = IndexIterator::new(Arc::clone(&tree), Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert_eq!(results.len(), 3);
@@ -307,7 +304,7 @@ mod tests {
         let start = create_tuple(1, "value1", &schema);
         let end = create_tuple(200, "value200", &schema);
 
-        let iterator = IndexIterator::new(Arc::clone(&tree), 10, Some(start), Some(end));
+        let iterator = IndexIterator::new(Arc::clone(&tree), Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert_eq!(results.len(), 200);
@@ -321,41 +318,9 @@ mod tests {
         let start = create_tuple(1, "value1", &schema);
         let end = create_tuple(10, "value10", &schema);
 
-        let iterator = IndexIterator::new(Arc::clone(&tree), 1, Some(start), Some(end));
+        let iterator = IndexIterator::new(Arc::clone(&tree), Some(start), Some(end));
 
         let results: Vec<RID> = iterator.collect();
         assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_iterator_batch_boundaries() {
-        use crate::common::logger::initialize_logger;
-        initialize_logger();
-
-        let schema = create_test_schema();
-        let tree = create_test_tree(4);
-
-        // Insert a small set of data to test batch boundaries
-        {
-            let mut tree_guard = tree.write();
-            for i in 1..=10 {
-                let tuple = create_tuple(i, &format!("value{}", i), &schema);
-                assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
-            }
-        }
-
-        let start = create_tuple(1, "value1", &schema);
-        let end = create_tuple(10, "value10", &schema);
-
-        // Use very small batch size to force multiple batches
-        let iterator = IndexIterator::new(Arc::clone(&tree), 3, Some(start), Some(end));
-
-        // Collect all results and verify
-        let results: Vec<RID> = iterator.collect();
-        println!("Got {} results: {:?}", results.len(), results);
-
-        // Verify we got all expected RIDs
-        let expected: Vec<RID> = (1..=10).map(|i| RID::new(0, i)).collect();
-        assert_eq!(results, expected, "Results don't match expected values");
     }
 }
