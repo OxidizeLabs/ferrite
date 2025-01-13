@@ -6,19 +6,19 @@ use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanTyp
 pub struct ProjectionNode {
     output_schema: Schema,
     expressions: Vec<Expression>,
-    child: Box<PlanNode>,
+    children: Vec<PlanNode>,
 }
 
 impl ProjectionNode {
     pub fn new(
         output_schema: Schema,
         expressions: Vec<Expression>,
-        child: PlanNode,
+        children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema,
             expressions,
-            child: Box::new(child),
+            children,
         }
     }
 
@@ -29,7 +29,7 @@ impl ProjectionNode {
 
     /// Get a reference to the child plan
     pub fn get_child_plan(&self) -> &PlanNode {
-        &self.child
+        &self.children[0]
     }
 }
 
@@ -39,10 +39,7 @@ impl AbstractPlanNode for ProjectionNode {
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        static CHILDREN: Vec<PlanNode> = Vec::new();
-        // We can't return a reference to a newly created Vec, so we maintain
-        // the child in a Box and use a static empty Vec for the trait implementation
-        &CHILDREN
+        &self.children
     }
 
     fn get_type(&self) -> PlanType {
@@ -80,16 +77,18 @@ impl AbstractPlanNode for ProjectionNode {
         let mut result = format!("{}└─ {}\n", indent_str, self.to_string(true));
 
         // Add child plan with increased indentation
-        result.push_str(&format!(
-            "{}",
-            match self.child.as_ref() {
-                PlanNode::Projection(node) => node.children_to_string(indent + 1),
-                PlanNode::Filter(node) => node.children_to_string(indent + 1),
-                PlanNode::TableScan(node) => node.children_to_string(indent + 1),
-                // Add other plan types as needed
-                _ => String::from("Unknown child node type"),
-            }
-        ));
+        if let Some(child) = self.children.first() {
+            result.push_str(&format!(
+                "{}",
+                match child {
+                    PlanNode::Projection(node) => node.children_to_string(indent + 1),
+                    PlanNode::Filter(node) => node.children_to_string(indent + 1),
+                    PlanNode::TableScan(node) => node.children_to_string(indent + 1),
+                    // Add other plan types as needed
+                    _ => String::from("Unknown child node type"),
+                }
+            ));
+        }
 
         result
     }
@@ -102,7 +101,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::common::logger::initialize_logger;
     use crate::execution::expressions::mock_expression::MockExpression;
     use crate::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -121,7 +119,7 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            initialize_logger();
+            // initialize_logger();
             let buffer_pool_size: usize = 5;
             const K: usize = 2;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
@@ -201,7 +199,7 @@ mod tests {
             create_mock_expression("name", TypeId::VarChar),
         ];
 
-        let child_node = create_mock_table_scan(&ctx, "test_table", input_schema);
+        let child_node = vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
         let projection = ProjectionNode::new(output_schema.clone(), expressions, child_node);
 
         assert_eq!(projection.get_type(), PlanType::Projection);
@@ -233,7 +231,7 @@ mod tests {
             create_mock_expression("name", TypeId::VarChar),
         ];
 
-        let child_node = create_mock_table_scan(&ctx, "test_table", input_schema);
+        let child_node =  vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
         let projection = ProjectionNode::new(output_schema, expressions, child_node);
 
         let exprs = projection.get_expressions();
