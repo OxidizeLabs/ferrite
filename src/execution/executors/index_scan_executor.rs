@@ -15,6 +15,8 @@ use crate::types_db::value::{Val, Value};
 use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::storage::index::b_plus_tree_i::BPlusTree;
+use std::sync::Once;
 
 pub struct IndexScanExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -382,15 +384,14 @@ mod index_scan_executor_tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            initialize_logger();
+            // Initialize logger first using the common module
+            // initialize_logger();
             let timestamp = chrono::Utc::now().timestamp();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
                 10,
@@ -555,13 +556,12 @@ mod index_scan_executor_tests {
 
     #[test]
     fn test_index_scan_full() {
-        initialize_logger();
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_full");
-        let context = &ctx.executor_context;
+        let context = ctx.executor_context.clone();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
-        // insert_test_data(&context, &table_name);
+        insert_test_data(&context, &table_name);
 
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -584,11 +584,10 @@ mod index_scan_executor_tests {
     }
 
     #[test]
-    fn test_index_scan_equality() {
-        initialize_logger();
+    fn  test_index_scan_equality() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_equality");
-        let context = &ctx.executor_context;
+        let context = ctx.executor_context.clone();
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
 
@@ -622,10 +621,9 @@ mod index_scan_executor_tests {
 
     #[test]
     fn test_index_scan_range() {
-        initialize_logger();
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_range");
-        let context = &ctx.executor_context;
+        let context = ctx.executor_context.clone();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
@@ -659,10 +657,9 @@ mod index_scan_executor_tests {
 
     #[test]
     fn test_index_scan_with_deletion() {
-        initialize_logger();
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_with_deletion");
-        let context = &ctx.executor_context;
+        let context = ctx.executor_context.clone();
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
 
@@ -673,41 +670,43 @@ mod index_scan_executor_tests {
         let table_info = catalog_guard.get_table(&table_name).unwrap();
         let table_heap = table_info.get_table_heap();
 
+        // Mark tuples as deleted
         for i in &[3, 7] {
             let mut iterator = table_heap.make_iterator();
             while let Some((mut meta, tuple)) = iterator.next() {
                 if tuple.get_value(0).compare_equals(&Value::new(*i)) == CmpBool::CmpTrue {
                     meta.mark_as_deleted();
+                    table_heap.update_tuple_meta(&meta, tuple.get_rid());
                     break;
                 }
             }
         }
 
-        // 2 <= id <= 8
-        let pred_low = create_predicate_expression(ComparisonType::GreaterThanOrEqual, 2);
-        let pred_high = create_predicate_expression(ComparisonType::LessThanOrEqual, 8);
-
+        // Scan all tuples
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
             table_name,
             table_id,
             index_name,
             index_id,
-            vec![pred_low, pred_high],
-            vec![],
+            vec![], // no predicates
+            vec![], // no children
         ));
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
-        let mut seen_ids = vec![];
+        // Should only see non-deleted tuples
+        let mut count = 0;
+        let mut seen_ids = Vec::new();
         while let Some((tuple, _)) = executor.next() {
-            let id = tuple.get_value(0).clone();
+            count += 1;
+            let id = tuple.get_value(0);
             seen_ids.push(id.clone());
-            assert_eq!(id.compare_greater_than_equals(&Value::new(2)), CmpBool::CmpTrue);
-            assert_eq!(id.compare_less_than_equals(&Value::new(8)), CmpBool::CmpTrue);
-            assert_ne!(id.compare_equals(&Value::new(3)), CmpBool::CmpTrue);
-            assert_ne!(id.compare_equals(&Value::new(7)), CmpBool::CmpTrue);
+            assert!(id.compare_not_equals(&Value::new(3)) == CmpBool::CmpTrue);
+            assert!(id.compare_not_equals(&Value::new(7)) == CmpBool::CmpTrue);
         }
-        // assert_eq!(seen_ids, vec![Value::new(2), Value::new(4), Value::new(5), Value::new(6), Value::new(8)]);
+        assert_eq!(count, 8, "Should see 8 non-deleted tuples");
+        assert!(!seen_ids.contains(&Value::new(3)), "Should not contain deleted ID 3");
+        assert!(!seen_ids.contains(&Value::new(7)), "Should not contain deleted ID 7");
     }
 }
