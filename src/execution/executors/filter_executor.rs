@@ -118,7 +118,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -153,7 +152,6 @@ mod tests {
 
     impl TestContext {
         pub fn new(test_name: &str) -> Self {
-            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 
@@ -187,7 +185,8 @@ mod tests {
             )));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction_manager =
+                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             Self {
@@ -381,11 +380,7 @@ mod tests {
         // Create filter for age = 28 (should match David)
         let filter_plan = create_age_filter(28, ComparisonType::Equal, &schema);
 
-        let mut executor = FilterExecutor::new(
-            child_executor,
-            executor_context,
-            filter_plan,
-        );
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
         executor.init();
 
         // Collect filtered results
@@ -404,7 +399,6 @@ mod tests {
         assert_eq!(results[0].0, "David");
         assert_eq!(results[0].1, 28);
     }
-
 
     #[test]
     fn test_filter_greater_than() {
@@ -459,11 +453,7 @@ mod tests {
         let filter_plan = create_age_filter(30, ComparisonType::GreaterThan, &schema);
 
         // Create and initialize filter executor
-        let mut executor = FilterExecutor::new(
-            child_executor,
-            executor_context,
-            filter_plan,
-        );
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
         executor.init();
 
         // Collect filtered results
@@ -510,11 +500,7 @@ mod tests {
             schema.clone(),
         ));
 
-        let mut executor = FilterExecutor::new(
-            child_executor,
-            executor_context,
-            filter_plan,
-        );
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
         executor.init();
 
         // Should not return any results
@@ -532,12 +518,16 @@ mod tests {
         // Create table within a block to ensure the write lock is dropped
         let table_heap = {
             let mut catalog_guard = catalog.write();
-            let table_info = catalog_guard.create_table("test_table", schema.clone()).unwrap();
+            let table_info = catalog_guard
+                .create_table("test_table", schema.clone())
+                .unwrap();
             table_info.get_table_heap().clone()
         };
 
         // Insert test data using a separate transaction
-        let insert_txn = test_context.transaction_manager.write()
+        let insert_txn = test_context
+            .transaction_manager
+            .write()
             .begin(IsolationLevel::ReadCommitted);
 
         let test_data = vec![
@@ -592,11 +582,7 @@ mod tests {
         ));
 
         // Create filter executor
-        let mut executor = FilterExecutor::new(
-            child_executor,
-            executor_context,
-            filter_plan,
-        );
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
 
         // Initialize the executor
         executor.init();
@@ -613,7 +599,10 @@ mod tests {
 
         // Verify results
         assert!(!results.is_empty(), "Should find matching tuples");
-        assert!(results.iter().all(|&age| age > 25), "All ages should be > 25");
+        assert!(
+            results.iter().all(|&age| age > 25),
+            "All ages should be > 25"
+        );
         assert_eq!(results.len(), 4); // Bob(30), Charlie(35), David(28), Eve(32)
 
         // Optional: Verify specific ages are present

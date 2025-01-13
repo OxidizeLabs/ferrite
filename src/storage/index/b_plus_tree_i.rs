@@ -99,10 +99,10 @@ impl BPlusTree {
     pub fn delete(&self, key: &Value, rid: RID) -> bool {
         debug!("Starting delete for key {:?} with RID {:?}", key, rid);
         let mut nodes_to_check = vec![(Arc::clone(&self.root), Vec::new())];
-        let mut found = false;
+        let found = false;
 
         // Search through all possible paths that could contain our key
-        while let Some((current_node, mut path)) = nodes_to_check.pop() {
+        while let Some((current_node, path)) = nodes_to_check.pop() {
             let node = current_node.read();
             match node.node_type {
                 NodeType::Internal => {
@@ -147,7 +147,6 @@ impl BPlusTree {
                         // Check for exact match
                         if k.compare_equals(key) == CmpBool::CmpTrue && *r == rid {
                             debug!("Found matching key-RID pair at position {}", i);
-                            found = true;
                             drop(node);
                             let mut node_write = current_node.write();
                             

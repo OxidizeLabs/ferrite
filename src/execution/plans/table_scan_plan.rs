@@ -99,7 +99,6 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableHeap;
@@ -115,7 +114,7 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            initialize_logger();
+            // initialize_logger();
             let buffer_pool_size: usize = 5;
             const K: usize = 2;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();

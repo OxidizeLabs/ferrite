@@ -75,12 +75,10 @@ impl IndexInfo {
         }
     }
 
-
     pub fn create_dummy_key(&self) -> Tuple {
         let key_schema = self.get_key_schema();
         Tuple::new(&[Value::new(0)], key_schema.clone(), RID::new(0, 0))
     }
-
 
     pub fn get_key_schema(&self) -> &Schema {
         &self.key_schema
@@ -120,13 +118,14 @@ impl IndexInfo {
     }
 
     // Creates an iterator for scanning the index
-    pub fn create_iterator(&self,
-                           tree: Arc<RwLock<BPlusTree>>,
-                           batch_size: usize,
-                           start_key: Option<Tuple>,
-                           end_key: Option<Tuple>,
+    pub fn create_iterator(
+        &self,
+        tree: Arc<RwLock<BPlusTree>>,
+        batch_size: usize,
+        start_key: Option<Tuple>,
+        end_key: Option<Tuple>,
     ) -> IndexIterator {
-        IndexIterator::new(tree, batch_size, start_key, end_key)
+        IndexIterator::new(tree, start_key, end_key)
     }
 }
 
@@ -198,16 +197,16 @@ pub trait Index: Send + Sync {
     /// - `key`: The index key.
     /// - `result`: The collection of RIDs that is populated with results of the search.
     /// - `transaction`: The transaction context.
-    fn scan_key(&self, key: &Tuple, result: &mut Vec<RID>, transaction: &Transaction) {
+    fn scan_key(
+        &self,
+        key: &Tuple,
+        transaction: &Transaction,
+    ) -> Result<Vec<(Value, RID)>, String> {
         unimplemented!()
     }
 
     /// Creates an iterator for scanning the index
-    fn create_iterator(
-        &self,
-        start_key: Option<Tuple>,
-        end_key: Option<Tuple>,
-    ) -> IndexIterator {
+    fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator {
         unimplemented!()
     }
 
@@ -237,11 +236,7 @@ impl Display for IndexInfo {
         write!(
             f,
             " {{ name: {}, type: {}, table: {}, primary_key: {}, key_size: {} }}",
-            self.index_name,
-            self.index_type,
-            self.table_name,
-            self.is_primary_key,
-            self.key_size
+            self.index_name, self.index_type, self.table_name, self.is_primary_key, self.key_size
         )
     }
 }

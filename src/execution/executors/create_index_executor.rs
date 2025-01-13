@@ -163,7 +163,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -187,7 +186,7 @@ mod tests {
 
     impl TestContext {
         pub fn new(test_name: &str) -> Self {
-            initialize_logger();
+            // initialize_logger();
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 

@@ -203,6 +203,12 @@ pub enum DBError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Executor error: {0}")]
+    ExecutorError(String),
+
+    #[error("Optimize error: {0}")]
+    OptimizeError(String),
 }
 
 impl Error for PageError {}
