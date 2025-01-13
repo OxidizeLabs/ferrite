@@ -1,318 +1,152 @@
+use sqlparser::ast::Statement;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
-use crate::execution::check_option::CheckOptions;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
-use crate::execution::executors::aggregation_executor::AggregationExecutor;
-use crate::execution::executors::create_index_executor::CreateIndexExecutor;
-use crate::execution::executors::create_table_executor::CreateTableExecutor;
-use crate::execution::executors::filter_executor::FilterExecutor;
-use crate::execution::executors::index_scan_executor::IndexScanExecutor;
-use crate::execution::executors::insert_executor::InsertExecutor;
-use crate::execution::executors::mock_executor::MockExecutor;
-use crate::execution::executors::projection_executor::ProjectionExecutor;
-use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::execution::executors::table_scan_executor::TableScanExecutor;
-use crate::execution::executors::values_executor::ValuesExecutor;
-use crate::execution::plans::abstract_plan::PlanNode::*;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::optimizer::optimizer::Optimizer;
-use crate::planner::planner::{LogicalToPhysical, QueryPlanner};
+use crate::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::execution::check_option::CheckOptions;
 use log::{debug, info, warn};
-use parking_lot::RwLock;
-use std::env;
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 
 pub struct ExecutorEngine {
-    // buffer_pool_manager: Arc<BufferPoolManager>,
-    // catalog: Arc<RwLock<Catalog>>,
     planner: QueryPlanner,
     optimizer: Optimizer,
-    log_detailed: bool,
+    catalog: Arc<RwLock<Catalog>>,
+    buffer_pool_manager: Arc<BufferPoolManager>,
+    transaction_manager: Arc<RwLock<TransactionManager>>,
+    lock_manager: Arc<LockManager>,
 }
 
 impl ExecutorEngine {
-    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(
+        catalog: Arc<RwLock<Catalog>>,
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        transaction_manager: Arc<RwLock<TransactionManager>>,
+        lock_manager: Arc<LockManager>,
+    ) -> Self {
         Self {
             planner: QueryPlanner::new(catalog.clone()),
-            optimizer: Optimizer::new(catalog),
-            log_detailed: env::var("RUST_TEST").is_ok(),
+            optimizer: Optimizer::new(catalog.clone()),
+            catalog,
+            buffer_pool_manager,
+            transaction_manager,
+            lock_manager,
         }
     }
 
-    /// Prepares an SQL statement for execution
-    pub fn prepare_statement(
+    /// Execute a SQL statement with the given context and writer
+    pub fn execute_sql(
         &mut self,
         sql: &str,
-        check_options: Arc<CheckOptions>,
+        context: Arc<RwLock<ExecutorContext>>,
+        writer: &mut impl ResultWriter,
+    ) -> Result<bool, DBError> {
+        // Parse and plan the SQL statement
+        let plan = self.prepare_sql(sql, context.clone())?;
+        
+        // Execute the plan
+        self.execute_plan(&plan, context, writer)
+    }
+
+    /// Prepare a SQL statement for execution
+    fn prepare_sql(
+        &mut self,
+        sql: &str,
+        context: Arc<RwLock<ExecutorContext>>,
     ) -> Result<PlanNode, DBError> {
-        info!("Preparing statement: {}", sql);
+        info!("Preparing SQL statement: {}", sql);
 
-        // Generate initial logical plan using our QueryPlanner
-        let initial_logical_plan = match self.planner.create_logical_plan(sql) {
-            Ok(plan) => {
-                if self.log_detailed {
-                    debug!("Initial logical plan generated: \n{}", plan);
-                }
-                plan
-            }
-            Err(e) => {
-                warn!("Failed to create logical plan: {}", e);
-                return Err(DBError::PlanError(e));
-            }
+        // Create logical plan
+        let logical_plan = self.create_logical_plan(sql)?;
+        debug!("Initial logical plan generated: \n{}", logical_plan);
+
+        // Get check options from context
+        let check_options = {
+            let ctx = context.read();
+            ctx.get_check_options().clone()
         };
 
-        // Optimize the logical plan
-        let optimized_logical_plan = if check_options.is_modify() {
-            info!("Optimizing logical plan with modification checks");
-            self.optimizer.optimize(initial_logical_plan, check_options)?
-        } else {
-            if self.log_detailed {
-                debug!("Skipping optimization for read-only query");
-            }
-            initial_logical_plan
-        };
-
-        // Convert logical plan to physical plan
-        let physical_plan = match optimized_logical_plan.to_physical_plan() {
-            Ok(plan) => {
-                if self.log_detailed {
-                    debug!("Successfully converted to physical plan: {:?}", plan);
-                }
-                plan
-            }
-            Err(e) => {
-                warn!("Failed to convert logical plan to physical plan: {}", e);
-                return Err(DBError::PlanError(e));
-            }
-        };
+        // Optimize plan
+        let physical_plan = self.optimize_plan(logical_plan)?;
+        debug!("Physical plan generated: \n{}", physical_plan.display_physical_plan());
 
         Ok(physical_plan)
     }
 
-    /// Executes a prepared statement
-    pub fn execute_statement(
+    /// Execute a physical plan
+    fn execute_plan(
         &self,
         plan: &PlanNode,
         context: Arc<RwLock<ExecutorContext>>,
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
-        info!("Starting execution of plan: {:?}", plan);
+        info!("Executing plan: {}", plan.display_physical_plan());
 
-        let result = self.execute_statement_internal(plan, context, writer);
+        // Create and initialize executor
+        let mut executor = self.create_executor(plan, context)?;
+        executor.init();
 
-        match &result {
-            Ok(has_results) => {
-                info!(
-                    "Statement execution completed successfully. Has results: {}",
-                    has_results
-                );
-                debug!("Releasing all resources and returning control to CLI");
-            }
-            Err(e) => {
-                warn!("Statement execution failed: {:?}", e);
-                debug!("Cleaning up after execution failure");
-            }
+        // Process all tuples
+        let mut has_results = false;
+        while let Some((tuple, _)) = executor.next() {
+            has_results = true;
+            writer.write_tuple(&tuple).unwrap();
         }
 
-        // Ensure proper cleanup happens even on success
         self.cleanup_after_execution();
-
-        result
+        Ok(has_results)
     }
 
-    /// Creates appropriate executor for a plan node
+    /// Create an executor for the given plan
     fn create_executor(
         &self,
         plan: &PlanNode,
         context: Arc<RwLock<ExecutorContext>>,
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
-        debug!("Creating executor for plan type: {:?}", plan);
-        match plan {
-            Insert(insert_plan) => {
-                info!("Creating insert executor");
-                let executor = InsertExecutor::new(context, Arc::new(insert_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            SeqScan(scan_plan) => {
-                info!("Creating sequential scan executor");
-                let executor = SeqScanExecutor::new(context, Arc::new(scan_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            CreateTable(create_table_plan) => {
-                info!("Creating table creation executor");
-                let executor =
-                    CreateTableExecutor::new(context, Arc::from(create_table_plan.clone()), false);
-                Ok(Box::new(executor))
-            }
-            CreateIndex(create_index_plan) => {
-                info!("Creating index creation executor");
-                let executor = CreateIndexExecutor::new(context, Arc::from(create_index_plan.clone()), false);
-                Ok(Box::new(executor))
-            }
-            Filter(filter_plan) => {
-                info!("Creating filter executor for WHERE clause");
-                debug!("Filter predicate: {:?}", filter_plan.get_filter_predicate());
-                let child_executor =
-                    self.create_executor(filter_plan.get_child_plan(), context.clone())?;
-                let executor =
-                    FilterExecutor::new(child_executor, context, Arc::new(filter_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            Values(values_plan) => {
-                info!("Creating values executor");
-                let executor = ValuesExecutor::new(context, Arc::new(values_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            TableScan(table_scan_plan) => {
-                info!("Creating table scan executor");
-                let executor = TableScanExecutor::new(context, Arc::new(table_scan_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            Aggregation(aggregation_plan) => {
-                info!("Creating aggregation executor");
-                // Create child executor first
-                let child_executor =
-                    self.create_executor(&aggregation_plan.get_child_plan(), context.clone())?;
-
-                let executor = AggregationExecutor::new(
-                    child_executor,
-                    Arc::new(aggregation_plan.clone()),
-                    context,
-                );
-                Ok(Box::new(executor))
-            }
-            Projection(projection_plan) => {
-                info!("Creating projection executor");
-                // Create child executor first
-                let child_executor =
-                    self.create_executor(&projection_plan.get_child_plan(), context.clone())?;
-
-                let executor = ProjectionExecutor::new(
-                    child_executor,
-                    context,
-                    Arc::new(projection_plan.clone()),
-                );
-                Ok(Box::new(executor))
-            }
-            MockScan(mock_scan_plan) => {
-                info!("Creating mock scan executor");
-                let executor = MockExecutor::new(context, Arc::new(mock_scan_plan.clone()), 0, vec![], Default::default());
-                Ok(Box::new(executor))
-            }
-            IndexScan(index_plan) => {
-                info!("Creating index plan");
-                let executor = IndexScanExecutor::new(context, Arc::new(index_plan.clone()));
-                Ok(Box::new(executor))
-            }
-            _ => {
-                warn!("Unsupported plan type: {:?}", plan.get_type());
-                Err(DBError::NotImplemented(format!(
-                    "Executor type {:?} not implemented",
-                    plan.get_type()
-                )))
-            }
-        }
+        debug!("Creating executor for plan: {}", plan.display_physical_plan());
+        plan.create_executor(context).map_err(DBError::ExecutorError)
     }
 
-    fn execute_statement_internal(
-        &self,
-        plan: &PlanNode,
-        context: Arc<RwLock<ExecutorContext>>,
-        writer: &mut impl ResultWriter,
-    ) -> Result<bool, DBError> {
-        // Create root executor
-        let mut root_executor = self.create_executor(plan, context)?;
-
-        info!("Initializing executor");
-        root_executor.init();
-        debug!("Executor initialization complete");
-
-        // Handle different types of statements
-        match plan {
-            Insert(_) | CreateTable(_) | CreateIndex(_) => {
-                debug!("Executing modification statement");
-                let mut has_results = false;
-
-                // Process all tuples from the executor
-                while let Some(_) = root_executor.next() {
-                    has_results = true;
-                }
-
-                if has_results {
-                    info!("Modification statement executed successfully");
-                    Ok(true)
-                } else {
-                    info!("No rows affected");
-                    Ok(false)
-                }
-            }
-            // For SELECT and other queries that produce output (including filtered results)
-            _ => {
-                debug!("Plan: {}", plan.explain());
-
-                let mut has_results = false;
-                let mut row_count = 0;
-
-                // Get schema information
-                let column_count = root_executor.get_output_schema().get_column_count();
-                let column_names: Vec<String> = root_executor
-                    .get_output_schema()
-                    .get_columns()
-                    .iter()
-                    .map(|col| col.get_name().to_string())
-                    .collect();
-
-                debug!("Writing output schema with {} columns", column_count);
-                writer.begin_table(true);
-                writer.begin_header();
-                for name in &column_names {
-                    writer.write_header_cell(name);
-                }
-                writer.end_header();
-
-                debug!("Starting result processing");
-                while let Some((tuple, _rid)) = root_executor.next() {
-                    has_results = true;
-                    row_count += 1;
-
-                    if row_count % 1000 == 0 {
-                        debug!("Processed {} rows", row_count);
-                    }
-
-                    writer.begin_row();
-                    for i in 0..column_count {
-                        let value = tuple.get_value(i as usize);
-                        writer.write_cell(&value.to_string());
-                    }
-                    writer.end_row();
-                }
-
-                debug!(
-                    "Result processing complete. Found {} matching rows",
-                    row_count
-                );
-                writer.end_table();
-
-                info!("Query execution finished. Processed {} rows", row_count);
-                Ok(has_results)
-            }
-        }
+    /// Create a logical plan from SQL
+    fn create_logical_plan(&mut self, sql: &str) -> Result<LogicalPlan, DBError> {
+        self.planner
+            .create_logical_plan(sql)
+            .map(|boxed_plan| *boxed_plan)  // Unbox the LogicalPlan
+            .map_err(DBError::PlanError)
     }
 
+    /// Optimize a logical plan into a physical plan
+    fn optimize_plan(&self, plan: LogicalPlan) -> Result<PlanNode, DBError> {
+        // Box the logical plan and get check options
+        let boxed_plan = Box::new(plan);
+        let check_options = Arc::new(CheckOptions::new());
+        
+        // Optimize the plan
+        let optimized_plan = self.optimizer
+            .optimize(boxed_plan, check_options)
+            .map_err(|e| DBError::OptimizeError(e.to_string()))?;
+
+        // Convert to physical plan and map any String errors to DBError
+        optimized_plan
+            .to_physical_plan()
+            .map_err(|e| DBError::OptimizeError(e))
+    }
+
+    /// Clean up after execution
     fn cleanup_after_execution(&self) {
         debug!("Starting post-execution cleanup");
-
-        // Add any necessary cleanup logic here
-        // For example:
-        // - Release any held locks
-        // - Clear any temporary resources
-        // - Reset any execution state
-
+        // Add cleanup logic here if needed
         debug!("Post-execution cleanup complete");
     }
 }
+
 
 #[cfg(test)]
 mod tests {

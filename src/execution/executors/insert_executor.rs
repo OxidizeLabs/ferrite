@@ -121,9 +121,7 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Create tuple metadata
                 let tuple_meta = TupleMeta::new(
-                    self.context.read()
-                        .get_transaction()
-                        .get_transaction_id(),
+                    self.context.read().get_transaction().get_transaction_id(),
                     false,
                 );
 
@@ -144,7 +142,8 @@ impl AbstractExecutor for InsertExecutor {
                         );
 
                         // Add to transaction's write set
-                        self.context.read()
+                        self.context
+                            .read()
                             .get_transaction()
                             .append_write_set(self.plan.get_table_oid() as u32, rid);
 
@@ -185,7 +184,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -211,7 +209,6 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
@@ -246,8 +243,10 @@ mod tests {
             )));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(Arc::clone(&catalog), log_manager)));
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
+                Arc::clone(&catalog),
+                log_manager,
+            )));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             Self {

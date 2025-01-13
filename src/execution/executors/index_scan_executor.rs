@@ -15,8 +15,6 @@ use crate::types_db::value::{Val, Value};
 use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::storage::index::b_plus_tree_i::BPlusTree;
-use std::sync::Once;
 
 pub struct IndexScanExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -266,7 +264,7 @@ impl AbstractExecutor for IndexScanExecutor {
             let (start_key, end_key) = self.analyze_bounds(&index_info);
 
             // Create iterator
-            self.iterator = Some(IndexIterator::new(btree.clone(), 1, start_key, end_key));
+            self.iterator = Some(IndexIterator::new(btree.clone(), start_key, end_key));
             self.initialized = true;
         }
     }
@@ -358,7 +356,6 @@ mod index_scan_executor_tests {
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::config::{IndexOidT, TableOidT};
-    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -390,8 +387,10 @@ mod index_scan_executor_tests {
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-            let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager =
+                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
                 10,
@@ -480,12 +479,7 @@ mod index_scan_executor_tests {
                 RID::new(0, i),
             );
             let tuple_meta = TupleMeta::new(i as u64, false);
-            table_heap
-                .insert_tuple(
-                    &tuple_meta,
-                    &mut tuple,
-                )
-                .unwrap();
+            table_heap.insert_tuple(&tuple_meta, &mut tuple).unwrap();
         }
 
         // Create index on id column
@@ -523,12 +517,7 @@ mod index_scan_executor_tests {
                 RID::new(0, 0),
             );
             let tuple_meta = TupleMeta::new(i, false);
-            table_heap
-                .insert_tuple(
-                    &tuple_meta,
-                    &mut tuple,
-                )
-                .unwrap();
+            table_heap.insert_tuple(&tuple_meta, &mut tuple).unwrap();
         }
     }
 
@@ -584,7 +573,7 @@ mod index_scan_executor_tests {
     }
 
     #[test]
-    fn  test_index_scan_equality() {
+    fn test_index_scan_equality() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_equality");
         let context = ctx.executor_context.clone();
@@ -648,8 +637,14 @@ mod index_scan_executor_tests {
         while let Some((tuple, _)) = executor.next() {
             count += 1;
             let id = tuple.get_value(0);
-            assert_eq!(id.compare_greater_than_equals(&Value::new(3)), CmpBool::CmpTrue);
-            assert_eq!(id.compare_less_than_equals(&Value::new(7)), CmpBool::CmpTrue);
+            assert_eq!(
+                id.compare_greater_than_equals(&Value::new(3)),
+                CmpBool::CmpTrue
+            );
+            assert_eq!(
+                id.compare_less_than_equals(&Value::new(7)),
+                CmpBool::CmpTrue
+            );
             // assert_eq!(val.compare_equals(&Value::new(100)), CmpBool::CmpTrue);
         }
         assert_eq!(count, 5);
@@ -706,7 +701,13 @@ mod index_scan_executor_tests {
             assert!(id.compare_not_equals(&Value::new(7)) == CmpBool::CmpTrue);
         }
         assert_eq!(count, 8, "Should see 8 non-deleted tuples");
-        assert!(!seen_ids.contains(&Value::new(3)), "Should not contain deleted ID 3");
-        assert!(!seen_ids.contains(&Value::new(7)), "Should not contain deleted ID 7");
+        assert!(
+            !seen_ids.contains(&Value::new(3)),
+            "Should not contain deleted ID 3"
+        );
+        assert!(
+            !seen_ids.contains(&Value::new(7)),
+            "Should not contain deleted ID 7"
+        );
     }
 }

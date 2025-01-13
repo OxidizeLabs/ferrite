@@ -94,7 +94,6 @@ mod tests {
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::common::logger::initialize_logger;
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::comparison_expression::{
@@ -169,7 +168,6 @@ mod tests {
 
         #[test]
         fn test_basic_construction() {
-            initialize_logger();
             let schema = create_test_schema();
             let predicate = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 0),
