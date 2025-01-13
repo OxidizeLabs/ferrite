@@ -1,5 +1,6 @@
 use colored::Colorize;
 use std::collections::VecDeque;
+use crate::storage::table::tuple::Tuple;
 
 /// Trait for writing query results in a tabular format
 pub trait ResultWriter {
@@ -12,6 +13,15 @@ pub trait ResultWriter {
     fn write_cell(&mut self, content: &str);
     fn write_header_cell(&mut self, content: &str);
     fn one_cell(&mut self, content: &str);
+    /// Write a tuple to the output
+    fn write_tuple(&mut self, tuple: &Tuple) -> Result<(), String> {
+        self.begin_row();
+        for value in tuple.get_values() {
+            self.write_cell(&value.to_string());
+        }
+        self.end_row();
+        Ok(())
+    }
 }
 
 pub struct CliResultWriter {
