@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::ops::Add;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
@@ -109,6 +110,11 @@ impl Value {
             Val::Null => bytes.extend_from_slice(&[0u8]),
         }
         bytes
+    }
+
+    /// Returns true if this value represents NULL
+    pub fn is_null(&self) -> bool {
+        matches!(self.value_, Val::Null)
     }
 }
 
@@ -338,6 +344,14 @@ impl Hash for Value {
 }
 
 impl Eq for Value {}
+
+impl Add for Value {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        self.add(rhs)
+    }
+}
 
 #[cfg(test)]
 mod unit_tests {
