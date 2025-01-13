@@ -22,6 +22,21 @@ use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::execution::executor_context::ExecutorContext;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::executors::aggregation_executor::AggregationExecutor;
+use crate::execution::executors::create_index_executor::CreateIndexExecutor;
+use crate::execution::executors::create_table_executor::CreateTableExecutor;
+// use crate::execution::executors::delete_executor::DeleteExecutor;
+use crate::execution::executors::filter_executor::FilterExecutor;
+// use crate::execution::executors::hash_join_executor::HashJoinExecutor;
+use crate::execution::executors::index_scan_executor::IndexScanExecutor;
+use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::executors::projection_executor::ProjectionExecutor;
+use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
+use crate::execution::executors::values_executor::ValuesExecutor;
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -82,6 +97,10 @@ pub trait AbstractPlanNode {
     fn to_string(&self, with_schema: bool) -> String;
     fn plan_node_to_string(&self) -> String;
     fn children_to_string(&self, indent: usize) -> String;
+    /// Display the physical plan in a tree format
+    fn display_physical_plan(&self) -> String {
+        self.to_string(true)
+    }
 }
 
 impl AbstractPlanNode for PlanNode {
@@ -230,6 +249,88 @@ impl PlanNode {
         }
         result
     }
+
+    /// Create an executor for this plan node
+    pub fn create_executor(&self, context: Arc<RwLock<ExecutorContext>>) -> Result<Box<dyn AbstractExecutor>, String> {
+        match self {
+            // Leaf nodes (no children)
+            PlanNode::SeqScan(node) => {
+                Ok(Box::new(SeqScanExecutor::new(
+                    context,
+                    Arc::new(node.clone())
+                )))
+            }
+            PlanNode::IndexScan(node) => {
+                Ok(Box::new(IndexScanExecutor::new(
+                    context,
+                    Arc::new(node.clone())
+                )))
+            }
+            PlanNode::Values(node) => {
+                Ok(Box::new(ValuesExecutor::new(
+                    context,
+                    Arc::new(node.clone())
+                )))
+            }
+            PlanNode::CreateTable(node) => {
+                Ok(Box::new(CreateTableExecutor::new(
+                    context,
+                    Arc::new(node.clone()),
+                    false
+                )))
+            }
+            PlanNode::CreateIndex(node) => {
+                Ok(Box::new(CreateIndexExecutor::new(
+                    context,
+                    Arc::new(node.clone()),
+                     false
+                )))
+            }
+
+            // Nodes requiring child executors
+            PlanNode::Insert(node) => {
+                Ok(Box::new(InsertExecutor::new(
+                    context,
+                    Arc::new(node.clone()))))
+            }
+            PlanNode::Filter(node) => {
+                let child_plan = node.get_children().first()
+                    .ok_or_else(|| "Filter node must have a child".to_string())?;
+                let child_executor = child_plan.create_executor(context.clone())?;
+                
+                Ok(Box::new(FilterExecutor::new(
+                    child_executor,
+                    context,
+                    Arc::new(node.clone()),
+                )))
+            }
+            PlanNode::Projection(node) => {
+                let child_plan = node.get_children().first()
+                    .ok_or_else(|| "Projection node must have a child".to_string())?;
+                let child_executor = child_plan.create_executor(context.clone())?;
+                
+                Ok(Box::new(ProjectionExecutor::new(
+                    child_executor,
+                    context,
+                    Arc::new(node.clone())
+                )))
+            }
+            PlanNode::Aggregation(node) => {
+                let child_plan = node.get_children().first()
+                    .ok_or_else(|| "Aggregation node must have a child".to_string())?;
+                let child_executor = child_plan.create_executor(context.clone())?;
+                
+                Ok(Box::new(AggregationExecutor::new(
+                    context.clone(),
+                    Arc::new(node.clone()),
+                    child_executor,
+                )))
+            }
+
+            PlanNode::Empty => Err("Cannot create executor for empty plan node".to_string()),
+            _ => Err(format!("Executor not implemented for plan node: {:?}", self)),
+        }
+    }
 }
 
 impl Display for PlanNode {
@@ -250,7 +351,7 @@ mod basic_behaviour {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
-    use log::{info, warn};
+    use log::info;
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::error::Error;
@@ -351,20 +452,6 @@ mod basic_behaviour {
             info!("Created products table: {}", products_info.get_table_name());
 
             Ok(())
-        }
-
-        fn debug_plan(&mut self, sql: &str) -> Result<(), Box<dyn Error>> {
-            info!("Generating plan for SQL: {}", sql);
-            match self.planner.explain(sql) {
-                Ok(plan) => {
-                    info!("Generated plan:\n{}", plan);
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("Failed to generate plan: {}", e);
-                    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-                }
-            }
         }
     }
 
@@ -681,7 +768,7 @@ mod complex_behaviour {
         let test_cases = vec![
             "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id",
             "SELECT u.name, o.amount FROM users u LEFT JOIN orders o ON u.id = o.user_id",
-            "SELECT u.name, p.name FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON p.id = o.product_id",
+            "SELECT u.name, p.name FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON p.id = oi.product_id",
             "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id WHERE o.amount > 1000",
         ];
 
