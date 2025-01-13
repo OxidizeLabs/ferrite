@@ -2,13 +2,15 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
-use crate::execution::expressions::abstract_expression::ExpressionOps;
+use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::common::exception::ExpressionError;
+use crate::types_db::value::Value;
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -38,26 +40,58 @@ impl ProjectionExecutor {
 
     /// Projects values from input tuple according to projection expressions
     fn project_tuple(&self, tuple: &Tuple) -> Option<Tuple> {
-        let expressions = self.plan.get_expressions();
-        let mut values = Vec::with_capacity(expressions.len());
-
-        // Evaluate each expression
-        for expr in expressions {
-            match expr.evaluate(tuple, &self.child_executor.get_output_schema()) {
-                Ok(value) => values.push(value),
-                Err(e) => {
-                    error!("Failed to evaluate expression: {}", e);
+        // Evaluate expressions and handle errors
+        match self.evaluate_projection_expressions(tuple) {
+            Ok(values) => {
+                if values.is_empty() {
+                    debug!("No values after projection, skipping tuple");
                     return None;
+                }
+
+                // Verify number of values matches schema
+                let expected_cols = self.plan.get_output_schema().get_column_count();
+                if values.len() != expected_cols as usize {
+                    error!(
+                        "Projection produced {} values but schema expects {}",
+                        values.len(),
+                        expected_cols
+                    );
+                    return None;
+                }
+
+                // Create new tuple with projected values
+                Some(Tuple::new(
+                    &values,
+                    self.plan.get_output_schema().clone(),
+                    tuple.get_rid(),
+                ))
+            }
+            Err(e) => {
+                error!("Failed to evaluate projection expressions: {}", e);
+                None
+            }
+        }
+    }
+
+    fn evaluate_projection_expressions(&self, tuple: &Tuple) -> Result<Vec<Value>, ExpressionError> {
+        let mut values = Vec::with_capacity(self.plan.get_expressions().len());
+        let output_schema = self.plan.get_output_schema();
+
+        for (idx, expr) in self.plan.get_expressions().iter().enumerate() {
+            match expr {
+                Expression::Aggregate(_) => {
+                    // For aggregate expressions, use a placeholder value matching the schema type
+                    let col_type = output_schema.get_column(idx).unwrap().get_type();
+                    values.push(Value::new(col_type));
+                }
+                _ => {
+                    let value = expr.evaluate(tuple, &self.child_executor.get_output_schema())?;
+                    values.push(value);
                 }
             }
         }
 
-        // Create new tuple with projected values
-        Some(Tuple::new(
-            &values,
-            self.plan.get_output_schema().clone(),
-            tuple.get_rid(),
-        ))
+        Ok(values)
     }
 }
 
@@ -84,27 +118,19 @@ impl AbstractExecutor for ProjectionExecutor {
         }
 
         // Get next tuple from child
-        match self.child_executor.next() {
-            Some((tuple, rid)) => {
-                debug!("Processing tuple from child executor");
+        while let Some((tuple, rid)) = self.child_executor.next() {
+            debug!("Processing tuple from child executor");
 
-                // Project tuple values according to expressions
-                match self.project_tuple(&tuple) {
-                    Some(projected_tuple) => {
-                        debug!("Successfully projected tuple");
-                        Some((projected_tuple, rid))
-                    }
-                    None => {
-                        debug!("Failed to project tuple, skipping");
-                        self.next() // Try next tuple
-                    }
-                }
+            // Project tuple values according to expressions
+            if let Some(projected_tuple) = self.project_tuple(&tuple) {
+                debug!("Successfully projected tuple");
+                return Some((projected_tuple, rid));
             }
-            None => {
-                debug!("No more tuples from child executor");
-                None
-            }
+            debug!("Failed to project tuple, trying next one");
         }
+
+        debug!("No more tuples from child executor");
+        None
     }
 
     fn get_output_schema(&self) -> Schema {
@@ -291,11 +317,7 @@ mod tests {
         ));
 
         // Create projection plan
-        let plan = Arc::new(ProjectionNode::new(
-            output_schema,
-            expressions,
-            *Box::new(PlanNode::Empty),
-        ));
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![]));
 
         // Create projection executor
         let mut executor = ProjectionExecutor::new(child_executor, context, plan);
