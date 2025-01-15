@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use crate::catalog::schema::Schema;
+use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
@@ -7,11 +7,11 @@ use crate::execution::expressions::abstract_expression::{Expression, ExpressionO
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::value::Value;
 use log::{debug, error};
 use parking_lot::RwLock;
+use std::fmt::Display;
 use std::sync::Arc;
-use crate::common::exception::ExpressionError;
-use crate::types_db::value::Value;
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -146,7 +146,6 @@ impl AbstractExecutor for ProjectionExecutor {
 impl Display for ProjectionExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ProjectionExecutor")
-
     }
 }
 
@@ -163,7 +162,7 @@ mod tests {
     use crate::execution::executors::mock_executor::MockExecutor;
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::execution::plans::abstract_plan::PlanNode;
+
     use crate::execution::plans::mock_scan_plan::MockScanNode;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;

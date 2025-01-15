@@ -93,7 +93,7 @@ mod tests {
 
         // Test basic format
         assert_eq!(delete_node.to_string(), "Delete(test_table)");
-        
+
         // Test detailed format
         let detailed = format!("{:#}", delete_node);
         assert!(detailed.starts_with("Delete ["));

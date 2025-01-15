@@ -3,11 +3,11 @@ use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
+use crate::execution::plans::window_plan::WindowNode;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::plans::window_plan::WindowNode;
 
 pub struct WindowExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -22,7 +22,6 @@ impl WindowExecutor {
 
         todo!()
     }
-
 }
 
 impl AbstractExecutor for WindowExecutor {
@@ -134,5 +133,4 @@ mod tests {
 
         todo!()
     }
-
 }

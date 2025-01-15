@@ -134,7 +134,6 @@ impl Display for AggregationType {
 
 impl Display for AggregateExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
         if f.alternate() {
             match self.agg_type {
                 // Special case for COUNT(*) since it doesn't have an argument
@@ -150,7 +149,6 @@ impl Display for AggregateExpression {
                 _ => write!(f, "{}({})", self.agg_type, self.arg),
             }
         }
-
     }
 }
 

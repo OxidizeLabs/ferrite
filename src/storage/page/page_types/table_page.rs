@@ -769,8 +769,8 @@ mod concurrency_safety_tests {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
-    use crate::catalog::schema::Schema;
     use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -790,26 +790,26 @@ mod serialization_tests {
     fn test_serialize_deserialize_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         let mut original_page = TablePage::new(1);
         let (meta, mut tuple) = create_test_tuple();
-        
+
         // Insert a tuple
         let rid = original_page.insert_tuple(&meta, &mut tuple).unwrap();
-        
+
         // Serialize
         let serialized = original_page.serialize();
-        
+
         // Deserialize
         let deserialized_page = TablePage::deserialize(&serialized)?;
-        
+
         // Verify metadata
         assert_eq!(deserialized_page.get_page_id(), original_page.get_page_id());
         assert_eq!(deserialized_page.get_num_tuples(), original_page.get_num_tuples());
-        
+
         // Verify tuple
         let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid)?;
         assert_eq!(deserialized_meta.get_timestamp(), meta.get_timestamp());
         assert_eq!(deserialized_meta.is_deleted(), meta.is_deleted());
         assert_eq!(deserialized_tuple.get_values(), tuple.get_values());
-        
+
         Ok(())
     }
 }

@@ -113,7 +113,7 @@ impl AbstractExecutor for SeqScanExecutor {
 
         // Keep trying until we find a valid tuple or reach the end
         loop {
-            match iter.next() {
+            return match iter.next() {
                 Some((meta, tuple)) => {
                     let rid = tuple.get_rid();
                     debug!("Found tuple with RID {:?}", rid);
@@ -125,13 +125,13 @@ impl AbstractExecutor for SeqScanExecutor {
                     }
 
                     // Return valid tuple
-                    return Some((tuple, rid));
+                    Some((tuple, rid))
                 }
                 None => {
                     info!("Reached end of table scan");
-                    return None;
+                    None
                 }
-            }
+            };
         }
     }
 

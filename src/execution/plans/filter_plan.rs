@@ -1,11 +1,10 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::execution::plans::delete_plan::DeleteNode;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterNode {
@@ -29,7 +28,7 @@ impl FilterNode {
             table_oid_t,
             table_name,
             predicate,
-            children
+            children,
         }
     }
 
@@ -72,7 +71,7 @@ impl Display for FilterNode {
             write!(f, "\n   Predicate: {:#}", self.predicate)?;
             write!(f, "\n   Table: {}", self.table_name)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "   Child {}: {:#}", i + 1, child)?;
@@ -155,7 +154,7 @@ mod tests {
             let col_ref = create_column_ref(&schema, 1); // value column
             let constant = create_constant_value(25, schema.get_column(1).unwrap().clone());
             let predicate = create_comparison(col_ref, constant, ComparisonType::GreaterThan);
-            
+
             let scan_node = create_seq_scan(schema.clone(), "test_table");
             let filter_node = FilterNode::new(
                 schema,
@@ -171,7 +170,7 @@ mod tests {
         // Predicate creation helpers
         pub fn create_test_predicate(expr_str: &str) -> Arc<Expression> {
             let schema = create_test_schema();
-            
+
             match expr_str {
                 "value > 25" | "age > 25" => {
                     let col_ref = create_column_ref(&schema, 1); // value/age column
@@ -196,7 +195,7 @@ mod tests {
                     }
 
                     let (col_name, op, value_str) = (parts[0], parts[1], parts[2]);
-                    
+
                     // Find column index
                     let col_idx = match col_name {
                         "id" => 0,
@@ -208,7 +207,7 @@ mod tests {
 
                     let col_ref = create_column_ref(&schema, col_idx);
                     let column = schema.get_column(col_idx).unwrap().clone();
-                    
+
                     // Parse value based on column type
                     let value = match column.get_type() {
                         TypeId::Integer => create_constant_value(value_str.parse::<i32>().unwrap(), column),
@@ -638,14 +637,14 @@ mod tests {
 
     // =============== String Representation Tests ===============
     mod string_representation {
-        use super::*;
         use super::helpers::*;
+        use super::*;
 
         #[test]
         fn test_basic_display() {
             let (filter_node, _) = create_test_filter_node();
             let basic_str = format!("{}", filter_node);
-            
+
             println!("Basic display: {}", basic_str);
             assert!(basic_str.contains("Filter (value > 25)"));
         }
@@ -654,7 +653,7 @@ mod tests {
         fn test_detailed_display() {
             let (filter_node, _) = create_test_filter_node();
             let detailed_str = format!("{:#}", filter_node);
-            
+
             println!("Detailed display: {}", detailed_str);
             assert!(detailed_str.contains("→ Filter"));
             assert!(detailed_str.contains("(Col#0.1 > Constant(25))"));
@@ -667,7 +666,7 @@ mod tests {
             let (filter_node, _) = create_test_filter_node();
             let plan_node = PlanNode::Filter(filter_node);
             let node_string = plan_node.to_string();
-            
+
             println!("Plan node string: {}", node_string);
             assert!(node_string.contains("Filter (value > 25)"));
         }

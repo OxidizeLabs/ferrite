@@ -91,18 +91,18 @@ impl AbstractExecutor for CreateIndexExecutor {
             let index_exists = existing_indexes.iter().any(|idx| idx.get_index_name() == index_name);
 
             if index_exists {
-                if self.plan.if_not_exists() {
+                return if self.plan.if_not_exists() {
                     info!(
                         "Index '{}' already exists, skipping creation (IF NOT EXISTS)",
                         index_name
                     );
                     self.executed = true;
-                    return None;
+                    None
                 } else {
                     warn!("Index '{}' already exists", index_name);
                     self.executed = true;
-                    return None;
-                }
+                    None
+                };
             }
 
             // Create the index

@@ -693,8 +693,8 @@ mod index_scan_executor_tests {
             count += 1;
             let id = tuple.get_value(0);
             seen_ids.push(id.clone());
-            assert!(id.compare_not_equals(&Value::new(3)) == CmpBool::CmpTrue);
-            assert!(id.compare_not_equals(&Value::new(7)) == CmpBool::CmpTrue);
+            assert_eq!(id.compare_not_equals(&Value::new(3)), CmpBool::CmpTrue);
+            assert_eq!(id.compare_not_equals(&Value::new(7)), CmpBool::CmpTrue);
         }
         assert_eq!(count, 8, "Should see 8 non-deleted tuples");
         assert!(

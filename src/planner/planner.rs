@@ -1,6 +1,7 @@
 use crate::catalog::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::common::config::{IndexOidT, TableOidT};
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::abstract_expression::ExpressionOps;
 use crate::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
@@ -15,16 +16,23 @@ use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::execution::plans::delete_plan::DeleteNode;
 use crate::execution::plans::filter_plan::FilterNode;
+use crate::execution::plans::hash_join_plan::HashJoinNode;
 use crate::execution::plans::index_scan_plan::IndexScanNode;
 use crate::execution::plans::insert_plan::InsertNode;
 use crate::execution::plans::limit_plan::LimitNode;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
+use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
+use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::execution::plans::projection_plan::ProjectionNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::execution::plans::sort_plan::SortNode;
+use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::execution::plans::topn_plan::TopNNode;
 use crate::execution::plans::update_plan::UpdateNode;
 use crate::execution::plans::values_plan::ValuesNode;
+use crate::execution::plans::window_plan::WindowFunction;
+use crate::execution::plans::window_plan::WindowFunctionType;
+use crate::execution::plans::window_plan::WindowNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
@@ -38,14 +46,6 @@ use sqlparser::parser::Parser;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
-use crate::common::config::{IndexOidT, TableOidT};
-use crate::execution::plans::hash_join_plan::HashJoinNode;
-use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
-use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
-use crate::execution::plans::window_plan::WindowNode;
-use crate::execution::plans::window_plan::WindowFunction;
-use crate::execution::plans::window_plan::WindowFunctionType;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -77,7 +77,7 @@ pub enum LogicalPlanType {
         index_name: String,
         index_oid: IndexOidT,
         schema: Schema,
-        predicate_keys: Vec<Arc<Expression>>
+        predicate_keys: Vec<Arc<Expression>>,
     },
     Filter {
         schema: Schema,
@@ -1524,14 +1524,14 @@ impl LogicalPlan {
         table_name: String,
         table_oid: TableOidT,
         predicate: Arc<Expression>,
-        input: Box<LogicalPlan>
+        input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Filter {
                 schema,
                 table_oid,
                 table_name,
-                predicate
+                predicate,
             },
             vec![input],
         ))
@@ -1602,7 +1602,7 @@ impl LogicalPlan {
                 index_name,
                 index_oid,
                 schema,
-                predicate_keys
+                predicate_keys,
             },
             vec![],
         ))
@@ -1776,7 +1776,8 @@ impl LogicalPlan {
                 let combined_columns: &mut Vec<Column> = left_columns.get_columns_mut();
                 combined_columns.extend(right_schema.get_columns().iter().cloned());
                 Schema::new(combined_columns.to_vec())
-            }            LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
+            }
+            LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
             LogicalPlanType::Window { schema, .. } => schema.clone()
         }
     }
@@ -1832,7 +1833,7 @@ impl LogicalToPhysical for LogicalPlan {
                 *table_oid,
                 index_name.to_string(),
                 *index_oid,
-                predicate_keys.clone()
+                predicate_keys.clone(),
             ))),
 
             LogicalPlanType::Filter {
@@ -1841,7 +1842,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name,
                 predicate
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Filter(FilterNode::new(
                     schema.clone(),
                     *table_oid,
@@ -1852,7 +1853,7 @@ impl LogicalToPhysical for LogicalPlan {
             }
 
             LogicalPlanType::Projection { expressions, schema } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Projection(ProjectionNode::new(
                     schema.clone(),
                     expressions.clone(),
@@ -1865,13 +1866,13 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Insert(InsertNode::new(
                     schema.clone(),
                     *table_oid,
                     table_name.to_string(),
                     vec![],
-                    children
+                    children,
                 )))
             }
 
@@ -1880,12 +1881,12 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Delete(DeleteNode::new(
                     schema.clone(),
                     table_name.clone(),
                     *table_oid,
-                    children
+                    children,
                 )))
             }
 
@@ -1895,7 +1896,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_oid,
                 update_expressions,
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Update(UpdateNode::new(
                     schema.clone(),
                     table_name.clone(),
@@ -1909,20 +1910,20 @@ impl LogicalToPhysical for LogicalPlan {
                 rows,
                 schema
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Values(ValuesNode::new(
                     schema.clone(),
                     rows.clone(),
-                    children
+                    children,
                 )))
-            },
+            }
 
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
                 schema,
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
                     schema.clone(),
                     children,
@@ -2009,7 +2010,7 @@ impl LogicalToPhysical for LogicalPlan {
                 sort_expressions,
                 schema,
             } => {
-                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::TopN(TopNNode::new(
                     schema.clone(),
                     sort_expressions.clone(),

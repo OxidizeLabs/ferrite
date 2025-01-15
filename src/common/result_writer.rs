@@ -1,6 +1,5 @@
 use colored::Colorize;
 use std::collections::VecDeque;
-use crate::storage::table::tuple::Tuple;
 
 /// Trait for writing query results in a tabular format
 pub trait ResultWriter {

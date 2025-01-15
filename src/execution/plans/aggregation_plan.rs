@@ -1,9 +1,9 @@
-use std::fmt;
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::value::Value;
+use std::fmt;
 use std::fmt::{Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -106,7 +106,7 @@ impl AbstractPlanNode for AggregationPlanNode {
 impl Display for AggregationPlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ Aggregate")?;
-        
+
         // Add aggregate expressions with their types
         for (expr, agg_type) in self.aggregates.iter().zip(self.agg_types.iter()) {
             match agg_type {
@@ -134,14 +134,14 @@ impl Display for AggregationPlanNode {
         // Add schema and children if alternate flag is set
         if f.alternate() {
             writeln!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }

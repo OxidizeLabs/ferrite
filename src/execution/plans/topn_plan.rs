@@ -1,10 +1,9 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNNode {
@@ -51,7 +50,7 @@ impl AbstractPlanNode for TopNNode {
 impl Display for TopNNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ TopN: {}", self.k)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Order By: [")?;
             for (i, expr) in self.order_bys.iter().enumerate() {
@@ -62,14 +61,14 @@ impl Display for TopNNode {
             }
             write!(f, "]")?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }

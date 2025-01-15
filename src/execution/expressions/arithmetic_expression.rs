@@ -302,8 +302,6 @@ impl Display for ArithmeticExpression {
         } else {
             write!(f, "({} {} {})", self.left, op_str, self.right)
         }
-
-
     }
 }
 

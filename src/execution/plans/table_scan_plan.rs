@@ -1,11 +1,10 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::table_heap::TableInfo;
 use crate::storage::table::table_iterator::TableScanIterator;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::sort_plan::SortNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableScanNode {
@@ -73,11 +72,11 @@ impl Display for TableScanNode {
         if let Some(alias) = &self.table_alias {
             write!(f, " as {}", alias)?;
         }
-        
+
         if f.alternate() {
             write!(f, "\n   Schema: {}", self.output_schema)?;
         }
-        
+
         Ok(())
     }
 }

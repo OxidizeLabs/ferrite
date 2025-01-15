@@ -274,21 +274,21 @@ mod unit_tests {
             Column::new("const", TypeId::Boolean),
             vec![],
         )));
-        
+
         // Test AND expression
         let and_expr = Expression::Logic(LogicExpression::new(
-            left.clone(), 
-            right.clone(), 
-            LogicType::And, 
-            vec![]
+            left.clone(),
+            right.clone(),
+            LogicType::And,
+            vec![],
         ));
-        
+
         // Basic format
         assert_eq!(and_expr.to_string(), "(true AND false)");
-        
+
         // Detailed format
         assert_eq!(format!("{:#}", and_expr), "(Constant(true) AND Constant(false))");
-        
+
         // Test OR expression
         let or_expr = Expression::Logic(LogicExpression::new(
             left,
@@ -296,10 +296,10 @@ mod unit_tests {
             LogicType::Or,
             vec![],
         ));
-        
+
         // Basic format
         assert_eq!(or_expr.to_string(), "(true OR false)");
-        
+
         // Detailed format
         assert_eq!(format!("{:#}", or_expr), "(Constant(true) OR Constant(false))");
     }

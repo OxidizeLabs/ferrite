@@ -1,7 +1,7 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateIndexPlanNode {
@@ -58,7 +58,7 @@ impl AbstractPlanNode for CreateIndexPlanNode {
 impl Display for CreateIndexPlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ CreateIndex: {} on {}", self.index_name, self.table_name)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Key Columns: {:?}", self.key_attrs)?;
             if self.if_not_exists {
@@ -66,7 +66,7 @@ impl Display for CreateIndexPlanNode {
             }
             write!(f, "\n   Schema: {}", self.output_schema)?;
         }
-        
+
         Ok(())
     }
 }
