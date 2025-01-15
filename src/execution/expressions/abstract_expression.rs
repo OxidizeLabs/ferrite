@@ -15,6 +15,8 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::execution::plans::window_plan::WindowFunction;
+use crate::execution::expressions::window_expression::WindowExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -27,6 +29,7 @@ pub enum Expression {
     Array(ArrayExpression),
     Mock(MockExpression),
     Aggregate(AggregateExpression),
+    Window(WindowExpression),
 }
 
 pub trait ExpressionOps {
@@ -56,6 +59,7 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => expr.evaluate(tuple, schema),
             Self::Mock(expr) => expr.evaluate(tuple, schema),
             Self::Aggregate(expr) => expr.evaluate(tuple, schema),
+            Self::Window(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -93,6 +97,9 @@ impl ExpressionOps for Expression {
             Self::Aggregate(expr) => {
                 expr.evaluate(left_tuple, right_schema)
             }
+            Self::Window(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
         }
     }
 
@@ -107,6 +114,7 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => expr.get_child_at(child_idx),
             Self::Mock(expr) => expr.get_child_at(child_idx),
             Self::Aggregate(expr) => expr.get_child_at(child_idx),
+            Self::Window(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -121,6 +129,7 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => expr.get_children(),
             Self::Mock(expr) => expr.get_children(),
             Self::Aggregate(expr) => expr.get_children(),
+            Self::Window(expr) => expr.get_children(),
         }
     }
 
@@ -135,6 +144,7 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => expr.get_return_type(),
             Self::Mock(expr) => expr.get_return_type(),
             Self::Aggregate(expr) => expr.get_return_type(),
+            Self::Window(expr) => expr.get_return_type(),
         }
     }
 
@@ -149,6 +159,7 @@ impl ExpressionOps for Expression {
             Self::Array(expr) => expr.clone_with_children(children),
             Self::Mock(expr) => expr.clone_with_children(children),
             Self::Aggregate(expr) => expr.clone_with_children(children),
+            Self::Window(expr) => expr.clone_with_children(children),
         }
     }
 }
@@ -192,8 +203,8 @@ impl Display for Expression {
                 write!(f, "]")
             }
             Self::Mock(expr) => write!(f, "{}", expr),
-            Self::Aggregate(expr) => write!(f, "{}({})", expr.get_agg_type(), expr.get_arg()
-            )
+            Self::Aggregate(expr) => write!(f, "{}({})", expr.get_agg_type(), expr.get_arg()),
+            Self::Window(expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -248,5 +259,32 @@ mod unit_tests {
             Expression::Mock(_) => (),
             _ => panic!("Expected Mock expression"),
         }
+    }
+
+    #[test]
+    fn test_window_expression() {
+        use crate::execution::plans::window_plan::WindowFunctionType;
+        
+        let function_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("salary", TypeId::Integer),
+            vec![],
+        )));
+
+        let window_expr = Expression::Window(WindowExpression::new(
+            WindowFunctionType::Sum,
+            function_expr,
+            vec![],
+            vec![],
+            Column::new("total", TypeId::Integer),
+        ));
+
+        let schema = Schema::new(vec![Column::new("salary", TypeId::Integer)]);
+        let tuple = Tuple::new(&*vec![Value::new(100)], schema.clone(), RID::new(0, 0));
+
+        // Window functions can't be evaluated on a single tuple
+        assert!(window_expr.evaluate(&tuple, &schema).is_err());
+        assert_eq!(window_expr.to_string(), "Sum(salary)");
     }
 }

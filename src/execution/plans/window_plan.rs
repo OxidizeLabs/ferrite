@@ -1,82 +1,91 @@
-use crate::binder::bound_order_by::OrderByType;
-use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::collections::HashMap;
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::values_plan::ValuesNode;
 
 /// WindowFunctionType enumerates all the possible window functions in our system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowFunctionType {
-    CountStarAggregate,
-    CountAggregate,
-    SumAggregate,
-    MinAggregate,
-    MaxAggregate,
+    RowNumber,
     Rank,
+    DenseRank,
+    FirstValue,
+    LastValue,
+    Lead,
+    Lag,
+    Sum,
+    Min,
+    Max,
+    Count,
+    Average,
 }
 
 /// WindowFunction represents a single window function in the plan
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowFunction {
-    function: Arc<Expression>,
-    type_: WindowFunctionType,
+    function_type: WindowFunctionType,
+    function_expr: Arc<Expression>,
     partition_by: Vec<Arc<Expression>>,
-    order_by: Vec<(OrderByType, Arc<Expression>)>,
+    order_by: Vec<Arc<Expression>>,
 }
 
-/// WindowFunctionPlanNode represents a plan for window function execution
+impl WindowFunction {
+    pub fn new(
+        function_type: WindowFunctionType,
+        function_expr: Arc<Expression>,
+        partition_by: Vec<Arc<Expression>>,
+        order_by: Vec<Arc<Expression>>,
+    ) -> Self {
+        Self {
+            function_type,
+            function_expr,
+            partition_by,
+            order_by,
+        }
+    }
+
+    pub fn get_function_type(&self) -> WindowFunctionType {
+        self.function_type
+    }
+
+    pub fn get_function_expr(&self) -> &Arc<Expression> {
+        &self.function_expr
+    }
+
+    pub fn get_partition_by(&self) -> &Vec<Arc<Expression>> {
+        &self.partition_by
+    }
+
+    pub fn get_order_by(&self) -> &Vec<Arc<Expression>> {
+        &self.order_by
+    }
+}
+
+/// WindowNode represents a plan for window function execution
 #[derive(Clone, PartialEq, Debug)]
 pub struct WindowNode {
     output_schema: Schema,
-    columns: Vec<Arc<Expression>>,
-    window_functions: HashMap<u32, WindowFunction>,
+    window_functions: Vec<WindowFunction>,
     children: Vec<PlanNode>,
 }
 
 impl WindowNode {
-    /// Creates a new WindowFunctionPlanNode
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         output_schema: Schema,
-        child: Box<PlanNode>,
-        window_func_indexes: Vec<u32>,
-        columns: Vec<Arc<Expression>>,
-        partition_bys: Vec<Vec<Arc<Expression>>>,
-        order_bys: Vec<Vec<(OrderByType, Arc<Expression>)>>,
-        functions: Vec<Arc<Expression>>,
-        window_func_types: Vec<WindowFunctionType>,
+        window_functions: Vec<WindowFunction>,
+        children: Vec<PlanNode>,
     ) -> Self {
-        let mut window_functions = HashMap::new();
-        for (i, &index) in window_func_indexes.iter().enumerate() {
-            window_functions.insert(
-                index,
-                WindowFunction {
-                    function: functions[i].clone(),
-                    type_: window_func_types[i],
-                    partition_by: partition_bys[i].clone(),
-                    order_by: order_bys[i].clone(),
-                },
-            );
-        }
-
         Self {
             output_schema,
-            columns,
             window_functions,
-            children: vec![],
+            children,
         }
     }
 
-    /// Infers the window schema from the given columns
-    pub fn infer_scan_schema(table_ref: &BoundBaseTableRef) -> Result<Schema, String> {
-        // This is a placeholder implementation. You should replace this with actual schema inference logic.
-        let schema = table_ref.get_schema();
-        Ok(schema.clone())
+    pub fn get_window_functions(&self) -> &Vec<WindowFunction> {
+        &self.window_functions
     }
 }
 
@@ -85,10 +94,6 @@ impl AbstractPlanNode for WindowNode {
         &self.output_schema
     }
 
-    /// Returns a reference to the child nodes of this node.
-    ///
-    /// Note: Currently, DeleteNode only has one child, but this method
-    /// returns an empty vector for consistency with the trait definition.
     fn get_children(&self) -> &Vec<PlanNode> {
         &self.children
     }
@@ -103,14 +108,33 @@ impl Display for WindowNode {
         write!(f, "→ Window")?;
         
         if f.alternate() {
-            write!(f, "\n   Functions: [")?;
-            for (i, (col, func)) in self.window_functions.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
+            for (i, window_func) in self.window_functions.iter().enumerate() {
+                write!(f, "\n   Window Function {}: {:?}", i + 1, window_func.function_type)?;
+                write!(f, "\n     Expression: {}", window_func.function_expr)?;
+                
+                if !window_func.partition_by.is_empty() {
+                    write!(f, "\n     Partition By: [")?;
+                    for (i, expr) in window_func.partition_by.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", expr)?;
+                    }
+                    write!(f, "]")?;
                 }
-                write!(f, "{}={}", col, func)?;
+                
+                if !window_func.order_by.is_empty() {
+                    write!(f, "\n     Order By: [")?;
+                    for (i, expr) in window_func.order_by.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", expr)?;
+                    }
+                    write!(f, "]")?;
+                }
             }
-            write!(f, "]")?;
+            
             write!(f, "\n   Schema: {}", self.output_schema)?;
             
             // Format children with proper indentation
@@ -127,40 +151,74 @@ impl Display for WindowNode {
 impl Display for WindowFunctionType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            WindowFunctionType::CountStarAggregate => write!(f, "count_star"),
-            WindowFunctionType::CountAggregate => write!(f, "count"),
-            WindowFunctionType::SumAggregate => write!(f, "sum"),
-            WindowFunctionType::MinAggregate => write!(f, "min"),
-            WindowFunctionType::MaxAggregate => write!(f, "max"),
-            WindowFunctionType::Rank => write!(f, "rank"),
+            WindowFunctionType::RowNumber => write!(f, "ROW_NUMBER"),
+            WindowFunctionType::Rank => write!(f, "RANK"),
+            WindowFunctionType::DenseRank => write!(f, "DENSE_RANK"),
+            WindowFunctionType::FirstValue => write!(f, "FIRST_VALUE"),
+            WindowFunctionType::LastValue => write!(f, "LAST_VALUE"),
+            WindowFunctionType::Lead => write!(f, "LEAD"),
+            WindowFunctionType::Lag => write!(f, "LAG"),
+            WindowFunctionType::Sum => write!(f, "SUM"),
+            WindowFunctionType::Min => write!(f, "MIN"),
+            WindowFunctionType::Max => write!(f, "MAX"),
+            WindowFunctionType::Count => write!(f, "COUNT"),
+            WindowFunctionType::Average => write!(f, "AVG"),
         }
-    }
-}
-
-impl Display for WindowFunction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{{ function_arg={}, type={}, partition_by={:?}, order_by={:?} }}",
-            self.function.to_string(),
-            self.type_,
-            self.partition_by,
-            self.order_by
-        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::column::Column;
+    use crate::types_db::type_id::TypeId;
+    use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]
-    fn test_window_function_type_display() {
-        assert_eq!(
-            WindowFunctionType::CountStarAggregate.to_string(),
-            "count_star"
+    fn test_window_node_creation() {
+        let schema = Schema::new(vec![
+            Column::new("department", TypeId::VarChar),
+            Column::new("salary", TypeId::Integer),
+            Column::new("rank", TypeId::Integer),
+        ]);
+
+        // Create partition by expression (department)
+        let partition_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("department", TypeId::VarChar),
+            vec![],
+        )));
+
+        // Create order by expression (salary)
+        let order_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            Column::new("salary", TypeId::Integer),
+            vec![],
+        )));
+
+        // Create window function (RANK)
+        let window_func = WindowFunction::new(
+            WindowFunctionType::Rank,
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,
+                2,
+                Column::new("rank", TypeId::Integer),
+                vec![],
+            ))),
+            vec![partition_expr],
+            vec![order_expr],
         );
-        assert_eq!(WindowFunctionType::SumAggregate.to_string(), "sum");
-        assert_eq!(WindowFunctionType::Rank.to_string(), "rank");
+
+        let node = WindowNode::new(
+            schema.clone(),
+            vec![window_func],
+            vec![],
+        );
+
+        assert_eq!(node.get_output_schema(), &schema);
+        assert_eq!(node.get_window_functions().len(), 1);
+        assert_eq!(node.get_window_functions()[0].get_function_type(), WindowFunctionType::Rank);
     }
 }
