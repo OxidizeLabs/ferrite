@@ -5,7 +5,6 @@ use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
 use std::sync::Arc;
-use crate::execution::plans::filter_plan::FilterNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertNode {
@@ -62,18 +61,16 @@ impl AbstractPlanNode for InsertNode {
 
 impl Display for InsertNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "→ Insert into {}", self.table_name)?;
+        write!(f, "→ Insert [table: {}]", self.table_name)?;
         
         if f.alternate() {
+            write!(f, "\n   Table ID: {}", self.table_oid)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            if !self.tuples.is_empty() {
-                write!(f, "\n   Values: {} tuples", self.tuples.len())?;
-            }
             
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
-                write!(f, "    Child {}: {:#}", i + 1, child)?;
+                write!(f, "   Child {}: {:#}", i + 1, child)?;
             }
         }
         
@@ -190,85 +187,103 @@ mod tests {
     }
 
     mod child_plan {
-        use super::helpers::*;
         use super::*;
 
         #[test]
-        fn test_child_access() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
+        fn test_children_vec() {
+            let schema = helpers::create_test_schema();
+            
+            // Create an insert node with no children
+            let insert_node = InsertNode::new(
+                schema.clone(),
+                1,
+                "test_table".to_string(),
+                vec![],
+                vec![], // Empty children vector
+            );
 
-            let insert_node =
-                InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child.clone()]);
-
-            assert_eq!(insert_node.get_children()[0], child);
+            // Verify that a newly created insert node has no children
+            assert!(insert_node.get_children().is_empty());
         }
 
         #[test]
-        fn test_children_vec() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
+        fn test_with_values_child() {
+            let schema = helpers::create_test_schema();
+            
+            // Create a values node as child
+            let values_node = PlanNode::Values(ValuesNode::new(
+                schema.clone(),
+                vec![], // empty rows
+                vec![], // empty children
+            ));
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
+            // Create insert node with the values node as child
+            let insert_node = InsertNode::new(
+                schema,
+                1,
+                "test_table".to_string(),
+                vec![],
+                vec![values_node], // Add values node as child
+            );
 
-            // The children vector should be empty as per implementation
-            assert!(insert_node.get_children().is_empty());
+            // Verify that the insert node has exactly one child
+            assert_eq!(insert_node.get_children().len(), 1);
+            
+            // Verify that the child is a values node
+            match &insert_node.get_children()[0] {
+                PlanNode::Values(_) => (),
+                _ => panic!("Expected Values node as child"),
+            }
         }
     }
 
     mod string_representation {
-        use super::helpers::*;
         use super::*;
 
         #[test]
-        fn test_to_string_with_schema() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
-
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
-
-            let string_repr = insert_node.to_string();
-            assert!(string_repr.contains("InsertNode [table: test_table]"));
-            assert!(string_repr.contains("schema:"));
-            assert!(string_repr.contains("id"));
-            assert!(string_repr.contains("name"));
-            assert!(string_repr.contains("active"));
-        }
-
-        #[test]
-        fn test_to_string_without_schema() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
-
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
-
-            let string_repr = insert_node.to_string();
-            assert!(string_repr.contains("InsertNode [table: test_table]"));
-            assert!(!string_repr.contains("schema:"));
-        }
-
-        #[test]
-        fn test_plan_node_to_string() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
-
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
-
-            let string_repr = insert_node.to_string();
-            assert!(string_repr.contains("InsertNode [table: test_table]"));
-            assert!(string_repr.contains("schema:"));
-        }
-
-        #[test]
         fn test_children_to_string() {
-            let schema = create_test_schema();
-            let child = create_values_plan(schema.clone());
+            let schema = helpers::create_test_schema();
+            
+            // Create a values node as child
+            let values_node = PlanNode::Values(ValuesNode::new(
+                schema.clone(),
+                vec![],
+                vec![],
+            ));
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
+            // Create insert node with the values node as child
+            let insert_node = InsertNode::new(
+                schema,
+                1,
+                "test_table".to_string(),
+                vec![],
+                vec![values_node],
+            );
 
-            let string_repr = insert_node.to_string();
-            assert!(string_repr.contains("Child:"));
-            assert!(string_repr.contains("Values"));
+            let string_repr = format!("{:#}", insert_node);
+            println!("Insert node string representation: {}", string_repr);
+            
+            assert!(string_repr.contains("→ Insert [table: test_table]"));
+            assert!(string_repr.contains("Schema:"));
+            assert!(string_repr.contains("Child 1:"));
+        }
+
+        #[test]
+        fn test_to_string_with_schema() {
+            let schema = helpers::create_test_schema();
+            let insert_node = InsertNode::new(
+                schema,
+                1,
+                "test_table".to_string(),
+                vec![],
+                vec![],
+            );
+
+            let string_repr = format!("{:#}", insert_node);
+            println!("Insert node with schema: {}", string_repr);
+            
+            assert!(string_repr.contains("→ Insert [table: test_table]"));
+            assert!(string_repr.contains("Schema:"));
         }
     }
 
