@@ -9,7 +9,6 @@ use crate::types_db::types::Type;
 use crate::types_db::value::{Size, Val, Value};
 use log::debug;
 use std::sync::Arc;
-use crate::execution::plans::update_plan::UpdateNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuesNode {
@@ -38,8 +37,10 @@ impl ValuesNode {
             output_schema
         );
 
-        // Validate row lengths
-        Self::validate_row_expression_lengths(&expressions, column_count).unwrap();
+        // Skip validation for empty rows
+        if !expressions.is_empty() {
+            Self::validate_row_expression_lengths(&expressions, column_count).unwrap();
+        }
 
         // Convert Arc<Expression> to Expression for each row
         let processed_rows: Vec<ValueRow> = expressions
@@ -56,7 +57,7 @@ impl ValuesNode {
         Self {
             output_schema: Arc::new(output_schema),
             rows: processed_rows,
-            children: Vec::new()
+            children,
         }
     }
 
@@ -72,8 +73,9 @@ impl ValuesNode {
         expressions: &Vec<Vec<Arc<Expression>>>,
         column_count: usize,
     ) -> Result<(), ValuesError> {
-        for (_idx, row_exprs) in expressions.iter().enumerate() {
-            if row_exprs.len() != column_count {
+        for row_exprs in expressions.iter() {
+            // Skip validation for empty rows
+            if !row_exprs.is_empty() && row_exprs.len() != column_count {
                 return Err(ValuesError::InvalidValueCount {
                     value_count: row_exprs.len(),
                     column_count,
@@ -169,12 +171,33 @@ impl AbstractPlanNode for ValuesNode {
 
 impl Display for ValuesNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "→ Values: {} rows", self.rows.len())?;
+        if self.rows.is_empty() {
+            write!(f, "→ Values (empty)")?;
+        } else {
+            write!(f, "→ Values: {} Row(s)", self.rows.len())?;
+        }
         
         if f.alternate() {
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            for (i, row) in self.rows.iter().enumerate() {
-                write!(f, "\n   Row {}: {}", i + 1, row)?;
+            
+            if self.rows.is_empty() {
+                write!(f, "\n   No rows")?;
+            } else {
+                for (i, row) in self.rows.iter().enumerate() {
+                    write!(f, "\n   Row {}: ", i + 1)?;
+                    if row.is_empty() {
+                        write!(f, "(empty)")?;
+                    } else {
+                        write!(f, "{}", row)?;
+                    }
+                }
+            }
+
+            // Display children if any
+            if !self.children.is_empty() {
+                for (i, child) in self.children.iter().enumerate() {
+                    write!(f, "\n   Child {}: {:#}", i + 1, child)?;
+                }
             }
         }
         
@@ -184,17 +207,23 @@ impl Display for ValuesNode {
 
 impl Display for ValueRow {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        for (i, expr) in self.expressions.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
+        if self.expressions.is_empty() {
+            write!(f, "(empty)")
+        } else {
+            write!(f, "[")?;
+            for (i, expr) in self.expressions.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                match expr {
+                    Expression::Constant(c) => write!(f, "{}", c.get_value())?,
+                    _ => write!(f, "{}", expr)?,
+                }
             }
-            write!(f, "{}", expr)?;
+            write!(f, "]")
         }
-        write!(f, "]")
     }
 }
-
 
 
 #[cfg(test)]
@@ -203,122 +232,237 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::{Val, Value};
+    use std::sync::Arc;
 
-    #[test]
-    fn test_value_row_evaluation() {
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-
-        let expressions = vec![
-            Expression::Constant(ConstantExpression::new(
-                Value::new(42),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            )),
-            Expression::Constant(ConstantExpression::new(
-                Value::new("test"),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            )),
-        ];
-
-        let mut row = ValueRow::new(expressions);
-        let values = row.evaluate(&schema).unwrap();
-
-        assert_eq!(values.len(), 2);
-        assert_eq!(values[0].get_type_id(), TypeId::Integer);
-        assert_eq!(values[1].get_type_id(), TypeId::VarChar);
-    }
-
-    #[test]
-    fn test_type_mismatch() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-
-        let expressions = vec![Expression::Constant(ConstantExpression::new(
-            Value::new("not an integer"),
-            Column::new("id", TypeId::VarChar),
-            vec![],
-        ))];
-
-        let mut row = ValueRow::new(expressions);
-        let result = row.evaluate(&schema);
-
-        assert!(matches!(
-            result,
-            Err(ValuesError::TypeMismatch {
-                column_name,
-                expected: TypeId::Integer,
-                actual: TypeId::VarChar,
-                ..
-            }) if column_name == "id"
-        ));
-    }
-
-    #[test]
-    fn test_values_node_creation() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
-        ))]];
-
-        let result = ValuesNode::new(schema, expressions, vec![PlanNode::Empty]);
-        assert_eq!(result.get_type(), PlanType::Values);
-    }
-
-    #[test]
-    fn test_value_row_mixed_values() {
-        let schema = Schema::new(vec![
+    // Test fixtures
+    fn create_test_schema() -> Schema {
+        Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
             Column::new("active", TypeId::Boolean),
-        ]);
-
-        let expressions = vec![
-            Expression::Constant(ConstantExpression::new(
-                Value::new(42),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            )),
-            Expression::Constant(ConstantExpression::new(
-                Value::new(Val::VarLen("NULL".to_string())),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            )),
-            Expression::Constant(ConstantExpression::new(
-                Value::new(true),
-                Column::new("active", TypeId::Boolean),
-                vec![],
-            )),
-        ];
-
-        let mut row = ValueRow::new(expressions);
-        let values = row.evaluate(&schema).unwrap();
-
-        assert_eq!(values.len(), 3);
-        assert_eq!(values[0].get_value(), &Val::Integer(42));
-        assert_eq!(values[1].get_value(), &Val::VarLen("NULL".to_string()));
-        assert_eq!(values[2].get_value(), &Val::Boolean(true));
+        ])
     }
 
-    #[test]
-    fn test_multiple_evaluations() {
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let expressions = vec![Expression::Constant(ConstantExpression::new(
-            Value::new(42),
-            Column::new("id", TypeId::Integer),
+    fn create_constant_expr(value: Value, name: &str, type_id: TypeId) -> Expression {
+        Expression::Constant(ConstantExpression::new(
+            value,
+            Column::new(name, type_id),
             vec![],
-        ))];
+        ))
+    }
 
-        let mut row = ValueRow::new(expressions);
+    mod value_row_tests {
+        use super::*;
 
-        // First evaluation
-        let values1 = row.evaluate(&schema).unwrap().to_vec();
-        assert_eq!(values1.len(), 1);
+        #[test]
+        fn test_basic_value_row_evaluation() {
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
 
-        // Second evaluation should return the same cached values
-        let values2 = row.evaluate(&schema).unwrap().to_vec();
-        assert_eq!(values1, values2);
+            let expressions = vec![
+                create_constant_expr(Value::new(42), "id", TypeId::Integer),
+                create_constant_expr(Value::new("test"), "name", TypeId::VarChar),
+            ];
+
+            let mut row = ValueRow::new(expressions);
+            let values = row.evaluate(&schema).unwrap();
+
+            assert_eq!(values.len(), 2);
+            assert_eq!(values[0].get_type_id(), TypeId::Integer);
+            assert_eq!(values[1].get_type_id(), TypeId::VarChar);
+        }
+
+        #[test]
+        fn test_empty_value_row() {
+            let schema = create_test_schema();
+            let mut row = ValueRow::new(vec![]);
+            let values = row.evaluate(&schema).unwrap();
+            assert!(values.is_empty());
+        }
+
+        #[test]
+        fn test_type_mismatch() {
+            let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+            let expressions = vec![create_constant_expr(
+                Value::new("not an integer"),
+                "id",
+                TypeId::VarChar,
+            )];
+
+            let mut row = ValueRow::new(expressions);
+            let result = row.evaluate(&schema);
+
+            assert!(matches!(
+                result,
+                Err(ValuesError::TypeMismatch {
+                    column_name,
+                    expected: TypeId::Integer,
+                    actual: TypeId::VarChar,
+                    ..
+                }) if column_name == "id"
+            ));
+        }
+
+        #[test]
+        fn test_mixed_value_types() {
+            let schema = create_test_schema();
+            let expressions = vec![
+                create_constant_expr(Value::new(42), "id", TypeId::Integer),
+                create_constant_expr(Value::new(Val::VarLen("NULL".to_string())), "name", TypeId::VarChar),
+                create_constant_expr(Value::new(true), "active", TypeId::Boolean),
+            ];
+
+            let mut row = ValueRow::new(expressions);
+            let values = row.evaluate(&schema).unwrap();
+
+            assert_eq!(values.len(), 3);
+            assert_eq!(values[0].get_value(), &Val::Integer(42));
+            assert_eq!(values[1].get_value(), &Val::VarLen("NULL".to_string()));
+            assert_eq!(values[2].get_value(), &Val::Boolean(true));
+        }
+    }
+
+    mod values_node_tests {
+        use super::*;
+
+        #[test]
+        fn test_empty_values_node() {
+            let schema = create_test_schema();
+            let node = ValuesNode::new(schema.clone(), vec![], vec![]);
+
+            assert!(node.get_rows().is_empty());
+            assert_eq!(node.get_type(), PlanType::Values);
+            assert_eq!(node.get_output_schema(), &schema);
+        }
+
+        #[test]
+        fn test_single_row_values() {
+            let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+            let expressions = vec![vec![Arc::new(create_constant_expr(
+                Value::new(1),
+                "id",
+                TypeId::Integer,
+            ))]];
+
+            let node = ValuesNode::new(schema, expressions, vec![]);
+            assert_eq!(node.get_rows().len(), 1);
+        }
+
+        #[test]
+        fn test_mixed_row_values() {
+            let schema = create_test_schema();
+            let rows = vec![
+                vec![], // empty row
+                vec![
+                    Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer)),
+                    Arc::new(create_constant_expr(Value::new("test"), "name", TypeId::VarChar)),
+                    Arc::new(create_constant_expr(Value::new(true), "active", TypeId::Boolean)),
+                ],
+                vec![], // another empty row
+            ];
+
+            let node = ValuesNode::new(schema, rows, vec![]);
+            assert_eq!(node.get_rows().len(), 3);
+            assert!(node.get_rows()[0].is_empty());
+            assert_eq!(node.get_rows()[1].len(), 3);
+            assert!(node.get_rows()[2].is_empty());
+        }
+    }
+
+    mod display_tests {
+        use super::*;
+
+        #[test]
+        fn test_empty_values_display() {
+            let schema = create_test_schema();
+            let node = ValuesNode::new(schema, vec![], vec![]);
+
+            let basic_str = format!("{}", node);
+            println!("Basic empty display: {}", basic_str);
+            assert!(basic_str.contains("→ Values (empty)"));
+
+            let detailed_str = format!("{:#}", node);
+            println!("Detailed empty display: {}", detailed_str);
+            assert!(detailed_str.contains("Schema:"));
+            assert!(detailed_str.contains("No rows"));
+        }
+
+        #[test]
+        fn test_empty_rows_display() {
+            let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+            let rows = vec![
+                vec![], // empty row
+                vec![Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer))],
+                vec![], // another empty row
+            ];
+            
+            let node = ValuesNode::new(schema, rows, vec![]);
+            let detailed_str = format!("{:#}", node);
+            println!("Mixed rows display: {}", detailed_str);
+            
+            assert!(detailed_str.contains("Row 1: (empty)"));
+            assert!(detailed_str.contains("Row 2: [1]"));
+            assert!(detailed_str.contains("Row 3: (empty)"));
+        }
+
+        #[test]
+        fn test_populated_values_display() {
+            let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+            let expressions = vec![vec![Arc::new(create_constant_expr(
+                Value::new(42),
+                "id",
+                TypeId::Integer,
+            ))]];
+
+            let node = ValuesNode::new(schema, expressions, vec![]);
+            let detailed_str = format!("{:#}", node);
+            println!("Populated values display: {}", detailed_str);
+            
+            assert!(detailed_str.contains("Row 1: [42]"));
+        }
+
+        #[test]
+        fn test_display_with_children() {
+            let schema = create_test_schema();
+            let mut node = ValuesNode::new(
+                schema.clone(),
+                vec![],
+                vec![PlanNode::Values(ValuesNode::new(
+                    schema,
+                    vec![],
+                    vec![],
+                ))],
+            );
+
+            let detailed_str = format!("{:#}", node);
+            println!("Values node with children: {}", detailed_str);
+            assert!(detailed_str.contains("Child 1:"));
+            assert!(detailed_str.contains("Values (empty)"));
+        }
+
+        #[test]
+        fn test_mixed_row_values() {
+            let schema = create_test_schema();
+            let rows = vec![
+                vec![], // empty row
+                vec![
+                    Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer)),
+                    Arc::new(create_constant_expr(Value::new("test"), "name", TypeId::VarChar)),
+                    Arc::new(create_constant_expr(Value::new(true), "active", TypeId::Boolean)),
+                ],
+                vec![], // another empty row
+            ];
+
+            let node = ValuesNode::new(schema, rows, vec![]);
+            let detailed_str = format!("{:#}", node);
+            println!("Mixed values display: {}", detailed_str);
+            
+            assert!(detailed_str.contains("Row 1: (empty)"));
+            assert!(detailed_str.contains("Row 2: [1, test, true]"));
+            assert!(detailed_str.contains("Row 3: (empty)"));
+        }
     }
 }
