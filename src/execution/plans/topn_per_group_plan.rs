@@ -1,8 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::binder::bound_order_by::OrderByType;
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
+use crate::execution::plans::table_scan_plan::TableScanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNPerGroupNode {
@@ -24,17 +27,34 @@ impl AbstractPlanNode for TopNPerGroupNode {
     fn get_type(&self) -> PlanType {
         PlanType::TopNPerGroup
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        todo!()
-    }
-
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        todo!()
+impl Display for TopNPerGroupNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ TopNPerGroup: {}", self.size)?;
+        
+        if f.alternate() {
+            write!(f, "\n   Order By: [")?;
+            for (i, (order_type, expr)) in self.order_bys.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{:?} {}", order_type, expr)?;
+            }
+            write!(f, "]")?;
+            
+            write!(f, "\n   Group By: [")?;
+            for (i, expr) in self.group_bys.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", expr)?;
+            }
+            write!(f, "]")?;
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            write!(f, "\n   Child: {:#}", self.child)?;
+        }
+        
+        Ok(())
     }
 }

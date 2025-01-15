@@ -1,24 +1,38 @@
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
+use crate::common::rid::RID;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use crate::execution::plans::limit_plan::LimitNode;
+use crate::types_db::value::Value;
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MockScanNode {
     output_schema: Schema,
     table: String,
     children: Vec<PlanNode>,
+    tuples: Vec<(Vec<Value>, RID)>,
 }
 
 impl MockScanNode {
-    pub fn new(output_schema: Schema, table: String, children: Vec<PlanNode>) -> Self {
+    pub fn new(
+        schema: Schema,
+        table_name: String,
+        tuples: Vec<(Vec<Value>, RID)>,
+    ) -> Self {
         Self {
-            output_schema,
-            table,
-            children,
+            output_schema: schema,
+            table: table_name,
+            children: vec![],
+            tuples,
         }
     }
 
     pub fn get_table_name(&self) -> String {
         self.table.clone()
+    }
+
+    pub fn get_tuples(&self) -> &Vec<(Vec<Value>, RID)> {
+        &self.tuples
     }
 }
 
@@ -40,43 +54,11 @@ impl AbstractPlanNode for MockScanNode {
     fn get_type(&self) -> PlanType {
         PlanType::MockScan
     }
+}
 
-    /// Returns a string representation of this node.
-    ///
-    /// # Arguments
-    ///
-    /// * `with_schema` - If true, includes the schema in the string representation.
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("MockScanNode");
-        if with_schema {
-            result.push_str(&format!(" [{}]", self.output_schema));
-        }
-        result
-    }
-
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    /// Returns a string representation of this node's children.
-    ///
-    /// # Arguments
-    ///
-    /// * `indent` - The number of spaces to indent the output.
-    fn children_to_string(&self, indent: usize) -> String {
-        self.children
-            .iter()
-            .enumerate()
-            .map(|(i, child)| {
-                format!(
-                    "\n{:indent$}Child {}: {}",
-                    "",
-                    i + 1,
-                    AbstractPlanNode::to_string(child, false),
-                    indent = indent
-                )
-            })
-            .collect()
+impl Display for MockScanNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
+

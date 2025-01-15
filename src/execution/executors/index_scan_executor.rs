@@ -559,7 +559,6 @@ mod index_scan_executor_tests {
             index_name,
             index_id,
             vec![], // no predicates
-            vec![], // no children
         ));
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);
@@ -590,7 +589,6 @@ mod index_scan_executor_tests {
             index_name,
             index_id,
             vec![predicate],
-            vec![],
         ));
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);
@@ -628,7 +626,6 @@ mod index_scan_executor_tests {
             index_name,
             index_id,
             vec![pred_low, pred_high],
-            vec![],
         ));
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);
@@ -685,7 +682,6 @@ mod index_scan_executor_tests {
             index_name,
             index_id,
             vec![], // no predicates
-            vec![], // no children
         ));
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);

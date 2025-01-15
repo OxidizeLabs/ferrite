@@ -110,6 +110,7 @@ impl Optimizer {
                                                 index_name: index_info.get_index_name().to_string(),
                                                 index_oid: index_info.get_index_oid(),
                                                 schema: schema.clone(),
+                                                predicate_keys: vec![],
                                             },
                                             vec![],
                                         )));
@@ -144,7 +145,7 @@ impl Optimizer {
         trace!("Applying early pruning to plan node: {:?}", plan.plan_type);
 
         match &plan.plan_type {
-            LogicalPlanType::Project { expressions, .. } => {
+            LogicalPlanType::Projection { expressions, .. } => {
                 if expressions.is_empty() {
                     debug!("Found empty projection, removing unnecessary node");
                     if let Some(child) = plan.children.pop() {
@@ -153,7 +154,7 @@ impl Optimizer {
                 }
                 self.apply_early_pruning_to_children(plan)
             }
-            LogicalPlanType::Filter { predicate } => {
+            LogicalPlanType::Filter { schema, table_oid, table_name, predicate } => {
                 trace!("Examining filter predicate for simplification");
                 if let Expression::Constant(const_expr) = predicate.as_ref() {
                     if let Val::Boolean(b) = const_expr.get_value().value_ {
@@ -174,7 +175,7 @@ impl Optimizer {
     /// Phase 2: Apply rewrite rules
     fn apply_rewrite_rules(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
-            LogicalPlanType::Filter { predicate } => {
+            LogicalPlanType::Filter { schema, table_oid, table_name, predicate } => {
                 // Push down filter predicates
                 if let Some(child) = plan.children.pop() {
                     self.push_down_predicate(predicate.clone(), child)
@@ -182,13 +183,13 @@ impl Optimizer {
                     Ok(plan)
                 }
             }
-            LogicalPlanType::Project {
+            LogicalPlanType::Projection {
                 expressions,
                 ..
             } => {
                 // Combine consecutive projections
                 if let Some(child) = plan.children.pop() {
-                    if let LogicalPlanType::Project { .. } = child.plan_type {
+                    if let LogicalPlanType::Projection { .. } = child.plan_type {
                         return self.merge_projections(expressions.clone(), child);
                     }
                     plan.children = vec![self.apply_rewrite_rules(child)?];
@@ -327,13 +328,16 @@ impl Optimizer {
             LogicalPlanType::TableScan { .. } => {
                 // Create a new filter node above the scan
                 Ok(Box::new(LogicalPlan::new(
-                    LogicalPlanType::Filter { predicate },
+                    LogicalPlanType::Filter {
+                        schema: Default::default(),
+                        table_oid: 0,
+                        table_name: "".to_string(),
+                        predicate
+                    },
                     vec![child],
                 )))
             }
-            LogicalPlanType::Filter {
-                predicate: existing_pred,
-            } => {
+            LogicalPlanType::Filter { predicate: existing_pred, .. } => {
                 // Combine predicates using AND
                 let combined_pred = Arc::new(Expression::Logic(LogicExpression::new(
                     predicate.clone(),
@@ -346,6 +350,9 @@ impl Optimizer {
                 } else {
                     Ok(Box::new(LogicalPlan::new(
                         LogicalPlanType::Filter {
+                            schema: Default::default(),
+                            table_oid: 0,
+                            table_name: "".to_string(),
                             predicate: combined_pred,
                         },
                         vec![],
@@ -353,7 +360,12 @@ impl Optimizer {
                 }
             }
             _ => Ok(Box::new(LogicalPlan::new(
-                LogicalPlanType::Filter { predicate },
+                LogicalPlanType::Filter {
+                    schema: Default::default(),
+                    table_oid: 0,
+                    table_name: "".to_string(),
+                    predicate
+                },
                 vec![child],
             ))),
         }
@@ -364,17 +376,14 @@ impl Optimizer {
         expressions: Vec<Arc<Expression>>,
         child: Box<LogicalPlan>,
     ) -> Result<Box<LogicalPlan>, DBError> {
-        if let LogicalPlanType::Project {
-            expressions: child_exprs,
-            schema: child_schema,
-        } = child.clone().plan_type
+        if let LogicalPlanType::Projection { .. } = child.clone().plan_type
         {
             // TODO: Implement projection merging logic
             // This would involve rewriting the outer expressions in terms of the inner ones
             Ok(child)
         } else {
             Ok(Box::new(LogicalPlan::new(
-                LogicalPlanType::Project {
+                LogicalPlanType::Projection {
                     expressions,
                     schema: Schema::new(vec![]), // TODO: Compute correct schema
                 },

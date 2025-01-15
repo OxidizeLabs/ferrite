@@ -1,8 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::table_heap::TableInfo;
 use crate::storage::table::table_iterator::TableScanIterator;
 use std::sync::Arc;
+use crate::execution::plans::sort_plan::SortNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableScanNode {
@@ -62,34 +65,20 @@ impl AbstractPlanNode for TableScanNode {
     fn get_type(&self) -> PlanType {
         PlanType::TableScan
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("TableScan { table: ");
-        result.push_str(self.get_table_name());
-
+impl Display for TableScanNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ TableScan: {}", self.get_table_name())?;
         if let Some(alias) = &self.table_alias {
-            result.push_str(" AS ");
-            result.push_str(alias);
+            write!(f, " as {}", alias)?;
         }
-
-        result.push('}');
-
-        if with_schema {
-            result.push_str("\n  Schema: [");
-            result.push_str(&self.output_schema.to_string());
-            result.push(']');
+        
+        if f.alternate() {
+            write!(f, "\n   Schema: {}", self.output_schema)?;
         }
-
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent * 2);
-        format!("{}└─ {}\n", indent_str, self.to_string(true))
+        
+        Ok(())
     }
 }
 

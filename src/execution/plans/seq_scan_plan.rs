@@ -1,7 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqScanPlanNode {
@@ -48,21 +51,24 @@ impl AbstractPlanNode for SeqScanPlanNode {
     fn get_type(&self) -> PlanType {
         PlanType::SeqScan
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = self.plan_node_to_string();
-        if with_schema {
-            result.push_str(&format!("\nSchema: {}", self.output_schema));
+impl Display for SeqScanPlanNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ SeqScan: {}", self.table_name)?;
+        
+        if f.alternate() {
+            write!(f, "\n   Table ID: {}", self.table_oid)?;
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
         }
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        format!("SeqScan {{ table: {} }}", self.table_name)
-    }
-
-    fn children_to_string(&self, _indent: usize) -> String {
-        String::new()
+        
+        Ok(())
     }
 }
 
@@ -98,10 +104,10 @@ mod unit_tests {
         assert_eq!(seq_scan_node.get_table_oid(), table_oid);
         assert_eq!(seq_scan_node.get_table_name(), table_name);
 
-        let plan_node_str = seq_scan_node.plan_node_to_string();
+        let plan_node_str = seq_scan_node.to_string();
         assert!(plan_node_str.contains(&table_name));
 
-        let full_str = seq_scan_node.to_string(true);
+        let full_str = seq_scan_node.to_string();
         assert!(full_str.contains(&table_name));
         assert!(full_str.contains("Schema"));
     }
@@ -118,7 +124,7 @@ mod unit_tests {
         assert_eq!(seq_scan_node.get_table_oid(), table_oid);
         assert_eq!(seq_scan_node.get_table_name(), table_name);
 
-        let plan_node_str = seq_scan_node.plan_node_to_string();
+        let plan_node_str = seq_scan_node.to_string();
         assert!(plan_node_str.contains(&table_name));
         assert!(!plan_node_str.contains("filter"));
     }
@@ -163,8 +169,8 @@ mod unit_tests {
 
         let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone());
 
-        let with_schema = seq_scan_node.to_string(true);
-        let without_schema = seq_scan_node.to_string(false);
+        let with_schema = seq_scan_node.to_string();
+        let without_schema = seq_scan_node.to_string();
 
         assert!(with_schema.contains("Schema"));
         assert!(with_schema.contains(&table_name));
@@ -206,8 +212,8 @@ mod seq_scan_string_tests {
 
         let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone());
 
-        let with_schema = seq_scan_node.to_string(true);
-        let without_schema = seq_scan_node.to_string(false);
+        let with_schema = seq_scan_node.to_string();
+        let without_schema = seq_scan_node.to_string();
 
         assert_eq!(
             without_schema,
@@ -230,8 +236,8 @@ mod seq_scan_string_tests {
 
         let seq_scan_node = SeqScanPlanNode::new(schema, table_oid, table_name.clone());
 
-        let with_schema = seq_scan_node.to_string(true);
-        let without_schema = seq_scan_node.to_string(false);
+        let with_schema = seq_scan_node.to_string();
+        let without_schema = seq_scan_node.to_string();
 
         assert_eq!(
             without_schema,

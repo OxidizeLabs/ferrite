@@ -1,18 +1,20 @@
+use std::fmt::{self, Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionNode {
     output_schema: Schema,
-    expressions: Vec<Expression>,
+    expressions: Vec<Arc<Expression>>,
     children: Vec<PlanNode>,
 }
 
 impl ProjectionNode {
     pub fn new(
         output_schema: Schema,
-        expressions: Vec<Expression>,
+        expressions: Vec<Arc<Expression>>,
         children: Vec<PlanNode>,
     ) -> Self {
         Self {
@@ -22,14 +24,41 @@ impl ProjectionNode {
         }
     }
 
-    /// Get a reference to the expressions used in this projection
-    pub fn get_expressions(&self) -> &Vec<Expression> {
+    pub fn get_expressions(&self) -> &Vec<Arc<Expression>> {
         &self.expressions
     }
 
-    /// Get a reference to the child plan
     pub fn get_child_plan(&self) -> &PlanNode {
         &self.children[0]
+    }
+}
+
+impl Display for ProjectionNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ Projection [")?;
+        
+        // Add expressions
+        for (i, expr) in self.expressions.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", expr)?;
+        }
+        write!(f, "]")?;
+
+        // Add schema if alternate flag is set
+        if f.alternate() {
+            writeln!(f)?;
+            write!(f, "  Schema: [{}]", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
+        }
+        
+        Ok(())
     }
 }
 
@@ -44,53 +73,6 @@ impl AbstractPlanNode for ProjectionNode {
 
     fn get_type(&self) -> PlanType {
         PlanType::Projection
-    }
-
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("Projection [");
-
-        // Add expressions
-        for (i, expr) in self.expressions.iter().enumerate() {
-            if i > 0 {
-                result.push_str(", ");
-            }
-            result.push_str(&expr.to_string());
-        }
-        result.push(']');
-
-        // Add schema if requested
-        if with_schema {
-            result.push_str("\n  Schema: [");
-            result.push_str(&self.output_schema.to_string(true));
-            result.push(']');
-        }
-
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent * 2);
-        let mut result = format!("{}└─ {}\n", indent_str, self.to_string(true));
-
-        // Add child plan with increased indentation
-        if let Some(child) = self.children.first() {
-            result.push_str(&format!(
-                "{}",
-                match child {
-                    PlanNode::Projection(node) => node.children_to_string(indent + 1),
-                    PlanNode::Filter(node) => node.children_to_string(indent + 1),
-                    PlanNode::TableScan(node) => node.children_to_string(indent + 1),
-                    // Add other plan types as needed
-                    _ => String::from("Unknown child node type"),
-                }
-            ));
-        }
-
-        result
     }
 }
 
@@ -177,11 +159,11 @@ mod tests {
         ])
     }
 
-    fn create_mock_expression(name: &str, return_type: TypeId) -> Expression {
-        Expression::Mock(MockExpression::new(
+    fn create_mock_expression(name: &str, return_type: TypeId) -> Arc<Expression> {
+        Arc::new(Expression::Mock(MockExpression::new(
             name.to_string(),
             return_type,
-        ))
+        )))
     }
 
     #[test]
@@ -208,7 +190,7 @@ mod tests {
 
         // Expression verification
         let exprs = projection.get_expressions();
-        match exprs[0].clone() {
+        match exprs[0].as_ref() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_name(), "id");
                 assert_eq!(mock.get_type(), TypeId::Integer);
@@ -238,7 +220,7 @@ mod tests {
         assert_eq!(exprs.len(), 2);
 
         // Verify first expression
-        match exprs[0].clone() {
+        match exprs[0].as_ref() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::Integer);
                 assert_eq!(mock.get_name(), "result");
@@ -247,7 +229,7 @@ mod tests {
         }
 
         // Verify second expression
-        match exprs[1].clone() {
+        match exprs[1].as_ref() {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::VarChar);
                 assert_eq!(mock.get_name(), "name");

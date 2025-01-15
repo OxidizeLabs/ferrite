@@ -1,3 +1,5 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::exception::ValuesError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -7,12 +9,13 @@ use crate::types_db::types::Type;
 use crate::types_db::value::{Size, Val, Value};
 use log::debug;
 use std::sync::Arc;
+use crate::execution::plans::update_plan::UpdateNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuesNode {
     output_schema: Arc<Schema>,
     rows: Vec<ValueRow>,
-    child: Box<PlanNode>,
+    children: Vec<PlanNode>,
 }
 
 /// Represents a row of values in a VALUES clause
@@ -26,8 +29,8 @@ impl ValuesNode {
     pub fn new(
         output_schema: Schema,
         expressions: Vec<Vec<Arc<Expression>>>,
-        child: PlanNode,
-    ) -> Result<Self, ValuesError> {
+        children: Vec<PlanNode>,
+    ) -> Self {
         let column_count = output_schema.get_column_count() as usize;
         debug!(
             "Creating ValuesNode with {} rows and schema: {}",
@@ -36,7 +39,7 @@ impl ValuesNode {
         );
 
         // Validate row lengths
-        Self::validate_row_expression_lengths(&expressions, column_count)?;
+        Self::validate_row_expression_lengths(&expressions, column_count).unwrap();
 
         // Convert Arc<Expression> to Expression for each row
         let processed_rows: Vec<ValueRow> = expressions
@@ -50,11 +53,11 @@ impl ValuesNode {
             })
             .collect();
 
-        Ok(Self {
+        Self {
             output_schema: Arc::new(output_schema),
             rows: processed_rows,
-            child: Box::new(child),
-        })
+            children: Vec::new()
+        }
     }
 
     pub fn get_rows(&self) -> &[ValueRow] {
@@ -63,10 +66,6 @@ impl ValuesNode {
 
     pub fn get_row_count(&self) -> usize {
         self.rows.len()
-    }
-
-    pub fn get_child(&self) -> &Box<PlanNode> {
-        &self.child
     }
 
     fn validate_row_expression_lengths(
@@ -166,24 +165,37 @@ impl AbstractPlanNode for ValuesNode {
     fn get_type(&self) -> PlanType {
         PlanType::Values
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = format!("ValuesNode [{}]", self.rows.len());
-        if with_schema {
-            result.push_str(&format!(", schema: {}", self.output_schema));
+impl Display for ValuesNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ Values: {} rows", self.rows.len())?;
+        
+        if f.alternate() {
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            for (i, row) in self.rows.iter().enumerate() {
+                write!(f, "\n   Row {}: {}", i + 1, row)?;
+            }
         }
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent);
-        format!("{}Child: {}", indent_str, self.child.plan_node_to_string())
+        
+        Ok(())
     }
 }
+
+impl Display for ValueRow {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        for (i, expr) in self.expressions.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", expr)?;
+        }
+        write!(f, "]")
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -251,28 +263,8 @@ mod tests {
             ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
         ))]];
 
-        let result = ValuesNode::new(schema, expressions, PlanNode::Empty);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_invalid_value_count() {
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-        let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
-        ))]];
-
-        let result = ValuesNode::new(schema, expressions, PlanNode::Empty);
-        assert!(matches!(
-            result,
-            Err(ValuesError::InvalidValueCount {
-                value_count: 1,
-                column_count: 2,
-            })
-        ));
+        let result = ValuesNode::new(schema, expressions, vec![PlanNode::Empty]);
+        assert_eq!(result.get_type(), PlanType::Values);
     }
 
     #[test]

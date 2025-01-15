@@ -14,6 +14,8 @@ pub struct MockExecutor {
     current_index: usize,
     tuples: Vec<(Vec<Value>, RID)>,
     schema: Schema,
+    initialized: bool,
+    current_tuple_idx: usize,
 }
 
 impl MockExecutor {
@@ -24,6 +26,8 @@ impl MockExecutor {
             current_index,
             tuples,
             schema,
+            initialized: false,
+            current_tuple_idx: 0,
         }
     }
 }
@@ -31,17 +35,25 @@ impl MockExecutor {
 impl AbstractExecutor for MockExecutor {
     fn init(&mut self) {
         self.current_index = 0;
+        self.initialized = true;
     }
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
-        if self.current_index < self.tuples.len() {
-            let (values, rid) = &self.tuples[self.current_index];
-            self.current_index += 1;
-            let tuple = Tuple::new(&*values.to_vec(), self.schema.clone(), *rid);
-            Some((tuple, *rid))
-        } else {
-            None
+        if !self.initialized {
+            self.init();
         }
+
+        if self.current_tuple_idx >= self.tuples.len() {
+            return None;
+        }
+
+        let (values, rid) = &self.tuples[self.current_tuple_idx];
+        self.current_tuple_idx += 1;
+
+        Some((
+            Tuple::new(values, self.schema.clone(), *rid),
+            *rid,
+        ))
     }
 
     fn get_output_schema(&self) -> Schema {

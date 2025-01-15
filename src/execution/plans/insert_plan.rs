@@ -1,8 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
 use std::sync::Arc;
+use crate::execution::plans::filter_plan::FilterNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertNode {
@@ -10,7 +13,7 @@ pub struct InsertNode {
     table_oid: TableOidT,
     table_name: String,
     tuples: Vec<Tuple>,
-    child: Box<PlanNode>,
+    children: Vec<PlanNode>,
 }
 
 impl InsertNode {
@@ -19,19 +22,15 @@ impl InsertNode {
         table_oid: TableOidT,
         table_name: String,
         tuples: Vec<Tuple>,
-        child: PlanNode,
+        children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema: Arc::new(output_schema),
             table_oid,
             table_name,
             tuples,
-            child: Box::new(child),
+            children
         }
-    }
-
-    pub fn get_child(&self) -> &PlanNode {
-        &self.child
     }
 
     pub fn get_table_oid(&self) -> TableOidT {
@@ -53,29 +52,32 @@ impl AbstractPlanNode for InsertNode {
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        static CHILDREN: Vec<PlanNode> = Vec::new();
-        &CHILDREN
+        &self.children
     }
 
     fn get_type(&self) -> PlanType {
         PlanType::Insert
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = format!("InsertNode [table: {}]", self.table_name);
-        if with_schema {
-            result.push_str(&format!(", schema: {}", self.output_schema));
+impl Display for InsertNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ Insert into {}", self.table_name)?;
+        
+        if f.alternate() {
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            if !self.tuples.is_empty() {
+                write!(f, "\n   Values: {} tuples", self.tuples.len())?;
+            }
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
         }
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent);
-        format!("{}Child: {}", indent_str, self.child.plan_node_to_string())
+        
+        Ok(())
     }
 }
 
@@ -111,7 +113,7 @@ mod tests {
         }
 
         pub fn create_values_plan(schema: Schema) -> PlanNode {
-            PlanNode::Values(ValuesNode::new(schema, vec![], PlanNode::Empty).unwrap())
+            PlanNode::Values(ValuesNode::new(schema, vec![], vec![PlanNode::Empty]))
         }
     }
 
@@ -132,7 +134,7 @@ mod tests {
                 table_oid,
                 table_name.clone(),
                 tuples.clone(),
-                child,
+                vec![child],
             );
 
             assert_eq!(insert_node.get_table_oid(), table_oid);
@@ -147,7 +149,7 @@ mod tests {
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], child);
+                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], vec![child]);
 
             assert!(insert_node.get_input_tuples().is_empty());
         }
@@ -163,7 +165,7 @@ mod tests {
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], child);
+                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], vec![child]);
 
             assert_eq!(
                 insert_node.get_output_schema().get_columns(),
@@ -181,7 +183,7 @@ mod tests {
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], child);
+                InsertNode::new(schema.clone(), 1, "test_table".to_string(), vec![], vec![child]);
 
             assert_eq!(insert_node.get_output_schema().get_column_count(), 0);
         }
@@ -197,9 +199,9 @@ mod tests {
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema, 1, "test_table".to_string(), vec![], child.clone());
+                InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child.clone()]);
 
-            assert_eq!(insert_node.get_child(), &child);
+            assert_eq!(insert_node.get_children()[0], child);
         }
 
         #[test]
@@ -207,7 +209,7 @@ mod tests {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
 
             // The children vector should be empty as per implementation
             assert!(insert_node.get_children().is_empty());
@@ -223,9 +225,9 @@ mod tests {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
 
-            let string_repr = insert_node.to_string(true);
+            let string_repr = insert_node.to_string();
             assert!(string_repr.contains("InsertNode [table: test_table]"));
             assert!(string_repr.contains("schema:"));
             assert!(string_repr.contains("id"));
@@ -238,9 +240,9 @@ mod tests {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
 
-            let string_repr = insert_node.to_string(false);
+            let string_repr = insert_node.to_string();
             assert!(string_repr.contains("InsertNode [table: test_table]"));
             assert!(!string_repr.contains("schema:"));
         }
@@ -250,9 +252,9 @@ mod tests {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
 
-            let string_repr = insert_node.plan_node_to_string();
+            let string_repr = insert_node.to_string();
             assert!(string_repr.contains("InsertNode [table: test_table]"));
             assert!(string_repr.contains("schema:"));
         }
@@ -262,9 +264,9 @@ mod tests {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), vec![], vec![child]);
 
-            let string_repr = insert_node.children_to_string(2);
+            let string_repr = insert_node.to_string();
             assert!(string_repr.contains("Child:"));
             assert!(string_repr.contains("Values"));
         }
@@ -285,7 +287,7 @@ mod tests {
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema, 1, "test_table".to_string(), tuples.clone(), child);
+                InsertNode::new(schema, 1, "test_table".to_string(), tuples.clone(), vec![child]);
 
             assert_eq!(insert_node.get_input_tuples(), &tuples);
             assert_eq!(insert_node.get_input_tuples().len(), 3);
@@ -298,7 +300,7 @@ mod tests {
             let tuples = vec![tuple.clone()];
             let child = create_values_plan(schema.clone());
 
-            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), tuples, child);
+            let insert_node = InsertNode::new(schema, 1, "test_table".to_string(), tuples, vec![child]);
 
             let stored_tuple = &insert_node.get_input_tuples()[0];
             assert_eq!(stored_tuple, &tuple);

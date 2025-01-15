@@ -80,30 +80,31 @@ impl AbstractExecutor for InsertExecutor {
             self.plan.get_table_name()
         );
 
-        match self.plan.get_child() {
-            PlanNode::Values(values_plan) => {
-                debug!(
+        self.plan.get_children().iter().for_each(|child| {
+            match child {
+                PlanNode::Values(values_plan) => {
+                    debug!(
                     "Creating ValuesExecutor for insert with {} rows",
                     values_plan.get_rows().len()
                 );
-                debug!("Values schema: {:?}", values_plan.get_output_schema());
+                    debug!("Values schema: {:?}", values_plan.get_output_schema());
 
-                self.child_executor = Some(Box::new(ValuesExecutor::new(
-                    self.context.clone(),
-                    Arc::new(values_plan.clone()),
-                )));
+                    self.child_executor = Some(Box::new(ValuesExecutor::new(
+                        self.context.clone(),
+                        Arc::new(values_plan.clone()),
+                    )));
 
-                debug!("Initializing child ValuesExecutor");
-                if let Some(child) = self.child_executor.as_mut() {
-                    child.init();
-                    debug!("Child ValuesExecutor initialized successfully");
+                    debug!("Initializing child ValuesExecutor");
+                    if let Some(child) = self.child_executor.as_mut() {
+                        child.init();
+                        debug!("Child ValuesExecutor initialized successfully");
+                    }
+                }
+                _ => {
+                    warn!("Unexpected child plan type for InsertExecutor");
                 }
             }
-            _ => {
-                warn!("Unexpected child plan type for InsertExecutor");
-            }
-        }
-
+        });
         self.initialized = true;
         debug!("InsertExecutor initialization completed");
     }
@@ -319,8 +320,7 @@ mod tests {
 
         // Create values plan node
         let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
-                .expect("Failed to create ValuesNode"),
+            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
         );
 
         // Get table info for insert plan
@@ -338,7 +338,7 @@ mod tests {
             table_oid,
             table_name.to_string(),
             vec![],
-            PlanNode::Values(values_node.as_ref().clone()),
+            vec![PlanNode::Values(values_node.as_ref().clone())],
         ));
 
         // Create executor context and insert executor
@@ -390,8 +390,7 @@ mod tests {
         ];
 
         let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
-                .expect("Failed to create ValuesNode"),
+            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
         );
 
         let table_oid = {
@@ -407,7 +406,7 @@ mod tests {
             table_oid,
             table_name.to_string(),
             vec![],
-            PlanNode::Values(values_node.as_ref().clone()),
+            vec![PlanNode::Values(values_node.as_ref().clone())],
         ));
 
         let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
@@ -455,8 +454,7 @@ mod tests {
         ))]];
 
         let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, PlanNode::Empty)
-                .expect("Failed to create ValuesNode"),
+            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
         );
 
         let table_oid = {
@@ -472,7 +470,7 @@ mod tests {
             table_oid,
             table_name.to_string(),
             vec![],
-            PlanNode::Values(values_node.as_ref().clone()),
+            vec![PlanNode::Values(values_node.as_ref().clone())],
         ));
 
         let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);

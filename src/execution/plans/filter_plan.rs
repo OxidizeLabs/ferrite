@@ -1,14 +1,18 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use crate::execution::plans::delete_plan::DeleteNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterNode {
     output_schema: Schema,
     table_oid_t: TableOidT,
     table_name: String,
-    predicate: Expression,
+    predicate: Arc<Expression>,
     children: Vec<PlanNode>,
 }
 
@@ -17,15 +21,15 @@ impl FilterNode {
         output_schema: Schema,
         table_oid_t: TableOidT,
         table_name: String,
-        predicate: Expression,
-        child: PlanNode,
+        predicate: Arc<Expression>,
+        children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema,
             table_oid_t,
             table_name,
             predicate,
-            children: vec![child],
+            children
         }
     }
 
@@ -58,34 +62,25 @@ impl AbstractPlanNode for FilterNode {
     fn get_type(&self) -> PlanType {
         PlanType::Filter
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = self.plan_node_to_string();
-        if with_schema {
-            result.push_str(&format!("\nSchema: {}", self.output_schema));
+impl Display for FilterNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ Filter")?;
+        
+        if f.alternate() {
+            write!(f, "\n   Predicate: {}", self.predicate)?;
+            write!(f, "\n   Table: {}", self.table_name)?;
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
         }
-        result.push_str(&self.children_to_string(2));
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        format!("Filter {{ predicate={:?} }}", self.predicate)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        self.children
-            .iter()
-            .enumerate()
-            .map(|(i, child)| {
-                format!(
-                    "\n{:indent$}Child {}: {}",
-                    "",
-                    i + 1,
-                    AbstractPlanNode::to_string(child, false),
-                    indent = indent
-                )
-            })
-            .collect()
+        
+        Ok(())
     }
 }
 
@@ -180,8 +175,8 @@ mod tests {
                 schema.clone(),
                 42,
                 "test_table".to_string(),
-                predicate.clone(),
-                create_seq_scan(schema.clone(), "test_table"),
+                Arc::from(predicate.clone()),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
             assert_eq!(filter_node.get_type(), PlanType::Filter);
@@ -204,8 +199,8 @@ mod tests {
                 schema.clone(),
                 0,
                 "empty_table".to_string(),
-                predicate,
-                create_seq_scan(schema.clone(), "empty_table"),
+                Arc::from(predicate),
+                vec![create_seq_scan(schema.clone(), "empty_table")],
             );
 
             assert_eq!(filter_node.get_output_schema().get_column_count(), 0);
@@ -247,8 +242,8 @@ mod tests {
                     schema.clone(),
                     0,
                     "test_table".to_string(),
-                    predicate.clone(),
-                    create_seq_scan(schema.clone(), "test_table"),
+                    Arc::from(predicate.clone()),
+                    vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
                 assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -278,8 +273,8 @@ mod tests {
                     schema.clone(),
                     0,
                     "test_table".to_string(),
-                    predicate.clone(),
-                    create_seq_scan(schema.clone(), "test_table"),
+                    Arc::from(predicate.clone()),
+                    vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
                 assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -311,8 +306,8 @@ mod tests {
                     schema.clone(),
                     0,
                     "test_table".to_string(),
-                    predicate.clone(),
-                    create_seq_scan(schema.clone(), "test_table"),
+                    Arc::from(predicate.clone()),
+                    vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
                 assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -341,8 +336,8 @@ mod tests {
                     schema.clone(),
                     0,
                     "test_table".to_string(),
-                    predicate.clone(),
-                    create_seq_scan(schema.clone(), "test_table"),
+                    Arc::from(predicate.clone()),
+                    vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
                 assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -380,8 +375,8 @@ mod tests {
                         schema.clone(),
                         0,
                         "test_table".to_string(),
-                        predicate.clone(),
-                        create_seq_scan(schema.clone(), "test_table"),
+                        Arc::from(predicate.clone()),
+                        vec![create_seq_scan(schema.clone(), "test_table")],
                     );
 
                     assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -404,8 +399,8 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                predicate.clone(),
-                create_seq_scan(schema, "test_table"),
+                Arc::from(predicate),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
             assert_eq!(filter_node.get_filter_predicate().get_children().len(), 0);
@@ -441,8 +436,8 @@ mod tests {
                     schema.clone(),
                     0,
                     "test_table".to_string(),
-                    predicate.clone(),
-                    create_seq_scan(schema.clone(), "test_table"),
+                    Arc::from(predicate.clone()),
+                    vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
                 assert_eq!(filter_node.get_filter_predicate(), &predicate);
@@ -474,8 +469,8 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                id_pred.clone(),
-                create_seq_scan(schema.clone(), "test_table"),
+                Arc::from(id_pred.clone()),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
             assert_eq!(filter_node.get_filter_predicate(), &id_pred);
@@ -485,8 +480,8 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                value_pred.clone(),
-                create_seq_scan(schema, "test_table"),
+                Arc::from(value_pred.clone()),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
             assert_eq!(filter_node2.get_filter_predicate(), &value_pred);
@@ -513,8 +508,8 @@ mod tests {
                 schema,
                 0,
                 "test_table".to_string(),
-                predicate,
-                child.clone(),
+                Arc::from(predicate),
+                vec![child.clone()],
             );
 
             assert_eq!(filter_node.get_child_plan(), &child);
@@ -546,16 +541,16 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                predicate1,
-                child.clone(),
+                Arc::from(predicate1),
+                vec![child.clone()],
             );
 
             let filter_node2 = FilterNode::new(
                 schema,
                 0,
                 "test_table".to_string(),
-                predicate2,
-                child.clone(),
+                Arc::from(predicate2),
+                vec![child.clone()],
             );
 
             assert_eq!(filter_node1.get_child_plan(), &child);
@@ -582,11 +577,11 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                predicate,
-                create_seq_scan(schema, "test_table"),
+                Arc::from(predicate),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            let string_repr = filter_node.to_string(true);
+            let string_repr = filter_node.to_string();
             assert!(string_repr.contains("Filter { predicate="));
             assert!(string_repr.contains("Schema: Schema (id, value, name, flag)"));
             assert!(string_repr.contains("Child 1: SeqScan { table: test_table }"));
@@ -606,11 +601,11 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                predicate,
-                create_seq_scan(schema, "test_table"),
+                Arc::from(predicate),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            let string_repr = filter_node.to_string(false);
+            let string_repr = filter_node.to_string();
             assert!(string_repr.contains("Filter { predicate="));
             assert!(!string_repr.contains("Schema:"));
             assert!(string_repr.contains("Child 1: SeqScan { table: test_table }"));
@@ -630,11 +625,11 @@ mod tests {
                 schema.clone(),
                 0,
                 "test_table".to_string(),
-                predicate,
-                create_seq_scan(schema, "test_table"),
+                Arc::from(predicate),
+                vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            let node_string = filter_node.plan_node_to_string();
+            let node_string = filter_node.to_string();
             assert!(node_string.contains("Filter { predicate="));
             assert!(!node_string.contains("Child"));
             assert!(!node_string.contains("Schema:"));

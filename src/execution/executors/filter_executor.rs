@@ -302,8 +302,8 @@ mod tests {
             schema.clone(),
             0,
             "test_table".to_string(),
-            predicate,
-            PlanNode::Empty,
+            Arc::from(predicate),
+            vec![PlanNode::Empty],
         ))
     }
 
