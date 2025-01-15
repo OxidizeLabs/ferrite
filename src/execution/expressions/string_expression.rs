@@ -119,10 +119,24 @@ impl Display for StringExpressionType {
     }
 }
 
+impl Display for StringExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // Format as function call: function_name(argument)
+        if f.alternate() {
+            // Detailed format - pass alternate flag to argument
+            write!(f, "{}({:#})", self.expr_type, self.arg)
+        } else {
+            // Basic format
+            write!(f, "{}({})", self.expr_type, self.arg)
+        }
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
     use crate::common::rid::RID;
+    use crate::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
 
     #[test]
@@ -190,5 +204,55 @@ mod unit_tests {
             result.unwrap_err(),
             ExpressionError::InvalidStringExpressionType
         ));
+    }
+
+    #[test]
+    fn test_string_expression_display() {
+        // Test LOWER function
+        let arg = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::VarLen("HELLO".to_string())),
+            Column::new("text", TypeId::VarChar),
+            vec![],
+        )));
+        let lower_expr = Expression::String(StringExpression::new(
+            arg.clone(),
+            StringExpressionType::Lower,
+            vec![],
+        ));
+
+        // Basic format
+        assert_eq!(lower_expr.to_string(), "lower(HELLO)");
+        // Detailed format
+        assert_eq!(format!("{:#}", lower_expr), "lower(Constant(HELLO))");
+
+        // Test UPPER function
+        let upper_expr = Expression::String(StringExpression::new(
+            arg,
+            StringExpressionType::Upper,
+            vec![],
+        ));
+
+        // Basic format
+        assert_eq!(upper_expr.to_string(), "upper(HELLO)");
+        // Detailed format
+        assert_eq!(format!("{:#}", upper_expr), "upper(Constant(HELLO))");
+
+        // Test with column reference
+        let col_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("name", TypeId::VarChar),
+            vec![],
+        )));
+        let col_expr = Expression::String(StringExpression::new(
+            col_arg,
+            StringExpressionType::Lower,
+            vec![],
+        ));
+
+        // Basic format
+        assert_eq!(col_expr.to_string(), "lower(name)");
+        // Detailed format
+        assert_eq!(format!("{:#}", col_expr), "lower(Col#0.0)");
     }
 }

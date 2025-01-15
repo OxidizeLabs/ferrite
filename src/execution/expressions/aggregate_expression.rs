@@ -131,3 +131,101 @@ impl Display for AggregationType {
         }
     }
 }
+
+impl Display for AggregateExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+        if f.alternate() {
+            match self.agg_type {
+                // Special case for COUNT(*) since it doesn't have an argument
+                AggregationType::CountStar => write!(f, "COUNT(*)"),
+                // All other aggregate functions format as: function_name(argument)
+                _ => write!(f, "{}({:#})", self.agg_type, self.arg),
+            }
+        } else {
+            match self.agg_type {
+                // Special case for COUNT(*) since it doesn't have an argument
+                AggregationType::CountStar => write!(f, "COUNT(*)"),
+                // All other aggregate functions format as: function_name(argument)
+                _ => write!(f, "{}({})", self.agg_type, self.arg),
+            }
+        }
+
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::execution::expressions::constant_value_expression::ConstantExpression;
+
+    #[test]
+    fn test_aggregate_expression_display() {
+        // Test COUNT(*)
+        let dummy_arg = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1),
+            Column::new("dummy", TypeId::Integer),
+            vec![],
+        )));
+        let count_star = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::CountStar,
+            dummy_arg,
+            vec![],
+        ));
+
+        assert_eq!(count_star.to_string(), "COUNT(*)");
+        assert_eq!(format!("{:#}", count_star), "COUNT(*)");
+
+        // Test COUNT(column)
+        let col_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )));
+        let count_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Count,
+            col_arg.clone(),
+            vec![],
+        ));
+
+        assert_eq!(count_expr.to_string(), "COUNT(id)");
+        assert_eq!(format!("{:#}", count_expr), "COUNT(Col#0.0)");
+
+        // Test SUM(column)
+        let sum_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Sum,
+            col_arg.clone(),
+            vec![],
+        ));
+
+        assert_eq!(sum_expr.to_string(), "SUM(id)");
+        assert_eq!(format!("{:#}", sum_expr), "SUM(Col#0.0)");
+
+        // Test AVG(column)
+        let avg_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Avg,
+            col_arg.clone(),
+            vec![],
+        ));
+
+        assert_eq!(avg_expr.to_string(), "AVG(id)");
+        assert_eq!(format!("{:#}", avg_expr), "AVG(Col#0.0)");
+
+        // Test with constant argument
+        let const_arg = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(42),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let sum_const = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Sum,
+            const_arg,
+            vec![],
+        ));
+
+        assert_eq!(sum_const.to_string(), "SUM(42)");
+        assert_eq!(format!("{:#}", sum_const), "SUM(Constant(42))");
+    }
+}

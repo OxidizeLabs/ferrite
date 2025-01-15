@@ -38,6 +38,10 @@ impl ColumnRefExpression {
     pub fn get_return_type(&self) -> &Column {
         &self.ret_type
     }
+
+    pub fn get_tuple_index(&self) -> usize {
+        self.tuple_index
+    }
 }
 
 impl ExpressionOps for ColumnRefExpression {
@@ -86,9 +90,11 @@ impl ExpressionOps for ColumnRefExpression {
 impl Display for ColumnRefExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
-            write!(f, "{}", self.ret_type.get_name())
+            // Detailed format: #0.1
+            write!(f, "Col#{}.{}", self.get_tuple_index(), self.get_column_index())
         } else {
-            write!(f, "#{}.{}", self.tuple_index, self.column_index)
+            // Basic format: just the column name
+            write!(f, "{}", self.ret_type.get_name())
         }
     }
 }

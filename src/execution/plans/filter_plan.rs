@@ -67,20 +67,20 @@ impl AbstractPlanNode for FilterNode {
 impl Display for FilterNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
+            // Detailed format
             write!(f, "→ Filter")?;
-            write!(f, "\n   Predicate: {}", self.predicate)?;
+            write!(f, "\n   Predicate: {:#}", self.predicate)?;
             write!(f, "\n   Table: {}", self.table_name)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
             
-            // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "   Child {}: {:#}", i + 1, child)?;
             }
         } else {
-            write!(f, "Filter {{ predicate={} }}", self.predicate)?;
+            // Basic format
+            write!(f, "Filter {}", self.predicate)?
         }
-        
         Ok(())
     }
 }
@@ -647,17 +647,17 @@ mod tests {
             let basic_str = format!("{}", filter_node);
             
             println!("Basic display: {}", basic_str);
-            assert!(basic_str.contains("Filter { predicate="));
+            assert!(basic_str.contains("Filter (value > 25)"));
         }
 
         #[test]
         fn test_detailed_display() {
-            let (filter_node, predicate) = create_test_filter_node();
+            let (filter_node, _) = create_test_filter_node();
             let detailed_str = format!("{:#}", filter_node);
             
             println!("Detailed display: {}", detailed_str);
             assert!(detailed_str.contains("→ Filter"));
-            assert!(detailed_str.contains(&format!("Predicate: {}", predicate)));
+            assert!(detailed_str.contains("(Col#0.1 > Constant(25))"));
             assert!(detailed_str.contains("Schema:"));
             assert!(detailed_str.contains("Child 1:"));
         }
@@ -669,7 +669,7 @@ mod tests {
             let node_string = plan_node.to_string();
             
             println!("Plan node string: {}", node_string);
-            assert!(node_string.contains("Filter { predicate="));
+            assert!(node_string.contains("Filter (value > 25)"));
         }
 
         #[test]
@@ -695,13 +695,14 @@ mod tests {
                 vec![PlanNode::Filter(inner_filter)],
             );
 
+            // Test basic format
+            let basic_str = format!("{}", outer_filter);
+            assert!(basic_str.contains("Filter (id < 100)"));
+
+            // Test detailed format
             let detailed_str = format!("{:#}", outer_filter);
-            println!("Nested filters: {}", detailed_str);
-            
-            assert!(detailed_str.contains("→ Filter"));
-            assert!(detailed_str.contains("value > 25") || detailed_str.contains("(Col#0.1 > ColConstant(25))"));
-            assert!(detailed_str.contains("id < 100") || detailed_str.contains("(Col#0.0 < ColConstant(100))"));
-            assert!(detailed_str.contains("Child 1:"));
+            assert!(detailed_str.contains("(Col#0.0 < Constant(100))"));
+            assert!(detailed_str.contains("(Col#0.1 > Constant(25))"));
         }
     }
 }

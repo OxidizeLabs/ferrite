@@ -238,7 +238,7 @@ impl DBInstance {
             if let Some(table_info) = catalog.get_table(&name) {
                 writer.write_cell(&table_info.get_table_oidt().to_string());
                 writer.write_cell(&table_info.get_table_name());
-                writer.write_cell(&table_info.get_table_schema().to_string(false));
+                writer.write_cell(&table_info.get_table_schema().to_string());
             }
             writer.end_row();
         }

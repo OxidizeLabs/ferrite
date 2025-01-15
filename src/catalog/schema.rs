@@ -92,27 +92,6 @@ impl Schema {
     pub fn is_inlined(&self) -> bool {
         self.tuple_is_inlined
     }
-
-    pub fn to_string(&self, simplified: bool) -> String {
-        if simplified {
-            let column_strings: Vec<String> =
-                self.columns.iter().map(|col| col.to_string(true)).collect();
-            format!("({})", column_strings.join(", "))
-        } else {
-            let column_strings: Vec<String> = self
-                .columns
-                .iter()
-                .map(|col| col.to_string(false))
-                .collect();
-            format!(
-                "Schema[NumColumns: {}, IsInlined: {}, Length: {}] :: ({})",
-                self.get_column_count(),
-                self.tuple_is_inlined,
-                self.length,
-                column_strings.join(", ")
-            )
-        }
-    }
 }
 
 impl PartialEq for Schema {
@@ -126,7 +105,32 @@ impl PartialEq for Schema {
 
 impl Display for Schema {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Schema {}", self.to_string(true))
+        if f.alternate() {
+            // Detailed format
+            let column_strings: Vec<String> = self
+                .columns
+                .iter()
+                .map(|col| format!("{:#}", col))
+                .collect();
+
+            write!(
+                f,
+                "Schema[NumColumns: {}, IsInlined: {}, Length: {}] :: ({})",
+                self.get_column_count(),
+                self.tuple_is_inlined,
+                self.length,
+                column_strings.join(", ")
+            )
+        } else {
+            // Basic format
+            let column_strings: Vec<String> = self
+                .columns
+                .iter()
+                .map(|col| format!("{}", col))
+                .collect();
+
+            write!(f, "Schema ({})", column_strings.join(", "))
+        }
     }
 }
 

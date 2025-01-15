@@ -287,6 +287,26 @@ impl Display for ArithmeticOp {
     }
 }
 
+impl Display for ArithmeticExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let op_str = match self.op {
+            ArithmeticOp::Add => "+",
+            ArithmeticOp::Subtract => "-",
+            ArithmeticOp::Multiply => "*",
+            ArithmeticOp::Divide => "/",
+        };
+
+        if f.alternate() {
+            // Use parentheses to ensure proper operator precedence
+            write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
+        } else {
+            write!(f, "({} {} {})", self.left, op_str, self.right)
+        }
+
+
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -335,7 +355,7 @@ mod unit_tests {
         let result = mul_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(12.5));
 
-        assert_eq!(add_expr.to_string(), "(Col#0.0 + Col#0.1)");
-        assert_eq!(mul_expr.to_string(), "(Col#0.0 * Col#0.1)");
+        assert_eq!(format!("{:#}", add_expr), "(Col#0.0 + Col#0.1)");
+        assert_eq!(format!("{:#}", mul_expr), "(Col#0.0 * Col#0.1)");
     }
 }

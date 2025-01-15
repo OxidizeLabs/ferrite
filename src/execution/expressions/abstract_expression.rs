@@ -167,44 +167,70 @@ impl ExpressionOps for Expression {
 impl Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Constant(expr) => write!(f, "{}", expr.to_string()),
-            Self::ColumnRef(expr) => write!(f, "{}", expr.to_string()),
-            Self::Arithmetic(expr) => write!(
-                f,
-                "(Col{} {} Col{})",
-                expr.get_left(),
-                expr.get_op(),
-                expr.get_right()
-            ),
-            Self::Comparison(expr) => write!(
-                f,
-                "(Col{} {} Col{})",
-                expr.get_left(),
-                expr.get_comp_type(),
-                expr.get_right()
-            ),
-            Self::Logic(expr) => write!(
-                f,
-                "({} {} {})",
-                expr.get_left(),
-                expr.get_logic_type(),
-                expr.get_right()
-            ),
-            Self::String(expr) => write!(f, "{}({})", expr.get_expr_type(), expr.get_arg()),
-            Self::Array(expr) => {
-                write!(f, "[")?;
-                let mut iter = expr.get_children().iter();
-                if let Some(first) = iter.next() {
-                    write!(f, "{}", first)?;
-                    for child in iter {
-                        write!(f, ", {}", child)?;
-                    }
+            Self::Constant(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
                 }
-                write!(f, "]")
-            }
+            },
+            Self::ColumnRef(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::Arithmetic(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::Comparison(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::Logic(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::String(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::Array(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
             Self::Mock(expr) => write!(f, "{}", expr),
-            Self::Aggregate(expr) => write!(f, "{}({})", expr.get_agg_type(), expr.get_arg()),
-            Self::Window(expr) => write!(f, "{}", expr),
+            Self::Aggregate(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
+            Self::Window(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            },
         }
     }
 }
@@ -228,7 +254,7 @@ mod unit_tests {
 
         assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), value);
         assert_eq!(expr.get_children().len(), 0);
-        assert_eq!(expr.to_string(), "Constant(42)");
+        assert_eq!(expr.to_string(), "42");
     }
 
     #[test]
@@ -264,7 +290,7 @@ mod unit_tests {
     #[test]
     fn test_window_expression() {
         use crate::execution::plans::window_plan::WindowFunctionType;
-        
+
         let function_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
             0,
