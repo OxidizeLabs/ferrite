@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
+use crate::execution::plans::values_plan::ValuesNode;
 
 /// WindowFunctionType enumerates all the possible window functions in our system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +30,12 @@ pub struct WindowFunction {
 }
 
 /// WindowFunctionPlanNode represents a plan for window function execution
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct WindowNode {
     output_schema: Schema,
-    child: Box<PlanNode>,
     columns: Vec<Arc<Expression>>,
     window_functions: HashMap<u32, WindowFunction>,
+    children: Vec<PlanNode>,
 }
 
 impl WindowNode {
@@ -65,15 +66,10 @@ impl WindowNode {
 
         Self {
             output_schema,
-            child,
             columns,
             window_functions,
+            children: vec![],
         }
-    }
-
-    /// Returns the child plan node
-    pub fn get_child_plan(&self) -> &PlanNode {
-        &*self.child
     }
 
     /// Infers the window schema from the given columns
@@ -94,36 +90,37 @@ impl AbstractPlanNode for WindowNode {
     /// Note: Currently, DeleteNode only has one child, but this method
     /// returns an empty vector for consistency with the trait definition.
     fn get_children(&self) -> &Vec<PlanNode> {
-        static CHILDREN: Vec<PlanNode> = Vec::new();
-        &CHILDREN
+        &self.children
     }
 
     fn get_type(&self) -> PlanType {
         PlanType::Window
     }
-
-    fn to_string(&self, with_schema: bool) -> String {
-        todo!()
-    }
-
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        todo!()
-    }
 }
 
-impl Debug for WindowNode {
+impl Display for WindowNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WindowFunctionPlanNode")
-            .field("output_schema", &self.output_schema)
-            .field("child", &self.child)
-            .field("columns", &self.columns)
-            .field("window_functions", &self.window_functions)
-            .finish()
+        write!(f, "→ Window")?;
+        
+        if f.alternate() {
+            write!(f, "\n   Functions: [")?;
+            for (i, (col, func)) in self.window_functions.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}={}", col, func)?;
+            }
+            write!(f, "]")?;
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
+        }
+        
+        Ok(())
     }
 }
 

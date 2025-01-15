@@ -1,3 +1,5 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
@@ -39,20 +41,19 @@ impl AbstractPlanNode for CreateTablePlanNode {
     fn get_type(&self) -> PlanType {
         PlanType::CreateTable
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = format!("CreateTable {{ table: {} }}", self.table_name);
-        if with_schema {
-            result.push_str(&format!("\nSchema: {}", self.output_schema));
+impl Display for CreateTablePlanNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ CreateTable: {}", self.table_name)?;
+        
+        if f.alternate() {
+            if self.if_not_exists {
+                write!(f, "\n   IF NOT EXISTS")?;
+            }
+            write!(f, "\n   Schema: {}", self.output_schema)?;
         }
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, _indent: usize) -> String {
-        String::new()
+        
+        Ok(())
     }
 }

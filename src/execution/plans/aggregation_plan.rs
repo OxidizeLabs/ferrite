@@ -1,9 +1,10 @@
+use std::fmt;
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::expressions::aggregate_expression::AggregationType;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::value::Value;
-use std::fmt::Write;
+use std::fmt::{Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -100,94 +101,48 @@ impl AbstractPlanNode for AggregationPlanNode {
     fn get_type(&self) -> PlanType {
         PlanType::Aggregation
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::new();
-        write!(&mut result, "→ Aggregate").unwrap();
-
+impl Display for AggregationPlanNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ Aggregate")?;
+        
         // Add aggregate expressions with their types
         for (expr, agg_type) in self.aggregates.iter().zip(self.agg_types.iter()) {
             match agg_type {
                 AggregationType::CountStar => {
-                    write!(&mut result, "\n   COUNT(*)").unwrap();
+                    write!(f, "\n   COUNT(*)")?;
                 }
                 _ => {
-                    write!(&mut result, "\n   {}({})", agg_type, expr).unwrap();
+                    write!(f, "\n   {}({})", agg_type, expr)?;
                 }
             }
         }
 
         // Add group by expressions if any
         if !self.group_bys.is_empty() {
-            write!(&mut result, "\n   Group By: [").unwrap();
+            write!(f, "\n   Group By: [")?;
             for (i, expr) in self.group_bys.iter().enumerate() {
                 if i > 0 {
-                    write!(&mut result, ", ").unwrap();
+                    write!(f, ", ")?;
                 }
-                write!(&mut result, "{}", expr).unwrap();
+                write!(f, "{}", expr)?;
             }
-            write!(&mut result, "]").unwrap();
+            write!(f, "]")?;
         }
 
-        // Add schema if requested
-        if with_schema {
-            write!(&mut result, "\n   Schema: {}", self.output_schema).unwrap();
-        }
-
-        // Add children
-        for child in &self.children {
-            let child_str = AbstractPlanNode::to_string(child, with_schema);
-            for line in child_str.lines() {
-                write!(&mut result, "\n   {}", line).unwrap();
+        // Add schema and children if alternate flag is set
+        if f.alternate() {
+            writeln!(f, "\n   Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-
-        result
-    }
-
-    fn plan_node_to_string(&self) -> String {
-        let mut result = String::new();
-        write!(&mut result, "Aggregate ").unwrap();
-
-        // Add group by expressions if any
-        if !self.group_bys.is_empty() {
-            write!(&mut result, "[GROUP BY: ").unwrap();
-            for (i, expr) in self.group_bys.iter().enumerate() {
-                if i > 0 {
-                    write!(&mut result, ", ").unwrap();
-                }
-                write!(&mut result, "{}", expr).unwrap();
-            }
-            write!(&mut result, "] ").unwrap();
-        }
-
-        // Add aggregate expressions
-        write!(&mut result, "[").unwrap();
-        for (i, (expr, agg_type)) in self.aggregates.iter().zip(self.agg_types.iter()).enumerate() {
-            if i > 0 {
-                write!(&mut result, ", ").unwrap();
-            }
-            write!(&mut result, "{}({})", agg_type, expr).unwrap();
-        }
-        write!(&mut result, "]").unwrap();
-
-        result
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        self.children
-            .iter()
-            .enumerate()
-            .map(|(i, child)| {
-                format!(
-                    "\n{:indent$}Child {}: {}",
-                    "",
-                    i + 1,
-                    AbstractPlanNode::to_string(child, false),
-                    indent = indent
-                )
-            })
-            .collect()
+        
+        Ok(())
     }
 }
 
@@ -270,7 +225,7 @@ mod tests {
             vec![AggregationType::Sum, AggregationType::Count],
         );
 
-        let result = agg_node.plan_node_to_string();
+        let result = agg_node.to_string();
         assert_eq!(
             result,
             "Aggregate [GROUP BY: #0.0] [SUM(#0.1), COUNT(#0.1)]"

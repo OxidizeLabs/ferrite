@@ -145,7 +145,7 @@ mod tests {
                 rows.push(row_expressions);
             }
 
-            Arc::new(ValuesNode::new(schema, rows, PlanNode::Empty).unwrap())
+            Arc::new(ValuesNode::new(schema, rows, vec![PlanNode::Empty]))
         }
 
         pub struct TestContext {

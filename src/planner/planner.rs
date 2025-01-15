@@ -9,7 +9,6 @@ use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
-use crate::execution::plans::abstract_plan::PlanNode::IndexScan;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
@@ -41,6 +40,9 @@ use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use mockall::Any;
+use crate::common::config::{IndexOidT, TableOidT};
+use crate::execution::plans::hash_join_plan::HashJoinNode;
+use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -59,41 +61,45 @@ pub enum LogicalPlanType {
     MockScan {
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
     },
     TableScan {
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
     },
     IndexScan {
         table_name: String,
-        table_oid: u64,
+        table_oid: TableOidT,
         index_name: String,
-        index_oid: u64,
+        index_oid: IndexOidT,
         schema: Schema,
+        predicate_keys: Vec<Arc<Expression>>
     },
     Filter {
+        schema: Schema,
+        table_oid: TableOidT,
+        table_name: String,
         predicate: Arc<Expression>,
     },
-    Project {
+    Projection {
         expressions: Vec<Arc<Expression>>,
         schema: Schema,
     },
     Insert {
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
     },
     Delete {
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
     },
     Update {
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
         update_expressions: Vec<Arc<Expression>>,
     },
     Values {
@@ -285,7 +291,7 @@ impl QueryPlanner {
         // Add filter if WHERE clause exists
         if let Some(where_clause) = &select.selection {
             let predicate = Arc::new(self.parse_expression(where_clause, &schema)?);
-            current_plan = LogicalPlan::filter(predicate, current_plan);
+            current_plan = LogicalPlan::filter(schema.clone(), table_name, table_oid, predicate, current_plan);
         }
 
         // Handle aggregation if needed
@@ -1214,7 +1220,9 @@ impl QueryPlanner {
 
 impl Display for LogicalPlan {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.explain(0))
+        match self {
+            _ => write!(f, "{:#?}", self),
+        }
     }
 }
 
@@ -1227,137 +1235,164 @@ impl LogicalPlan {
     }
 
     /// Returns a string representation of the logical plan tree
-    pub fn explain(&self, indent: usize) -> String {
-        let mut result = format!("{:indent$}", "", indent = indent);
+    pub fn explain(&self, depth: usize) -> String {
+        let indent_str = "  ".repeat(depth);
+        let mut result = String::new();
 
         match &self.plan_type {
-            LogicalPlanType::CreateTable {
-                table_name,
-                schema,
-                if_not_exists,
-            } => {
-                result.push_str(&format!("→ CreateTable: {}\n", table_name));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
+            LogicalPlanType::CreateTable { schema, table_name, if_not_exists } => {
+                result.push_str(&format!("{}→ CreateTable: {}\n", indent_str, table_name));
                 if *if_not_exists {
-                    result.push_str(&format!(
-                        "{:indent$}   IF NOT EXISTS\n",
-                        "",
-                        indent = indent
-                    ));
+                    result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::TableScan {
-                table_name, schema, ..
-            } => {
-                result.push_str(&format!("→ TableScan: {}\n", table_name));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
-            }
-            LogicalPlanType::MockScan {
-                table_name, schema, ..
-            } => {
-                result.push_str(&format!("→ MockScan: {}\n", table_name));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
-            }
-            LogicalPlanType::Filter { predicate } => {
-                result.push_str(&format!("→ Filter: {}\n", predicate));
-            }
-            LogicalPlanType::Project {
-                expressions,
-                schema,
-            } => {
-                result.push_str("→ Project\n");
-                for expr in expressions {
-                    result.push_str(&format!("{:indent$}   {}\n", "", expr, indent = indent));
+            LogicalPlanType::CreateIndex { schema, table_name, index_name, key_attrs, if_not_exists } => {
+                result.push_str(&format!("{}→ CreateIndex: {} on {}\n", indent_str, index_name, table_name));
+                result.push_str(&format!("{}   Key Columns: {:?}\n", indent_str, key_attrs));
+                if *if_not_exists {
+                    result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
-                result.push_str(&format!(
-                    "{:indent$}   Output Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Insert {
-                table_name, schema, ..
-            } => {
-                result.push_str(&format!("→ Insert into {}\n", table_name));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
+            LogicalPlanType::MockScan { table_name, schema, .. } => {
+                result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::TableScan { table_name, schema, .. } => {
+                result.push_str(&format!("{}→ TableScan: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::IndexScan { table_name, table_oid, index_name, index_oid, schema, predicate_keys } => {
+                result.push_str(&format!("{}→ IndexScan: {} using {}\n", indent_str, table_name, index_name));
+                result.push_str(&format!("{}   Predicate Keys: [", indent_str));
+                for (i, key) in predicate_keys.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&key.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Filter { schema, table_name, predicate, .. } => {
+                result.push_str(&format!("{}→ Filter\n", indent_str));
+                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
+                result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Projection { expressions, schema } => {
+                result.push_str(&format!("{}→ Projection\n", indent_str));
+                result.push_str(&format!("{}   Expressions: [", indent_str));
+                for (i, expr) in expressions.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Limit { limit, schema } => {
+                result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Insert { table_name, schema, .. } => {
+                result.push_str(&format!("{}→ Insert\n", indent_str));
+                result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Delete { table_name, schema, .. } => {
+                result.push_str(&format!("{}→ Delete\n", indent_str));
+                result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Update { table_name, schema, update_expressions, .. } => {
+                result.push_str(&format!("{}→ Update\n", indent_str));
+                result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Target Expressions: [", indent_str));
+                for (i, expr) in update_expressions.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::Values { rows, schema } => {
-                result.push_str("→ Values\n");
-                result.push_str(&format!(
-                    "{:indent$}   Rows: {}\n",
-                    "",
-                    rows.len(),
-                    indent = indent
-                ));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
+                result.push_str(&format!("{}→ Values: {} rows\n", indent_str, rows.len()));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Aggregate {
-                group_by,
-                aggregates,
-                schema,
-            } => {
-                result.push_str("→ Aggregate\n");
+            LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                result.push_str(&format!("{}→ Aggregate\n", indent_str));
                 if !group_by.is_empty() {
-                    result.push_str(&format!(
-                        "{:indent$}   Group By: {:?}\n",
-                        "",
-                        group_by,
-                        indent = indent
-                    ));
+                    result.push_str(&format!("{}   Group By: [", indent_str));
+                    for (i, expr) in group_by.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&expr.to_string());
+                    }
+                    result.push_str("]\n");
                 }
-                result.push_str(&format!(
-                    "{:indent$}   Aggregates: {:?}\n",
-                    "",
-                    aggregates,
-                    indent = indent
-                ));
-                result.push_str(&format!(
-                    "{:indent$}   Schema: {}\n",
-                    "",
-                    schema,
-                    indent = indent
-                ));
+                result.push_str(&format!("{}   Aggregates: [", indent_str));
+                for (i, expr) in aggregates.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::CreateIndex { .. } => {}
-            LogicalPlanType::IndexScan { .. } => {}
-            LogicalPlanType::Delete { .. } => {}
-            LogicalPlanType::Update { .. } => {}
-            LogicalPlanType::NestedLoopJoin { .. } => {}
-            LogicalPlanType::HashJoin { .. } => {}
-            LogicalPlanType::Sort { .. } => {}
-            LogicalPlanType::Limit { .. } => {}
-            LogicalPlanType::TopN { .. } => {}
+            LogicalPlanType::NestedLoopJoin { left_schema, right_schema, predicate, join_type } => {
+                result.push_str(&format!("{}→ NestedLoopJoin\n", indent_str));
+                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
+                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
+                result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
+                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+            }
+            LogicalPlanType::HashJoin { left_schema, right_schema, predicate, join_type } => {
+                result.push_str(&format!("{}→ HashJoin\n", indent_str));
+                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
+                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
+                result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
+                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+            }
+            LogicalPlanType::Sort { sort_expressions, schema } => {
+                result.push_str(&format!("{}→ Sort\n", indent_str));
+                result.push_str(&format!("{}   Order By: [", indent_str));
+                for (i, expr) in sort_expressions.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::TopN { k, sort_expressions, schema } => {
+                result.push_str(&format!("{}→ TopN: {}\n", indent_str, k));
+                result.push_str(&format!("{}   Order By: [", indent_str));
+                for (i, expr) in sort_expressions.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::MockScan { table_name, schema, .. } => {
+                result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
         }
 
-        // Recursively explain children
+        // Add children recursively
         for child in &self.children {
-            result.push_str(&child.explain(indent + 2));
+            result.push_str(&child.explain(depth + 1));
         }
 
         result
@@ -1404,9 +1439,20 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn filter(predicate: Arc<Expression>, input: Box<LogicalPlan>) -> Box<Self> {
+    pub fn filter(
+        schema: Schema,
+        table_name: String,
+        table_oid: TableOidT,
+        predicate: Arc<Expression>,
+        input: Box<LogicalPlan>
+    ) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::Filter { predicate },
+            LogicalPlanType::Filter {
+                schema,
+                table_oid,
+                table_name,
+                predicate
+            },
             vec![input],
         ))
     }
@@ -1417,7 +1463,7 @@ impl LogicalPlan {
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::Project {
+            LogicalPlanType::Projection {
                 expressions,
                 schema: schema,
             },
@@ -1467,6 +1513,7 @@ impl LogicalPlan {
         index_name: String,
         index_oid: u64,
         schema: Schema,
+        predicate_keys: Vec<Arc<Expression>>,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::IndexScan {
@@ -1475,6 +1522,7 @@ impl LogicalPlan {
                 index_name,
                 index_oid,
                 schema,
+                predicate_keys
             },
             vec![],
         ))
@@ -1491,12 +1539,116 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn delete(table_name: String, schema: Schema, table_oid: u64, input: Box<LogicalPlan>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Delete {
+                table_name,
+                schema,
+                table_oid,
+            },
+            vec![input],
+        ))
+    }
+
+    pub fn update(
+        table_name: String,
+        schema: Schema,
+        table_oid: u64,
+        update_expressions: Vec<Arc<Expression>>,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Update {
+                table_name,
+                schema,
+                table_oid,
+                update_expressions,
+            },
+            vec![input],
+        ))
+    }
+
+    pub fn nested_loop_join(
+        left_schema: Schema,
+        right_schema: Schema,
+        predicate: Arc<Expression>,
+        join_type: JoinOperator,
+        left: Box<LogicalPlan>,
+        right: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::NestedLoopJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            },
+            vec![left, right],
+        ))
+    }
+
+    pub fn hash_join(
+        left_schema: Schema,
+        right_schema: Schema,
+        predicate: Arc<Expression>,
+        join_type: JoinOperator,
+        left: Box<LogicalPlan>,
+        right: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::HashJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            },
+            vec![left, right],
+        ))
+    }
+
+    pub fn sort(
+        sort_expressions: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Sort {
+                sort_expressions,
+                schema,
+            },
+            vec![input],
+        ))
+    }
+
+    pub fn limit(limit: usize, schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Limit { limit, schema },
+            vec![input],
+        ))
+    }
+
+    pub fn top_n(
+        k: usize,
+        sort_expressions: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::TopN {
+                k,
+                sort_expressions,
+                schema,
+            },
+            vec![input],
+        ))
+    }
+
     pub fn get_schema(&self) -> Schema {
         match &self.plan_type {
             // Plans with explicit schemas
             LogicalPlanType::CreateTable { schema, .. } => schema.clone(),
             LogicalPlanType::TableScan { schema, .. } => schema.clone(),
-            LogicalPlanType::Project { schema, .. } => (*schema).clone(),
+            LogicalPlanType::Projection { schema, .. } => (*schema).clone(),
             LogicalPlanType::Insert { schema, .. } => schema.clone(),
             LogicalPlanType::Values { schema, .. } => schema.clone(),
             LogicalPlanType::Aggregate { schema, .. } => schema.clone(),
@@ -1551,6 +1703,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name.clone(),
                 *if_not_exists,
             ))),
+
             LogicalPlanType::CreateIndex {
                 schema,
                 table_name,
@@ -1564,15 +1717,11 @@ impl LogicalToPhysical for LogicalPlan {
                 key_attrs.clone(),
                 *if_not_exists,
             ))),
-            LogicalPlanType::MockScan {
-                table_name, schema, table_oid, ..
-            } => Ok(PlanNode::MockScan(MockScanNode::new(
-                schema.clone(),
-                table_name.clone(),
-                vec![],
-            ))),
+
             LogicalPlanType::TableScan {
-                table_name, schema, table_oid, ..
+                table_name,
+                schema,
+                table_oid,
             } => Ok(PlanNode::SeqScan(SeqScanPlanNode::new(
                 schema.clone(),
                 *table_oid,
@@ -1585,123 +1734,119 @@ impl LogicalToPhysical for LogicalPlan {
                 index_name,
                 index_oid,
                 schema,
-            } => {
-                let child_plans = self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?;
+                predicate_keys
+            } => Ok(PlanNode::IndexScan(IndexScanNode::new(
+                schema.clone(),
+                table_name.to_string(),
+                *table_oid,
+                index_name.to_string(),
+                *index_oid,
+                predicate_keys.clone()
+            ))),
 
-                Ok(IndexScan(IndexScanNode::new(
-                    schema.clone(),
-                    table_name.clone(),
-                    *table_oid,
-                    index_name.clone(),
-                    *index_oid,
-                    vec![],
-                    child_plans,
-                )))
-            }
-
-            LogicalPlanType::Filter { predicate } => {
-                let child_plan = self.children[0].to_physical_plan()?;
-                let schema = child_plan.get_output_schema().clone();
-                Ok(PlanNode::Filter(FilterNode::new(
-                    schema,
-                    0,
-                    String::new(),
-                    predicate.as_ref().clone(),
-                    child_plan,
-                )))
-            }
-
-            LogicalPlanType::Project {
-                expressions,
+            LogicalPlanType::Filter {
                 schema,
+                table_oid,
+                table_name,
+                predicate
             } => {
-                // Convert child plans first
-                let child_plans = self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?;
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                Ok(PlanNode::Filter(FilterNode::new(
+                    schema.clone(),
+                    *table_oid,
+                    table_name.to_string(),
+                    predicate.clone(),
+                    children,
+                )))
+            }
 
+            LogicalPlanType::Projection { expressions, schema } => {
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Projection(ProjectionNode::new(
-                    schema.as_ref().clone(),
-                    expressions.iter().map(|e| e.as_ref().clone()).collect(),
-                    child_plans,
+                    schema.clone(),
+                    expressions.clone(),
+                    children,
                 )))
             }
 
             LogicalPlanType::Insert {
-                table_name, schema, table_oid, ..
+                table_name,
+                schema,
+                table_oid,
             } => {
-                let child_plan = self.children[0].to_physical_plan()?;
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Insert(InsertNode::new(
                     schema.clone(),
                     *table_oid,
-                    table_name.clone(),
+                    table_name.to_string(),
                     vec![],
-                    child_plan,
+                    children
                 )))
             }
 
             LogicalPlanType::Delete {
-                table_name, schema, table_oid, ..
-            } => Ok(PlanNode::Delete(DeleteNode::new(
-                schema.clone(),
-                table_name.clone(),
-                table_oid.clone(),
-                self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?,
-            ))),
+                table_name,
+                schema,
+                table_oid,
+            } => {
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                Ok(PlanNode::Delete(DeleteNode::new(
+                    schema.clone(),
+                    table_name.clone(),
+                    *table_oid,
+                    children
+                )))
+            }
 
             LogicalPlanType::Update {
-                table_name, schema, table_oid, update_expressions, ..
-            } => Ok(PlanNode::Update(UpdateNode::new(
-                schema.clone(),
-                table_name.clone(),
-                *table_oid,
-                update_expressions.clone(),
-                self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?,
-            ))),
-
-            LogicalPlanType::Values { rows, schema } => {
-                let physical_rows: Vec<Vec<Arc<Expression>>> = rows
-                    .iter()
-                    .map(|row| row.iter().map(Arc::clone).collect())
-                    .collect();
-
-                Ok(PlanNode::Values(
-                    ValuesNode::new(schema.clone(), physical_rows, PlanNode::Empty).unwrap(),
-                ))
+                table_name,
+                schema,
+                table_oid,
+                update_expressions,
+            } => {
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                Ok(PlanNode::Update(UpdateNode::new(
+                    schema.clone(),
+                    table_name.clone(),
+                    *table_oid,
+                    update_expressions.clone(),
+                    children,
+                )))
             }
+
+            LogicalPlanType::Values {
+                rows,
+                schema
+            } => {
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                Ok(PlanNode::Values(ValuesNode::new(
+                    schema.clone(),
+                    rows.clone(),
+                    children
+                )))
+            },
 
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
                 schema,
             } => {
-                let child_plan = self.children[0].to_physical_plan()?;
-                
-                // Get aggregate types from the expressions
-                let agg_types = aggregates.iter().map(|expr| {
-                    if let Expression::Aggregate(agg_expr) = expr.as_ref() {
-                        agg_expr.get_agg_type().clone()
-                    } else {
-                        AggregationType::CountStar
-                    }
-                }).collect();
-
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
                     schema.clone(),
-                    vec![child_plan],
+                    children,
                     group_by.clone(),
                     aggregates.clone(),
-                    agg_types,
+                    aggregates
+                        .iter()
+                        .map(|agg| {
+                            if let Expression::Aggregate(agg_expr) = agg.as_ref() {
+                                agg_expr.get_agg_type().clone()
+                            } else {
+                                AggregationType::Count // Default type if not an aggregate
+                            }
+                        })
+                        .collect(),
                 )))
             }
 
@@ -1711,17 +1856,21 @@ impl LogicalToPhysical for LogicalPlan {
                 predicate,
                 join_type,
             } => {
-                let left_child = self.children[0].to_physical_plan()?;
-                let right_child = self.children[1].to_physical_plan()?;
+                let left = self.children[0].to_physical_plan()?;
+                let right = self.children[1].to_physical_plan()?;
 
-                // let output_schema = Schema::merge(left_schema, right_schema);
-                // Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
-                //     output_schema,
-                //     predicate.clone(),
-                //     join_type.clone(),
-                //     vec![left_child, right_child],
-                // )))
-                Err("NestedLoopJoin not implemented".to_string())
+                // Extract join key expressions from the predicate
+                let (left_keys, right_keys) = extract_join_keys(predicate)?;
+
+                Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
+                    left_schema.clone(),
+                    right_schema.clone(),
+                    predicate.clone(),
+                    join_type.clone(),
+                    left_keys,
+                    right_keys,
+                    vec![left, right],
+                )))
             }
 
             LogicalPlanType::HashJoin {
@@ -1730,78 +1879,107 @@ impl LogicalToPhysical for LogicalPlan {
                 predicate,
                 join_type,
             } => {
+                let left = self.children[0].to_physical_plan()?;
+                let right = self.children[1].to_physical_plan()?;
+
                 // Extract join key expressions from the predicate
-                // let (left_keys, right_keys) = extract_join_keys(predicate)?;
-                //
-                // let output_schema = Schema::merge(left_schema, right_schema);
-                // Ok(PlanNode::HashJoin(HashJoinNode::new(
-                //     output_schema,
-                //     left_keys,
-                //     right_keys,
-                //     join(TableFactor::Table {
-                //         name: ObjectName(vec![]),
-                //         alias: None,
-                //         args: None,
-                //         with_hints: vec![],
-                //         version: None,
-                //         with_ordinality: false,
-                //         partitions: vec![],
-                //     }),
-                //     self.children.iter().map(|child| child.to_physical_plan()).collect::<Result<Vec<PlanNode>, String>>()?,
-                // )))
-                Err("HashJoin not implemented".to_string())
+                let (left_keys, right_keys) = extract_join_keys(predicate)?;
+
+                Ok(PlanNode::HashJoin(HashJoinNode::new(
+                    left_schema.clone(),
+                    right_schema.clone(),
+                    predicate.clone(),
+                    join_type.clone(),
+                    left_keys,
+                    right_keys,
+                    vec![left, right],
+                )))
             }
 
             LogicalPlanType::Sort {
                 sort_expressions,
                 schema,
-            } => Ok(PlanNode::Sort(SortNode::new(
-                schema.clone(),
-                sort_expressions.clone(),
-                self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?,
-            ))),
+            } => {
+                let child = self.children[0].to_physical_plan()?;
+                Ok(PlanNode::Sort(SortNode::new(
+                    schema.clone(),
+                    sort_expressions.clone(),
+                    vec![child],
+                )))
+            }
 
-            LogicalPlanType::Limit { limit, schema } => Ok(PlanNode::Limit(LimitNode::new(
-                limit.clone(),
-                schema.clone(),
-                self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?,
-            ))),
+            LogicalPlanType::Limit { limit, schema } => {
+                let child = self.children[0].to_physical_plan()?;
+                Ok(PlanNode::Limit(LimitNode::new(*limit, schema.clone(), vec![child])))
+            }
 
             LogicalPlanType::TopN {
                 k,
                 sort_expressions,
                 schema,
-            } => Ok(PlanNode::TopN(TopNNode::new(
+            } => {
+                let child = self.children[0].to_physical_plan()?;
+                Ok(PlanNode::TopN(TopNNode::new(
+                    schema.clone(),
+                    sort_expressions.clone(),
+                    k.clone(),
+                    vec![child],
+                )))
+            }
+
+            LogicalPlanType::MockScan {
+                table_name,
+                schema,
+                table_oid: _,
+            } => Ok(PlanNode::MockScan(MockScanNode::new(
                 schema.clone(),
-                sort_expressions.clone(),
-                k.clone(),
-                self.children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?,
+                table_name.clone(),
+                vec![],
             ))),
         }
     }
 }
 
-/// Helper function to extract join keys from a join predicate
-fn extract_join_keys(
-    predicate: &Arc<Expression>,
-) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
-    // This is a simplified implementation - in practice, you'd need to:
-    // 1. Parse the predicate to identify equijoin conditions
-    // 2. Separate expressions that reference only left table columns
-    // 3. Separate expressions that reference only right table columns
-    // 4. Ensure they form valid join keys
+/// Helper function to extract join key expressions from a join predicate
+fn extract_join_keys(predicate: &Arc<Expression>) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+    let mut left_keys = Vec::new();
+    let mut right_keys = Vec::new();
 
-    // For now, we'll return empty vectors
-    Ok((vec![], vec![]))
+    match predicate.as_ref() {
+        Expression::Comparison(comp_expr) => {
+            // Handle simple equality comparison
+            if let ComparisonType::Equal = comp_expr.get_comp_type() {
+                let children = comp_expr.get_children();
+                if children.len() == 2 {
+                    left_keys.push(Arc::clone(&children[0]));
+                    right_keys.push(Arc::clone(&children[1]));
+                }
+            }
+        }
+        Expression::Logic(logic_expr) => {
+            // Handle AND conditions for multiple join keys
+            if let LogicType::And = logic_expr.get_logic_type() {
+                for child in logic_expr.get_children() {
+                    if let Expression::Comparison(comp_expr) = child.as_ref() {
+                        if let ComparisonType::Equal = comp_expr.get_comp_type() {
+                            let comp_children = comp_expr.get_children();
+                            if comp_children.len() == 2 {
+                                left_keys.push(Arc::clone(&comp_children[0]));
+                                right_keys.push(Arc::clone(&comp_children[1]));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => return Err("Unsupported join predicate type".to_string()),
+    }
+
+    if left_keys.is_empty() || right_keys.is_empty() {
+        return Err("No valid join keys found in predicate".to_string());
+    }
+
+    Ok((left_keys, right_keys))
 }
 
 #[cfg(test)]
@@ -2004,7 +2182,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Filter { predicate } => match predicate.as_ref() {
+                LogicalPlanType::Filter {
+                    schema,
+                    table_oid,
+                    table_name,
+                    predicate
+                } => match predicate.as_ref() {
                     Expression::Comparison(comp) => {
                         assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
                     }

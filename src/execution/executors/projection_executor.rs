@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
@@ -78,7 +79,7 @@ impl ProjectionExecutor {
         let output_schema = self.plan.get_output_schema();
 
         for (idx, expr) in self.plan.get_expressions().iter().enumerate() {
-            match expr {
+            match expr.as_ref() {
                 Expression::Aggregate(_) => {
                     // For aggregate expressions, use a placeholder value matching the schema type
                     let col_type = output_schema.get_column(idx).unwrap().get_type();
@@ -139,6 +140,13 @@ impl AbstractExecutor for ProjectionExecutor {
 
     fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
         self.context.clone()
+    }
+}
+
+impl Display for ProjectionExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ProjectionExecutor")
+
     }
 }
 
@@ -288,18 +296,18 @@ mod tests {
 
         // Create column reference expressions
         let expressions = vec![
-            Expression::ColumnRef(ColumnRefExpression::new(
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                 0,  // tuple index
                 0,  // column index for id
                 Column::new("id", TypeId::Integer),
                 vec![]
-            )),
-            Expression::ColumnRef(ColumnRefExpression::new(
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                 0,  // tuple index
                 1,  // column index for name
                 Column::new("name", TypeId::VarChar),
                 vec![]
-            )),
+            ))),
         ];
 
         // Create executor context with test context

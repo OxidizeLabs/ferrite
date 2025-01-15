@@ -1,7 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
+use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNNode {
@@ -43,42 +46,30 @@ impl AbstractPlanNode for TopNNode {
     fn get_type(&self) -> PlanType {
         PlanType::Sort
     }
+}
 
-    /// Returns a string representation of this node.
-    ///
-    /// # Arguments
-    ///
-    /// * `with_schema` - If true, includes the schema in the string representation.
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("TopNNode");
-        if with_schema {
-            result.push_str(&format!(" [{}]", self.output_schema));
+impl Display for TopNNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ TopN: {}", self.k)?;
+        
+        if f.alternate() {
+            write!(f, "\n   Order By: [")?;
+            for (i, expr) in self.order_bys.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", expr)?;
+            }
+            write!(f, "]")?;
+            write!(f, "\n   Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
         }
-        result
-    }
-
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    /// Returns a string representation of this node's children.
-    ///
-    /// # Arguments
-    ///
-    /// * `indent` - The number of spaces to indent the output.
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent);
-        let mut result = String::new();
-
-        // Add left child
-        result.push_str(&format!("{}Left Child: {}\n", indent_str, self.get_children()[0].plan_node_to_string()));
-        result.push_str(&self.get_children()[0].children_to_string(indent + 2));
-
-        // Add right child
-        result.push_str(&format!("{}Right Child: {}\n", indent_str, self.get_children()[1].plan_node_to_string()));
-        result.push_str(&self.get_children()[1].children_to_string(indent + 2));
-
-        result
+        
+        Ok(())
     }
 }

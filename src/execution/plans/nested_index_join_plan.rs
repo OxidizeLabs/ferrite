@@ -1,9 +1,12 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use crate::binder::table_ref::bound_join_ref::JoinType;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::sync::Arc;
+use crate::execution::plans::mock_scan_plan::MockScanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedIndexJoinNode {
@@ -15,7 +18,7 @@ pub struct NestedIndexJoinNode {
     index_id: IndexOidT,
     inner_table_schema: Arc<Schema>,
     join_type: JoinType,
-    child: Box<PlanNode>,
+    children: Vec<PlanNode>,
 }
 
 impl AbstractPlanNode for NestedIndexJoinNode {
@@ -30,26 +33,25 @@ impl AbstractPlanNode for NestedIndexJoinNode {
     fn get_type(&self) -> PlanType {
         PlanType::NestedIndexJoin
     }
+}
 
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("NestedIndexJoin");
-        if with_schema {
-            result.push_str(&format!(" [{{ type={}, key_predicate={}, index={}, index_table={}, inner_table_schema={} }}]", self.join_type,
-                                     self.key_predicate, self.index_name, self.index_table_name, self.inner_table_schema));
-        } else {
-            result.push_str(&format!(
-                " [{{ type={}, key_predicate={}, index={}, index_table={}}}]",
-                self.join_type, self.key_predicate, self.index_name, self.index_table_name
-            ));
+impl Display for NestedIndexJoinNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "→ NestedIndexJoin: {} using {}", self.index_table_name, self.index_name)?;
+        
+        if f.alternate() {
+            write!(f, "\n   Join Type: {:#?}", self.join_type)?;
+            write!(f, "\n   Key Predicate: {}", self.key_predicate)?;
+            write!(f, "\n   Inner Schema: {}", self.inner_table_schema)?;
+            write!(f, "\n   Output Schema: {}", self.output_schema)?;
+            
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
         }
-        result
-    }
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    fn children_to_string(&self, indent: usize) -> String {
-        todo!()
+        
+        Ok(())
     }
 }

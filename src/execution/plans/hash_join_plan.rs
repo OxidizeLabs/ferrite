@@ -1,37 +1,78 @@
+use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use sqlparser::ast::Join;
+use sqlparser::ast::JoinOperator;
 use std::sync::Arc;
+use crate::execution::plans::filter_plan::FilterNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HashJoinNode {
+    left_schema: Schema,
+    right_schema: Schema,
     output_schema: Schema,
+    predicate: Arc<Expression>,
+    join_type: JoinOperator,
     left_key_expressions: Vec<Arc<Expression>>,
     right_key_expressions: Vec<Arc<Expression>>,
-    join: Join,
     children: Vec<PlanNode>,
 }
 
 impl HashJoinNode {
     pub fn new(
-        output_schema: Schema,
+        left_schema: Schema,
+        right_schema: Schema,
+        predicate: Arc<Expression>,
+        join_type: JoinOperator,
         left_key_expressions: Vec<Arc<Expression>>,
         right_key_expressions: Vec<Arc<Expression>>,
-        join: Join,
         children: Vec<PlanNode>,
     ) -> Self {
+        // Create output schema by combining columns from both input schemas
+        let mut output_columns = Vec::new();
+        
+        // Add columns from left schema
+        output_columns.extend(left_schema.get_columns().iter().cloned());
+        
+        // Add columns from right schema
+        output_columns.extend(right_schema.get_columns().iter().cloned());
+        
+        let output_schema = Schema::new(output_columns);
+
         Self {
+            left_schema,
+            right_schema,
             output_schema,
+            predicate,
+            join_type,
             left_key_expressions,
             right_key_expressions,
-            join,
             children,
         }
     }
 
-    pub fn get_join(&self) -> &Join {
-        &self.join
+    pub fn get_left_schema(&self) -> &Schema {
+        &self.left_schema
+    }
+
+    pub fn get_right_schema(&self) -> &Schema {
+        &self.right_schema
+    }
+
+    pub fn get_predicate(&self) -> &Arc<Expression> {
+        &self.predicate
+    }
+
+    pub fn get_join_type(&self) -> &JoinOperator {
+        &self.join_type
+    }
+
+    pub fn get_left_key_expressions(&self) -> &Vec<Arc<Expression>> {
+        &self.left_key_expressions
+    }
+
+    pub fn get_right_key_expressions(&self) -> &Vec<Arc<Expression>> {
+        &self.right_key_expressions
     }
 
     pub fn get_left_child(&self) -> &PlanNode {
@@ -44,67 +85,21 @@ impl HashJoinNode {
 }
 
 impl AbstractPlanNode for HashJoinNode {
-    /// Returns a reference to the output schema of this node.
     fn get_output_schema(&self) -> &Schema {
         &self.output_schema
     }
 
-    /// Returns a reference to the child nodes of this node.
-    ///
-    /// Note: Currently, DeleteNode only has one child, but this method
-    /// returns an empty vector for consistency with the trait definition.
     fn get_children(&self) -> &Vec<PlanNode> {
         &self.children
     }
 
-    /// Returns the type of this plan node.
     fn get_type(&self) -> PlanType {
         PlanType::HashJoin
     }
+}
 
-    /// Returns a string representation of this node.
-    ///
-    /// # Arguments
-    ///
-    /// * `with_schema` - If true, includes the schema in the string representation.
-    fn to_string(&self, with_schema: bool) -> String {
-        let mut result = String::from("HashJoinNode");
-        if with_schema {
-            result.push_str(&format!(" [{}]", self.output_schema));
-        }
-        result
-    }
-
-    /// Returns a string representation of this node, including the schema.
-    fn plan_node_to_string(&self) -> String {
-        self.to_string(true)
-    }
-
-    /// Returns a string representation of this node's children.
-    ///
-    /// # Arguments
-    ///
-    /// * `indent` - The number of spaces to indent the output.
-    fn children_to_string(&self, indent: usize) -> String {
-        let indent_str = " ".repeat(indent);
-        let mut result = String::new();
-
-        // Add left child
-        result.push_str(&format!(
-            "{}Left Child: {}\n",
-            indent_str,
-            self.get_children()[0].plan_node_to_string()
-        ));
-        result.push_str(&self.get_children()[0].children_to_string(indent + 2));
-
-        // Add right child
-        result.push_str(&format!(
-            "{}Right Child: {}\n",
-            indent_str,
-            self.get_children()[1].plan_node_to_string()
-        ));
-        result.push_str(&self.get_children()[1].children_to_string(indent + 2));
-
-        result
+impl Display for HashJoinNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
