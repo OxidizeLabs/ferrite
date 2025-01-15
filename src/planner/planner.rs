@@ -27,7 +27,6 @@ use crate::execution::plans::update_plan::UpdateNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateIndex, CreateTable, DataType, Expr, Function, FunctionArg,
@@ -39,10 +38,14 @@ use sqlparser::parser::Parser;
 use std::env;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
-use mockall::Any;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::execution::plans::hash_join_plan::HashJoinNode;
+use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
+use crate::execution::plans::window_plan::WindowNode;
+use crate::execution::plans::window_plan::WindowFunction;
+use crate::execution::plans::window_plan::WindowFunctionType;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -117,6 +120,12 @@ pub enum LogicalPlanType {
         predicate: Arc<Expression>,
         join_type: JoinOperator,
     },
+    NestedIndexJoin {
+        left_schema: Schema,
+        right_schema: Schema,
+        predicate: Arc<Expression>,
+        join_type: JoinOperator,
+    },
     HashJoin {
         left_schema: Schema,
         right_schema: Schema,
@@ -134,6 +143,18 @@ pub enum LogicalPlanType {
     TopN {
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
+        schema: Schema,
+    },
+    TopNPerGroup {
+        k: usize,
+        sort_expressions: Vec<Arc<Expression>>,
+        groups: Vec<Arc<Expression>>,
+        schema: Schema,
+    },
+    Window {
+        group_by: Vec<Arc<Expression>>,
+        aggregates: Vec<Arc<Expression>>,
+        partitions: Vec<Arc<Expression>>,
         schema: Schema,
     },
 }
@@ -1388,6 +1409,65 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
+            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, predicate, join_type } => {
+                result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
+                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
+                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
+                result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
+                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+            }
+            LogicalPlanType::TopNPerGroup { k, sort_expressions, groups, schema } => {
+                result.push_str(&format!("{}→ TopNPerGroup: {}\n", indent_str, k));
+                result.push_str(&format!("{}   Order By: [", indent_str));
+                for (i, expr) in sort_expressions.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Group By: [", indent_str));
+                for (i, expr) in groups.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Window { group_by, aggregates, partitions, schema } => {
+                result.push_str(&format!("{}→ Window\n", indent_str));
+                if !group_by.is_empty() {
+                    result.push_str(&format!("{}   Group By: [", indent_str));
+                    for (i, expr) in group_by.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&expr.to_string());
+                    }
+                    result.push_str("]\n");
+                }
+                result.push_str(&format!("{}   Window Functions: [", indent_str));
+                for (i, expr) in aggregates.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&expr.to_string());
+                }
+                result.push_str("]\n");
+                if !partitions.is_empty() {
+                    result.push_str(&format!("{}   Partition By: [", indent_str));
+                    for (i, expr) in partitions.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&expr.to_string());
+                    }
+                    result.push_str("]\n");
+                }
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
         }
 
         // Add children recursively
@@ -1465,7 +1545,7 @@ impl LogicalPlan {
         Box::new(Self::new(
             LogicalPlanType::Projection {
                 expressions,
-                schema: schema,
+                schema,
             },
             vec![input],
         ))
@@ -1686,7 +1766,18 @@ impl LogicalPlan {
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
-            LogicalPlanType::MockScan { .. } => self.get_schema(),
+            LogicalPlanType::MockScan { schema, .. } => schema.clone(),
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
+                let mut left_columns = left_schema.clone();
+                let combined_columns: &mut Vec<Column> = left_columns.get_columns_mut();
+                combined_columns.extend(right_schema.get_columns().iter().cloned());
+                Schema::new(combined_columns.to_vec())
+            }            LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
+            LogicalPlanType::Window { schema, .. } => schema.clone()
         }
     }
 }
@@ -1918,12 +2009,12 @@ impl LogicalToPhysical for LogicalPlan {
                 sort_expressions,
                 schema,
             } => {
-                let child = self.children[0].to_physical_plan()?;
+                let children = self.children.iter().map(|child|child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
                 Ok(PlanNode::TopN(TopNNode::new(
                     schema.clone(),
                     sort_expressions.clone(),
                     k.clone(),
-                    vec![child],
+                    children,
                 )))
             }
 
@@ -1936,6 +2027,93 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name.clone(),
                 vec![],
             ))),
+
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
+                let left = self.children[0].to_physical_plan()?;
+                let right = self.children[1].to_physical_plan()?;
+
+                // Extract join key expressions from the predicate
+                let (left_keys, right_keys) = extract_join_keys(predicate)?;
+
+                Ok(PlanNode::NestedIndexJoin(NestedIndexJoinNode::new(
+                    left_schema.clone(),
+                    right_schema.clone(),
+                    predicate.clone(),
+                    join_type.clone(),
+                    left_keys,
+                    right_keys,
+                    vec![left, right],
+                )))
+            }
+            LogicalPlanType::TopNPerGroup { k, sort_expressions, groups, schema } => {
+                let children = self.children.iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?;
+
+                Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
+                    *k,
+                    sort_expressions.clone(),
+                    groups.clone(),
+                    schema.clone(),
+                    children,
+                )))
+            }
+            LogicalPlanType::Window { group_by, aggregates, partitions, schema } => {
+                let children = self.children.iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?;
+
+                // Convert the logical window expressions into WindowFunction structs
+                let window_functions = aggregates.iter()
+                    .enumerate()
+                    .map(|(i, agg_expr)| {
+                        // Determine the window function type based on the aggregate expression
+                        let function_type = match agg_expr.as_ref() {
+                            Expression::Aggregate(agg) => match agg.get_agg_type() {
+                                AggregationType::Count => WindowFunctionType::Count,
+                                AggregationType::Sum => WindowFunctionType::Sum,
+                                AggregationType::Min => WindowFunctionType::Min,
+                                AggregationType::Max => WindowFunctionType::Max,
+                                AggregationType::Avg => WindowFunctionType::Average,
+                                // Add other mappings as needed
+                                _ => return Err("Unsupported window function type".to_string()),
+                            },
+                            Expression::Window(window_func) => {
+                                // If it's already a window function, use its type directly
+                                window_func.get_window_type()
+                            }
+                            _ => return Err("Invalid window function expression".to_string()),
+                        };
+
+                        // Create a new WindowFunction with the appropriate partitioning and ordering
+                        Ok(WindowFunction::new(
+                            function_type,
+                            Arc::clone(agg_expr),
+                            if i < partitions.len() {
+                                vec![Arc::clone(&partitions[i])]
+                            } else {
+                                vec![]
+                            },
+                            if i < group_by.len() {
+                                vec![Arc::clone(&group_by[i])]
+                            } else {
+                                vec![]
+                            },
+                        ))
+                    })
+                    .collect::<Result<Vec<WindowFunction>, String>>()?;
+
+                Ok(PlanNode::Window(WindowNode::new(
+                    schema.clone(),
+                    window_functions,
+                    children,
+                )))
+            }
         }
     }
 }

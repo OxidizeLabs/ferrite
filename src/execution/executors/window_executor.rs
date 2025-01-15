@@ -1,17 +1,12 @@
 use crate::catalog::schema::Schema;
-use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::execution::plans::window_plan::WindowNode;
 
 pub struct WindowExecutor {
@@ -23,7 +18,7 @@ pub struct WindowExecutor {
 
 impl WindowExecutor {
     pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<WindowNode>) -> Self {
-        debug!("Creating WindowExecutor for table '{}'", plan.get_table_name());
+        debug!("Creating WindowExecutor");
 
         todo!()
     }
@@ -55,16 +50,16 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
-    use crate::catalog::column::Column;
+
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::type_id::TypeId;
+
     use chrono::Utc;
-    use std::collections::HashMap;
+
     use std::fs;
 
     struct TestContext {

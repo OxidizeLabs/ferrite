@@ -8,3 +8,4 @@ pub mod logic_expression;
 pub mod mock_expression;
 pub mod string_expression;
 pub mod aggregate_expression;
+pub mod window_expression;
