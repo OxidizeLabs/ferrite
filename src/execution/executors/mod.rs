@@ -18,3 +18,6 @@ pub mod sort_executor;
 pub mod limit_executor;
 pub mod update_executor;
 pub mod delete_executor;
+pub mod nested_index_join_executor;
+pub mod topn_per_group_executor;
+pub mod window_executor;
