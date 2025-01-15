@@ -83,22 +83,16 @@ impl Column {
     pub fn is_inlined(&self) -> bool {
         self.column_type != TypeId::VarChar
     }
-
-    pub fn to_string(&self, simplified: bool) -> String {
-        if simplified {
-            self.column_name.clone()
-        } else {
-            format!(
-                "Column(name: {}, type: {:?}, length: {}, offset: {})",
-                self.column_name, self.column_type, self.length, self.column_offset
-            )
-        }
-    }
 }
 
 impl Display for Column {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string(true))
+        if f.alternate() {
+            write!(f, "Column(name: {}, type: {:?}, length: {}, offset: {})",
+                   self.column_name, self.column_type, self.length, self.column_offset)
+        } else {
+            write!(f, "{}({:?})", self.column_name, self.column_type)
+        }
     }
 }
 

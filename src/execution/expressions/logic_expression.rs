@@ -157,6 +157,22 @@ impl Display for LogicType {
     }
 }
 
+impl Display for LogicExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let op_str = match self.logic_type {
+            LogicType::And => "AND",
+            LogicType::Or => "OR",
+        };
+
+        // Use parentheses to ensure proper operator precedence
+        if f.alternate() {
+            write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
+        } else {
+            write!(f, "({} {} {})", self.left, op_str, self.right)
+        }
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -244,5 +260,47 @@ mod unit_tests {
         )));
         let result = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
         assert_eq!(result.get_return_type().get_type(), TypeId::Boolean);
+    }
+
+    #[test]
+    fn test_logic_expression_display() {
+        let left = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let right = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::from(false),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        
+        // Test AND expression
+        let and_expr = Expression::Logic(LogicExpression::new(
+            left.clone(), 
+            right.clone(), 
+            LogicType::And, 
+            vec![]
+        ));
+        
+        // Basic format
+        assert_eq!(and_expr.to_string(), "(true AND false)");
+        
+        // Detailed format
+        assert_eq!(format!("{:#}", and_expr), "(Constant(true) AND Constant(false))");
+        
+        // Test OR expression
+        let or_expr = Expression::Logic(LogicExpression::new(
+            left,
+            right,
+            LogicType::Or,
+            vec![],
+        ));
+        
+        // Basic format
+        assert_eq!(or_expr.to_string(), "(true OR false)");
+        
+        // Detailed format
+        assert_eq!(format!("{:#}", or_expr), "(Constant(true) OR Constant(false))");
     }
 }

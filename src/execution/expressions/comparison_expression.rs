@@ -147,9 +147,9 @@ impl Display for ComparisonExpression {
         };
 
         if f.alternate() {
-            write!(f, "{} {} {}", self.left, op_str, self.right)
+            write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
         } else {
-            write!(f, "(Col{} {} {})", self.left, op_str, self.right)
+            write!(f, "({} {} {})", self.left, op_str, self.right)
         }
     }
 }
@@ -204,7 +204,10 @@ mod unit_tests {
         let result = equal_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(false));
 
-        assert_eq!(less_than_expr.to_string(), "(Col#0.0 < Col#1.1)");
-        assert_eq!(equal_expr.to_string(), "(Col#0.0 = Col#1.1)");
+        assert_eq!(less_than_expr.to_string(), "(col1 < col2)");
+        assert_eq!(equal_expr.to_string(), "(col1 = col2)");
+
+        assert_eq!(format!("{:#}", less_than_expr), "(Col#0.0 < Col#1.1)");
+        assert_eq!(format!("{:#}", equal_expr), "(Col#0.0 = Col#1.1)");
     }
 }
