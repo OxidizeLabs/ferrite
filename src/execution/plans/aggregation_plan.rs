@@ -228,7 +228,7 @@ mod tests {
         let result = agg_node.to_string();
         assert_eq!(
             result,
-            "Aggregate [GROUP BY: #0.0] [SUM(#0.1), COUNT(#0.1)]"
+            "→ Aggregate\n   SUM(col2)\n   COUNT(col2)\n   Group By: [col1]"
         );
     }
 }
