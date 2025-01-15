@@ -66,9 +66,8 @@ impl AbstractPlanNode for FilterNode {
 
 impl Display for FilterNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "→ Filter")?;
-        
         if f.alternate() {
+            write!(f, "→ Filter")?;
             write!(f, "\n   Predicate: {}", self.predicate)?;
             write!(f, "\n   Table: {}", self.table_name)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
@@ -76,8 +75,10 @@ impl Display for FilterNode {
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
-                write!(f, "    Child {}: {:#}", i + 1, child)?;
+                write!(f, "   Child {}: {:#}", i + 1, child)?;
             }
+        } else {
+            write!(f, "Filter {{ predicate={} }}", self.predicate)?;
         }
         
         Ok(())
@@ -101,10 +102,10 @@ mod tests {
     use crate::types_db::value::Value;
     use std::sync::Arc;
 
-    // =============== Test Helpers ===============
     mod helpers {
         use super::*;
 
+        // Schema creation helpers
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -114,6 +115,7 @@ mod tests {
             ])
         }
 
+        // Expression creation helpers
         pub fn create_column_ref(schema: &Schema, col_idx: usize) -> Arc<Expression> {
             Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                 0,
@@ -123,36 +125,112 @@ mod tests {
             )))
         }
 
-        pub fn create_constant_int(value: i32, column: Column) -> Arc<Expression> {
+        pub fn create_constant_value(value: impl Into<Value>, column: Column) -> Arc<Expression> {
             Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(value),
+                value.into(),
                 column,
                 vec![],
             )))
         }
 
-        pub fn create_constant_bool(value: bool, column: Column) -> Arc<Expression> {
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(value),
-                column,
-                vec![],
-            )))
+        pub fn create_comparison(
+            left: Arc<Expression>,
+            right: Arc<Expression>,
+            comp_type: ComparisonType,
+        ) -> Arc<Expression> {
+            Arc::new(Expression::Comparison(ComparisonExpression::new(left, right, comp_type, vec![])))
         }
 
-        pub fn create_constant_string(value: &str, column: Column) -> Arc<Expression> {
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(value.to_string()),
-                column,
-                vec![],
-            )))
-        }
-
+        // Plan node creation helpers
         pub fn create_seq_scan(schema: Schema, table_name: &str) -> PlanNode {
             PlanNode::SeqScan(SeqScanPlanNode::new(
                 schema,
                 0,
                 table_name.to_string(),
             ))
+        }
+
+        pub fn create_test_filter_node() -> (FilterNode, Arc<Expression>) {
+            let schema = create_test_schema();
+            let col_ref = create_column_ref(&schema, 1); // value column
+            let constant = create_constant_value(25, schema.get_column(1).unwrap().clone());
+            let predicate = create_comparison(col_ref, constant, ComparisonType::GreaterThan);
+            
+            let scan_node = create_seq_scan(schema.clone(), "test_table");
+            let filter_node = FilterNode::new(
+                schema,
+                1,
+                "test_table".to_string(),
+                predicate.clone(),
+                vec![scan_node],
+            );
+
+            (filter_node, predicate)
+        }
+
+        // Predicate creation helpers
+        pub fn create_test_predicate(expr_str: &str) -> Arc<Expression> {
+            let schema = create_test_schema();
+            
+            match expr_str {
+                "value > 25" | "age > 25" => {
+                    let col_ref = create_column_ref(&schema, 1); // value/age column
+                    let constant = create_constant_value(25, schema.get_column(1).unwrap().clone());
+                    create_comparison(col_ref, constant, ComparisonType::GreaterThan)
+                }
+                "id < 100" => {
+                    let col_ref = create_column_ref(&schema, 0); // id column
+                    let constant = create_constant_value(100, schema.get_column(0).unwrap().clone());
+                    create_comparison(col_ref, constant, ComparisonType::LessThan)
+                }
+                "flag = true" => {
+                    let col_ref = create_column_ref(&schema, 3); // flag column
+                    let constant = create_constant_value(true, schema.get_column(3).unwrap().clone());
+                    create_comparison(col_ref, constant, ComparisonType::Equal)
+                }
+                expr => {
+                    // Parse expression in format: "<column> <op> <value>"
+                    let parts: Vec<&str> = expr.split_whitespace().collect();
+                    if parts.len() != 3 {
+                        panic!("Invalid predicate format: {}", expr);
+                    }
+
+                    let (col_name, op, value_str) = (parts[0], parts[1], parts[2]);
+                    
+                    // Find column index
+                    let col_idx = match col_name {
+                        "id" => 0,
+                        "value" | "age" => 1,
+                        "name" => 2,
+                        "flag" => 3,
+                        _ => panic!("Unknown column: {}", col_name),
+                    };
+
+                    let col_ref = create_column_ref(&schema, col_idx);
+                    let column = schema.get_column(col_idx).unwrap().clone();
+                    
+                    // Parse value based on column type
+                    let value = match column.get_type() {
+                        TypeId::Integer => create_constant_value(value_str.parse::<i32>().unwrap(), column),
+                        TypeId::VarChar => create_constant_value(value_str.to_string(), column),
+                        TypeId::Boolean => create_constant_value(value_str.parse::<bool>().unwrap(), column),
+                        _ => panic!("Unsupported type for column: {}", col_name),
+                    };
+
+                    // Parse operator
+                    let comp_type = match op {
+                        "=" | "==" => ComparisonType::Equal,
+                        "!=" | "<>" => ComparisonType::NotEqual,
+                        "<" => ComparisonType::LessThan,
+                        "<=" => ComparisonType::LessThanOrEqual,
+                        ">" => ComparisonType::GreaterThan,
+                        ">=" => ComparisonType::GreaterThanOrEqual,
+                        _ => panic!("Unknown operator: {}", op),
+                    };
+
+                    create_comparison(col_ref, value, comp_type)
+                }
+            }
         }
     }
 
@@ -189,8 +267,8 @@ mod tests {
         fn test_construction_with_empty_schema() {
             let schema = Schema::new(vec![]);
             let predicate = Expression::Comparison(ComparisonExpression::new(
-                create_constant_int(1, Column::new("const", TypeId::Integer)),
-                create_constant_int(2, Column::new("const", TypeId::Integer)),
+                create_constant_value(1, Column::new("const", TypeId::Integer)),
+                create_constant_value(2, Column::new("const", TypeId::Integer)),
                 ComparisonType::Equal,
                 vec![],
             ));
@@ -219,7 +297,7 @@ mod tests {
         fn test_all_comparison_types() {
             let schema = create_test_schema();
             let col_ref = create_column_ref(&schema, 0); // id column
-            let const_val = create_constant_int(10, schema.get_column(0).unwrap().clone());
+            let const_val = create_constant_value(10, schema.get_column(0).unwrap().clone());
 
             let comparison_types = vec![
                 ComparisonType::Equal,
@@ -264,7 +342,7 @@ mod tests {
             for (value, comp_type) in test_cases {
                 let predicate = Expression::Comparison(ComparisonExpression::new(
                     create_column_ref(&schema, 0),
-                    create_constant_int(value, schema.get_column(0).unwrap().clone()),
+                    create_constant_value(value, schema.get_column(0).unwrap().clone()),
                     comp_type,
                     vec![],
                 ));
@@ -297,7 +375,7 @@ mod tests {
             for (value, comp_type) in test_cases {
                 let predicate = Expression::Comparison(ComparisonExpression::new(
                     create_column_ref(&schema, 2), // name column
-                    create_constant_string(value, schema.get_column(2).unwrap().clone()),
+                    create_constant_value(value, schema.get_column(2).unwrap().clone()),
                     comp_type,
                     vec![],
                 ));
@@ -327,7 +405,7 @@ mod tests {
             for (value, comp_type) in test_cases {
                 let predicate = Expression::Comparison(ComparisonExpression::new(
                     create_column_ref(&schema, 3), // flag column
-                    create_constant_bool(value, schema.get_column(3).unwrap().clone()),
+                    create_constant_value(value, schema.get_column(3).unwrap().clone()),
                     comp_type,
                     vec![],
                 ));
@@ -390,7 +468,7 @@ mod tests {
             let schema = create_test_schema();
             let predicate = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 0),
-                create_constant_int(5, schema.get_column(0).unwrap().clone()),
+                create_constant_value(5, schema.get_column(0).unwrap().clone()),
                 ComparisonType::Equal,
                 vec![], // empty children vector
             ));
@@ -414,13 +492,13 @@ mod tests {
                 (create_column_ref(&schema, 0), create_column_ref(&schema, 1)), // both INTEGER
                 // Constants with matching types
                 (
-                    create_constant_int(5, schema.get_column(0).unwrap().clone()),
-                    create_constant_int(10, schema.get_column(0).unwrap().clone()),
+                    create_constant_value(5, schema.get_column(0).unwrap().clone()),
+                    create_constant_value(10, schema.get_column(0).unwrap().clone()),
                 ),
                 // Mixed column ref and constant
                 (
                     create_column_ref(&schema, 0),
-                    create_constant_int(5, schema.get_column(0).unwrap().clone()),
+                    create_constant_value(5, schema.get_column(0).unwrap().clone()),
                 ),
             ];
 
@@ -453,14 +531,14 @@ mod tests {
             // Example: (id > 0) AND (value < 100)
             let id_pred = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 0),
-                create_constant_int(0, schema.get_column(0).unwrap().clone()),
+                create_constant_value(0, schema.get_column(0).unwrap().clone()),
                 ComparisonType::GreaterThan,
                 vec![],
             ));
 
             let value_pred = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 1),
-                create_constant_int(100, schema.get_column(1).unwrap().clone()),
+                create_constant_value(100, schema.get_column(1).unwrap().clone()),
                 ComparisonType::LessThan,
                 vec![],
             ));
@@ -499,7 +577,7 @@ mod tests {
             let child = create_seq_scan(schema.clone(), "test_table");
             let predicate = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 0),
-                create_constant_int(1, schema.get_column(0).unwrap().clone()),
+                create_constant_value(1, schema.get_column(0).unwrap().clone()),
                 ComparisonType::Equal,
                 vec![],
             ));
@@ -525,14 +603,14 @@ mod tests {
             // Create two different predicates
             let predicate1 = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 0),
-                create_constant_int(10, schema.get_column(0).unwrap().clone()),
+                create_constant_value(10, schema.get_column(0).unwrap().clone()),
                 ComparisonType::GreaterThan,
                 vec![],
             ));
 
             let predicate2 = Expression::Comparison(ComparisonExpression::new(
                 create_column_ref(&schema, 1),
-                create_constant_int(20, schema.get_column(1).unwrap().clone()),
+                create_constant_value(20, schema.get_column(1).unwrap().clone()),
                 ComparisonType::LessThan,
                 vec![],
             ));
@@ -560,79 +638,70 @@ mod tests {
 
     // =============== String Representation Tests ===============
     mod string_representation {
-        use super::helpers::*;
         use super::*;
+        use super::helpers::*;
 
         #[test]
-        fn test_to_string_with_schema() {
-            let schema = create_test_schema();
-            let predicate = Expression::Comparison(ComparisonExpression::new(
-                create_column_ref(&schema, 0),
-                create_constant_int(5, schema.get_column(0).unwrap().clone()),
-                ComparisonType::Equal,
-                vec![],
-            ));
-
-            let filter_node = FilterNode::new(
-                schema.clone(),
-                0,
-                "test_table".to_string(),
-                Arc::from(predicate),
-                vec![create_seq_scan(schema.clone(), "test_table")],
-            );
-
-            let string_repr = filter_node.to_string();
-            assert!(string_repr.contains("Filter { predicate="));
-            assert!(string_repr.contains("Schema: Schema (id, value, name, flag)"));
-            assert!(string_repr.contains("Child 1: SeqScan { table: test_table }"));
+        fn test_basic_display() {
+            let (filter_node, _) = create_test_filter_node();
+            let basic_str = format!("{}", filter_node);
+            
+            println!("Basic display: {}", basic_str);
+            assert!(basic_str.contains("Filter { predicate="));
         }
 
         #[test]
-        fn test_to_string_without_schema() {
-            let schema = create_test_schema();
-            let predicate = Expression::Comparison(ComparisonExpression::new(
-                create_column_ref(&schema, 0),
-                create_constant_int(5, schema.get_column(0).unwrap().clone()),
-                ComparisonType::Equal,
-                vec![],
-            ));
-
-            let filter_node = FilterNode::new(
-                schema.clone(),
-                0,
-                "test_table".to_string(),
-                Arc::from(predicate),
-                vec![create_seq_scan(schema.clone(), "test_table")],
-            );
-
-            let string_repr = filter_node.to_string();
-            assert!(string_repr.contains("Filter { predicate="));
-            assert!(!string_repr.contains("Schema:"));
-            assert!(string_repr.contains("Child 1: SeqScan { table: test_table }"));
+        fn test_detailed_display() {
+            let (filter_node, predicate) = create_test_filter_node();
+            let detailed_str = format!("{:#}", filter_node);
+            
+            println!("Detailed display: {}", detailed_str);
+            assert!(detailed_str.contains("→ Filter"));
+            assert!(detailed_str.contains(&format!("Predicate: {}", predicate)));
+            assert!(detailed_str.contains("Schema:"));
+            assert!(detailed_str.contains("Child 1:"));
         }
 
         #[test]
         fn test_plan_node_to_string() {
-            let schema = create_test_schema();
-            let predicate = Expression::Comparison(ComparisonExpression::new(
-                create_column_ref(&schema, 0),
-                create_constant_int(5, schema.get_column(0).unwrap().clone()),
-                ComparisonType::Equal,
-                vec![],
-            ));
+            let (filter_node, _) = create_test_filter_node();
+            let plan_node = PlanNode::Filter(filter_node);
+            let node_string = plan_node.to_string();
+            
+            println!("Plan node string: {}", node_string);
+            assert!(node_string.contains("Filter { predicate="));
+        }
 
-            let filter_node = FilterNode::new(
+        #[test]
+        fn test_nested_filters_display() {
+            let schema = create_test_schema();
+            let inner_predicate = create_test_predicate("value > 25");
+            let outer_predicate = create_test_predicate("id < 100");
+
+            let scan_node = create_seq_scan(schema.clone(), "test_table");
+            let inner_filter = FilterNode::new(
                 schema.clone(),
-                0,
+                1,
                 "test_table".to_string(),
-                Arc::from(predicate),
-                vec![create_seq_scan(schema.clone(), "test_table")],
+                inner_predicate,
+                vec![scan_node],
             );
 
-            let node_string = filter_node.to_string();
-            assert!(node_string.contains("Filter { predicate="));
-            assert!(!node_string.contains("Child"));
-            assert!(!node_string.contains("Schema:"));
+            let outer_filter = FilterNode::new(
+                schema,
+                1,
+                "test_table".to_string(),
+                outer_predicate,
+                vec![PlanNode::Filter(inner_filter)],
+            );
+
+            let detailed_str = format!("{:#}", outer_filter);
+            println!("Nested filters: {}", detailed_str);
+            
+            assert!(detailed_str.contains("→ Filter"));
+            assert!(detailed_str.contains("value > 25") || detailed_str.contains("(Col#0.1 > ColConstant(25))"));
+            assert!(detailed_str.contains("id < 100") || detailed_str.contains("(Col#0.0 < ColConstant(100))"));
+            assert!(detailed_str.contains("Child 1:"));
         }
     }
 }
