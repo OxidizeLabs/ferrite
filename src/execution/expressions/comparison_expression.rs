@@ -20,6 +20,19 @@ pub enum ComparisonType {
     GreaterThanOrEqual,
 }
 
+impl Display for ComparisonType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ComparisonType::Equal => write!(f, "="),
+            ComparisonType::NotEqual => write!(f, "!="),
+            ComparisonType::LessThan => write!(f, "<"),
+            ComparisonType::LessThanOrEqual => write!(f, "<="),
+            ComparisonType::GreaterThan => write!(f, ">"),
+            ComparisonType::GreaterThanOrEqual => write!(f, ">="),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComparisonExpression {
     left: Arc<Expression>,
@@ -122,15 +135,21 @@ impl ExpressionOps for ComparisonExpression {
     }
 }
 
-impl Display for ComparisonType {
+impl Display for ComparisonExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            ComparisonType::Equal => write!(f, "="),
-            ComparisonType::NotEqual => write!(f, "!="),
-            ComparisonType::LessThan => write!(f, "<"),
-            ComparisonType::LessThanOrEqual => write!(f, "<="),
-            ComparisonType::GreaterThan => write!(f, ">"),
-            ComparisonType::GreaterThanOrEqual => write!(f, ">="),
+        let op_str = match self.comp_type {
+            ComparisonType::Equal => "=",
+            ComparisonType::NotEqual => "!=",
+            ComparisonType::LessThan => "<",
+            ComparisonType::LessThanOrEqual => "<=",
+            ComparisonType::GreaterThan => ">",
+            ComparisonType::GreaterThanOrEqual => ">=",
+        };
+
+        if f.alternate() {
+            write!(f, "{} {} {}", self.left, op_str, self.right)
+        } else {
+            write!(f, "(Col{} {} {})", self.left, op_str, self.right)
         }
     }
 }

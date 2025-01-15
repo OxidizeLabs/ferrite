@@ -85,6 +85,10 @@ impl ExpressionOps for ColumnRefExpression {
 
 impl Display for ColumnRefExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "#{}.{}", self.tuple_index, self.column_index)
+        if f.alternate() {
+            write!(f, "{}", self.ret_type.get_name())
+        } else {
+            write!(f, "#{}.{}", self.tuple_index, self.column_index)
+        }
     }
 }
