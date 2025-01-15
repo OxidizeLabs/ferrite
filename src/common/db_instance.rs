@@ -84,7 +84,7 @@ impl DBInstance {
             Arc::clone(&catalog),
             buffer_pool_manager.clone().unwrap(),
             transaction_manager.clone().unwrap(),
-            lock_manager.clone().unwrap()
+            lock_manager.clone().unwrap(),
         )));
 
         Ok(Self {

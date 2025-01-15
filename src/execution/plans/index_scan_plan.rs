@@ -1,11 +1,10 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::filter_plan::FilterNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexScanNode {
@@ -34,7 +33,7 @@ impl IndexScanNode {
             index_name,
             index_id,
             predicate_keys,
-            children: Vec::new()
+            children: Vec::new(),
         }
     }
 
@@ -72,7 +71,7 @@ impl AbstractPlanNode for IndexScanNode {
 impl Display for IndexScanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ IndexScan: {} using {}", self.table_name, self.index_name)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Predicate Keys: [")?;
             for (i, key) in self.predicate_keys.iter().enumerate() {
@@ -83,14 +82,14 @@ impl Display for IndexScanNode {
             }
             write!(f, "]")?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }

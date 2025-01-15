@@ -1,4 +1,18 @@
 use crate::catalog::schema::Schema;
+use crate::execution::executor_context::ExecutorContext;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::executors::aggregation_executor::AggregationExecutor;
+use crate::execution::executors::create_index_executor::CreateIndexExecutor;
+use crate::execution::executors::create_table_executor::CreateTableExecutor;
+// use crate::execution::executors::delete_executor::DeleteExecutor;
+use crate::execution::executors::filter_executor::FilterExecutor;
+// use crate::execution::executors::hash_join_executor::HashJoinExecutor;
+use crate::execution::executors::index_scan_executor::IndexScanExecutor;
+use crate::execution::executors::insert_executor::InsertExecutor;
+use crate::execution::executors::mock_executor::MockExecutor;
+use crate::execution::executors::projection_executor::ProjectionExecutor;
+use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
+use crate::execution::executors::values_executor::ValuesExecutor;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
@@ -20,24 +34,10 @@ use crate::execution::plans::topn_plan::TopNNode;
 use crate::execution::plans::update_plan::UpdateNode;
 use crate::execution::plans::values_plan::ValuesNode;
 use crate::execution::plans::window_plan::WindowNode;
+use parking_lot::RwLock;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use crate::execution::executor_context::ExecutorContext;
-use crate::execution::executors::abstract_executor::AbstractExecutor;
-use crate::execution::executors::aggregation_executor::AggregationExecutor;
-use crate::execution::executors::create_index_executor::CreateIndexExecutor;
-use crate::execution::executors::create_table_executor::CreateTableExecutor;
-// use crate::execution::executors::delete_executor::DeleteExecutor;
-use crate::execution::executors::filter_executor::FilterExecutor;
-// use crate::execution::executors::hash_join_executor::HashJoinExecutor;
-use crate::execution::executors::index_scan_executor::IndexScanExecutor;
-use crate::execution::executors::insert_executor::InsertExecutor;
-use crate::execution::executors::projection_executor::ProjectionExecutor;
-use crate::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::execution::executors::values_executor::ValuesExecutor;
-use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::executors::mock_executor::MockExecutor;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -160,20 +160,17 @@ impl PlanNode {
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::IndexScan(node) => {
                 result.push_str(&format!("{}→ IndexScan\n", indent));
                 result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Filter(node) => {
                 result.push_str(&format!("{}→ Filter\n", indent));
                 result.push_str(&format!("{}   Predicate: {}\n", indent, node.get_filter_predicate()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::HashJoin(node) => {
                 result.push_str(&format!("{}→ HashJoin\n", indent));
@@ -183,14 +180,12 @@ impl PlanNode {
                 result.push_str(&format!("{}   Right Child:\n", indent));
                 result.push_str(&node.get_right_child().explain_internal(depth + 1));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Aggregation(node) => {
                 result.push_str(&format!("{}→ Aggregation\n", indent));
                 result.push_str(&format!("{}   Group By: {:?}\n", indent, node.get_group_bys()));
                 result.push_str(&format!("{}   Aggregates: {:?}\n", indent, node.get_aggregates()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Insert(node) => {
                 result.push_str(&format!("{}→ Insert\n", indent));
@@ -201,14 +196,12 @@ impl PlanNode {
                 result.push_str(&format!("{}→ Values\n", indent));
                 result.push_str(&format!("{}   Row Count: {}\n", indent, node.get_row_count()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::CreateTable(node) => {
                 result.push_str(&format!("{}→ CreateTable\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::NestedLoopJoin(node) => {
                 result.push_str(&format!("{}→ NestedLoopJoin\n", indent));
@@ -239,64 +232,54 @@ impl PlanNode {
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Update(node) => {
                 result.push_str(&format!("{}→ Update\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Delete(node) => {
                 result.push_str(&format!("{}→ Delete\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::NestedIndexJoin(node) => {
                 result.push_str(&format!("{}→ NestedIndexJoin\n", indent));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Projection(node) => {
                 result.push_str(&format!("{}→ Projection\n", indent));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::TopN(node) => {
                 result.push_str(&format!("{}→ TopN: {}\n", indent, node.get_k()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::TopNPerGroup(node) => {
                 result.push_str(&format!("{}→ TopNPerGroup\n", indent));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::Window(node) => {
                 result.push_str(&format!("{}→ Window\n", indent));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
             PlanNode::CreateIndex(node) => {
                 result.push_str(&format!("{}→ CreateIndex\n", indent));
                 result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
-
             }
             PlanNode::MockScan(node) => {
                 result.push_str(&format!("{}→ MockScan\n", indent));
                 result.push_str(&format!("{}   Schema: {}\n", indent, node.get_output_schema()));
                 result.push_str(&node.get_children().iter().map(|child| child.explain_internal(depth + 1)).collect::<Vec<String>>().join("\n"));
-
             }
         }
         result
@@ -309,33 +292,33 @@ impl PlanNode {
             PlanNode::SeqScan(node) => {
                 Ok(Box::new(SeqScanExecutor::new(
                     context,
-                    Arc::new(node.clone())
+                    Arc::new(node.clone()),
                 )))
             }
             PlanNode::IndexScan(node) => {
                 Ok(Box::new(IndexScanExecutor::new(
                     context,
-                    Arc::new(node.clone())
+                    Arc::new(node.clone()),
                 )))
             }
             PlanNode::Values(node) => {
                 Ok(Box::new(ValuesExecutor::new(
                     context,
-                    Arc::new(node.clone())
+                    Arc::new(node.clone()),
                 )))
             }
             PlanNode::CreateTable(node) => {
                 Ok(Box::new(CreateTableExecutor::new(
                     context,
                     Arc::new(node.clone()),
-                    false
+                    false,
                 )))
             }
             PlanNode::CreateIndex(node) => {
                 Ok(Box::new(CreateIndexExecutor::new(
                     context,
                     Arc::new(node.clone()),
-                     false
+                    false,
                 )))
             }
 
@@ -360,16 +343,16 @@ impl PlanNode {
                 let child_plan = node.get_children().first()
                     .ok_or_else(|| "Projection node must have a child".to_string())?;
                 let child_executor = child_plan.create_executor(context.clone())?;
-                
+
                 Ok(Box::new(ProjectionExecutor::new(
                     child_executor,
                     context,
-                    Arc::new(node.clone())
+                    Arc::new(node.clone()),
                 )))
             }
             PlanNode::Aggregation(node) => {
                 let child_executor = node.get_children()[0].create_executor(context.clone())?;
-                
+
                 Ok(Box::new(AggregationExecutor::new(
                     context,
                     Arc::new(node.clone()),
@@ -381,7 +364,7 @@ impl PlanNode {
             PlanNode::MockScan(node) => {
                 let tuples = node.get_tuples().to_vec();
                 let schema = node.get_output_schema().clone();
-                
+
                 Ok(Box::new(MockExecutor::new(
                     context,
                     Arc::new(node.clone()),
@@ -389,16 +372,16 @@ impl PlanNode {
                     tuples,
                     schema,
                 )))
-            },
+            }
             _ => Err(format!("Executor not implemented for plan node: {:?}", self)),
         }
     }
 }
 
 impl Display for PlanNode {
-    fn fmt (&self, f: &mut Formatter<'_>)-> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            _ => self.as_abstract_plan_node().fmt (f),
+            _ => self.as_abstract_plan_node().fmt(f),
         }
     }
 }

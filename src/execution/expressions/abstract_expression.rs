@@ -10,13 +10,12 @@ use crate::execution::expressions::constant_value_expression::ConstantExpression
 use crate::execution::expressions::logic_expression::LogicExpression;
 use crate::execution::expressions::mock_expression::MockExpression;
 use crate::execution::expressions::string_expression::StringExpression;
+use crate::execution::expressions::window_expression::WindowExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::execution::plans::window_plan::WindowFunction;
-use crate::execution::expressions::window_expression::WindowExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -173,49 +172,49 @@ impl Display for Expression {
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::ColumnRef(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Arithmetic(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Comparison(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Logic(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::String(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Array(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Mock(expr) => write!(f, "{}", expr),
             Self::Aggregate(expr) => {
                 if f.alternate() {
@@ -223,14 +222,14 @@ impl Display for Expression {
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
             Self::Window(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            },
+            }
         }
     }
 }

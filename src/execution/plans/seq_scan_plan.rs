@@ -1,9 +1,9 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqScanPlanNode {
@@ -55,18 +55,18 @@ impl AbstractPlanNode for SeqScanPlanNode {
 impl Display for SeqScanPlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ SeqScan: {}", self.table_name)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Table ID: {}", self.table_oid)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -135,7 +135,7 @@ mod tests {
         fn test_basic_display() {
             let (node, _, _, table_name) = create_test_node();
             let basic_str = format!("{}", node);
-            
+
             assert!(basic_str.contains(&table_name));
             assert!(!basic_str.contains("Schema"));
             assert!(!basic_str.contains("Table ID"));
@@ -145,7 +145,7 @@ mod tests {
         fn test_alternate_display() {
             let (node, _, table_oid, table_name) = create_test_node();
             let detailed_str = format!("{:#}", node);
-            
+
             println!("Detailed string: {}", detailed_str);
             assert!(detailed_str.contains(&table_name));
             assert!(detailed_str.contains("Schema"));
@@ -160,7 +160,7 @@ mod tests {
                 1,
                 "parent".to_string(),
             );
-            
+
             // Add a child node
             let child_node = PlanNode::SeqScan(SeqScanPlanNode::new(
                 schema,
@@ -197,7 +197,7 @@ mod tests {
         fn test_schema_columns() {
             let (node, _, _, _) = create_test_node();
             let schema = node.get_output_schema();
-            
+
             assert_eq!(schema.get_column_count(), 3);
             assert_eq!(schema.get_column(0).unwrap().get_name(), "id");
             assert_eq!(schema.get_column(1).unwrap().get_name(), "name");

@@ -1,17 +1,13 @@
 use crate::catalog::schema::Schema;
-use crate::common::config::PageId;
 use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::execution::plans::mock_scan_plan::MockScanNode;
+use crate::execution::plans::hash_join_plan::HashJoinNode;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
 use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::execution::plans::hash_join_plan::HashJoinNode;
 
 pub struct HashJoinExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -22,11 +18,10 @@ pub struct HashJoinExecutor {
 
 impl HashJoinExecutor {
     pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<HashJoinNode>) -> Self {
-        debug!("Creating HashJoinExecutor for table '{}'", plan.get_table_name());
+        debug!("Creating HashJoinExecutor");
 
         todo!()
     }
-
 }
 
 impl AbstractExecutor for HashJoinExecutor {
@@ -54,16 +49,16 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
-    use crate::catalog::column::Column;
+
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::type_id::TypeId;
+
     use chrono::Utc;
-    use std::collections::HashMap;
+
     use std::fs;
 
     struct TestContext {

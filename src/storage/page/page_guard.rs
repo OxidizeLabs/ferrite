@@ -526,7 +526,7 @@ mod concurrency {
             threads.push(thread::spawn(move || {
                 let page_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_id); // <-- Use stored page_id
                 let read_guard = page_guard.read();
-                
+
                 // Simply verify the page ID without acquiring another lock
                 assert_eq!(read_guard.as_page_trait().get_page_id(), page_id);
             }));
@@ -576,7 +576,7 @@ mod concurrency {
                 let read_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_id); // <-- Use stored page_id
                 let binding = read_guard.read();
                 let data = binding.as_page_trait().get_data();
-                
+
                 // Simply verify the page ID without acquiring another lock
                 assert_eq!(read_guard.get_page_id(), page_id);
                 assert_eq!(data[i], (i + 1) as u8, "Unexpected values in the data");

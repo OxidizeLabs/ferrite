@@ -1,7 +1,7 @@
-use std::fmt::{self, Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,7 +36,7 @@ impl ProjectionNode {
 impl Display for ProjectionNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ Projection [")?;
-        
+
         // Add expressions
         for (i, expr) in self.expressions.iter().enumerate() {
             if i > 0 {
@@ -50,14 +50,14 @@ impl Display for ProjectionNode {
         if f.alternate() {
             writeln!(f)?;
             write!(f, "  Schema: [{}]", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -213,7 +213,7 @@ mod tests {
             create_mock_expression("name", TypeId::VarChar),
         ];
 
-        let child_node =  vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
+        let child_node = vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
         let projection = ProjectionNode::new(output_schema, expressions, child_node);
 
         let exprs = projection.get_expressions();

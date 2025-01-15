@@ -204,21 +204,21 @@ impl FileDiskManager {
         let mut log_io = self.log_io.write();
         let mut pinned = std::pin::pin!(log_io.get_mut());
         let file = pinned.as_mut().get_mut(); // Get the underlying File
-        
+
         // Get current file size and pre-allocate space atomically
         let file_size = file.metadata()?.len();
         if offset + data.len() as u64 > file_size {
             file.set_len(offset + data.len() as u64)?;
         }
-        
+
         // Seek and write atomically while holding the lock
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;
-        
+
         // Ensure data is written to disk
         file.flush()?;
         file.sync_data()?;
-        
+
         debug!("Log data written and flushed at offset {}", offset);
         Ok(())
     }
@@ -229,29 +229,29 @@ impl FileDiskManager {
         let mut log_io = self.log_io.write();
         let mut pinned = std::pin::pin!(log_io.get_mut());
         let file = pinned.as_mut().get_mut();
-        
+
         // Get current file size
         let file_size = file.metadata()?.len();
-        
+
         // Check if read is within file bounds
         if offset >= file_size {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
-                "Attempted to read beyond end of file"
+                "Attempted to read beyond end of file",
             ));
         }
-        
+
         // Calculate how many bytes we can actually read
         let bytes_available = file_size - offset;
         let bytes_to_read = std::cmp::min(bytes_available, buf.len() as u64) as usize;
-        
+
         // Create a temporary buffer for the actual read
         let mut temp_buf = vec![0u8; bytes_to_read];
-        
+
         // Seek and read the available data
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(&mut temp_buf)?;
-        
+
         // Copy data to output buffer
         buf[..bytes_to_read].copy_from_slice(&temp_buf);
         if bytes_to_read < buf.len() {
@@ -260,7 +260,7 @@ impl FileDiskManager {
         } else {
             debug!("Log data read from offset {}", offset);
         }
-        
+
         Ok(())
     }
 
@@ -269,14 +269,14 @@ impl FileDiskManager {
         let mut log_io = self.log_io.write();
         let mut pinned = std::pin::pin!(log_io.get_mut());
         let file = pinned.as_mut().get_mut();
-        
+
         // Get current end of file position using metadata
         let offset = file.metadata()?.len();
-        
+
         // Pre-allocate space for the new log entry
         file.set_len(offset + size)?;
         file.sync_data()?;
-        
+
         Ok(offset)
     }
 }
@@ -785,7 +785,7 @@ mod concurrency {
             thread::spawn(move || {
                 let log_data = format!("Log entry from thread {}\n", i).into_bytes();
                 let log_size = log_data.len() as u64;
-                
+
                 // Wait for all threads to be ready
                 barrier.wait();
 

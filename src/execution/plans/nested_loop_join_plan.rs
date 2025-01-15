@@ -1,10 +1,9 @@
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use sqlparser::ast::JoinOperator;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
@@ -30,13 +29,13 @@ impl NestedLoopJoinNode {
     ) -> Self {
         // Create output schema by combining columns from both input schemas
         let mut output_columns = Vec::new();
-        
+
         // Add columns from left schema
         output_columns.extend(left_schema.get_columns().iter().cloned());
-        
+
         // Add columns from right schema
         output_columns.extend(right_schema.get_columns().iter().cloned());
-        
+
         let output_schema = Schema::new(output_columns);
 
         Self {
@@ -100,7 +99,48 @@ impl AbstractPlanNode for NestedLoopJoinNode {
 
 impl Display for NestedLoopJoinNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        write!(f, "→ NestedLoopJoin")?;
+
+        if f.alternate() {
+            write!(f, "\n   Join Type: {:?}", self.join_type)?;
+            write!(f, "\n   Predicate: {}", self.predicate)?;
+            write!(f, "\n   Left Schema: {}", self.left_schema)?;
+            write!(f, "\n   Right Schema: {}", self.right_schema)?;
+
+            if !self.left_key_expressions.is_empty() {
+                write!(f, "\n   Join Keys:")?;
+                write!(f, "\n      Left:  [")?;
+                for (i, expr) in self.left_key_expressions.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, "]")?;
+            }
+
+            if !self.right_key_expressions.is_empty() {
+                if self.left_key_expressions.is_empty() {
+                    write!(f, "\n   Join Keys:")?;
+                }
+                write!(f, "\n      Right: [")?;
+                for (i, expr) in self.right_key_expressions.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, "]")?;
+            }
+
+            // Format children with proper indentation
+            for (i, child) in self.children.iter().enumerate() {
+                writeln!(f)?;
+                write!(f, "    Child {}: {:#}", i + 1, child)?;
+            }
+        }
+
+        Ok(())
     }
 }
 

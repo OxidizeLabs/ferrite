@@ -1,8 +1,8 @@
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::value::Value;
+use std::fmt::{Display, Formatter};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MockScanNode {
@@ -103,13 +103,13 @@ mod tests {
     fn test_mock_scan_with_children() {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let child_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
-        
+
         let child = MockScanNode::new(
             child_schema,
             "child_table".to_string(),
             vec![],
         );
-        
+
         let parent = MockScanNode::new(
             schema,
             "parent_table".to_string(),
@@ -135,7 +135,7 @@ mod tests {
             (vec![Value::new(1)], RID::new(1, 1)),
             (vec![Value::new(2)], RID::new(1, 2)),
         ];
-        
+
         let node = MockScanNode::new(schema, table_name, vec![])
             .with_tuples(tuples.clone());
 

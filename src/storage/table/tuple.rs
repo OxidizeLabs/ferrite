@@ -1,12 +1,12 @@
-use std::fmt::{Display, Formatter};
+use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
+use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
-use crate::catalog::column::Column;
-use crate::types_db::types::Type;
+use std::fmt::{Display, Formatter};
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,11 +141,11 @@ impl Tuple {
             .map(|(i, value)| {
                 Column::new(
                     &format!("col_{}", i),  // Default column name
-                    value.get_type_id()     // Get TypeId from the Value
+                    value.get_type_id(),     // Get TypeId from the Value
                 )
             })
             .collect();
-        
+
         Schema::new(columns)
     }
 
@@ -362,21 +362,21 @@ mod tests {
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
         ]);
-        
+
         let values = vec![
             Value::new(1),
             Value::new("Alice"),
             Value::new(30),
         ];
-        
+
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&values, schema.clone(), rid);
-        
+
         let derived_schema = tuple.get_schema();
-        
+
         // Check that the number of columns matches
         assert_eq!(derived_schema.get_column_count(), schema.get_column_count());
-        
+
         // Check that the types match for each column
         for i in 0..schema.get_column_count() {
             assert_eq!(

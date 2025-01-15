@@ -332,7 +332,7 @@ impl Optimizer {
                         schema: Default::default(),
                         table_oid: 0,
                         table_name: "".to_string(),
-                        predicate
+                        predicate,
                     },
                     vec![child],
                 )))
@@ -364,7 +364,7 @@ impl Optimizer {
                     schema: Default::default(),
                     table_oid: 0,
                     table_name: "".to_string(),
-                    predicate
+                    predicate,
                 },
                 vec![child],
             ))),

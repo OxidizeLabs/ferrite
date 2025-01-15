@@ -1,5 +1,3 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::exception::ValuesError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -8,6 +6,8 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::Type;
 use crate::types_db::value::{Size, Val, Value};
 use log::debug;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,10 +176,10 @@ impl Display for ValuesNode {
         } else {
             write!(f, "→ Values: {} Row(s)", self.rows.len())?;
         }
-        
+
         if f.alternate() {
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             if self.rows.is_empty() {
                 write!(f, "\n   No rows")?;
             } else {
@@ -200,7 +200,7 @@ impl Display for ValuesNode {
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -398,11 +398,11 @@ mod tests {
                 vec![Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer))],
                 vec![], // another empty row
             ];
-            
+
             let node = ValuesNode::new(schema, rows, vec![]);
             let detailed_str = format!("{:#}", node);
             println!("Mixed rows display: {}", detailed_str);
-            
+
             assert!(detailed_str.contains("Row 1: (empty)"));
             assert!(detailed_str.contains("Row 2: [1]"));
             assert!(detailed_str.contains("Row 3: (empty)"));
@@ -420,7 +420,7 @@ mod tests {
             let node = ValuesNode::new(schema, expressions, vec![]);
             let detailed_str = format!("{:#}", node);
             println!("Populated values display: {}", detailed_str);
-            
+
             assert!(detailed_str.contains("Row 1: [42]"));
         }
 
@@ -459,7 +459,7 @@ mod tests {
             let node = ValuesNode::new(schema, rows, vec![]);
             let detailed_str = format!("{:#}", node);
             println!("Mixed values display: {}", detailed_str);
-            
+
             assert!(detailed_str.contains("Row 1: (empty)"));
             assert!(detailed_str.contains("Row 2: [1, test, true]"));
             assert!(detailed_str.contains("Row 3: (empty)"));

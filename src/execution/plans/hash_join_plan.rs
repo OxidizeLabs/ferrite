@@ -1,10 +1,9 @@
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use sqlparser::ast::JoinOperator;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::filter_plan::FilterNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HashJoinNode {
@@ -30,13 +29,13 @@ impl HashJoinNode {
     ) -> Self {
         // Create output schema by combining columns from both input schemas
         let mut output_columns = Vec::new();
-        
+
         // Add columns from left schema
         output_columns.extend(left_schema.get_columns().iter().cloned());
-        
+
         // Add columns from right schema
         output_columns.extend(right_schema.get_columns().iter().cloned());
-        
+
         let output_schema = Schema::new(output_columns);
 
         Self {

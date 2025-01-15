@@ -1,14 +1,14 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use std::any::Any;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::execution::plans::window_plan::WindowFunctionType;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use crate::execution::plans::window_plan::WindowFunctionType;
+use std::any::Any;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowExpression {
@@ -134,7 +134,7 @@ impl ExpressionOps for WindowExpression {
 impl Display for WindowExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}({})", self.function_type, self.function_expr)?;
-        
+
         if !self.partition_by.is_empty() {
             write!(f, " PARTITION BY ")?;
             for (i, expr) in self.partition_by.iter().enumerate() {
@@ -144,7 +144,7 @@ impl Display for WindowExpression {
                 write!(f, "{}", expr)?;
             }
         }
-        
+
         if !self.order_by.is_empty() {
             write!(f, " ORDER BY ")?;
             for (i, expr) in self.order_by.iter().enumerate() {
@@ -154,7 +154,7 @@ impl Display for WindowExpression {
                 write!(f, "{}", expr)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -162,8 +162,8 @@ impl Display for WindowExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types_db::type_id::TypeId;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn test_window_expression_creation() {

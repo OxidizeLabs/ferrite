@@ -1,8 +1,8 @@
-use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 /// WindowFunctionType enumerates all the possible window functions in our system
@@ -106,12 +106,12 @@ impl AbstractPlanNode for WindowNode {
 impl Display for WindowNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ Window")?;
-        
+
         if f.alternate() {
             for (i, window_func) in self.window_functions.iter().enumerate() {
                 write!(f, "\n   Window Function {}: {:?}", i + 1, window_func.function_type)?;
                 write!(f, "\n     Expression: {}", window_func.function_expr)?;
-                
+
                 if !window_func.partition_by.is_empty() {
                     write!(f, "\n     Partition By: [")?;
                     for (i, expr) in window_func.partition_by.iter().enumerate() {
@@ -122,7 +122,7 @@ impl Display for WindowNode {
                     }
                     write!(f, "]")?;
                 }
-                
+
                 if !window_func.order_by.is_empty() {
                     write!(f, "\n     Order By: [")?;
                     for (i, expr) in window_func.order_by.iter().enumerate() {
@@ -134,16 +134,16 @@ impl Display for WindowNode {
                     write!(f, "]")?;
                 }
             }
-            
+
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -171,8 +171,8 @@ impl Display for WindowFunctionType {
 mod tests {
     use super::*;
     use crate::catalog::column::Column;
-    use crate::types_db::type_id::TypeId;
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn test_window_node_creation() {

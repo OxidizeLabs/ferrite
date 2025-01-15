@@ -1,20 +1,23 @@
-use sqlparser::ast::Statement;
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
+use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
-use crate::execution::executor_context::ExecutorContext;
-use crate::execution::executors::abstract_executor::AbstractExecutor;
-use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
-use crate::optimizer::optimizer::Optimizer;
-use crate::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::execution::check_option::CheckOptions;
-use log::{debug, info, warn};
+use crate::execution::executor_context::ExecutorContext;
+use crate::execution::executors::abstract_executor::AbstractExecutor;
+use crate::execution::plans::abstract_plan::PlanNode::{CreateIndex, CreateTable, Insert};
+use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::execution::plans::mock_scan_plan::MockScanNode;
+use crate::optimizer::optimizer::Optimizer;
+use crate::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
+use crate::types_db::value::Value;
+use log::{debug, info};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-use crate::execution::plans::abstract_plan::PlanNode::{CreateIndex, CreateTable, Insert};
 
 pub struct ExecutorEngine {
     planner: QueryPlanner,
@@ -51,7 +54,7 @@ impl ExecutorEngine {
     ) -> Result<bool, DBError> {
         // Parse and plan the SQL statement
         let plan = self.prepare_sql(sql, context.clone())?;
-        
+
         // Execute the plan
         self.execute_plan(&plan, context, writer)
     }
@@ -201,7 +204,7 @@ impl ExecutorEngine {
         // Box the logical plan and get check options
         let boxed_plan = Box::new(plan);
         let check_options = Arc::new(CheckOptions::new());
-        
+
         // Optimize the plan
         let optimized_plan = self.optimizer
             .optimize(boxed_plan, check_options)
@@ -219,6 +222,17 @@ impl ExecutorEngine {
         // Add cleanup logic here if needed
         debug!("Post-execution cleanup complete");
     }
+
+    fn create_mock_scan(&self, input_schema: Schema, mock_tuples: Vec<(Vec<Value>, RID)>) -> PlanNode {
+        PlanNode::MockScan(
+            MockScanNode::new(
+                input_schema.clone(),
+                "mock_table".to_string(),
+                vec![],  // No children initially
+            )
+                .with_tuples(mock_tuples)
+        )
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +240,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
+    use crate::common::rid::RID;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -235,10 +252,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
-    use crate::catalog::column::Column;
-    use crate::catalog::schema::Schema;
-    use crate::common::rid::RID;
-    use crate::execution::executors::mock_executor::MockExecutor;
+
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
     use crate::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -278,14 +292,10 @@ mod tests {
     impl ResultWriter for MockResultWriter {
         fn begin_table(&mut self, _has_header: bool) {}
 
+        fn end_table(&mut self) {}
+
         fn begin_header(&mut self) {
             self.in_header = true;
-        }
-
-        fn write_header_cell(&mut self, value: &str) {
-            if self.in_header {
-                self.headers.push(value.to_string());
-            }
         }
 
         fn end_header(&mut self) {
@@ -297,18 +307,22 @@ mod tests {
             self.current_row.clear();
         }
 
+        fn end_row(&mut self) {
+            self.in_row = false;
+            self.rows.push(self.current_row.clone());
+        }
+
         fn write_cell(&mut self, value: &str) {
             if self.in_row {
                 self.current_row.push(value.to_string());
             }
         }
 
-        fn end_row(&mut self) {
-            self.in_row = false;
-            self.rows.push(self.current_row.clone());
+        fn write_header_cell(&mut self, value: &str) {
+            if self.in_header {
+                self.headers.push(value.to_string());
+            }
         }
-
-        fn end_table(&mut self) {}
 
         fn one_cell(&mut self, content: &str) {
             println!("{}", content);
@@ -414,7 +428,7 @@ mod tests {
         let test_context = TestContext::new("create_table");
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
-        
+
         let mut engine = ExecutorEngine::new(
             catalog.clone(),
             test_context.buffer_pool_manager.clone(),
@@ -424,7 +438,7 @@ mod tests {
 
         let sql = "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name VARCHAR(255))";
         let mut writer = MockResultWriter::new();
-        
+
         let result = engine.execute_sql(sql, exec_ctx.clone(), &mut writer);
 
         assert!(result.is_ok());
@@ -436,7 +450,7 @@ mod tests {
         let test_context = TestContext::new("insert_scan");
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
-        
+
         let mut engine = ExecutorEngine::new(
             catalog.clone(),
             test_context.buffer_pool_manager.clone(),
@@ -469,7 +483,7 @@ mod tests {
         let test_context = TestContext::new("filter");
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
-        
+
         let mut engine = ExecutorEngine::new(
             catalog.clone(),
             test_context.buffer_pool_manager.clone(),
@@ -499,7 +513,7 @@ mod tests {
         let test_context = TestContext::new("error_handling");
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
-        
+
         let mut engine = ExecutorEngine::new(
             catalog.clone(),
             test_context.buffer_pool_manager.clone(),
@@ -517,7 +531,7 @@ mod tests {
     #[test]
     fn test_aggregation() {
         let test_context = TestContext::new("aggregation");
-        
+
         // Create input schema
         let input_schema = Schema::new(vec![
             Column::new("name", TypeId::VarChar),
@@ -544,7 +558,12 @@ mod tests {
         ];
 
         // Create mock scan plan
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), mock_tuples.clone());
+        let mock_scan_plan = MockScanNode::new(
+            input_schema.clone(),
+            "mock_table".to_string(),
+            vec![],  // empty children vector
+        )
+            .with_tuples(mock_tuples.clone());
 
         // Create group by expression
         let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
@@ -578,7 +597,7 @@ mod tests {
         );
 
         // Create executor engine
-        let mut engine = ExecutorEngine::new(
+        let engine = ExecutorEngine::new(
             catalog.clone(),
             test_context.buffer_pool_manager.clone(),
             test_context.transaction_manager.clone(),
@@ -590,13 +609,13 @@ mod tests {
         let result = engine.execute_plan(&PlanNode::Aggregation(agg_plan), exec_ctx, &mut writer);
 
         assert!(result.is_ok(), "Failed to execute plan: {:?}", result);
-        
+
         // Verify headers
         assert_eq!(writer.headers, vec!["name", "SUM(age)", "COUNT(age)"]);
 
         // Verify results
         assert_eq!(writer.rows.len(), 2);
-        
+
         // Sort rows by name to ensure consistent order
         let mut rows = writer.rows;
         rows.sort_by(|a, b| a[0].cmp(&b[0]));
@@ -610,5 +629,26 @@ mod tests {
         assert_eq!(rows[1][0], "bob");
         assert_eq!(rows[1][1], "80");     // SUM(age) = 30 + 25 + 25
         assert_eq!(rows[1][2], "3");      // COUNT(age) = 3
+    }
+
+    #[test]
+    fn test_mock_scan_execution() {
+        let input_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+        ]);
+
+        let mock_tuples = vec![
+            (vec![Value::new(1)], RID::new(1, 1)),
+            (vec![Value::new(2)], RID::new(1, 2)),
+        ];
+
+        let mock_scan = MockScanNode::new(
+            input_schema.clone(),
+            "mock_table".to_string(),
+            vec![],
+        )
+            .with_tuples(mock_tuples.clone());
+
+        // ... rest of the test ...
     }
 }

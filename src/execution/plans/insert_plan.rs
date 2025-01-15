@@ -1,9 +1,9 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +28,7 @@ impl InsertNode {
             table_oid,
             table_name,
             tuples,
-            children
+            children,
         }
     }
 
@@ -62,18 +62,18 @@ impl AbstractPlanNode for InsertNode {
 impl Display for InsertNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ Insert [table: {}]", self.table_name)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Table ID: {}", self.table_oid)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "   Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -192,7 +192,7 @@ mod tests {
         #[test]
         fn test_children_vec() {
             let schema = helpers::create_test_schema();
-            
+
             // Create an insert node with no children
             let insert_node = InsertNode::new(
                 schema.clone(),
@@ -209,7 +209,7 @@ mod tests {
         #[test]
         fn test_with_values_child() {
             let schema = helpers::create_test_schema();
-            
+
             // Create a values node as child
             let values_node = PlanNode::Values(ValuesNode::new(
                 schema.clone(),
@@ -228,7 +228,7 @@ mod tests {
 
             // Verify that the insert node has exactly one child
             assert_eq!(insert_node.get_children().len(), 1);
-            
+
             // Verify that the child is a values node
             match &insert_node.get_children()[0] {
                 PlanNode::Values(_) => (),
@@ -243,7 +243,7 @@ mod tests {
         #[test]
         fn test_children_to_string() {
             let schema = helpers::create_test_schema();
-            
+
             // Create a values node as child
             let values_node = PlanNode::Values(ValuesNode::new(
                 schema.clone(),
@@ -262,7 +262,7 @@ mod tests {
 
             let string_repr = format!("{:#}", insert_node);
             println!("Insert node string representation: {}", string_repr);
-            
+
             assert!(string_repr.contains("→ Insert [table: test_table]"));
             assert!(string_repr.contains("Schema:"));
             assert!(string_repr.contains("Child 1:"));
@@ -281,7 +281,7 @@ mod tests {
 
             let string_repr = format!("{:#}", insert_node);
             println!("Insert node with schema: {}", string_repr);
-            
+
             assert!(string_repr.contains("→ Insert [table: test_table]"));
             assert!(string_repr.contains("Schema:"));
         }

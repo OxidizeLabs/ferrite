@@ -1,11 +1,10 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::execution::expressions::abstract_expression::Expression;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateNode {
@@ -58,7 +57,7 @@ impl AbstractPlanNode for UpdateNode {
 impl Display for UpdateNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "→ Update: {}", self.table_name)?;
-        
+
         if f.alternate() {
             write!(f, "\n   Target Expressions: [")?;
             for (i, expr) in self.target_expressions.iter().enumerate() {
@@ -69,14 +68,14 @@ impl Display for UpdateNode {
             }
             write!(f, "]")?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
-            
+
             // Format children with proper indentation
             for (i, child) in self.children.iter().enumerate() {
                 writeln!(f)?;
                 write!(f, "    Child {}: {:#}", i + 1, child)?;
             }
         }
-        
+
         Ok(())
     }
 }

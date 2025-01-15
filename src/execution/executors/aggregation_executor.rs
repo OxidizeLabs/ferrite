@@ -1,20 +1,20 @@
+use crate::catalog::schema::Schema;
+use crate::common::rid::RID;
 use crate::execution::executor_context::ExecutorContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::aggregate_expression::AggregationType;
+use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::storage::table::tuple::Tuple;
-use crate::common::rid::RID;
-use std::collections::HashMap;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use crate::catalog::schema::Schema;
-use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
-use crate::types_db::value::{Val, Value};
-use crate::types_db::types::{CmpBool};
+use crate::types_db::types::CmpBool;
 use crate::types_db::value::Val::BigInt;
+use crate::types_db::value::{Val, Value};
+use parking_lot::RwLock;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct AggregationExecutor {
     context: Arc<RwLock<ExecutorContext>>,
@@ -70,7 +70,7 @@ impl AggregationExecutor {
         // Update each aggregate based on its type and expression
         for (i, (agg_type, agg_expr)) in self.plan.get_aggregate_types().iter()
             .zip(self.plan.get_aggregates().iter())
-            .enumerate() 
+            .enumerate()
         {
             match agg_type {
                 AggregationType::Sum => {
@@ -85,13 +85,13 @@ impl AggregationExecutor {
                     } else {
                         agg_expr.evaluate(tuple, &tuple.get_schema())
                     }.map_err(|e| format!("Error evaluating sum: {}", e))?;
-                    
+
                     if !matches!(value.get_value(), Val::Null) {
                         let current_sum = match group[i].get_value() {
                             Val::Integer(n) => *n,
                             _ => 0,
                         };
-                        
+
                         match value.get_value() {
                             Val::Integer(n) => {
                                 group[i] = Value::new(current_sum + n);
@@ -110,7 +110,7 @@ impl AggregationExecutor {
                 AggregationType::Min => {
                     let value = agg_expr.evaluate(tuple, &tuple.get_schema())
                         .map_err(|e| format!("Error evaluating min: {}", e))?;
-                    
+
                     if !matches!(value.get_value(), Val::Null) {
                         if value.compare_less_than(&group[i]) == CmpBool::CmpTrue {
                             group[i] = value;
@@ -120,7 +120,7 @@ impl AggregationExecutor {
                 AggregationType::Max => {
                     let value = agg_expr.evaluate(tuple, &tuple.get_schema())
                         .map_err(|e| format!("Error evaluating max: {}", e))?;
-                    
+
                     if !matches!(value.get_value(), Val::Null) {
                         if value.compare_greater_than(&group[i]) == CmpBool::CmpTrue {
                             group[i] = value;
@@ -131,13 +131,13 @@ impl AggregationExecutor {
                     // For simplicity, we'll implement Avg as Sum for now
                     let value = agg_expr.evaluate(tuple, &tuple.get_schema())
                         .map_err(|e| format!("Error evaluating avg: {}", e))?;
-                    
+
                     if !matches!(value.get_value(), Val::Null) {
                         let current_sum = match group[i].get_value() {
                             Val::Integer(n) => *n,
                             _ => 0,
                         };
-                        
+
                         match value.get_value() {
                             Val::Integer(n) => {
                                 group[i] = Value::new(current_sum + n);
@@ -226,15 +226,15 @@ impl AbstractExecutor for AggregationExecutor {
 
         // Take ownership of the groups HashMap
         let mut remaining_groups = std::mem::take(&mut self.groups);
-        
+
         // Get the first entry
         if let Some((key, values)) = remaining_groups.iter().next().map(|(k, v)| (k.clone(), v.clone())) {
             // Remove the entry we just processed
             remaining_groups.remove(&key);
-            
+
             // Put the remaining groups back
             self.groups = remaining_groups;
-            
+
             // Mark as done if no more groups
             if self.groups.is_empty() {
                 self.done = true;
@@ -242,7 +242,7 @@ impl AbstractExecutor for AggregationExecutor {
 
             let mut combined = key;
             combined.extend(values);
-            
+
             Some((
                 Tuple::new(&combined, self.plan.get_output_schema().clone(), RID::new(0, 0)),
                 RID::new(0, 0),
@@ -269,7 +269,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
+
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -281,15 +281,15 @@ mod tests {
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
+
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
-    use crate::types_db::value::Val::{BigInt, Integer};
+    use crate::types_db::value::Val::BigInt;
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use rustyline::Word::Big;
+
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

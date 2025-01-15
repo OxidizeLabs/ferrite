@@ -59,7 +59,7 @@ impl BPlusTree {
 
     pub fn insert(&mut self, key: Value, rid: RID) -> bool {
         debug!("Inserting key {:?} with RID {:?}", key, rid);
-        
+
         let root_is_full = {
             let root_guard = self.root.read();
             let is_full = root_guard.keys.len() == self.order - 1;
@@ -107,10 +107,10 @@ impl BPlusTree {
             match node.node_type {
                 NodeType::Internal => {
                     debug!("At internal node with keys: {:?}", node.keys);
-                    
+
                     // Find all children that could contain our key
                     let mut child_indices = Vec::new();
-                    
+
                     // Check each key to find potential paths
                     for (i, k) in node.keys.iter().enumerate() {
                         if k.compare_greater_than(key) == CmpBool::CmpTrue {
@@ -122,7 +122,7 @@ impl BPlusTree {
                             child_indices.push(i + 1);
                         }
                     }
-                    
+
                     // Always check the rightmost child if we haven't found a greater key
                     if !child_indices.contains(&(&node.children.len() - 1)) {
                         child_indices.push(node.children.len() - 1);
@@ -139,17 +139,17 @@ impl BPlusTree {
                 }
                 NodeType::Leaf => {
                     debug!("Processing leaf node with keys: {:?}", node.keys);
-                    
+
                     // Check all entries in current leaf
                     for (i, (k, r)) in node.keys.iter().zip(node.values.iter()).enumerate() {
                         debug!("Checking entry {} - Key: {:?}, RID: {:?}", i, k, r);
-                        
+
                         // Check for exact match
                         if k.compare_equals(key) == CmpBool::CmpTrue && *r == rid {
                             debug!("Found matching key-RID pair at position {}", i);
                             drop(node);
                             let mut node_write = current_node.write();
-                            
+
                             // Remove the key and value
                             node_write.keys.remove(i);
                             node_write.values.remove(i);
@@ -190,7 +190,7 @@ impl BPlusTree {
     ) -> Result<Vec<(Value, RID)>, String> {
         let start_key = self.extract_key(start_key);
         let end_key = self.extract_key(end_key);
-        
+
         debug!("Starting range scan from {:?} to {:?}", start_key, end_key);
         let mut current_node = Arc::clone(&self.root);
         let mut entries = Vec::new();
@@ -483,7 +483,7 @@ impl BPlusTree {
     fn find_insert_position(&self, keys: &[Value], key: &Value) -> usize {
         debug!("Finding insert position for key {:?}", key);
         debug!("Current keys: {:?}", keys);
-        
+
         // For duplicate keys, we want to insert after existing equal keys
         // This ensures proper routing in internal nodes
         let pos = keys.iter().position(|k| {
@@ -492,7 +492,7 @@ impl BPlusTree {
                 _ => k.compare_greater_than(key) == CmpBool::CmpTrue
             }
         }).unwrap_or(keys.len());
-            
+
         debug!("Found insert position: {}", pos);
         pos
     }
@@ -501,7 +501,7 @@ impl BPlusTree {
     fn insert_non_full(&self, node: &mut BPlusTreeNode, key: Value, rid: RID) -> bool {
         debug!("Inserting into non-full node: key={:?}, rid={:?}", key, rid);
         debug!("Current node: type={:?}, keys={:?}", node.node_type, node.keys);
-        
+
         match node.node_type {
             NodeType::Leaf => {
                 let pos = self.find_insert_position(&node.keys, &key);
@@ -544,7 +544,7 @@ impl BPlusTree {
             NodeType::Internal => {
                 let pos = self.find_insert_position(&node.keys, &key);
                 debug!("Found child position {} in internal node", pos);
-                
+
                 // Ensure we don't go past the last child
                 let child_idx = if pos >= node.children.len() {
                     debug!("Adjusting child index from {} to {}", pos, node.children.len() - 1);
@@ -552,7 +552,7 @@ impl BPlusTree {
                 } else {
                     pos
                 };
-                
+
                 let child_arc = Arc::clone(&node.children[child_idx]);
                 debug!("Checking child node at position {} of {}", child_idx, node.children.len());
 
@@ -566,11 +566,11 @@ impl BPlusTree {
                         drop(child_guard);
                         debug!("Child node is full, performing split");
                         self.split_child(node, child_idx);
-                        
+
                         // After split, find new position and get new child
                         let new_pos = self.find_insert_position(&node.keys, &key);
                         debug!("After split, new insert position is {}", new_pos);
-                        
+
                         // Again ensure we don't go past the last child
                         let new_child_idx = if new_pos >= node.children.len() {
                             debug!("Adjusting new child index from {} to {}", new_pos, node.children.len() - 1);
@@ -578,7 +578,7 @@ impl BPlusTree {
                         } else {
                             new_pos
                         };
-                        
+
                         let child_arc = Arc::clone(&node.children[new_child_idx]);
                         let mut child_guard = child_arc.write();
                         return self.insert_non_full(&mut *child_guard, key, rid);
@@ -614,13 +614,13 @@ impl BPlusTree {
 
                 // For leaf splits, use the first key of the right node as separator
                 let split_key = new_node_arc.read().keys[0].clone();
-                
+
                 let mut insert_pos = self.find_insert_position(&parent.keys, &split_key);
                 insert_pos = insert_pos.min(parent.keys.len());
-                
+
                 debug!("Inserting separator key at position {} in parent (len={})", 
                        insert_pos, parent.keys.len());
-                
+
                 parent.keys.insert(insert_pos, split_key);
                 parent.children.insert(insert_pos + 1, new_node_arc.clone());
 
@@ -633,26 +633,26 @@ impl BPlusTree {
             }
             NodeType::Internal => {
                 debug!("Splitting internal node at position {}", middle);
-                
+
                 // For internal nodes, we need to handle the middle key differently
                 let split_point = child_guard.keys.len() / 2;
-                
+
                 // Get the middle key that will move up to the parent
                 let middle_key = child_guard.keys[split_point].clone();
-                
+
                 // Move entries to new node (excluding middle key)
                 new_node.keys = child_guard.keys.split_off(split_point + 1);
                 new_node.children = child_guard.children.split_off(split_point + 1);
-                
+
                 // Remove the middle key from the child (it moves up)
                 child_guard.keys.remove(split_point);
 
                 // For internal splits, ensure the routing key is greater than all keys in left subtree
                 let mut insert_pos = self.find_insert_position(&parent.keys, &middle_key);
                 insert_pos = insert_pos.min(parent.keys.len());
-                
+
                 debug!("Inserting middle key at position {} in parent", insert_pos);
-                
+
                 parent.keys.insert(insert_pos, middle_key.clone());
                 parent.children.insert(insert_pos + 1, Arc::new(RwLock::new(new_node.clone())));
 
@@ -669,16 +669,16 @@ impl BPlusTree {
 
     fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
         let mut current_path = path;
-        
+
         while !current_path.is_empty() {
             let (parent_arc, child_idx) = current_path.pop().unwrap();
             let mut parent = parent_arc.write();
-            
+
             // Check if child needs rebalancing
             let child = Arc::clone(&parent.children[child_idx]);
             let child_guard = child.read();
             let min_keys = (self.order - 1) / 2;
-            
+
             if child_guard.keys.len() >= min_keys {
                 debug!("Child has enough keys ({} >= {}), no rebalancing needed", 
                        child_guard.keys.len(), min_keys);
@@ -691,7 +691,7 @@ impl BPlusTree {
                 // Try left sibling
                 let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
                 let left_guard = left_sibling.read();
-                
+
                 if left_guard.keys.len() > min_keys {
                     drop(left_guard);
                     debug!("Borrowing from left sibling");
@@ -707,7 +707,7 @@ impl BPlusTree {
                 // Try right sibling
                 let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
                 let right_guard = right_sibling.read();
-                
+
                 if right_guard.keys.len() > min_keys {
                     drop(right_guard);
                     debug!("Borrowing from right sibling");
@@ -754,13 +754,13 @@ impl BPlusTree {
                     }
                     return;
                 }
-                
+
                 if parent.keys.len() < min_keys && !current_path.is_empty() {
                     debug!("Parent needs rebalancing, continuing up the tree");
                     continue;
                 }
             }
-            
+
             debug!("Rebalancing complete at this level");
             break;
         }
@@ -769,10 +769,10 @@ impl BPlusTree {
     fn borrow_from_left_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
         let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
         let child = Arc::clone(&parent.children[child_idx]);
-        
+
         let mut left = left_sibling.write();
         let mut right = child.write();
-        
+
         match right.node_type {
             NodeType::Leaf => {
                 // Move rightmost entry from left to right
@@ -787,14 +787,14 @@ impl BPlusTree {
                 // Move parent's separator down to right child
                 let separator = parent.keys[child_idx - 1].clone();
                 right.keys.insert(0, separator);
-                
+
                 // Move rightmost child from left to right
                 if !left.children.is_empty() {
                     let child = Arc::clone(&left.children[left.children.len() - 1]);
                     left.children.pop();
                     right.children.insert(0, child);
                 }
-                
+
                 // Move rightmost key from left to parent
                 parent.keys[child_idx - 1] = left.keys.pop().unwrap();
             }
@@ -804,10 +804,10 @@ impl BPlusTree {
     fn borrow_from_right_sibling(&self, parent: &mut BPlusTreeNode, child_idx: usize) {
         let child = Arc::clone(&parent.children[child_idx]);
         let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
-        
+
         let mut left = child.write();
         let mut right = right_sibling.write();
-        
+
         match left.node_type {
             NodeType::Leaf => {
                 // Move leftmost entry from right to left
@@ -822,14 +822,14 @@ impl BPlusTree {
                 // Move parent's separator down to left child
                 let separator = parent.keys[child_idx].clone();
                 left.keys.push(separator);
-                
+
                 // Move leftmost child from right to left
                 if !right.children.is_empty() {
                     let child = Arc::clone(&right.children[0]);
                     right.children.remove(0);
                     left.children.push(child);
                 }
-                
+
                 // Move leftmost key from right to parent
                 parent.keys[child_idx] = right.keys.remove(0);
             }
@@ -840,10 +840,10 @@ impl BPlusTree {
         debug!("Merging node {} with its left sibling", child_idx);
         let left_sibling = Arc::clone(&parent.children[child_idx - 1]);
         let child = Arc::clone(&parent.children[child_idx]);
-        
+
         let mut left = left_sibling.write();
         let mut right = child.write();
-        
+
         match right.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
@@ -856,21 +856,21 @@ impl BPlusTree {
                 // Move parent's separator key down to left sibling
                 let separator = parent.keys.remove(child_idx - 1);
                 left.keys.push(separator);
-                
+
                 // Move all keys and children from right to left
                 left.keys.extend(right.keys.drain(..));
                 left.children.extend(right.children.drain(..));
             }
         }
-        
+
         // Remove the right child from parent
         parent.children.remove(child_idx);
-        
+
         // Remove the separator key from parent if it exists
         if child_idx - 1 < parent.keys.len() {
             parent.keys.remove(child_idx - 1);
         }
-        
+
         debug!("Merge complete - Parent keys: {:?}", parent.keys);
     }
 
@@ -878,10 +878,10 @@ impl BPlusTree {
         debug!("Merging node {} with its right sibling", child_idx);
         let child = Arc::clone(&parent.children[child_idx]);
         let right_sibling = Arc::clone(&parent.children[child_idx + 1]);
-        
+
         let mut left = child.write();
         let mut right = right_sibling.write();
-        
+
         match left.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
@@ -894,21 +894,21 @@ impl BPlusTree {
                 // Move parent's separator key down to left node
                 let separator = parent.keys.remove(child_idx);
                 left.keys.push(separator);
-                
+
                 // Move all keys and children from right to left
                 left.keys.extend(right.keys.drain(..));
                 left.children.extend(right.children.drain(..));
             }
         }
-        
+
         // Remove the right sibling from parent
         parent.children.remove(child_idx + 1);
-        
+
         // Remove the separator key from parent
         if child_idx < parent.keys.len() {
             parent.keys.remove(child_idx);
         }
-        
+
         debug!("Merge complete - Parent keys: {:?}", parent.keys);
     }
 
@@ -926,10 +926,6 @@ impl Index for BPlusTree {
         BPlusTree::new(order, Arc::new(*metadata))
     }
 
-    fn get_metadata(&self) -> Arc<IndexInfo> {
-        Arc::clone(&self.metadata)
-    }
-
     fn insert_entry(&mut self, tuple: &Tuple, rid: RID, _transaction: &Transaction) -> bool {
         // Extract key from tuple using metadata
         let key = self.extract_key(tuple);
@@ -945,6 +941,10 @@ impl Index for BPlusTree {
         let result = self.scan_range(key, key, true).unwrap();
         debug!("Scan complete, found {} matching entries", result.len());
         Ok(result)
+    }
+
+    fn get_metadata(&self) -> Arc<IndexInfo> {
+        Arc::clone(&self.metadata)
     }
 }
 
@@ -1071,7 +1071,6 @@ mod basic_behavior_tests {
     use crate::common::logger::initialize_logger;
     use crate::types_db::value::{Val, Value};
     use std::collections::HashSet;
-
 
 
     #[test]
@@ -1215,10 +1214,7 @@ mod basic_behavior_tests {
         assert_eq!(result.len(), 1, "Expected single value for point query");
 
         // Verify the value
-        assert!(
-            result[0].0.compare_equals(&Value::new(3)) == CmpBool::CmpTrue,
-            "Expected value 3 in point query result"
-        );
+        assert_eq!(result[0].0.compare_equals(&Value::new(3)), CmpBool::CmpTrue, "Expected value 3 in point query result");
     }
 
     #[test]
@@ -1262,10 +1258,10 @@ mod basic_behavior_tests {
 mod advanced_tests {
     use super::test_utils::*;
     use super::*;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::Transaction;
     use rand::prelude::*;
     use rand::rng;
-    use crate::common::logger::initialize_logger;
 
     #[test]
     fn test_insertion_ascending() {
