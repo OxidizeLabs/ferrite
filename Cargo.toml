@@ -6,23 +6,21 @@ authors = ["Thomas Korrison <thomas_korrison@hotmail.com>"]
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive", "rc"] }
-bincode = "1.3"
-rand = "0.9.0-alpha.2"
-futures = { version = "0.3", features = ["thread-pool"] }
-xxhash-rust = { version = "0.8", features = ["xxh3"] }
-spin = "0.9"
-crossbeam = "0.8"
-log = "0.4"
-env_logger = "0.11"
-chrono = "0.4"
-thiserror = "2.0"
-parking_lot = "0.12"
-sqlparser = "0.53"
-mockall = "0.13"
-bitflags = "2.6"
-clap = { version = "4.5.23", features = ["derive"] }
+log = "0.4.25"
+parking_lot = "0.12.3"
+env_logger = "0.11.6"
+prettytable-rs = "0.10.0"
+tempfile = "3.15.0"
+chrono = "0.4.39"
+crossbeam = "0.8.4"
+sqlparser = "0.53.0"
+rand = "0.9.0-beta.3"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+spin = "0.9.8"
+serde = { version = "1.0.217", features = ["derive"] }
+bincode = "1.3.3"
+colored = "3.0.0"
+clap = { version = "4.5.26", features = ["derive"] }
 rustyline = "15.0.0"
-colored = "2.1.0"
-tempfile = "3.14.0"
-tracing = "0.1.41"
+thiserror = "2.0.11"
+mockall = "0.13.1"
