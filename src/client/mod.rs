@@ -1,4 +1,2 @@
 mod client;
-mod config;
-mod error;
-mod pool;
+pub use client::DatabaseClient;
