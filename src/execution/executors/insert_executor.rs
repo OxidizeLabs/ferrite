@@ -80,13 +80,15 @@ impl AbstractExecutor for InsertExecutor {
             self.plan.get_table_name()
         );
 
-        self.plan.get_children().iter().for_each(|child| {
-            match child {
+        self.plan
+            .get_children()
+            .iter()
+            .for_each(|child| match child {
                 PlanNode::Values(values_plan) => {
                     debug!(
-                    "Creating ValuesExecutor for insert with {} rows",
-                    values_plan.get_rows().len()
-                );
+                        "Creating ValuesExecutor for insert with {} rows",
+                        values_plan.get_rows().len()
+                    );
                     debug!("Values schema: {:?}", values_plan.get_output_schema());
 
                     self.child_executor = Some(Box::new(ValuesExecutor::new(
@@ -103,8 +105,7 @@ impl AbstractExecutor for InsertExecutor {
                 _ => {
                     warn!("Unexpected child plan type for InsertExecutor");
                 }
-            }
-        });
+            });
         self.initialized = true;
         debug!("InsertExecutor initialization completed");
     }
@@ -122,7 +123,10 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Create tuple metadata
                 let tuple_meta = TupleMeta::new(
-                    self.context.read().get_transaction_context().get_transaction_id(),
+                    self.context
+                        .read()
+                        .get_transaction_context()
+                        .get_transaction_id(),
                     false,
                 );
 
@@ -183,12 +187,16 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::result_writer::CliResultWriter;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
+    use crate::execution::execution_engine::ExecutionEngine;
     use crate::execution::expressions::abstract_expression::Expression;
     use crate::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::execution::plans::values_plan::ValuesNode;
+    use crate::execution::transaction_context::TransactionContext;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -196,16 +204,16 @@ mod tests {
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
-    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
+        transaction_context: Arc<TransactionContext>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_factory: Arc<TransactionManagerFactory>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         log_file: String,
-        transaction_context: Arc<TransactionContext>
     }
 
     impl TestContext {
@@ -246,7 +254,7 @@ mod tests {
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
                 Arc::clone(&catalog),
-                log_manager,
+                log_manager.clone(),
             )));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
@@ -258,14 +266,20 @@ mod tests {
                 transaction_manager.clone(),
             ));
 
+            let transaction_factory = Arc::new(TransactionManagerFactory::new(
+                Arc::clone(&catalog),
+                log_manager,
+            ));
+
             Self {
                 catalog,
                 buffer_pool,
+                transaction_context,
                 transaction_manager,
+                transaction_factory,
                 lock_manager,
                 db_file,
                 log_file,
-                transaction_context
             }
         }
 
@@ -282,7 +296,15 @@ mod tests {
             Arc::new(RwLock::new(ExecutionContext::new(
                 Arc::clone(&self.buffer_pool),
                 Arc::clone(&self.catalog),
-                Arc::clone(&self.transaction_context)
+                Arc::clone(&self.transaction_context),
+            )))
+        }
+
+        fn create_execution_engine(&self) -> Arc<RwLock<ExecutionEngine>> {
+            Arc::new(RwLock::new(ExecutionEngine::new(
+                Arc::clone(&self.catalog),
+                Arc::clone(&self.buffer_pool),
+                Arc::clone(&self.transaction_factory),
             )))
         }
     }
@@ -326,9 +348,11 @@ mod tests {
         ]];
 
         // Create values plan node
-        let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
-        );
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
 
         // Get table info for insert plan
         let table_oid = {
@@ -396,9 +420,11 @@ mod tests {
             )))],
         ];
 
-        let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
-        );
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
 
         let table_oid = {
             let catalog = test_ctx.catalog.read();
@@ -437,7 +463,12 @@ mod tests {
         {
             let exec_ctx_guard = exec_ctx.read();
             let mut txn_manager = test_ctx.transaction_manager.write();
-            assert!(txn_manager.commit(exec_ctx_guard.get_transaction_context().get_transaction().clone()));
+            assert!(txn_manager.commit(
+                exec_ctx_guard
+                    .get_transaction_context()
+                    .get_transaction()
+                    .clone()
+            ));
         }
     }
 
@@ -460,9 +491,11 @@ mod tests {
             ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
         ))]];
 
-        let values_node = Arc::new(
-            ValuesNode::new(schema.clone(), expressions, vec![PlanNode::Empty])
-        );
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
 
         let table_oid = {
             let catalog = test_ctx.catalog.read();
@@ -480,8 +513,8 @@ mod tests {
             vec![PlanNode::Values(values_node.as_ref().clone())],
         ));
 
+        // Create a new transaction context
         let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
-        let exec_ctx_guard = exec_ctx.read();
         let mut executor = InsertExecutor::new(exec_ctx.clone(), insert_plan);
 
         // Execute insert
@@ -491,8 +524,23 @@ mod tests {
 
         // Rollback the transaction
         {
+            let exec_ctx_guard = exec_ctx.read();
+            let txn_ctx = exec_ctx_guard.get_transaction_context();
             let mut txn_manager = test_ctx.transaction_manager.write();
-            txn_manager.abort(exec_ctx_guard.get_transaction_context().get_transaction());
+            txn_manager.abort(txn_ctx.get_transaction());
         }
+
+        // Verify the rollback by checking the table is empty
+        let verify_exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
+        let mut writer = CliResultWriter::new();
+        let select_sql = "SELECT COUNT(*) FROM test_rollback_table;";
+
+        let execution_engine = test_ctx.create_execution_engine();
+
+        let result = execution_engine
+            .write()
+            .execute_sql(select_sql, verify_exec_ctx, &mut writer);
+
+        assert!(result.is_ok(), "Failed to execute verification query");
     }
 }
