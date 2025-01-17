@@ -1,20 +1,18 @@
+use parking_lot::RwLock;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tkdb::buffer::buffer_pool_manager::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::catalog::Catalog;
 use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::concurrency::transaction_manager_factory::TransactionManagerFactory;
+use tkdb::execution::execution_context::ExecutionContext;
 use tkdb::execution::execution_engine::ExecutionEngine;
 use tkdb::recovery::log_manager::LogManager;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-use tkdb::execution::execution_context::ExecutionContext;
-use tkdb::execution::transaction_context::TransactionContext;
-use crate::common::{ensure_test_dir, cleanup_test_files};
 
 pub struct ConcurrentTestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -26,7 +24,6 @@ pub struct ConcurrentTestContext {
 
 impl ConcurrentTestContext {
     pub fn new(name: &str) -> Self {
-        ensure_test_dir();
         let test_name = name.to_string();
         
         // Initialize components
@@ -100,12 +97,6 @@ impl ConcurrentTestContext {
         }
 
         Ok(())
-    }
-}
-
-impl Drop for ConcurrentTestContext {
-    fn drop(&mut self) {
-        cleanup_test_files(&self.test_name);
     }
 }
 
