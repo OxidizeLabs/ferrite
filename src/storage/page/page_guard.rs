@@ -1,3 +1,4 @@
+use mockall::Any;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::PageId;
@@ -11,7 +12,6 @@ use crate::storage::page::page_types::extendable_hash_table_directory_page::Exte
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
-use mockall::Any;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
 use std::marker::PhantomData;

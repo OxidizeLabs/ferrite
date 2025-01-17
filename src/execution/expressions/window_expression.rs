@@ -5,7 +5,6 @@ use crate::execution::expressions::abstract_expression::{Expression, ExpressionO
 use crate::execution::plans::window_plan::WindowFunctionType;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::any::Any;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -67,7 +66,7 @@ impl WindowExpression {
 }
 
 impl ExpressionOps for WindowExpression {
-    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate(&self, _tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
         // Window functions can't be evaluated on a single tuple
         // They need the context of the entire window frame
         Err(ExpressionError::InvalidOperation(
@@ -77,10 +76,10 @@ impl ExpressionOps for WindowExpression {
 
     fn evaluate_join(
         &self,
-        left_tuple: &Tuple,
-        left_schema: &Schema,
-        right_tuple: &Tuple,
-        right_schema: &Schema,
+        _left_tuple: &Tuple,
+        _left_schema: &Schema,
+        _right_tuple: &Tuple,
+        _right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         // Window functions can't be evaluated on joined tuples directly
         Err(ExpressionError::InvalidOperation(

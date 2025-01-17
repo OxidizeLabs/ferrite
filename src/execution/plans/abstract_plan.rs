@@ -1,5 +1,5 @@
 use crate::catalog::schema::Schema;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::executors::aggregation_executor::AggregationExecutor;
 use crate::execution::executors::create_index_executor::CreateIndexExecutor;
@@ -286,7 +286,7 @@ impl PlanNode {
     }
 
     /// Create an executor for this plan node
-    pub fn create_executor(&self, context: Arc<RwLock<ExecutorContext>>) -> Result<Box<dyn AbstractExecutor>, String> {
+    pub fn create_executor(&self, context: Arc<RwLock<ExecutionContext>>) -> Result<Box<dyn AbstractExecutor>, String> {
         match self {
             // Leaf nodes (no children)
             PlanNode::SeqScan(node) => {
@@ -355,7 +355,7 @@ impl PlanNode {
 
                 Ok(Box::new(AggregationExecutor::new(
                     context,
-                    Arc::new(node.clone()),
+                    Arc::from(node.clone()),
                     child_executor,
                 )))
             }

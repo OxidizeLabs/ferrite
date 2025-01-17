@@ -74,7 +74,7 @@ mod unit_tests {
         assert_eq!(create_stmt.statement_type(), StatementType::CreateStatement);
         assert_eq!(
             create_stmt.to_string(),
-            "CREATE TABLE users (\nid, name, PRIMARY KEY (id))"
+            "CREATE TABLE users (\nid(Integer), name(VarChar), PRIMARY KEY (id))"
         );
 
         let create_stmt_no_pk = CreateStatement::new(
@@ -88,7 +88,7 @@ mod unit_tests {
 
         assert_eq!(
             create_stmt_no_pk.to_string(),
-            "CREATE TABLE products (\nid, name)"
+            "CREATE TABLE products (\nid(Integer), name(VarChar))"
         );
     }
 }

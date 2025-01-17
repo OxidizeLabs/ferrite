@@ -427,7 +427,7 @@ mod tests {
         #[test]
         fn test_display_with_children() {
             let schema = create_test_schema();
-            let mut node = ValuesNode::new(
+            let node = ValuesNode::new(
                 schema.clone(),
                 vec![],
                 vec![PlanNode::Values(ValuesNode::new(
