@@ -2,7 +2,7 @@ use crate::catalog::catalog::Catalog;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction_manager::TransactionManager;
-use crate::execution::transaction_context::TransactionContext;
+use crate::sql::execution::transaction_context::TransactionContext;
 use crate::recovery::log_manager::LogManager;
 use parking_lot::RwLock;
 use std::sync::Arc;

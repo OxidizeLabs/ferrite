@@ -2,7 +2,7 @@ use crate::common::config::{
     Lsn, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
 };
 use crate::common::rid::RID;
-use crate::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
@@ -303,8 +303,8 @@ mod tests {
     use crate::catalog::schema::Schema;
     use crate::common::config::TXN_START_ID;
     use crate::common::rid::RID;
-    use crate::execution::expressions::abstract_expression::Expression::Mock;
-    use crate::execution::expressions::mock_expression::MockExpression;
+    use crate::sql::execution::expressions::abstract_expression::Expression::Mock;
+    use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
