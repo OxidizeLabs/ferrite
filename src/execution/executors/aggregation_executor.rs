@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::aggregate_expression::AggregationType;
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::types_db::type_id::TypeId;
 
 pub struct AggregationExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<AggregationPlanNode>,
     child_executor: Box<dyn AbstractExecutor>,
     // Track aggregation state
@@ -28,7 +28,7 @@ pub struct AggregationExecutor {
 
 impl AggregationExecutor {
     pub fn new(
-        context: Arc<RwLock<ExecutorContext>>,
+        context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<AggregationPlanNode>,
         child_executor: Box<dyn AbstractExecutor>,
     ) -> Self {
@@ -282,7 +282,7 @@ impl AbstractExecutor for AggregationExecutor {
         self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -316,10 +316,11 @@ mod tests {
     use std::collections::HashMap;
     use crate::execution::expressions::aggregate_expression::AggregateExpression;
     use crate::execution::plans::abstract_plan::PlanNode;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
@@ -365,9 +366,17 @@ mod tests {
                 Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             Self {
                 bpm,
-                transaction_manager,
+                transaction_context,
                 lock_manager,
                 db_file,
                 db_log_file,
@@ -389,14 +398,12 @@ mod tests {
     fn create_test_executor_context(
         test_context: &TestContext,
         catalog: Arc<RwLock<Catalog>>,
-    ) -> Arc<RwLock<ExecutorContext>> {
+    ) -> Arc<RwLock<ExecutionContext>> {
         let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-        Arc::new(RwLock::new(ExecutorContext::new(
-            transaction,
-            Arc::clone(&test_context.transaction_manager),
-            catalog,
+        Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&test_context.bpm),
-            Arc::clone(&test_context.lock_manager),
+            catalog,
+            Arc::clone(&test_context.transaction_context),
         )))
     }
 

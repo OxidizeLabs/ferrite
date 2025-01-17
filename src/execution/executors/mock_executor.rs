@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct MockExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<MockScanNode>,
     current_index: usize,
     tuples: Vec<(Vec<Value>, RID)>,
@@ -19,7 +19,7 @@ pub struct MockExecutor {
 }
 
 impl MockExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<MockScanNode>, current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<MockScanNode>, current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
         Self {
             context,
             plan,
@@ -56,11 +56,11 @@ impl AbstractExecutor for MockExecutor {
         ))
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.schema.clone()
+    fn get_output_schema(&self) -> &Schema {
+        &self.schema
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }

@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
@@ -10,14 +10,14 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct CreateTableExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<CreateTablePlanNode>,
     executed: bool,
 }
 
 impl CreateTableExecutor {
     pub fn new(
-        context: Arc<RwLock<ExecutorContext>>,
+        context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<CreateTablePlanNode>,
         executed: bool,
     ) -> Self {
@@ -120,11 +120,11 @@ impl AbstractExecutor for CreateTableExecutor {
         None
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }

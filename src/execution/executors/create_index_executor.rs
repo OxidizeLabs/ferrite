@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
@@ -11,14 +11,14 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct CreateIndexExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<CreateIndexPlanNode>,
     executed: bool,
 }
 
 impl CreateIndexExecutor {
     pub fn new(
-        context: Arc<RwLock<ExecutorContext>>,
+        context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<CreateIndexPlanNode>,
         executed: bool,
     ) -> Self {
@@ -138,11 +138,11 @@ impl AbstractExecutor for CreateIndexExecutor {
         None
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -175,10 +175,12 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
@@ -221,15 +223,32 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
 
             Self {
                 bpm,
                 transaction_manager,
+                transaction_context,
                 lock_manager,
                 db_file,
                 db_log_file,
             }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
+        }
+
+        pub fn lock_manager(&self) -> Arc<LockManager> {
+            Arc::clone(&self.lock_manager)
         }
 
         fn cleanup(&self) {
@@ -263,19 +282,25 @@ mod tests {
         )
     }
 
-    fn create_test_executor_context(
-        test_context: &TestContext,
-        catalog: Arc<RwLock<Catalog>>,
-    ) -> Arc<RwLock<ExecutorContext>> {
-        let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-        Arc::new(RwLock::new(ExecutorContext::new(
-            transaction,
-            Arc::clone(&test_context.transaction_manager),
+    fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
+        let ctx = TestContext::new("projection_test");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
+        let transaction_manager = ctx.transaction_manager.clone();
+        let transaction_context = ctx.transaction_context.clone();
+
+
+        let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            bpm,
             catalog,
-            test_context.bpm.clone(),
-            test_context.lock_manager.clone(),
-        )))
+            transaction_context
+        )));
+
+        execution_context
     }
+
 
     #[test]
     fn test_create_index_basic() {
@@ -288,7 +313,7 @@ mod tests {
             catalog_guard.create_table("test_table", schema.clone());
         }
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
         let key_attrs = vec![0];
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
@@ -321,7 +346,7 @@ mod tests {
 
         let columns = vec![0, 1];
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
             "test_table".to_string(),
@@ -360,7 +385,7 @@ mod tests {
             );
         }
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
         let columns = vec![0];
 
         let plan = Arc::new(CreateIndexPlanNode::new(
@@ -384,7 +409,7 @@ mod tests {
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
         let columns = vec![0];
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
@@ -417,7 +442,7 @@ mod tests {
             catalog_guard.create_table("test_table", schema.clone());
         }
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
 
         // Create multiple index executors
         let mut executors = vec![];
@@ -458,7 +483,7 @@ mod tests {
             catalog_guard.create_table("test_table", schema.clone());
         }
 
-        let exec_context = create_test_executor_context(&test_context, catalog.clone());
+        let exec_context = create_test_executor_context();
         let key_attrs = vec![0];
 
         // Create first index

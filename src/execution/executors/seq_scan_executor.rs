@@ -1,7 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::seq_scan_plan::SeqScanPlanNode;
@@ -13,7 +13,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct SeqScanExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<SeqScanPlanNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
@@ -21,7 +21,7 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<SeqScanPlanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<SeqScanPlanNode>) -> Self {
         let table_name = plan.get_table_name();
         debug!("Creating SeqScanExecutor for table '{}'", table_name);
 
@@ -135,12 +135,12 @@ impl AbstractExecutor for SeqScanExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
+    fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
-        self.plan.get_output_schema().clone()
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -166,10 +166,12 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
@@ -215,9 +217,18 @@ mod tests {
                 Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             Self {
                 bpm,
                 transaction_manager,
+                transaction_context,
                 lock_manager,
                 db_file,
                 db_log_file,
@@ -273,6 +284,7 @@ mod tests {
         let bpm = ctx.bpm();
         let lock_manager = ctx.lock_manager();
         let transaction_manager = ctx.transaction_manager.clone();
+        let transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema
         let mut catalog = create_catalog(bpm.clone());
@@ -305,12 +317,10 @@ mod tests {
             table_name.to_string(),
         ));
 
-        let context = Arc::new(RwLock::new(ExecutorContext::new(
-            txn,
-            transaction_manager,
-            Arc::new(RwLock::new(catalog)),
+        let context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
-            lock_manager,
+            Arc::new(RwLock::new(catalog)),
+            transaction_context
         )));
 
         let mut executor = SeqScanExecutor::new(context, plan);
@@ -360,6 +370,7 @@ mod tests {
         let bpm = ctx.bpm();
         let lock_manager = ctx.lock_manager();
         let transaction_manager = ctx.transaction_manager.clone();
+        let transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema
         let mut catalog = create_catalog(bpm.clone());
@@ -377,12 +388,10 @@ mod tests {
             table_name.to_string(),
         ));
 
-        let context = Arc::new(RwLock::new(ExecutorContext::new(
-            txn,
-            transaction_manager,
-            Arc::new(RwLock::new(catalog)),
+        let context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
-            lock_manager,
+            Arc::new(RwLock::new(catalog)),
+            transaction_context
         )));
 
         let mut executor = SeqScanExecutor::new(context, plan);

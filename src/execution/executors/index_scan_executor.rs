@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::expressions::comparison_expression::ComparisonType;
@@ -17,7 +17,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct IndexScanExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<IndexScanNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
@@ -25,7 +25,7 @@ pub struct IndexScanExecutor {
 }
 
 impl IndexScanExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<IndexScanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<IndexScanNode>) -> Self {
         let table_name = plan.get_table_name();
         debug!(
             "Creating IndexScanExecutor for table '{}' using index '{}'",
@@ -276,7 +276,7 @@ impl AbstractExecutor for IndexScanExecutor {
         }
 
         // Get schema upfront
-        let output_schema = self.get_output_schema();
+        let output_schema = self.get_output_schema().clone();
         let predicate_keys = self.plan.get_predicate_keys();
 
         // Get iterator reference
@@ -338,12 +338,12 @@ impl AbstractExecutor for IndexScanExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
+    fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
-        self.plan.get_output_schema().clone()
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -372,9 +372,10 @@ mod index_scan_executor_tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
-        executor_context: Arc<RwLock<ExecutorContext>>,
+        execution_context: Arc<RwLock<ExecutionContext>>,
         db_file: String,
         log_file: String,
     }
@@ -416,21 +417,31 @@ mod index_scan_executor_tests {
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
-            // Create test transaction and executor context
-            let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
-            let executor_context = Arc::new(RwLock::new(ExecutorContext::new(
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
+
+            let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
-                transaction_manager.clone(),
-                catalog.clone(),
-                buffer_pool_manager.clone(),
                 lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
+            let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+                buffer_pool_manager,
+                catalog,
+                transaction_context
             )));
 
             Self {
-                executor_context,
+                execution_context,
                 db_file,
                 log_file,
             }
+        }
+
+        pub fn execution_context(&self) -> Arc<RwLock<ExecutionContext>> {
+            self.execution_context.clone()
         }
 
         fn cleanup(&self) {
@@ -454,7 +465,7 @@ mod index_scan_executor_tests {
 
     fn setup_test_table(
         schema: &Schema,
-        context: &Arc<RwLock<ExecutorContext>>,
+        context: &Arc<RwLock<ExecutionContext>>,
     ) -> (String, String, TableOidT, IndexOidT) {
         let context_guard = context.read();
         let catalog = context_guard.get_catalog();
@@ -500,7 +511,7 @@ mod index_scan_executor_tests {
         (table_name, index_name, table_id, index_id)
     }
 
-    fn insert_test_data(context: &Arc<RwLock<ExecutorContext>>, table_name: &str) {
+    fn insert_test_data(context: &Arc<RwLock<ExecutionContext>>, table_name: &str) {
         let context_guard = context.read();
         let catalog = context_guard.get_catalog();
         let catalog_guard = catalog.read();
@@ -547,7 +558,7 @@ mod index_scan_executor_tests {
     fn test_index_scan_full() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_full");
-        let context = ctx.executor_context.clone();
+        let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
@@ -575,7 +586,7 @@ mod index_scan_executor_tests {
     fn test_index_scan_equality() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_equality");
-        let context = ctx.executor_context.clone();
+        let context = ctx.execution_context();
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
 
@@ -610,7 +621,7 @@ mod index_scan_executor_tests {
     fn test_index_scan_range() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_range");
-        let context = ctx.executor_context.clone();
+        let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
@@ -651,7 +662,7 @@ mod index_scan_executor_tests {
     fn test_index_scan_with_deletion() {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_with_deletion");
-        let context = ctx.executor_context.clone();
+        let context = ctx.execution_context();
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
         insert_test_data(&context, &table_name);
 

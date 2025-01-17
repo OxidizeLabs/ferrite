@@ -1,23 +1,23 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info};
+use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct NestedIndexJoinExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<NestedIndexJoinNode>,
     current_index: usize,
     initialized: bool,
 }
 
 impl NestedIndexJoinExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<NestedIndexJoinNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<NestedIndexJoinNode>) -> Self {
         debug!("Creating NestedIndexJoinExecutor");
 
         todo!()
@@ -33,12 +33,12 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
         todo!()
     }
 
-    fn get_output_schema(&self) -> Schema {
+    fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
-        self.plan.get_output_schema().clone()
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
