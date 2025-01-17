@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::values_plan::ValuesNode;
@@ -10,14 +10,14 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct ValuesExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<ValuesNode>,
     current_row: usize,
     initialized: bool,
 }
 
 impl ValuesExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<ValuesNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<ValuesNode>) -> Self {
         Self {
             context,
             plan,
@@ -74,11 +74,11 @@ impl AbstractExecutor for ValuesExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -107,6 +107,7 @@ mod tests {
         use super::*;
         use crate::catalog::catalog::Catalog;
         use crate::execution::plans::abstract_plan::PlanNode;
+        use crate::execution::transaction_context::TransactionContext;
         use crate::recovery::log_manager::LogManager;
 
         pub fn create_test_schema() -> Schema {
@@ -149,11 +150,11 @@ mod tests {
         }
 
         pub struct TestContext {
-            pub catalog: Arc<RwLock<Catalog>>,
-            pub transaction_manager: Arc<RwLock<TransactionManager>>,
-            pub lock_manager: Arc<LockManager>,
-            pub buffer_pool_manager: Arc<BufferPoolManager>,
-            pub transaction: Arc<Transaction>,
+            catalog: Arc<RwLock<Catalog>>,
+            transaction_manager: Arc<RwLock<TransactionManager>>,
+            transaction_context: Arc<TransactionContext>,
+            lock_manager: Arc<LockManager>,
+            buffer_pool_manager: Arc<BufferPoolManager>,
         }
 
         impl TestContext {
@@ -200,23 +201,35 @@ mod tests {
                     .write()
                     .begin(IsolationLevel::Serializable);
 
+                let transaction_context = Arc::new(TransactionContext::new(
+                    transaction,
+                    lock_manager.clone(),
+                    transaction_manager.clone(),
+                ));
+
                 Self {
                     catalog,
                     transaction_manager,
+                    transaction_context,
                     lock_manager,
                     buffer_pool_manager,
-                    transaction,
                 }
             }
 
-            pub fn create_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
-                Arc::new(RwLock::new(ExecutorContext::new(
-                    self.transaction.clone(),
-                    self.transaction_manager.clone(),
-                    self.catalog.clone(),
+            pub fn create_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
+                Arc::new(RwLock::new(ExecutionContext::new(
                     self.buffer_pool_manager.clone(),
-                    self.lock_manager.clone(),
+                    self.catalog.clone(),
+                    self.transaction_context.clone()
                 )))
+            }
+
+            pub fn transaction_context(&self) -> Arc<TransactionContext> {
+                self.transaction_context.clone()
+            }
+
+            pub fn transaction_manager(&self) -> &Arc<RwLock<TransactionManager>> {
+                &self.transaction_manager
             }
         }
     }
@@ -296,7 +309,7 @@ mod tests {
             let mut executor = ValuesExecutor::new(context, plan);
 
             {
-                let txn = test_ctx.transaction.clone();
+                let txn = test_ctx.transaction_context().get_transaction().clone();
                 assert_eq!(txn.get_state(), TransactionState::Running);
             }
 
@@ -308,12 +321,12 @@ mod tests {
             }
 
             test_ctx
-                .transaction_manager
+                .transaction_manager()
                 .write()
-                .commit(test_ctx.transaction.clone());
+                .commit(test_ctx.transaction_context().get_transaction().clone());
 
             {
-                let txn = test_ctx.transaction;
+                let txn = test_ctx.transaction_context().get_transaction().clone();
                 assert_eq!(txn.get_state(), TransactionState::Committed);
             }
         }
@@ -368,12 +381,12 @@ mod tests {
 
             // Commit transaction
             test_ctx
-                .transaction_manager
+                .transaction_manager()
                 .write()
-                .commit(test_ctx.transaction.clone());
+                .commit(test_ctx.transaction_context().get_transaction().clone());
 
             {
-                let txn = test_ctx.transaction;
+                let txn = test_ctx.transaction_context().get_transaction().clone();
                 assert_eq!(txn.get_state(), TransactionState::Committed);
             }
         }
@@ -392,12 +405,12 @@ mod tests {
 
             // Abort transaction
             test_ctx
-                .transaction_manager
+                .transaction_manager()
                 .write()
-                .abort(test_ctx.transaction.clone());
+                .abort(test_ctx.transaction_context().get_transaction().clone());
 
             {
-                let txn = test_ctx.transaction;
+                let txn = test_ctx.transaction_context().get_transaction().clone();
                 assert_eq!(txn.get_state(), TransactionState::Aborted);
             }
         }

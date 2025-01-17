@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -24,15 +24,15 @@ pub trait AbstractExecutor {
     fn next(&mut self) -> Option<(Tuple, RID)>;
 
     /// Get the schema of the tuples that this executor produces.
-    fn get_output_schema(&self) -> Schema;
+    fn get_output_schema(&self) -> &Schema;
 
     /// Get the executor context in which this executor runs.
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>>;
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>>;
 }
 
 /// A base struct for concrete executors to inherit from.
 pub struct BaseExecutor {
-    exec_ctx: Arc<ExecutorContext>,
+    exec_ctx: Arc<ExecutionContext>,
 }
 
 impl BaseExecutor {
@@ -41,12 +41,12 @@ impl BaseExecutor {
     /// # Arguments
     ///
     /// * `exec_ctx` - The executor context that the executor runs with.
-    pub fn new(exec_ctx: Arc<ExecutorContext>) -> Self {
+    pub fn new(exec_ctx: Arc<ExecutionContext>) -> Self {
         Self { exec_ctx }
     }
 
     /// Get the executor context in which this executor runs.
-    pub fn get_executor_context(&self) -> &ExecutorContext {
+    pub fn get_executor_context(&self) -> &ExecutionContext {
         &self.exec_ctx
     }
 }

@@ -1,7 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::mock_scan_plan::MockScanNode;
@@ -13,7 +13,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct MockScanExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<MockScanNode>,
     mock_tuples: Vec<(Tuple, RID)>,
     current_index: usize,
@@ -21,7 +21,7 @@ pub struct MockScanExecutor {
 }
 
 impl MockScanExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<MockScanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<MockScanNode>) -> Self {
         debug!("Creating MockScanExecutor for table '{}'", plan.get_table_name());
 
         Self {
@@ -97,12 +97,12 @@ impl AbstractExecutor for MockScanExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
+    fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
-        self.plan.get_output_schema().clone()
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -124,10 +124,12 @@ mod tests {
     use chrono::Utc;
     use std::collections::HashMap;
     use std::fs;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
@@ -168,15 +170,36 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
 
             Self {
                 bpm,
                 transaction_manager,
+                transaction_context,
                 lock_manager,
                 db_file,
                 db_log_file,
             }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
+        }
+
+        pub fn lock_manager(&self) -> Arc<LockManager> {
+            Arc::clone(&self.lock_manager)
+        }
+
+        pub fn transaction_context(&self) -> Arc<TransactionContext> {
+            self.transaction_context.clone()
         }
 
         fn cleanup(&self) {
@@ -223,16 +246,14 @@ mod tests {
         ));
 
         // Create executor context
-        let context = Arc::new(RwLock::new(ExecutorContext::new(
-            txn,
-            ctx.transaction_manager.clone(),
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm(),
             catalog,
-            ctx.bpm.clone(),
-            ctx.lock_manager.clone(),
+            ctx.transaction_context()
         )));
 
         // Create and initialize executor
-        let mut executor = MockScanExecutor::new(context, plan.clone());
+        let mut executor = MockScanExecutor::new(execution_context, plan.clone());
         executor.init();
 
         // Test scanning
@@ -250,6 +271,8 @@ mod tests {
     #[test]
     fn test_mock_scan_executor_reuse() {
         let ctx = TestContext::new("test_mock_scan_executor_reuse");
+        let bpm = ctx.bpm();
+        let transaction_context = ctx.transaction_context();
 
         // Create schema
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
@@ -276,16 +299,14 @@ mod tests {
         ));
 
         // Create executor context
-        let context = Arc::new(RwLock::new(ExecutorContext::new(
-            txn,
-            ctx.transaction_manager.clone(),
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            bpm,
             catalog,
-            ctx.bpm.clone(),
-            ctx.lock_manager.clone(),
+            transaction_context
         )));
 
         // Create executor
-        let mut executor = MockScanExecutor::new(context, plan);
+        let mut executor = MockScanExecutor::new(execution_context, plan);
 
         // First scan
         executor.init();

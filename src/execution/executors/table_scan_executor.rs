@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::table_scan_plan::TableScanNode;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// using the Volcano-style iterator model.
 pub struct TableScanExecutor {
     /// The executor context
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     /// The table scan plan node
     plan: Arc<TableScanNode>,
     /// Flag indicating if the executor has been initialized
@@ -25,7 +25,7 @@ pub struct TableScanExecutor {
 
 impl TableScanExecutor {
     /// Create a new table scan executor
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<TableScanNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<TableScanNode>) -> Self {
         Self {
             context,
             plan,
@@ -80,11 +80,11 @@ impl AbstractExecutor for TableScanExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -235,7 +235,7 @@ impl AbstractExecutor for TableScanExecutor {
 //         ));
 //
 //
-//         let context = Arc::new(ExecutorContext::new(
+//         let context = Arc::new(ExecutionContext::new(
 //             txn,
 //             ctx.transaction_manager,
 //             Arc::new(RwLock::new(catalog)),
@@ -283,7 +283,7 @@ impl AbstractExecutor for TableScanExecutor {
 //             None,
 //         ));
 //
-//         let context = Arc::new(ExecutorContext::new(
+//         let context = Arc::new(ExecutionContext::new(
 //             txn,
 //             ctx.transaction_manager,
 //             Arc::new(RwLock::new(catalog)),

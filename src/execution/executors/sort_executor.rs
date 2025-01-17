@@ -1,23 +1,23 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::execution::plans::sort_plan::SortNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info};
+use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct SortExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<SortNode>,
     current_index: usize,
     initialized: bool,
 }
 
 impl SortExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<SortNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<SortNode>) -> Self {
         debug!("Creating SortExecutor");
 
         todo!()
@@ -33,12 +33,12 @@ impl AbstractExecutor for SortExecutor {
         todo!()
     }
 
-    fn get_output_schema(&self) -> Schema {
+    fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
-        self.plan.get_output_schema().clone()
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }

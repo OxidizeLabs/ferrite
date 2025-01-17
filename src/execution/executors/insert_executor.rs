@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::executors::values_executor::ValuesExecutor;
 use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct InsertExecutor {
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<InsertNode>,
     table_heap: Arc<TableHeap>,
     initialized: bool,
@@ -20,7 +20,7 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    pub fn new(context: Arc<RwLock<ExecutorContext>>, plan: Arc<InsertNode>) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<InsertNode>) -> Self {
         debug!(
             "Creating InsertExecutor for table '{}' with values plan",
             plan.get_table_name()
@@ -122,7 +122,7 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Create tuple metadata
                 let tuple_meta = TupleMeta::new(
-                    self.context.read().get_transaction().get_transaction_id(),
+                    self.context.read().get_transaction_context().get_transaction_id(),
                     false,
                 );
 
@@ -143,10 +143,8 @@ impl AbstractExecutor for InsertExecutor {
                         );
 
                         // Add to transaction's write set
-                        self.context
-                            .read()
-                            .get_transaction()
-                            .append_write_set(self.plan.get_table_oid() as u32, rid);
+                        let txn_ctx = self.context.write().get_transaction_context();
+                        txn_ctx.append_write_set_atomic(self.plan.get_table_oid(), rid);
 
                         Some((tuple, rid))
                     }
@@ -169,11 +167,11 @@ impl AbstractExecutor for InsertExecutor {
         }
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -198,6 +196,7 @@ mod tests {
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -206,6 +205,7 @@ mod tests {
         lock_manager: Arc<LockManager>,
         db_file: String,
         log_file: String,
+        transaction_context: Arc<TransactionContext>
     }
 
     impl TestContext {
@@ -250,6 +250,14 @@ mod tests {
             )));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             Self {
                 catalog,
                 buffer_pool,
@@ -257,6 +265,7 @@ mod tests {
                 lock_manager,
                 db_file,
                 log_file,
+                transaction_context
             }
         }
 
@@ -268,14 +277,12 @@ mod tests {
         fn create_executor_context(
             &self,
             isolation_level: IsolationLevel,
-        ) -> Arc<RwLock<ExecutorContext>> {
+        ) -> Arc<RwLock<ExecutionContext>> {
             let transaction = Arc::new(Transaction::new(0, isolation_level));
-            Arc::new(RwLock::new(ExecutorContext::new(
-                transaction,
-                Arc::clone(&self.transaction_manager),
-                Arc::clone(&self.catalog),
+            Arc::new(RwLock::new(ExecutionContext::new(
                 Arc::clone(&self.buffer_pool),
-                Arc::clone(&self.lock_manager),
+                Arc::clone(&self.catalog),
+                Arc::clone(&self.transaction_context)
             )))
         }
     }
@@ -430,7 +437,7 @@ mod tests {
         {
             let exec_ctx_guard = exec_ctx.read();
             let mut txn_manager = test_ctx.transaction_manager.write();
-            assert!(txn_manager.commit(exec_ctx_guard.get_transaction().clone()));
+            assert!(txn_manager.commit(exec_ctx_guard.get_transaction_context().get_transaction().clone()));
         }
     }
 
@@ -485,7 +492,7 @@ mod tests {
         // Rollback the transaction
         {
             let mut txn_manager = test_ctx.transaction_manager.write();
-            txn_manager.abort(exec_ctx_guard.get_transaction());
+            txn_manager.abort(exec_ctx_guard.get_transaction_context().get_transaction());
         }
     }
 }

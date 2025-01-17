@@ -1,7 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_context::ExecutionContext;
 use crate::execution::executors::abstract_executor::AbstractExecutor;
 use crate::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::execution::plans::abstract_plan::AbstractPlanNode;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
-    context: Arc<RwLock<ExecutorContext>>,
+    context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<ProjectionNode>,
     initialized: bool,
 }
@@ -23,7 +23,7 @@ pub struct ProjectionExecutor {
 impl ProjectionExecutor {
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
-        context: Arc<RwLock<ExecutorContext>>,
+        context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<ProjectionNode>,
     ) -> Self {
         debug!(
@@ -49,17 +49,6 @@ impl ProjectionExecutor {
                     return None;
                 }
 
-                // Verify number of values matches schema
-                let expected_cols = self.plan.get_output_schema().get_column_count();
-                if values.len() != expected_cols as usize {
-                    error!(
-                        "Projection produced {} values but schema expects {}",
-                        values.len(),
-                        expected_cols
-                    );
-                    return None;
-                }
-
                 // Create new tuple with projected values
                 Some(Tuple::new(
                     &values,
@@ -80,12 +69,13 @@ impl ProjectionExecutor {
 
         for (idx, expr) in self.plan.get_expressions().iter().enumerate() {
             match expr.as_ref() {
-                Expression::Aggregate(_) => {
-                    // For aggregate expressions, use a placeholder value matching the schema type
-                    let col_type = output_schema.get_column(idx).unwrap().get_type();
-                    values.push(Value::new(col_type));
+                Expression::Aggregate(agg_expr) => {
+                    // For aggregate expressions, just pass through the value from the child
+                    // The AggregationExecutor has already computed the result
+                    values.push(tuple.get_value(idx).clone());
                 }
                 _ => {
+                    // For non-aggregate expressions, evaluate normally
                     let value = expr.evaluate(tuple, &self.child_executor.get_output_schema())?;
                     values.push(value);
                 }
@@ -134,11 +124,11 @@ impl AbstractExecutor for ProjectionExecutor {
         None
     }
 
-    fn get_output_schema(&self) -> Schema {
-        self.plan.get_output_schema().clone()
+    fn get_output_schema(&self) -> &Schema {
+        self.plan.get_output_schema()
     }
 
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutorContext>> {
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
@@ -174,11 +164,13 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
+    use crate::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
         log_file: String,
@@ -221,14 +213,35 @@ mod tests {
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             Self {
                 catalog,
                 buffer_pool_manager,
                 transaction_manager,
+                transaction_context,
                 lock_manager,
                 db_file,
                 log_file,
             }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.buffer_pool_manager)
+        }
+
+        pub fn lock_manager(&self) -> Arc<LockManager> {
+            Arc::clone(&self.lock_manager)
+        }
+
+        pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
+            self.catalog.clone()
         }
 
         fn cleanup(&self) {
@@ -243,19 +256,23 @@ mod tests {
         }
     }
 
-    fn create_test_executor_context() -> (TestContext, Arc<RwLock<ExecutorContext>>) {
-        let test_context = TestContext::new("projection_test");
+    fn create_test_executor_context() -> (TestContext, Arc<RwLock<ExecutionContext>>) {
+        let ctx = TestContext::new("projection_test");
+        let bpm = ctx.bpm();
+        let lock_manager = ctx.lock_manager();
+        let catalog = ctx.catalog();
+        let transaction_manager = ctx.transaction_manager.clone();
+        let transaction_context = ctx.transaction_context.clone();
+
 
         let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
-        let executor_context = Arc::new(RwLock::new(ExecutorContext::new(
-            transaction,
-            Arc::clone(&test_context.transaction_manager),
-            Arc::clone(&test_context.catalog),
-            Arc::clone(&test_context.buffer_pool_manager),
-            Arc::clone(&test_context.lock_manager),
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            Arc::clone(&bpm),
+            catalog,
+            transaction_context
         )));
 
-        (test_context, executor_context)
+        (ctx, execution_context)
     }
 
     #[test]
