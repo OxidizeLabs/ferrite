@@ -203,8 +203,8 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
-    use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
-    use crate::execution::plans::table_scan_plan::TableScanNode;
+    use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
+    use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;

@@ -2,7 +2,7 @@ use crate::common::db_instance::{DBConfig, DBInstance};
 use crate::common::exception::DBError;
 use crate::common::result_writer::CliResultWriter;
 use crate::concurrency::transaction::IsolationLevel;
-use crate::execution::transaction_context::TransactionContext;
+use crate::sql::execution::transaction_context::TransactionContext;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::sync::Arc;

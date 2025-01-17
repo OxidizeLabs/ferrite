@@ -5,7 +5,7 @@ use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
 };
 use crate::concurrency::watermark::Watermark;
-use crate::execution::expressions::abstract_expression::ExpressionOps;
+use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::table::table_heap::TableHeap;

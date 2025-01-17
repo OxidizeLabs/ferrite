@@ -7,9 +7,9 @@ use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
-use crate::execution::check_option::CheckOptions;
-use crate::execution::execution_engine::ExecutionEngine;
-use crate::execution::transaction_context::TransactionContext;
+use crate::sql::execution::check_option::CheckOptions;
+use crate::sql::execution::execution_engine::ExecutionEngine;
+use crate::sql::execution::transaction_context::TransactionContext;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
@@ -19,7 +19,7 @@ use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 use crate::types_db::value::Value;
 use std::collections::HashMap;
-use crate::execution::execution_context::ExecutionContext;
+use crate::sql::execution::execution_context::ExecutionContext;
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
