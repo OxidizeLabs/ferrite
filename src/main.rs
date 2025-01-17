@@ -1,5 +1,8 @@
-use tkdb::cli::run_cli;
+use tkdb::cli::CLI;
+use tkdb::common::exception::DBError;
 
-fn main() {
-    run_cli().expect("Unable to run Cli");
+fn main() -> Result<(), DBError> {
+    // Create and run the CLI
+    let mut cli = CLI::new()?;
+    cli.run()
 }

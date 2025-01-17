@@ -2,13 +2,14 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
-use crate::common::result_writer::ResultWriter;
+use crate::common::result_writer::{CliResultWriter, ResultWriter};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
+use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::execution::check_option::CheckOptions;
-use crate::execution::execution_engine::ExecutorEngine;
-use crate::execution::executor_context::ExecutorContext;
+use crate::execution::execution_engine::ExecutionEngine;
+use crate::execution::transaction_context::TransactionContext;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
@@ -16,6 +17,9 @@ use crate::storage::disk::disk_scheduler::DiskScheduler;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
+use crate::types_db::value::Value;
+use std::collections::HashMap;
+use crate::execution::execution_context::ExecutionContext;
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
@@ -31,14 +35,13 @@ pub struct DBConfig {
 
 /// Main struct representing the DB database instance with generic disk manager type
 pub struct DBInstance {
-    buffer_pool_manager: Option<Arc<BufferPoolManager>>,
-    log_manager: Option<Arc<RwLock<LogManager>>>,
-    transaction_manager: Option<Arc<RwLock<TransactionManager>>>,
-    lock_manager: Option<Arc<LockManager>>,
+    pub buffer_pool_manager: Arc<BufferPoolManager>,
+    pub catalog: Arc<RwLock<Catalog>>,
+    pub transaction_factory: Arc<TransactionManagerFactory>,
+    execution_engine: Arc<Mutex<ExecutionEngine>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
-    catalog: Arc<RwLock<Catalog>>,
-    execution_engine: Arc<Mutex<ExecutorEngine>>,
     config: DBConfig,
+    writer: Box<dyn ResultWriter>,
 }
 
 impl Default for DBConfig {
@@ -58,44 +61,61 @@ impl Default for DBConfig {
 impl DBInstance {
     /// Creates a new DB instance with the given configuration
     pub fn new(config: DBConfig) -> Result<Self, DBError> {
-        let disk_manager = Self::create_disk_manager(&config)?;
-        let log_manager = Self::create_log_manager(&disk_manager)?;
+        // Initialize disk components
+        let disk_manager = Arc::new(FileDiskManager::new(
+            config.db_filename.clone(),
+            config.db_log_filename.clone(),
+            config.buffer_pool_size,
+        ));
+        
+        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+        
+        // Initialize buffer pool
+        let buffer_pool_manager = Arc::new(BufferPoolManager::new(
+            config.buffer_pool_size,
+            disk_scheduler,
+            disk_manager.clone(),
+            Arc::new(RwLock::new(LRUKReplacer::new(
+                config.lru_sample_size,
+                config.lru_k,
+            ))),
+        ));
 
-        let buffer_pool_manager = Self::create_buffer_pool_manager(&config, &disk_manager)?;
-
+        // Initialize catalog with default values
         let catalog = Arc::new(RwLock::new(Catalog::new(
-            buffer_pool_manager
-                .as_ref()
-                .map(Arc::clone)
-                .expect("Cannot create catalog without buffer pool manager"),
-            0,
-            0,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            buffer_pool_manager.clone(),  // Buffer pool manager
+            0,                           // next_index_oid
+            0,                           // next_table_oid
+            HashMap::new(),              // tables
+            HashMap::new(),              // indexes
+            HashMap::new(),              // table_names
+            HashMap::new(),              // index_names
         )));
 
-        let transaction_manager =
-            Self::create_transaction_manager(catalog.clone(), log_manager.clone().unwrap())?;
-        let lock_manager = Self::create_lock_manager(&transaction_manager.clone().unwrap())?;
+        // Initialize recovery components
+        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
 
-        let execution_engine = Arc::new(Mutex::new(ExecutorEngine::new(
-            Arc::clone(&catalog),
-            buffer_pool_manager.clone().unwrap(),
-            transaction_manager.clone().unwrap(),
-            lock_manager.clone().unwrap(),
+        // Initialize transaction components
+        let transaction_factory = Arc::new(TransactionManagerFactory::new(
+            catalog.clone(),
+            log_manager,
+        ));
+
+        // Initialize execution engine
+        let execution_engine = Arc::new(Mutex::new(ExecutionEngine::new(
+            catalog.clone(),
+            buffer_pool_manager.clone(),
+            transaction_factory.clone()
         )));
 
         Ok(Self {
             buffer_pool_manager,
-            log_manager,
-            transaction_manager,
-            lock_manager,
-            checkpoint_manager: None,
             catalog,
+            transaction_factory,
             execution_engine,
+            checkpoint_manager: None,
             config,
+            writer: Box::new(CliResultWriter::new()),
         })
     }
 
@@ -103,175 +123,141 @@ impl DBInstance {
     pub fn make_executor_context(
         &self,
         txn: Arc<Transaction>,
-    ) -> Result<Arc<ExecutorContext>, DBError> {
-        let buffer_pool = self.buffer_pool_manager.as_ref().ok_or_else(|| {
-            DBError::NotImplemented("Buffer pool manager not available".to_string())
-        })?;
-
-        let lock_manager = self
-            .lock_manager
-            .as_ref()
-            .ok_or_else(|| DBError::NotImplemented("Lock manager not available".to_string()))?;
-
-        Ok(Arc::new(ExecutorContext::new(
-            txn,
-            self.transaction_manager.clone().unwrap(),
+    ) -> Result<Arc<ExecutionContext>, DBError> {
+        Ok(Arc::new(ExecutionContext::new(
+            self.buffer_pool_manager.clone(),
             self.catalog.clone(),
-            Arc::clone(buffer_pool),
-            Arc::clone(lock_manager),
+            Arc::new(TransactionContext::new(
+                txn,
+                self.transaction_factory.get_lock_manager(),
+                self.transaction_factory.get_transaction_manager(),
+            )),
         )))
     }
 
-    pub fn execute_sql_txn(
-        &mut self,
+    pub fn execute_sql(
+        &self,
         sql: &str,
+        isolation_level: IsolationLevel,
         writer: &mut impl ResultWriter,
-        txn: Arc<Transaction>,
-        check_options: Option<CheckOptions>,
     ) -> Result<bool, DBError> {
-        debug!(
-            "Starting SQL transaction execution for transaction {}",
-            txn.get_transaction_id()
-        );
+        debug!("Executing SQL with isolation level {:?}: {}", isolation_level, sql);
 
-        // Create execution context
-        let exec_ctx = Arc::new(RwLock::new(ExecutorContext::new(
-            txn.clone(),
-            self.transaction_manager.clone().unwrap(),
+        // Begin transaction through factory
+        let txn_ctx = self.transaction_factory.begin_transaction(isolation_level);
+        
+        // Create executor context with transaction
+        let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
+            self.buffer_pool_manager.clone(),
             self.catalog.clone(),
-            self.buffer_pool_manager.clone().unwrap(),
-            self.lock_manager.clone().unwrap(),
+            txn_ctx.clone(),
         )));
 
-        debug!("Created execution context");
-
-        // Configure check options if needed
-        if let Some(opts) = check_options {
-            debug!("Configuring check options");
-            let mut ctx_guard = exec_ctx.write();
-            ctx_guard.set_check_options(opts);
-            ctx_guard.init_check_options();
-            debug!("Check options configured");
-        }
-
-        // Execute the SQL statement
+        // Execute query
         let result = {
             let mut engine = self.execution_engine.lock();
             engine.execute_sql(sql, exec_ctx, writer)
         };
 
-        match &result {
-            Ok(_) => {
-                debug!("SQL execution completed successfully");
-            }
-            Err(e) => {
-                warn!("SQL execution failed: {:?}", e);
-                txn.set_tainted();
-            }
-        }
-
-        result
-    }
-
-    pub fn execute_sql(
-        &mut self,
-        sql: &str,
-        writer: &mut impl ResultWriter,
-        check_options: Option<CheckOptions>,
-    ) -> Result<bool, DBError> {
-        info!("Starting SQL execution: {}", sql);
-
-        // Create new transaction
-        let txn = {
-            let txn_manager = self.transaction_manager.as_ref().unwrap();
-            let mut txn_manager_guard = txn_manager.write();
-            debug!("Creating new transaction");
-            txn_manager_guard.begin(IsolationLevel::ReadUncommitted)
-        };
-        debug!("Created transaction {}", txn.get_transaction_id());
-
-        // Execute in transaction context
-        let result = self.execute_sql_txn(sql, writer, txn.clone(), check_options);
-
-        match &result {
-            Ok(_) => {
-                debug!("Committing transaction {}", txn.get_transaction_id());
-                let txn_manager = self.transaction_manager.as_ref().unwrap();
-                let mut txn_manager_guard = txn_manager.write();
-                if !txn_manager_guard.commit(txn.clone()) {
-                    warn!("Transaction commit failed");
-                    return Err(DBError::Transaction(
-                        "Failed to commit transaction".to_string(),
-                    ));
+        // Handle transaction completion
+        match result {
+            Ok(success) => {
+                if success {
+                    if self.transaction_factory.commit_transaction(txn_ctx.clone()) {
+                        Ok(true)
+                    } else {
+                        self.transaction_factory.abort_transaction(txn_ctx);
+                        Ok(false)
+                    }
+                } else {
+                    self.transaction_factory.abort_transaction(txn_ctx);
+                    Ok(false)
                 }
-                info!("Transaction committed successfully");
             }
             Err(e) => {
-                warn!(
-                    "Rolling back transaction {} due to error: {:?}",
-                    txn.get_transaction_id(),
-                    e
-                );
-                let txn_manager = self.transaction_manager.as_ref().unwrap();
-                let mut txn_manager_guard = txn_manager.write();
-                txn_manager_guard.abort(txn.clone());
-                info!("Transaction rolled back");
+                self.transaction_factory.abort_transaction(txn_ctx);
+                Err(e)
             }
         }
-
-        result
     }
 
-    pub fn handle_cmd_display_tables(&self, writer: &mut impl ResultWriter) -> Result<(), DBError> {
+    pub fn execute_transaction(
+        &self,
+        sql: &str,
+        txn_ctx: Arc<TransactionContext>,
+        writer: &mut impl ResultWriter,
+    ) -> Result<bool, DBError> {
+        let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
+            self.buffer_pool_manager.clone(),
+            self.catalog.clone(),
+            txn_ctx.clone(),
+        )));
+
+        let mut engine = self.execution_engine.lock();
+        engine.execute_sql(sql, exec_ctx, writer)
+    }
+
+    pub fn display_tables(&self, writer: &mut dyn ResultWriter) -> Result<(), DBError> {
         let catalog = self.catalog.read();
         let table_names = catalog.get_table_names();
 
-        writer.begin_table(false);
-        writer.begin_header();
-        writer.write_header_cell("oid");
-        writer.write_header_cell("name");
-        writer.write_header_cell("cols");
-        writer.end_header();
+        if table_names.is_empty() {
+            println!("No tables found");
+            return Ok(());
+        }
+
+        writer.write_schema_header(vec![
+            "Table ID".to_string(),
+            "Table Name".to_string(),
+            "Schema".to_string(),
+            "Rows".to_string(),
+        ]);
 
         for name in table_names {
-            writer.begin_row();
             if let Some(table_info) = catalog.get_table(&name) {
-                writer.write_cell(&table_info.get_table_oidt().to_string());
-                writer.write_cell(&table_info.get_table_name());
-                writer.write_cell(&table_info.get_table_schema().to_string());
+                let schema = table_info.get_table_schema();
+                let schema_str = schema.get_columns()
+                    .iter()
+                    .map(|col| format!("{}({:?})",
+                        col.get_name(), 
+                        col.get_type()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                writer.write_row(vec![
+                    Value::new(table_info.get_table_oidt() as i32),
+                    Value::new(table_info.get_table_name()),
+                    Value::new(format!("({})", schema_str)),
+                    Value::new(table_info.get_table_heap().get_num_tuples() as i32),
+                ]);
             }
-            writer.end_row();
         }
-        writer.end_table();
+
         Ok(())
     }
 
-    pub fn get_config(&self) -> &DBConfig {
-        &self.config
-    }
+    pub fn get_table_info(&self, table_name: &str) -> Result<String, DBError> {
+        let catalog = self.catalog.read();
+        let table_info = catalog.get_table(table_name).unwrap();
+        
+        let mut writer = CliResultWriter::new();
+        
+        writer.write_schema_header(vec![
+            "Column".to_string(),
+            "Type".to_string(),
+            // "Nullable".to_string()
+        ]);
 
-    pub fn get_buffer_pool_manager(&self) -> Option<&Arc<BufferPoolManager>> {
-        self.buffer_pool_manager.as_ref()
-    }
+        for column in table_info.get_table_schema().get_columns() {
+            writer.write_row(vec![
+                Value::new(column.get_name()),
+                Value::new(column.get_type()),
+                // Value::new(column.is_nullable()),
+            ]);
+        }
 
-    pub fn get_log_manager(&self) -> Option<&Arc<RwLock<LogManager>>> {
-        self.log_manager.as_ref()
-    }
-
-    pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
-        self.checkpoint_manager.as_ref()
-    }
-
-    pub fn get_lock_manager(&self) -> Option<&Arc<LockManager>> {
-        self.lock_manager.as_ref()
-    }
-
-    pub fn get_transaction_manager(&self) -> Option<&Arc<RwLock<TransactionManager>>> {
-        self.transaction_manager.as_ref()
-    }
-
-    pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
-        &self.catalog
+        Ok("Table info displayed".to_string())
     }
 
     // Private helper methods
@@ -332,5 +318,60 @@ impl DBInstance {
         } else {
             None
         })
+    }
+
+    // Add back the getter methods
+    pub fn get_config(&self) -> &DBConfig {
+        &self.config
+    }
+
+    pub fn get_buffer_pool_manager(&self) -> &Arc<BufferPoolManager> {
+        &self.buffer_pool_manager
+    }
+
+    pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
+        &self.catalog
+    }
+
+    pub fn get_transaction_factory(&self) -> &Arc<TransactionManagerFactory> {
+        &self.transaction_factory
+    }
+
+    pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
+        self.checkpoint_manager.as_ref()
+    }
+
+    pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
+        self.transaction_factory.begin_transaction(isolation_level)
+    }
+
+    pub fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
+        let txn_manager = self.transaction_factory.get_transaction_manager();
+        let mut txn_manager_guard = txn_manager.write();
+        
+        let txn = txn_manager_guard.get_transaction(&txn_id).ok_or_else(|| {
+            DBError::Transaction(format!("Transaction {} not found", txn_id))
+        })?;
+
+        if !txn_manager_guard.commit(txn) {
+            warn!("Transaction commit failed");
+            return Err(DBError::Transaction(
+                "Failed to commit transaction".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn abort_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
+        let txn_manager = self.transaction_factory.get_transaction_manager();
+        let mut txn_manager_guard = txn_manager.write();
+        
+        let txn = txn_manager_guard.get_transaction(&txn_id).ok_or_else(|| {
+            DBError::Transaction(format!("Transaction {} not found", txn_id))
+        })?;
+
+        txn_manager_guard.abort(txn);
+        Ok(())
     }
 }
