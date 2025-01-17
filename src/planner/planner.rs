@@ -10,7 +10,7 @@ use crate::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::execution::expressions::logic_expression::{LogicExpression, LogicType};
-use crate::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::execution::plans::abstract_plan::PlanNode;
 use crate::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::execution::plans::create_table_plan::CreateTablePlanNode;
@@ -198,7 +198,10 @@ impl QueryPlanner {
         Ok(format!("Query Plan:\n{}\n", plan.explain(0)))
     }
 
-    pub fn create_logical_plan_from_statement(&mut self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn create_logical_plan_from_statement(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<LogicalPlan>, String> {
         match stmt {
             Statement::Query(query) => self.plan_query_logical(query),
             Statement::Insert(stmt) => self.plan_insert_logical(stmt),
@@ -312,7 +315,13 @@ impl QueryPlanner {
         // Add filter if WHERE clause exists
         if let Some(where_clause) = &select.selection {
             let predicate = Arc::new(self.parse_expression(where_clause, &schema)?);
-            current_plan = LogicalPlan::filter(schema.clone(), table_name, table_oid, predicate, current_plan);
+            current_plan = LogicalPlan::filter(
+                schema.clone(),
+                table_name,
+                table_oid,
+                predicate,
+                current_plan,
+            );
         }
 
         // Handle aggregation if needed
@@ -745,8 +754,10 @@ impl QueryPlanner {
                                 }
                             },
                             FunctionArg::ExprNamed { .. } => {
-                                return Err("ExprNamed arguments not supported in aggregate functions"
-                                    .to_string());
+                                return Err(
+                                    "ExprNamed arguments not supported in aggregate functions"
+                                        .to_string(),
+                                );
                             }
                         }
                     }
@@ -774,25 +785,27 @@ impl QueryPlanner {
                 if let Expr::Function(func) = expr {
                     match func.name.to_string().to_uppercase().as_str() {
                         "COUNT" => {
-                            agg_exprs.push(Arc::new(Expression::Constant(ConstantExpression::new(
-                                Value::new(1),
-                                Column::new("count", TypeId::Integer),
-                                vec![],
-                            ))));
+                            agg_exprs.push(Arc::new(Expression::Constant(
+                                ConstantExpression::new(
+                                    Value::new(1),
+                                    Column::new("count", TypeId::Integer),
+                                    vec![],
+                                ),
+                            )));
                             agg_types.push(AggregationType::CountStar);
                         }
-                        "SUM" => {
-                            match &func.args {
-                                FunctionArguments::List(args) if !args.args.is_empty() => {
-                                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(arg)) = &args.args[0] {
-                                        let expr = self.parse_expression(arg, schema)?;
-                                        agg_exprs.push(Arc::new(expr));
-                                        agg_types.push(AggregationType::Sum);
-                                    }
+                        "SUM" => match &func.args {
+                            FunctionArguments::List(args) if !args.args.is_empty() => {
+                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(arg)) =
+                                    &args.args[0]
+                                {
+                                    let expr = self.parse_expression(arg, schema)?;
+                                    agg_exprs.push(Arc::new(expr));
+                                    agg_types.push(AggregationType::Sum);
                                 }
-                                _ => return Err("SUM requires exactly one argument".to_string()),
                             }
-                        }
+                            _ => return Err("SUM requires exactly one argument".to_string()),
+                        },
                         _ => return Err(format!("Unsupported aggregate function: {}", func.name)),
                     }
                 }
@@ -818,7 +831,12 @@ impl QueryPlanner {
                             let agg_type = match func.name.to_string().to_uppercase().as_str() {
                                 "COUNT" => AggregationType::CountStar,
                                 "SUM" => AggregationType::Sum,
-                                _ => return Err(format!("Unsupported aggregate function: {}", func.name)),
+                                _ => {
+                                    return Err(format!(
+                                        "Unsupported aggregate function: {}",
+                                        func.name
+                                    ))
+                                }
                             };
 
                             // Parse function arguments
@@ -839,14 +857,22 @@ impl QueryPlanner {
                                                         let col_idx = schema
                                                             .get_column_index(&ident.value)
                                                             .ok_or_else(|| {
-                                                                format!("Column {} not found", ident.value)
+                                                                format!(
+                                                                    "Column {} not found",
+                                                                    ident.value
+                                                                )
                                                             })?;
-                                                        Expression::ColumnRef(ColumnRefExpression::new(
-                                                            0,
-                                                            col_idx,
-                                                            schema.get_column(col_idx).unwrap().clone(),
-                                                            vec![],
-                                                        ))
+                                                        Expression::ColumnRef(
+                                                            ColumnRefExpression::new(
+                                                                0,
+                                                                col_idx,
+                                                                schema
+                                                                    .get_column(col_idx)
+                                                                    .unwrap()
+                                                                    .clone(),
+                                                                vec![],
+                                                            ),
+                                                        )
                                                     }
                                                     _ => self.parse_expression(expr, schema)?,
                                                 }
@@ -859,7 +885,10 @@ impl QueryPlanner {
                                                     vec![],
                                                 ))
                                             }
-                                            _ => return Err("Unsupported function argument type".to_string()),
+                                            _ => {
+                                                return Err("Unsupported function argument type"
+                                                    .to_string())
+                                            }
                                         }
                                     }
                                 }
@@ -884,80 +913,90 @@ impl QueryPlanner {
                         _ => expressions.push(self.parse_expression(expr, schema)?),
                     }
                 }
-                SelectItem::ExprWithAlias { expr, alias } => {
-                    match expr {
-                        Expr::Function(func) => {
-                            let agg_type = match func.name.to_string().to_uppercase().as_str() {
-                                "COUNT" => AggregationType::CountStar,
-                                "SUM" => AggregationType::Sum,
-                                _ => return Err(format!("Unsupported aggregate function: {}", func.name)),
-                            };
+                SelectItem::ExprWithAlias { expr, alias } => match expr {
+                    Expr::Function(func) => {
+                        let agg_type = match func.name.to_string().to_uppercase().as_str() {
+                            "COUNT" => AggregationType::CountStar,
+                            "SUM" => AggregationType::Sum,
+                            _ => {
+                                return Err(format!(
+                                    "Unsupported aggregate function: {}",
+                                    func.name
+                                ))
+                            }
+                        };
 
-                            let arg_expr = match &func.args {
-                                FunctionArguments::List(args) => {
-                                    if args.args.is_empty() {
-                                        Expression::Constant(ConstantExpression::new(
-                                            Value::new(1),
-                                            Column::new("const", TypeId::Integer),
-                                            vec![],
-                                        ))
-                                    } else {
-                                        match &args.args[0] {
-                                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                                match expr {
-                                                    Expr::Identifier(ident) => {
-                                                        let col_idx = schema
-                                                            .get_column_index(&ident.value)
-                                                            .ok_or_else(|| {
-                                                                format!("Column {} not found", ident.value)
-                                                            })?;
-                                                        Expression::ColumnRef(ColumnRefExpression::new(
-                                                            0,
-                                                            col_idx,
-                                                            schema.get_column(col_idx).unwrap().clone(),
-                                                            vec![],
-                                                        ))
-                                                    }
-                                                    _ => self.parse_expression(expr, schema)?,
-                                                }
-                                            }
-                                            _ => return Err("Unsupported function argument type".to_string()),
-                                        }
-                                    }
-                                }
-                                FunctionArguments::None => {
+                        let arg_expr = match &func.args {
+                            FunctionArguments::List(args) => {
+                                if args.args.is_empty() {
                                     Expression::Constant(ConstantExpression::new(
                                         Value::new(1),
                                         Column::new("const", TypeId::Integer),
                                         vec![],
                                     ))
+                                } else {
+                                    match &args.args[0] {
+                                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                            match expr {
+                                                Expr::Identifier(ident) => {
+                                                    let col_idx = schema
+                                                        .get_column_index(&ident.value)
+                                                        .ok_or_else(|| {
+                                                            format!(
+                                                                "Column {} not found",
+                                                                ident.value
+                                                            )
+                                                        })?;
+                                                    Expression::ColumnRef(ColumnRefExpression::new(
+                                                        0,
+                                                        col_idx,
+                                                        schema.get_column(col_idx).unwrap().clone(),
+                                                        vec![],
+                                                    ))
+                                                }
+                                                _ => self.parse_expression(expr, schema)?,
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(
+                                                "Unsupported function argument type".to_string()
+                                            )
+                                        }
+                                    }
                                 }
-                                FunctionArguments::Subquery(_) => {
-                                    return Err("Subquery arguments not supported".to_string())
-                                }
-                            };
-
-                            expressions.push(Expression::Aggregate(AggregateExpression::new(
-                                agg_type,
-                                Arc::new(arg_expr),
-                                vec![],
-                            )));
-                        }
-                        _ => {
-                            let expr = self.parse_expression(expr, schema)?;
-                            if let Expression::ColumnRef(col_ref) = expr {
-                                expressions.push(Expression::ColumnRef(ColumnRefExpression::new(
-                                    col_ref.get_column_index(),
-                                    col_ref.get_column_index(),
-                                    col_ref.get_return_type().with_name(&alias.value),
-                                    col_ref.get_children().clone(),
-                                )));
-                            } else {
-                                expressions.push(expr);
                             }
+                            FunctionArguments::None => {
+                                Expression::Constant(ConstantExpression::new(
+                                    Value::new(1),
+                                    Column::new("const", TypeId::Integer),
+                                    vec![],
+                                ))
+                            }
+                            FunctionArguments::Subquery(_) => {
+                                return Err("Subquery arguments not supported".to_string())
+                            }
+                        };
+
+                        expressions.push(Expression::Aggregate(AggregateExpression::new(
+                            agg_type,
+                            Arc::new(arg_expr),
+                            vec![],
+                        )));
+                    }
+                    _ => {
+                        let expr = self.parse_expression(expr, schema)?;
+                        if let Expression::ColumnRef(col_ref) = expr {
+                            expressions.push(Expression::ColumnRef(ColumnRefExpression::new(
+                                col_ref.get_column_index(),
+                                col_ref.get_column_index(),
+                                col_ref.get_return_type().with_name(&alias.value),
+                                col_ref.get_children().clone(),
+                            )));
+                        } else {
+                            expressions.push(expr);
                         }
                     }
-                }
+                },
                 SelectItem::Wildcard(_) => {
                     // Add all columns from the schema
                     for i in 0..schema.get_column_count() {
@@ -1261,31 +1300,58 @@ impl LogicalPlan {
         let mut result = String::new();
 
         match &self.plan_type {
-            LogicalPlanType::CreateTable { schema, table_name, if_not_exists } => {
+            LogicalPlanType::CreateTable {
+                schema,
+                table_name,
+                if_not_exists,
+            } => {
                 result.push_str(&format!("{}→ CreateTable: {}\n", indent_str, table_name));
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::CreateIndex { schema, table_name, index_name, key_attrs, if_not_exists } => {
-                result.push_str(&format!("{}→ CreateIndex: {} on {}\n", indent_str, index_name, table_name));
+            LogicalPlanType::CreateIndex {
+                schema,
+                table_name,
+                index_name,
+                key_attrs,
+                if_not_exists,
+            } => {
+                result.push_str(&format!(
+                    "{}→ CreateIndex: {} on {}\n",
+                    indent_str, index_name, table_name
+                ));
                 result.push_str(&format!("{}   Key Columns: {:?}\n", indent_str, key_attrs));
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::MockScan { table_name, schema, .. } => {
+            LogicalPlanType::MockScan {
+                table_name, schema, ..
+            } => {
                 result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::TableScan { table_name, schema, .. } => {
+            LogicalPlanType::TableScan {
+                table_name, schema, ..
+            } => {
                 result.push_str(&format!("{}→ TableScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::IndexScan { table_name, table_oid, index_name, index_oid, schema, predicate_keys } => {
-                result.push_str(&format!("{}→ IndexScan: {} using {}\n", indent_str, table_name, index_name));
+            LogicalPlanType::IndexScan {
+                table_name,
+                table_oid,
+                index_name,
+                index_oid,
+                schema,
+                predicate_keys,
+            } => {
+                result.push_str(&format!(
+                    "{}→ IndexScan: {} using {}\n",
+                    indent_str, table_name, index_name
+                ));
                 result.push_str(&format!("{}   Predicate Keys: [", indent_str));
                 for (i, key) in predicate_keys.iter().enumerate() {
                     if i > 0 {
@@ -1296,13 +1362,21 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Filter { schema, table_name, predicate, .. } => {
+            LogicalPlanType::Filter {
+                schema,
+                table_name,
+                predicate,
+                ..
+            } => {
                 result.push_str(&format!("{}→ Filter\n", indent_str));
                 result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Projection { expressions, schema } => {
+            LogicalPlanType::Projection {
+                expressions,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ Projection\n", indent_str));
                 result.push_str(&format!("{}   Expressions: [", indent_str));
                 for (i, expr) in expressions.iter().enumerate() {
@@ -1318,17 +1392,26 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Insert { table_name, schema, .. } => {
+            LogicalPlanType::Insert {
+                table_name, schema, ..
+            } => {
                 result.push_str(&format!("{}→ Insert\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Delete { table_name, schema, .. } => {
+            LogicalPlanType::Delete {
+                table_name, schema, ..
+            } => {
                 result.push_str(&format!("{}→ Delete\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Update { table_name, schema, update_expressions, .. } => {
+            LogicalPlanType::Update {
+                table_name,
+                schema,
+                update_expressions,
+                ..
+            } => {
                 result.push_str(&format!("{}→ Update\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Target Expressions: [", indent_str));
@@ -1345,7 +1428,11 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ Values: {} rows\n", indent_str, rows.len()));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+            LogicalPlanType::Aggregate {
+                group_by,
+                aggregates,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ Aggregate\n", indent_str));
                 if !group_by.is_empty() {
                     result.push_str(&format!("{}   Group By: [", indent_str));
@@ -1367,21 +1454,40 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::NestedLoopJoin { left_schema, right_schema, predicate, join_type } => {
+            LogicalPlanType::NestedLoopJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
                 result.push_str(&format!("{}→ NestedLoopJoin\n", indent_str));
                 result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
                 result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
-                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+                result.push_str(&format!(
+                    "{}   Right Schema: {}\n",
+                    indent_str, right_schema
+                ));
             }
-            LogicalPlanType::HashJoin { left_schema, right_schema, predicate, join_type } => {
+            LogicalPlanType::HashJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
                 result.push_str(&format!("{}→ HashJoin\n", indent_str));
                 result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
                 result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
-                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+                result.push_str(&format!(
+                    "{}   Right Schema: {}\n",
+                    indent_str, right_schema
+                ));
             }
-            LogicalPlanType::Sort { sort_expressions, schema } => {
+            LogicalPlanType::Sort {
+                sort_expressions,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ Sort\n", indent_str));
                 result.push_str(&format!("{}   Order By: [", indent_str));
                 for (i, expr) in sort_expressions.iter().enumerate() {
@@ -1393,7 +1499,11 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::TopN { k, sort_expressions, schema } => {
+            LogicalPlanType::TopN {
+                k,
+                sort_expressions,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ TopN: {}\n", indent_str, k));
                 result.push_str(&format!("{}   Order By: [", indent_str));
                 for (i, expr) in sort_expressions.iter().enumerate() {
@@ -1405,18 +1515,33 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::MockScan { table_name, schema, .. } => {
+            LogicalPlanType::MockScan {
+                table_name, schema, ..
+            } => {
                 result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, predicate, join_type } => {
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
                 result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
                 result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
                 result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
-                result.push_str(&format!("{}   Right Schema: {}\n", indent_str, right_schema));
+                result.push_str(&format!(
+                    "{}   Right Schema: {}\n",
+                    indent_str, right_schema
+                ));
             }
-            LogicalPlanType::TopNPerGroup { k, sort_expressions, groups, schema } => {
+            LogicalPlanType::TopNPerGroup {
+                k,
+                sort_expressions,
+                groups,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ TopNPerGroup: {}\n", indent_str, k));
                 result.push_str(&format!("{}   Order By: [", indent_str));
                 for (i, expr) in sort_expressions.iter().enumerate() {
@@ -1436,7 +1561,12 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Window { group_by, aggregates, partitions, schema } => {
+            LogicalPlanType::Window {
+                group_by,
+                aggregates,
+                partitions,
+                schema,
+            } => {
                 result.push_str(&format!("{}→ Window\n", indent_str));
                 if !group_by.is_empty() {
                     result.push_str(&format!("{}   Group By: [", indent_str));
@@ -1619,7 +1749,12 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn delete(table_name: String, schema: Schema, table_oid: u64, input: Box<LogicalPlan>) -> Box<Self> {
+    pub fn delete(
+        table_name: String,
+        schema: Schema,
+        table_oid: u64,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Delete {
                 table_name,
@@ -1778,7 +1913,7 @@ impl LogicalPlan {
                 Schema::new(combined_columns.to_vec())
             }
             LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
-            LogicalPlanType::Window { schema, .. } => schema.clone()
+            LogicalPlanType::Window { schema, .. } => schema.clone(),
         }
     }
 }
@@ -1826,7 +1961,7 @@ impl LogicalToPhysical for LogicalPlan {
                 index_name,
                 index_oid,
                 schema,
-                predicate_keys
+                predicate_keys,
             } => Ok(PlanNode::IndexScan(IndexScanNode::new(
                 schema.clone(),
                 table_name.to_string(),
@@ -1840,9 +1975,13 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
                 table_name,
-                predicate
+                predicate,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Filter(FilterNode::new(
                     schema.clone(),
                     *table_oid,
@@ -1852,8 +1991,15 @@ impl LogicalToPhysical for LogicalPlan {
                 )))
             }
 
-            LogicalPlanType::Projection { expressions, schema } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+            LogicalPlanType::Projection {
+                expressions,
+                schema,
+            } => {
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Projection(ProjectionNode::new(
                     schema.clone(),
                     expressions.clone(),
@@ -1866,7 +2012,11 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Insert(InsertNode::new(
                     schema.clone(),
                     *table_oid,
@@ -1881,7 +2031,11 @@ impl LogicalToPhysical for LogicalPlan {
                 schema,
                 table_oid,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Delete(DeleteNode::new(
                     schema.clone(),
                     table_name.clone(),
@@ -1896,7 +2050,11 @@ impl LogicalToPhysical for LogicalPlan {
                 table_oid,
                 update_expressions,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Update(UpdateNode::new(
                     schema.clone(),
                     table_name.clone(),
@@ -1906,11 +2064,12 @@ impl LogicalToPhysical for LogicalPlan {
                 )))
             }
 
-            LogicalPlanType::Values {
-                rows,
-                schema
-            } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+            LogicalPlanType::Values { rows, schema } => {
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Values(ValuesNode::new(
                     schema.clone(),
                     rows.clone(),
@@ -1923,22 +2082,52 @@ impl LogicalToPhysical for LogicalPlan {
                 aggregates,
                 schema,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan())
+                    .collect::<Result<Vec<PlanNode>, String>>()?;
+
+                // Create proper aggregate expressions
+                let agg_exprs = aggregates
+                    .iter()
+                    .map(|expr| {
+                        match expr.as_ref() {
+                            Expression::ColumnRef(col_ref) => {
+                                // For COUNT(*), create a CountStar aggregate
+                                if col_ref.get_return_type().get_name() == "*" {
+                                    Arc::new(Expression::Aggregate(AggregateExpression::new(
+                                        AggregationType::CountStar,
+                                        Arc::new(Expression::Constant(ConstantExpression::new(
+                                            Value::new(1),
+                                            Column::new("count", TypeId::BigInt),
+                                            vec![],
+                                        ))),
+                                        vec![],
+                                    )))
+                                } else {
+                                    // For other columns, wrap in appropriate aggregate
+                                    Arc::new(Expression::Aggregate(AggregateExpression::new(
+                                        AggregationType::Count,
+                                        expr.clone(),
+                                        vec![expr.clone()],
+                                    )))
+                                }
+                            }
+                            Expression::Aggregate(_) => expr.clone(),
+                            _ => Arc::new(Expression::Aggregate(AggregateExpression::new(
+                                AggregationType::Sum,
+                                expr.clone(),
+                                vec![expr.clone()],
+                            ))),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
-                    schema.clone(),
                     children,
                     group_by.clone(),
-                    aggregates.clone(),
-                    aggregates
-                        .iter()
-                        .map(|agg| {
-                            if let Expression::Aggregate(agg_expr) = agg.as_ref() {
-                                agg_expr.get_agg_type().clone()
-                            } else {
-                                AggregationType::Count // Default type if not an aggregate
-                            }
-                        })
-                        .collect(),
+                    agg_exprs,
                 )))
             }
 
@@ -2002,7 +2191,11 @@ impl LogicalToPhysical for LogicalPlan {
 
             LogicalPlanType::Limit { limit, schema } => {
                 let child = self.children[0].to_physical_plan()?;
-                Ok(PlanNode::Limit(LimitNode::new(*limit, schema.clone(), vec![child])))
+                Ok(PlanNode::Limit(LimitNode::new(
+                    *limit,
+                    schema.clone(),
+                    vec![child],
+                )))
             }
 
             LogicalPlanType::TopN {
@@ -2010,7 +2203,11 @@ impl LogicalToPhysical for LogicalPlan {
                 sort_expressions,
                 schema,
             } => {
-                let children = self.children.iter().map(|child| child.to_physical_plan().unwrap()).collect::<Vec<PlanNode>>();
+                let children = self
+                    .children
+                    .iter()
+                    .map(|child| child.to_physical_plan().unwrap())
+                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::TopN(TopNNode::new(
                     schema.clone(),
                     sort_expressions.clone(),
@@ -2051,8 +2248,15 @@ impl LogicalToPhysical for LogicalPlan {
                     vec![left, right],
                 )))
             }
-            LogicalPlanType::TopNPerGroup { k, sort_expressions, groups, schema } => {
-                let children = self.children.iter()
+            LogicalPlanType::TopNPerGroup {
+                k,
+                sort_expressions,
+                groups,
+                schema,
+            } => {
+                let children = self
+                    .children
+                    .iter()
                     .map(|child| child.to_physical_plan())
                     .collect::<Result<Vec<PlanNode>, String>>()?;
 
@@ -2064,13 +2268,21 @@ impl LogicalToPhysical for LogicalPlan {
                     children,
                 )))
             }
-            LogicalPlanType::Window { group_by, aggregates, partitions, schema } => {
-                let children = self.children.iter()
+            LogicalPlanType::Window {
+                group_by,
+                aggregates,
+                partitions,
+                schema,
+            } => {
+                let children = self
+                    .children
+                    .iter()
                     .map(|child| child.to_physical_plan())
                     .collect::<Result<Vec<PlanNode>, String>>()?;
 
                 // Convert the logical window expressions into WindowFunction structs
-                let window_functions = aggregates.iter()
+                let window_functions = aggregates
+                    .iter()
                     .enumerate()
                     .map(|(i, agg_expr)| {
                         // Determine the window function type based on the aggregate expression
@@ -2120,7 +2332,9 @@ impl LogicalToPhysical for LogicalPlan {
 }
 
 /// Helper function to extract join key expressions from a join predicate
-fn extract_join_keys(predicate: &Arc<Expression>) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+fn extract_join_keys(
+    predicate: &Arc<Expression>,
+) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
     let mut left_keys = Vec::new();
     let mut right_keys = Vec::new();
 
@@ -2167,6 +2381,7 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
+    use crate::execution::plans::abstract_plan::AbstractPlanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -2365,7 +2580,7 @@ mod tests {
                     schema,
                     table_oid,
                     table_name,
-                    predicate
+                    predicate,
                 } => match predicate.as_ref() {
                     Expression::Comparison(comp) => {
                         assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);

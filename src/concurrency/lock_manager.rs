@@ -1,3 +1,4 @@
+use log::{debug, error, info, warn};
 use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
@@ -12,7 +13,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{fmt, thread};
-use tracing::{debug, error, info, warn};
 
 /// [LOCK_NOTE]
 ///
@@ -255,10 +255,7 @@ impl LockManager {
                 // Access the lock manager through the Arc<Mutex>
                 let lm = lock_manager_clone.lock();
                 if lm.has_cycle(&mut txn_id) {
-                    warn!(
-                        abort_txn = txn_id,
-                        "Deadlock detected, aborting transaction"
-                    );
+                    warn!("Deadlock detected, aborting transaction: {}", abort_txn = txn_id,);
 
                     let txn_mgr_guard = txn_mgr.write();
                     if let Some(txn) = txn_mgr_guard.get_transaction(&txn_id) {
@@ -340,18 +337,19 @@ impl LockManager {
         oid: TableOidT,
     ) -> Result<bool, LockError> {
         info!(
+            "Attempting to acquire table lock: {}, {}, {}",
             txn_id = txn.get_transaction_id(),
             table_oid = oid,
-            lock_mode = %lock_mode,
-            "Attempting to acquire table lock"
+            lock_mode = lock_mode,
         );
 
         // Validate lock request
         if let Err(e) = self.validate_lock_request(&txn, lock_mode) {
             error!(
-                error = %e,
+                "Lock request validation failed: {} {}",
+                error = e,
                 txn_id = txn.get_transaction_id(),
-                "Lock request validation failed"
+
             );
             return Err(e);
         }
@@ -546,7 +544,7 @@ impl LockManager {
     /// - `t1`: Transaction waiting for a lock.
     /// - `t2`: Transaction being waited for.
     pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
-        info!(txn_from = t1, txn_to = t2, "Adding edge to waits-for graph");
+        info!("Adding edge to waits-for graph: {} {}", txn_from = t1, txn_to = t2);
 
         let mut waits_for = self.waits_for.lock();
         waits_for.entry(t1).or_insert_with(Vec::new).push(t2);
@@ -562,9 +560,10 @@ impl LockManager {
     /// - `t2`: Transaction being waited for.
     pub fn remove_edge(&self, t1: TxnId, t2: TxnId) {
         info!(
+            "Removing edge from waits-for graph: {} {}",
             txn_from = t1,
             txn_to = t2,
-            "Removing edge from waits-for graph"
+
         );
 
         let mut waits_for = self.waits_for.lock();
@@ -632,8 +631,7 @@ impl LockManager {
 
             if self.has_cycle(&mut txn_id) {
                 warn!(
-                    abort_txn = txn_id,
-                    "Deadlock detected, aborting transaction"
+                    "Deadlock detected, aborting transaction: {}", abort_txn = txn_id,
                 );
 
                 // Using parking_lot Mutex
@@ -1269,11 +1267,11 @@ impl LockManager {
             .collect();
 
         debug!(
-            resource = resource,
-            granted = ?granted,
-            waiting = ?waiting,
-            upgrading = queue.upgrading,
-            "Lock queue state"
+            "Lock queue state: {} {} {} {}",
+            resource,
+            granted.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+            waiting.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+            queue.upgrading,
         );
     }
 
@@ -1285,7 +1283,7 @@ impl LockManager {
             .flat_map(|(&t1, t2s)| t2s.iter().map(move |&t2| format!("{} -> {}", t1, t2)))
             .collect();
 
-        debug!(edges = ?edges, "Waits-for graph state");
+        debug!("Waits-for graph state: {}", edges.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
     }
 
     fn grant_lock(&self, txn_id: TxnId, oid: TableOidT, rid: Option<RID>) {

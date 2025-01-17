@@ -209,6 +209,9 @@ pub enum DBError {
 
     #[error("Optimize error: {0}")]
     OptimizeError(String),
+
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl Error for PageError {}
