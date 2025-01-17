@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::Add;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
@@ -344,14 +343,6 @@ impl Hash for Value {
 }
 
 impl Eq for Value {}
-
-impl Add for Value {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        self.add(rhs)
-    }
-}
 
 #[cfg(test)]
 mod unit_tests {

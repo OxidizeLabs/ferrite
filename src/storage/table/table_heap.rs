@@ -472,7 +472,7 @@ impl TableHeap {
     }
 
     /// Helper method to get the total number of tuples
-    fn get_num_tuples(&self) -> usize {
+    pub fn get_num_tuples(&self) -> usize {
         let mut count = 0;
         let mut current_page_id = self.first_page_id;
         while current_page_id != INVALID_PAGE_ID {
