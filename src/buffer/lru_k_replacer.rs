@@ -31,6 +31,7 @@ pub struct Frame {
 /// An LRU-K page replacement policy.
 ///
 /// This replacer evicts the frame whose K-th most recent access is furthest in the past.
+#[derive(Debug)]
 pub struct LRUKReplacer {
     /// The store of frames managed by this replacer.
     frame_store: Arc<Mutex<HashMap<FrameId, Frame>>>,

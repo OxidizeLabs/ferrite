@@ -2,6 +2,7 @@ use crate::common::config::Timestamp;
 use std::collections::HashMap;
 
 /// Tracks all read timestamps.
+#[derive(Debug)]
 pub struct Watermark {
     commit_ts: Timestamp,
     watermark: Timestamp,

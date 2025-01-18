@@ -1,64 +1,60 @@
 use prettytable::{Cell, Row, Table, format};
 use colored::Colorize;
 use crate::types_db::value::Value;
+use std::sync::{Arc, Mutex};
 
 /// Trait for writing query results in a tabular format
-pub trait ResultWriter {
+pub trait ResultWriter: Send + Sync {
     fn write_schema_header(&mut self, headers: Vec<String>);
     fn write_row(&mut self, values: Vec<Value>);
     fn write_message(&mut self, message: &str);
 }
 
+#[derive(Default)]
 pub struct CliResultWriter {
-    table: Option<Table>,
-    headers: Vec<String>,
-}
-
-impl Default for CliResultWriter {
-    fn default() -> Self {
-        Self::new()
-    }
+    table: Arc<Mutex<Option<Table>>>,
+    headers: Arc<Mutex<Vec<String>>>,
 }
 
 impl CliResultWriter {
     pub fn new() -> Self {
         Self {
-            table: None,
-            headers: Vec::new(),
+            table: Arc::new(Mutex::new(None)),
+            headers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     fn ensure_table(&mut self) {
-        if self.table.is_none() {
+        if self.table.lock().unwrap().is_none() {
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_BOX_CHARS);
             
             // Add headers if they exist
-            if !self.headers.is_empty() {
+            if !self.headers.lock().unwrap().is_empty() {
                 table.set_titles(Row::new(
-                    self.headers
+                    self.headers.lock().unwrap()
                         .iter()
                         .map(|h| Cell::new(&h.bold().to_string()))
                         .collect()
                 ));
             }
             
-            self.table = Some(table);
+            *self.table.lock().unwrap() = Some(table);
         }
     }
 }
 
 impl ResultWriter for CliResultWriter {
     fn write_schema_header(&mut self, headers: Vec<String>) {
-        self.headers = headers;
-        self.table = None; // Reset table to create new one with headers
+        *self.headers.lock().unwrap() = headers;
+        *self.table.lock().unwrap() = None; // Reset table to create new one with headers
         self.ensure_table();
     }
 
     fn write_row(&mut self, values: Vec<Value>) {
         self.ensure_table();
         
-        if let Some(table) = &mut self.table {
+        if let Some(table) = self.table.lock().unwrap().as_mut() {
             let row = Row::new(
                 values
                     .into_iter()
@@ -71,7 +67,7 @@ impl ResultWriter for CliResultWriter {
 
     fn write_message(&mut self, message: &str) {
         // Flush any existing table
-        if let Some(table) = self.table.take() {
+        if let Some(table) = self.table.lock().unwrap().take() {
             table.printstd();
             println!(); // Add spacing
         }
@@ -83,7 +79,7 @@ impl ResultWriter for CliResultWriter {
 impl Drop for CliResultWriter {
     fn drop(&mut self) {
         // Print any remaining table
-        if let Some(table) = self.table.take() {
+        if let Some(table) = self.table.lock().unwrap().take() {
             table.printstd();
             println!(); // Add spacing
         }

@@ -363,10 +363,57 @@ impl DBInstance {
         let mut sessions = self.client_sessions.lock();
         let session = sessions
             .get_mut(&client_id)
-            .ok_or_else(|| DBError::Other(format!("No session found for client {}", client_id)))?;
+            .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
 
         match query {
-            DatabaseRequest::Query(sql) => self.handle_sql_query(sql, session).await,
+            DatabaseRequest::Query(sql) => {
+                let mut writer = NetworkResultWriter::new();
+                
+                // Create transaction context
+                let txn_ctx = if let Some(txn) = &session.current_transaction {
+                    txn.clone()
+                } else {
+                    self.transaction_factory.begin_transaction(session.isolation_level)
+                };
+
+                // Create execution context
+                let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
+                    self.buffer_pool_manager.clone(),
+                    self.catalog.clone(),
+                    txn_ctx.clone(),
+                )));
+
+                // Execute query
+                let result = self.execution_engine.lock().execute_sql(&sql, exec_ctx, &mut writer);
+
+                // Handle result
+                match result {
+                    Ok(success) => {
+                        if success {
+                            if session.current_transaction.is_none() {
+                                // Auto-commit if not in transaction
+                                if !self.transaction_factory.commit_transaction(txn_ctx.clone()) {
+                                    self.transaction_factory.abort_transaction(txn_ctx);
+                                    return Err(DBError::Execution("Failed to commit transaction".to_string()));
+                                }
+                            }
+                            debug!("Query executed successfully");
+                            Ok(DatabaseResponse::Results(writer.into_results()))
+                        } else {
+                            if session.current_transaction.is_none() {
+                                self.transaction_factory.abort_transaction(txn_ctx);
+                            }
+                            Err(DBError::Execution("Query execution failed".to_string()))
+                        }
+                    }
+                    Err(e) => {
+                        if session.current_transaction.is_none() {
+                            self.transaction_factory.abort_transaction(txn_ctx);
+                        }
+                        Err(e)
+                    }
+                }
+            }
             DatabaseRequest::BeginTransaction { isolation_level } => {
                 self.handle_begin_transaction(session, isolation_level)
             }
@@ -597,6 +644,7 @@ impl DBInstance {
                 Ok(DatabaseResponse::Results(QueryResults {
                     column_names: vec!["statement_id".to_string()],
                     rows: vec![vec![Value::new(stmt_id as i32)]],
+                    messages: vec![],
                 }))
             }
             Err(e) => {
@@ -761,6 +809,7 @@ impl DBInstance {
 struct NetworkResultWriter {
     column_names: Vec<String>,
     rows: Vec<Vec<Value>>,
+    messages: Vec<String>,
 }
 
 impl NetworkResultWriter {
@@ -768,6 +817,7 @@ impl NetworkResultWriter {
         Self {
             column_names: Vec::new(),
             rows: Vec::new(),
+            messages: Vec::new(),
         }
     }
 
@@ -775,6 +825,7 @@ impl NetworkResultWriter {
         QueryResults {
             column_names: self.column_names,
             rows: self.rows,
+            messages: self.messages,
         }
     }
 }
@@ -789,12 +840,6 @@ impl ResultWriter for NetworkResultWriter {
     }
 
     fn write_message(&mut self, message: &str) {
-        todo!()
-    }
-}
-
-impl From<Box<dyn std::error::Error>> for DBError {
-    fn from(error: Box<dyn std::error::Error>) -> Self {
-        DBError::Other(error.to_string())
+        self.messages.push(message.to_string());
     }
 }

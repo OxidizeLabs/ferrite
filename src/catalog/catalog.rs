@@ -15,6 +15,7 @@ use std::sync::Arc;
 /// The Catalog is a non-persistent catalog that is designed for
 /// use by executors within the DBMS execution engine. It handles
 /// table creation, table lookup, index creation, and index lookup.
+#[derive(Debug)]
 pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
     tables: HashMap<TableOidT, TableInfo>,

@@ -17,7 +17,7 @@ impl CLI {
     pub fn new() -> Result<Self, DBError> {
         let config = DBConfig::default();
         let db = DBInstance::new(config)?;
-        let rl = DefaultEditor::new().map_err(|e| DBError::Other(e.to_string()))?;
+        let rl = DefaultEditor::new().map_err(|e| DBError::Client(e.to_string()))?;
 
         Ok(Self {
             db,
@@ -119,7 +119,7 @@ impl CLI {
 
     fn commit_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            if self.db.transaction_factory.commit_transaction(txn_ctx) {
+            if self.db.get_transaction_factory().commit_transaction(txn_ctx) {
                 println!("Transaction committed.");
             } else {
                 println!("Transaction commit failed.");
@@ -132,7 +132,7 @@ impl CLI {
 
     fn rollback_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.transaction_factory.abort_transaction(txn_ctx);
+            self.db.get_transaction_factory().abort_transaction(txn_ctx);
             println!("Transaction rolled back.");
         } else {
             println!("No transaction in progress.");
@@ -142,7 +142,7 @@ impl CLI {
 
     fn cleanup_transaction(&mut self) {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.transaction_factory.abort_transaction(txn_ctx);
+            self.db.get_transaction_factory().abort_transaction(txn_ctx);
             println!("Active transaction rolled back.");
         }
     }

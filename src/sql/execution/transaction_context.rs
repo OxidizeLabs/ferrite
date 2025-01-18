@@ -7,6 +7,7 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct TransactionContext {
     transaction: Arc<Transaction>,
     lock_manager: Arc<LockManager>,

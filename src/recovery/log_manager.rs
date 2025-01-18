@@ -9,6 +9,7 @@ use std::thread;
 
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
+#[derive(Debug)]
 pub struct LogManager {
     next_lsn: AtomicU64,
     persistent_lsn: AtomicU64,
