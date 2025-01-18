@@ -8,6 +8,7 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
+use serde::{Deserialize, Serialize};
 
 /// Represents a link to a previous version of this tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,16 +53,34 @@ pub enum TransactionState {
 }
 
 /// Transaction isolation level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IsolationLevel {
     ReadUncommitted,
-    SnapshotIsolation,
-    Serializable,
-    RepeatableRead,
     ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+impl Default for IsolationLevel {
+    fn default() -> Self {
+        IsolationLevel::ReadCommitted
+    }
+}
+
+impl IsolationLevel {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "read uncommitted" => Some(IsolationLevel::ReadUncommitted),
+            "read committed" => Some(IsolationLevel::ReadCommitted),
+            "repeatable read" => Some(IsolationLevel::RepeatableRead),
+            "serializable" => Some(IsolationLevel::Serializable),
+            _ => None,
+        }
+    }
 }
 
 /// Represents a transaction.
+#[derive(Debug)]
 pub struct Transaction {
     // Immutable fields
     txn_id: TxnId,
@@ -272,10 +291,9 @@ impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             IsolationLevel::ReadUncommitted => "READ_UNCOMMITTED",
-            IsolationLevel::SnapshotIsolation => "SNAPSHOT_ISOLATION",
-            IsolationLevel::Serializable => "SERIALIZABLE",
+            IsolationLevel::ReadCommitted => "READ_COMMITTED",
             IsolationLevel::RepeatableRead => "REPEATABLE_READ",
-            IsolationLevel::ReadCommitted => "READ_commit_isolation",
+            IsolationLevel::Serializable => "SERIALIZABLE",
         };
         write!(f, "{}", name)
     }
@@ -503,15 +521,15 @@ mod tests {
         assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
         assert_eq!(
             IsolationLevel::ReadCommitted.to_string(),
-            "READ_commit_isolation"
+            "READ_COMMITTED"
         );
         assert_eq!(
             IsolationLevel::RepeatableRead.to_string(),
             "REPEATABLE_READ"
         );
         assert_eq!(
-            IsolationLevel::SnapshotIsolation.to_string(),
-            "SNAPSHOT_ISOLATION"
+            IsolationLevel::Serializable.to_string(),
+            "SERIALIZABLE"
         );
     }
 

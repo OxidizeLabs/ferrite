@@ -25,6 +25,7 @@ pub enum DatabaseResponse {
 pub struct QueryResults {
     pub column_names: Vec<String>,
     pub rows: Vec<Vec<Value>>,
+    pub messages: Vec<String>,
 }
 
 impl QueryResults {
@@ -32,6 +33,7 @@ impl QueryResults {
         Self {
             column_names: Vec::new(),
             rows: Vec::new(),
+            messages: Vec::new(),
         }
     }
 
@@ -39,6 +41,7 @@ impl QueryResults {
         Self {
             column_names,
             rows,
+            messages: Vec::new(),
         }
     }
 }

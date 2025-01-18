@@ -4,7 +4,7 @@ use chrono::Utc;
 use log::{debug, error, info, trace, warn};
 use mockall::automock;
 use spin::{Mutex, RwLock};
-use std::fs;
+use std::{fmt, fs};
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -323,6 +323,15 @@ impl DiskIO for FileDiskManager {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl fmt::Debug for FileDiskManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FileDiskManager")
+            .field("num_flushes", &self.num_flushes.load(Ordering::SeqCst))
+            // Skip db_file, log_file, and flush_log_f as they don't implement Debug
+            .finish_non_exhaustive()
     }
 }
 

@@ -121,6 +121,7 @@ pub enum LockMode {
 /// Structure to hold a lock request.
 /// This could be a lock request on a table OR a row.
 /// For table lock requests, the `rid` attribute would be unused.
+#[derive(Debug)]
 pub struct LockRequest {
     txn_id: TxnId,
     lock_mode: LockMode,
@@ -130,6 +131,7 @@ pub struct LockRequest {
 }
 
 /// Structure to hold lock requests for the same resource (table or row).
+#[derive(Debug)]
 pub struct LockRequestQueue {
     request_queue: VecDeque<Arc<Mutex<LockRequest>>>,
     cv: Arc<Condvar>,
@@ -138,6 +140,7 @@ pub struct LockRequestQueue {
 }
 
 /// LockManager handles transactions asking for locks on records.
+#[derive(Debug)]
 pub struct LockManager {
     transaction_manager: Arc<RwLock<TransactionManager>>,
     table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
@@ -148,7 +151,7 @@ pub struct LockManager {
     waits_for: Mutex<HashMap<TxnId, Vec<TxnId>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TxnLockState {
     table_locks: HashSet<TableOidT>,
     row_locks: HashSet<(TableOidT, RID)>,

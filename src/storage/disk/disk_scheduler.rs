@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::{fs, thread};
 
 // Define DiskRequest struct
+#[derive(Debug)]
 pub struct DiskRequest {
     is_write: bool,
     data: Arc<RwLock<[u8; 4096]>>,
@@ -19,6 +20,7 @@ pub struct DiskRequest {
 }
 
 // Define DiskScheduler struct
+#[derive(Debug)]
 pub struct DiskScheduler {
     disk_manager: Arc<FileDiskManager>,
     request_queue: Arc<RwLock<VecDeque<DiskRequest>>>,

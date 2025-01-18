@@ -35,6 +35,7 @@ pub enum NewPageType {
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
+#[derive(Debug)]
 pub struct BufferPoolManager {
     pool_size: usize,
     next_page_id: AtomicU64,

@@ -18,6 +18,9 @@ use parking_lot::{Mutex, RawRwLock, RwLock};
 use sqlparser::ast::Statement::{CreateIndex, CreateTable, Insert};
 use std::sync::Arc;
 use crate::sql::execution::transaction_context::TransactionContext;
+use crate::types_db::type_id::TypeId;
+use sqlparser::parser::Parser;
+use sqlparser::dialect::GenericDialect;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -180,7 +183,7 @@ impl ExecutionEngine {
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
         debug!("Creating executor for plan: {}", plan);
         plan.create_executor(context)
-            .map_err(DBError::ExecutorError)
+            .map_err(DBError::Execution)
     }
 
     /// Create a logical plan from SQL
@@ -229,5 +232,36 @@ impl ExecutionEngine {
             )
             .with_tuples(mock_tuples),
         )
+    }
+
+    /// Prepare a SQL statement and validate syntax
+    /// Returns empty parameter types for now since we don't support parameters yet
+    pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
+        // Parse SQL to validate syntax
+        let dialect = GenericDialect {};
+        let ast = Parser::parse_sql(&dialect, sql)
+            .map_err(|e| DBError::SqlError(format!("Parse error: {}", e)))?;
+
+        if ast.len() != 1 {
+            return Err(DBError::SqlError("Expected single statement".to_string()));
+        }
+
+        // Create logical plan to validate semantics
+        let _logical_plan = self.create_logical_plan(sql)?;
+        
+        // For now, return empty parameter types since we don't support parameters yet
+        Ok(Vec::new())
+    }
+
+    /// Execute a prepared statement (currently same as regular execute)
+    pub fn execute_prepared_statement(
+        &mut self,
+        sql: &str,
+        _params: Vec<Value>,
+        context: Arc<RwLock<ExecutionContext>>,
+        writer: &mut impl ResultWriter,
+    ) -> Result<bool, DBError> {
+        // For now, just execute as regular SQL since we don't support parameters
+        self.execute_sql(sql, context, writer)
     }
 }

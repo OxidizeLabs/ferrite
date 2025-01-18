@@ -4,6 +4,10 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
+use std::error::Error as StdError;
+use std::io;
+use sqlparser::parser::ParserError;
+use serde_json;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum LockError {
@@ -175,10 +179,10 @@ pub enum ArithmeticExpressionError {
 #[derive(Debug, Error)]
 pub enum DBError {
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
-    #[error("Lock acquisition failed")]
-    LockError,
+    #[error("Lock error: {0}")]
+    LockError(String),
 
     #[error("Transaction error: {0}")]
     Transaction(String),
@@ -204,14 +208,14 @@ pub enum DBError {
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("Executor error: {0}")]
-    ExecutorError(String),
-
     #[error("Optimize error: {0}")]
     OptimizeError(String),
 
-    #[error("Other error: {0}")]
-    Other(String),
+    #[error("Client error: {0}")]
+    Client(String),
+
+    #[error("SqlError error: {0}")]
+    SqlError(String),
 }
 
 impl Error for PageError {}
@@ -300,5 +304,97 @@ impl Display for FlushError {
             FlushError::PageNotFound => write!(f, "Page not found"),
             FlushError::PageNotInTable => write!(f, "Page not in table"),
         }
+    }
+}
+
+impl From<Box<dyn StdError>> for DBError {
+    fn from(error: Box<dyn StdError>) -> Self {
+        DBError::Client(error.to_string())
+    }
+}
+
+impl From<io::Error> for DBError {
+    fn from(error: io::Error) -> Self {
+        DBError::Io(error.to_string())
+    }
+}
+
+impl From<ParserError> for DBError {
+    fn from(error: ParserError) -> Self {
+        DBError::SqlError(error.to_string())
+    }
+}
+
+impl From<serde_json::Error> for DBError {
+    fn from(error: serde_json::Error) -> Self {
+        DBError::Internal(format!("JSON error: {}", error))
+    }
+}
+
+impl From<String> for DBError {
+    fn from(error: String) -> Self {
+        DBError::Client(error)
+    }
+}
+
+impl From<&str> for DBError {
+    fn from(error: &str) -> Self {
+        DBError::Client(error.to_string())
+    }
+}
+
+impl From<ExpressionError> for DBError {
+    fn from(error: ExpressionError) -> Self {
+        DBError::Execution(error.to_string())
+    }
+}
+
+impl From<TupleError> for DBError {
+    fn from(error: TupleError) -> Self {
+        DBError::Execution(error.to_string())
+    }
+}
+
+impl From<PageError> for DBError {
+    fn from(error: PageError) -> Self {
+        DBError::Internal(error.to_string())
+    }
+}
+
+impl From<FlushError> for DBError {
+    fn from(error: FlushError) -> Self {
+        match error {
+            _ => DBError::Internal(error.to_string())
+        }
+    }
+}
+
+impl From<DeletePageError> for DBError {
+    fn from(error: DeletePageError) -> Self {
+        DBError::Internal(error.to_string())
+    }
+}
+
+impl From<KeyConversionError> for DBError {
+    fn from(error: KeyConversionError) -> Self {
+        DBError::Internal(error.to_string())
+    }
+}
+
+impl From<ComparisonError> for DBError {
+    fn from(error: ComparisonError) -> Self {
+        DBError::Execution(error.to_string())
+    }
+}
+
+impl From<ArithmeticExpressionError> for DBError {
+    fn from(error: ArithmeticExpressionError) -> Self {
+        DBError::Execution(error.to_string())
+    }
+}
+
+impl From<ArrayExpressionError> for DBError {
+    fn from(error: ArrayExpressionError) -> Self {
+        DBError::Execution(error.to_string())
     }
 }

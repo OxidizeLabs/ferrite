@@ -15,11 +15,13 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct PageVersionInfo {
     // Stores previous version info for all slots
     prev_link: RwLock<HashMap<RID, UndoLink>>,
 }
 
+#[derive(Debug)]
 pub struct TransactionManager {
     next_txn_id: AtomicU64,
     txn_map: RwLock<HashMap<TxnId, Arc<Transaction>>>,
