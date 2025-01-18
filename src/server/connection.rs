@@ -1,8 +1,8 @@
-use std::error::Error as StdError;
 use crate::common::db_instance::DBInstance;
-use crate::server::{DatabaseRequest, DatabaseResponse};
 use crate::common::exception::DBError;
-use log::{error, info, warn, debug};
+use crate::server::{DatabaseRequest, DatabaseResponse};
+use log::{debug, error, info, warn};
+use std::error::Error as StdError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -19,7 +19,7 @@ fn format_log(client_id: u64, category: &str, message: &str) -> String {
 fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), severity: &str) {
     // Log main error with category
     let base_msg = format_log(client_id, context, &error.to_string());
-    
+
     match severity {
         "ERROR" => error!("{}", base_msg),
         "WARN" => warn!("{}", base_msg),
@@ -51,10 +51,10 @@ fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), se
     let mut source = error.source();
     let mut depth = 0;
     while let Some(err) = source {
-        debug!("{}", format_log(client_id, 
-            &format!("Cause {}", depth), 
-            &err.to_string()
-        ));
+        debug!(
+            "{}",
+            format_log(client_id, &format!("Cause {}", depth), &err.to_string())
+        );
         source = err.source();
         depth += 1;
     }
@@ -62,9 +62,12 @@ fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), se
 
 pub async fn handle_connection(mut stream: TcpStream, db: Arc<DBInstance>) {
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::SeqCst);
-    
+
     db.create_client_session(client_id);
-    info!("{}", format_log(client_id, "Connection", "New connection established"));
+    info!(
+        "{}",
+        format_log(client_id, "Connection", "New connection established")
+    );
 
     let result = handle_client_connection(&mut stream, &db, client_id).await;
     if let Err(e) = &result {
@@ -72,7 +75,10 @@ pub async fn handle_connection(mut stream: TcpStream, db: Arc<DBInstance>) {
     }
 
     db.remove_client_session(client_id);
-    info!("{}", format_log(client_id, "Connection", "Connection closed"));
+    info!(
+        "{}",
+        format_log(client_id, "Connection", "Connection closed")
+    );
 }
 
 async fn handle_client_connection(
@@ -84,30 +90,34 @@ async fn handle_client_connection(
         let mut buffer = [0; 1024];
         match stream.read(&mut buffer).await {
             Ok(0) => {
-                info!("{}", format_log(client_id, "Connection", "Client disconnected"));
+                info!(
+                    "{}",
+                    format_log(client_id, "Connection", "Client disconnected")
+                );
                 break;
             }
-            Ok(n) => {
-                match handle_client_request(&buffer[..n], db, client_id).await {
-                    Ok(response) => {
-                        debug!("{}", format_log(client_id, "Query", "Processing successful"));
-                        if let Err(e) = send_response(stream, response).await {
-                            log_error(client_id, "Response", &*e, "ERROR");
-                            return Err(e);
-                        }
-                    }
-                    Err(e) => {
-                        log_error(client_id, "Query", &*e, "ERROR");
-                        let error_msg = format_client_error(&*e);
-                        let error_response = DatabaseResponse::Error(error_msg);
-                        
-                        if let Err(e) = send_response(stream, error_response).await {
-                            log_error(client_id, "Response", &*e, "ERROR");
-                            return Err(e);
-                        }
+            Ok(n) => match handle_client_request(&buffer[..n], db, client_id).await {
+                Ok(response) => {
+                    debug!(
+                        "{}",
+                        format_log(client_id, "Query", "Processing successful")
+                    );
+                    if let Err(e) = send_response(stream, response).await {
+                        log_error(client_id, "Response", &*e, "ERROR");
+                        return Err(e);
                     }
                 }
-            }
+                Err(e) => {
+                    log_error(client_id, "Query", &*e, "ERROR");
+                    let error_msg = format_client_error(&*e);
+                    let error_response = DatabaseResponse::Error(error_msg);
+
+                    if let Err(e) = send_response(stream, error_response).await {
+                        log_error(client_id, "Response", &*e, "ERROR");
+                        return Err(e);
+                    }
+                }
+            },
             Err(e) => {
                 log_error(client_id, "Connection", &e, "ERROR");
                 return Err(Box::new(e));
@@ -133,7 +143,7 @@ fn format_client_error(error: &(dyn StdError + 'static)) -> String {
             DBError::Internal(msg) => format!("Internal Error: {}", msg),
             DBError::OptimizeError(msg) => format!("Optimization Error: {}", msg),
             DBError::SqlError(msg) => format!("SQL Error: {}", msg),
-            DBError::Client(msg) => format!("Database Error: {}", msg)
+            DBError::Client(msg) => format!("Database Error: {}", msg),
         }
     } else {
         error.to_string()
@@ -141,30 +151,42 @@ fn format_client_error(error: &(dyn StdError + 'static)) -> String {
 }
 
 async fn handle_client_request(
-    data: &[u8], 
+    data: &[u8],
     db: &DBInstance,
     client_id: u64,
 ) -> Result<DatabaseResponse, Box<dyn StdError>> {
     debug!("{}", format_log(client_id, "Request", "Parsing request"));
-    let request = serde_json::from_slice(data)
-        .map_err(|e| DBError::Internal(format!("Invalid request format: {}", e)))?;
+    let request = serde_json::from_slice(data)?;
 
     debug!("{}", format_log(client_id, "Request", &format!("Handling {:?}", request)));
-    let response = db.handle_network_query(request, client_id).await?;
-    debug!("{}", format_log(client_id, "Response", "Query handled successfully"));
-
-    Ok(response)
+    match db.handle_network_query(request, client_id).await {
+        Ok(response) => {
+            debug!("{}", format_log(client_id, "Response", "Query handled successfully"));
+            Ok(response)
+        }
+        Err(e) => {
+            log_error(client_id, "Query", &e, "ERROR");
+            Ok(DatabaseResponse::Error(format_client_error(&e)))
+        }
+    }
 }
 
 async fn send_response(
     stream: &mut TcpStream,
     response: DatabaseResponse,
 ) -> Result<(), Box<dyn StdError>> {
-    let data = serde_json::to_vec(&response)
-        .map_err(|e| DBError::Internal(format!("Failed to serialize response: {}", e)))?;
+    let data = serde_json::to_vec(&response)?;
     
-    stream.write_all(&data).await
-        .map_err(|e| Box::new(DBError::Io(e.to_string())))?;
+    // Send data in chunks if needed
+    let mut offset = 0;
+    while offset < data.len() {
+        let bytes_written = stream.write(&data[offset..]).await?;
+        if bytes_written == 0 {
+            return Err(Box::new(DBError::Io("Failed to write response".to_string())));
+        }
+        offset += bytes_written;
+    }
     
+    stream.flush().await?;
     Ok(())
 }

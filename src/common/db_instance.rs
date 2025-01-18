@@ -384,27 +384,17 @@ impl DBInstance {
                 )));
 
                 // Execute query
-                let result = self.execution_engine.lock().execute_sql(&sql, exec_ctx, &mut writer);
-
-                // Handle result
-                match result {
-                    Ok(success) => {
-                        if success {
-                            if session.current_transaction.is_none() {
-                                // Auto-commit if not in transaction
-                                if !self.transaction_factory.commit_transaction(txn_ctx.clone()) {
-                                    self.transaction_factory.abort_transaction(txn_ctx);
-                                    return Err(DBError::Execution("Failed to commit transaction".to_string()));
-                                }
-                            }
-                            debug!("Query executed successfully");
-                            Ok(DatabaseResponse::Results(writer.into_results()))
-                        } else {
-                            if session.current_transaction.is_none() {
+                match self.execution_engine.lock().execute_sql(&sql, exec_ctx, &mut writer) {
+                    Ok(_) => {
+                        if session.current_transaction.is_none() {
+                            // Auto-commit if not in transaction
+                            if !self.transaction_factory.commit_transaction(txn_ctx.clone()) {
                                 self.transaction_factory.abort_transaction(txn_ctx);
+                                return Err(DBError::Execution("Failed to commit transaction".to_string()));
                             }
-                            Err(DBError::Execution("Query execution failed".to_string()))
                         }
+                        debug!("Query executed successfully");
+                        Ok(DatabaseResponse::Results(writer.into_results()))
                     }
                     Err(e) => {
                         if session.current_transaction.is_none() {
@@ -831,15 +821,15 @@ impl NetworkResultWriter {
 }
 
 impl ResultWriter for NetworkResultWriter {
+    fn write_message(&mut self, message: &str) {
+        self.messages.push(message.to_string());
+    }
+
     fn write_schema_header(&mut self, column_names: Vec<String>) {
         self.column_names = column_names;
     }
 
     fn write_row(&mut self, values: Vec<Value>) {
         self.rows.push(values);
-    }
-
-    fn write_message(&mut self, message: &str) {
-        self.messages.push(message.to_string());
     }
 }

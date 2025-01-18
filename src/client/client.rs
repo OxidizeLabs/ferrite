@@ -22,10 +22,8 @@ impl DatabaseClient {
         debug!("[Query] Executing: {}", query);
         
         let request = DatabaseRequest::Query(query.to_string());
-        debug!("[Network] Sending query request");
         self.send_request(&request).await?;
         
-        debug!("[Network] Waiting for response");
         match self.receive_response().await? {
             DatabaseResponse::Results(results) => {
                 debug!("[Query] Completed successfully with {} rows", results.rows.len());
@@ -97,26 +95,46 @@ impl DatabaseClient {
     }
 
     async fn receive_response(&mut self) -> Result<DatabaseResponse, DBError> {
-        let mut buffer = [0; 1024];
+        let mut buffer = Vec::with_capacity(4096);
+        let mut temp_buffer = [0u8; 4096];
+        
         debug!("[Network] Reading response");
-        let n = self.stream
-            .read(&mut buffer)
-            .await
-            .map_err(|e| {
-                error!("[Network] Read failed: {}", e);
-                DBError::Io(e.to_string())
-            })?;
+        
+        loop {
+            let n = self.stream
+                .read(&mut temp_buffer)
+                .await
+                .map_err(|e| {
+                    error!("[Network] Read failed: {}", e);
+                    DBError::Io(e.to_string())
+                })?;
 
-        if n == 0 {
-            error!("[Network] Server disconnected");
-            return Err(DBError::Client("Server disconnected".to_string()));
+            if n == 0 {
+                if buffer.is_empty() {
+                    error!("[Network] Server disconnected");
+                    return Err(DBError::Client("Server disconnected".to_string()));
+                }
+                break;
+            }
+
+            buffer.extend_from_slice(&temp_buffer[..n]);
+            
+            match serde_json::from_slice(&buffer) {
+                Ok(response) => {
+                    debug!("[Network] Received {} bytes total", buffer.len());
+                    return Ok(response);
+                }
+                Err(ref e) if e.is_eof() => {
+                    continue;
+                }
+                Err(e) => {
+                    error!("[Network] Failed to parse response: {}", e);
+                    return Err(DBError::Internal(format!("Failed to parse response: {}", e)));
+                }
+            }
         }
 
-        debug!("[Network] Received {} bytes", n);
-        serde_json::from_slice(&buffer[..n])
-            .map_err(|e| {
-                error!("[Network] Failed to parse response: {}", e);
-                DBError::Internal(format!("Failed to parse response: {}", e))
-            })
+        error!("[Network] Failed to parse complete response");
+        Err(DBError::Internal("Failed to parse complete response".to_string()))
     }
 }

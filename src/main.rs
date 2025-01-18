@@ -1,3 +1,4 @@
+use std::error;
 use clap::{Parser, Subcommand};
 use tokio::signal;
 use tkdb::client::DatabaseClient;
@@ -33,7 +34,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -42,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
     // Initialize logger with custom format for server
     Builder::new()
         .filter_level(log::LevelFilter::Debug)
