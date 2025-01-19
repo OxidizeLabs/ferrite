@@ -90,7 +90,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
@@ -106,9 +106,9 @@ mod tests {
     mod helpers {
         use super::*;
         use crate::catalog::catalog::Catalog;
+        use crate::recovery::log_manager::LogManager;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
-        use crate::recovery::log_manager::LogManager;
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![
@@ -220,7 +220,7 @@ mod tests {
                 Arc::new(RwLock::new(ExecutionContext::new(
                     self.buffer_pool_manager.clone(),
                     self.catalog.clone(),
-                    self.transaction_context.clone()
+                    self.transaction_context.clone(),
                 )))
             }
 

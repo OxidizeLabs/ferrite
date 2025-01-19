@@ -1,6 +1,7 @@
-use prettytable::{Cell, Row, Table, format};
-use colored::Colorize;
+use crate::server::QueryResults;
 use crate::types_db::value::Value;
+use colored::Colorize;
+use prettytable::{format, Cell, Row, Table};
 use std::sync::{Arc, Mutex};
 
 /// Trait for writing query results in a tabular format
@@ -16,6 +17,31 @@ pub struct CliResultWriter {
     headers: Arc<Mutex<Vec<String>>>,
 }
 
+// New result writer for network responses
+pub struct NetworkResultWriter {
+    column_names: Vec<String>,
+    rows: Vec<Vec<Value>>,
+    messages: Vec<String>,
+}
+
+impl NetworkResultWriter {
+    pub(crate) fn new() -> Self {
+        Self {
+            column_names: Vec::new(),
+            rows: Vec::new(),
+            messages: Vec::new(),
+        }
+    }
+
+    pub(crate) fn into_results(self) -> QueryResults {
+        QueryResults {
+            column_names: self.column_names,
+            rows: self.rows,
+            messages: self.messages,
+        }
+    }
+}
+
 impl CliResultWriter {
     pub fn new() -> Self {
         Self {
@@ -28,17 +54,19 @@ impl CliResultWriter {
         if self.table.lock().unwrap().is_none() {
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_BOX_CHARS);
-            
+
             // Add headers if they exist
             if !self.headers.lock().unwrap().is_empty() {
                 table.set_titles(Row::new(
-                    self.headers.lock().unwrap()
+                    self.headers
+                        .lock()
+                        .unwrap()
                         .iter()
                         .map(|h| Cell::new(&h.bold().to_string()))
-                        .collect()
+                        .collect(),
                 ));
             }
-            
+
             *self.table.lock().unwrap() = Some(table);
         }
     }
@@ -53,13 +81,13 @@ impl ResultWriter for CliResultWriter {
 
     fn write_row(&mut self, values: Vec<Value>) {
         self.ensure_table();
-        
+
         if let Some(table) = self.table.lock().unwrap().as_mut() {
             let row = Row::new(
                 values
                     .into_iter()
                     .map(|v| Cell::new(&v.to_string()))
-                    .collect()
+                    .collect(),
             );
             table.add_row(row);
         }
@@ -71,8 +99,22 @@ impl ResultWriter for CliResultWriter {
             table.printstd();
             println!(); // Add spacing
         }
-        
+
         println!("{}", message);
+    }
+}
+
+impl ResultWriter for NetworkResultWriter {
+    fn write_message(&mut self, message: &str) {
+        self.messages.push(message.to_string());
+    }
+
+    fn write_schema_header(&mut self, column_names: Vec<String>) {
+        self.column_names = column_names;
+    }
+
+    fn write_row(&mut self, values: Vec<Value>) {
+        self.rows.push(values);
     }
 }
 
@@ -96,20 +138,14 @@ mod tests {
         let mut writer = CliResultWriter::new();
 
         // Write headers
-        writer.write_schema_header(vec![
-            "Setting".to_string(),
-            "Value".to_string()
-        ]);
+        writer.write_schema_header(vec!["Setting".to_string(), "Value".to_string()]);
 
         // Write rows
         writer.write_row(vec![
             Value::from("Database File"),
-            Value::from("default_db.db")
+            Value::from("default_db.db"),
         ]);
-        writer.write_row(vec![
-            Value::from("Buffer Pool Size"),
-            Value::from(1024)
-        ]);
+        writer.write_row(vec![Value::from("Buffer Pool Size"), Value::from(1024)]);
     }
 
     #[test]

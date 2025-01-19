@@ -1,10 +1,10 @@
 use crate::common::db_instance::DBInstance;
 use crate::server::connection::handle_connection;
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::runtime::Runtime;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use tokio::net::TcpListener;
+use tokio::runtime::Runtime;
 
 pub struct ServerHandle {
     port: u16,
@@ -40,7 +40,7 @@ impl ServerHandle {
                                 println!("New connection from: {}", addr);
                                 let db = Arc::clone(&db);
                                 let handle = Arc::clone(&runtime_handle);
-                                
+
                                 tokio::task::spawn_blocking(move || {
                                     handle.block_on(async {
                                         handle_connection(stream, db).await;
@@ -62,11 +62,11 @@ impl ServerHandle {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(Duration::from_secs(10));
         }
-        
+
         if let Some(handle) = self.join_handle.take() {
             let _ = handle.join();
         }
-        
+
         Ok(())
     }
 }

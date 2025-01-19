@@ -65,13 +65,13 @@ impl ProjectionExecutor {
 
     fn evaluate_projection_expressions(&self, tuple: &Tuple) -> Result<Vec<Value>, ExpressionError> {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
-        let output_schema = self.plan.get_output_schema();
-
-        for (idx, expr) in self.plan.get_expressions().iter().enumerate() {
+        
+        for expr in self.plan.get_expressions() {
             match expr.as_ref() {
-                Expression::Aggregate(agg_expr) => {
-                    // For aggregate expressions, just pass through the value from the child
+                Expression::Aggregate(_) => {
+                    // For aggregate expressions, just pass through the value
                     // The AggregationExecutor has already computed the result
+                    let idx = values.len();
                     values.push(tuple.get_value(idx).clone());
                 }
                 _ => {
@@ -81,7 +81,7 @@ impl ProjectionExecutor {
                 }
             }
         }
-
+        
         Ok(values)
     }
 }
@@ -153,8 +153,9 @@ mod tests {
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
-    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -164,7 +165,6 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -269,7 +269,7 @@ mod tests {
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
             catalog,
-            transaction_context
+            transaction_context,
         )));
 
         (ctx, execution_context)

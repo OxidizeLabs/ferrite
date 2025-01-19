@@ -4,11 +4,11 @@ use crate::container::hash_function::HashFunction;
 use crate::storage::page::page_types::{
     hash_table_block_page::HashTableBlockPage, hash_table_header_page::HashTableHeaderPage,
 };
+use parking_lot::RwLock;
 use std::marker::PhantomData;
 use std::string::String;
 use std::sync::Arc;
 use std::vec::Vec;
-use parking_lot::RwLock;
 
 pub struct LinearProbeHashTable<KeyType, ValueType, KeyComparator> {
     header_page_id: u32,

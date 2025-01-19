@@ -1,5 +1,6 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
+use crate::concurrency::lock_manager::LockManager;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::transaction_context::TransactionContext;
@@ -7,7 +8,6 @@ use log::debug;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use crate::concurrency::lock_manager::LockManager;
 
 pub struct ExecutionContext {
     buffer_pool_manager: Arc<BufferPoolManager>,

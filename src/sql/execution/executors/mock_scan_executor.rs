@@ -118,13 +118,13 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
     use std::collections::HashMap;
     use std::fs;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -249,7 +249,7 @@ mod tests {
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm(),
             catalog,
-            ctx.transaction_context()
+            ctx.transaction_context(),
         )));
 
         // Create and initialize executor
@@ -302,7 +302,7 @@ mod tests {
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             bpm,
             catalog,
-            transaction_context
+            transaction_context,
         )));
 
         // Create executor

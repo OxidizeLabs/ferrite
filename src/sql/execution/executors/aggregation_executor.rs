@@ -7,14 +7,14 @@ use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::types::Type;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool;
+use crate::types_db::types::Type;
 use crate::types_db::value::Val::BigInt;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::types_db::type_id::TypeId;
 
 pub struct AggregationExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -43,12 +43,10 @@ impl AggregationExecutor {
     }
 
     fn compute_group_key(&self, tuple: &Tuple) -> Result<Vec<Value>, String> {
-        // Use group_by expressions from plan
-        let mut key = Vec::new();
+        let mut key = Vec::with_capacity(self.plan.get_group_bys().len());
         for expr in self.plan.get_group_bys() {
             let value = expr.evaluate(tuple, &tuple.get_schema())
                 .map_err(|e| format!("Error evaluating group by expression: {}", e))?;
-            // Don't convert group by values - keep them in their original type
             key.push(value);
         }
         Ok(key)
@@ -56,125 +54,75 @@ impl AggregationExecutor {
 
     fn update_group(&mut self, key: Vec<Value>, tuple: &Tuple) -> Result<(), String> {
         let group = self.groups.entry(key).or_insert_with(|| {
-            // Initialize aggregates based on types from plan
-            self.plan.get_aggregate_types().iter().zip(self.plan.get_aggregates().iter()).map(|(agg_type, expr)| {
-                match agg_type {
-                    AggregationType::Count | AggregationType::CountStar => {
-                        Value::new(BigInt(0))  // COUNT always returns BigInt
-                    }
-                    AggregationType::Sum => {
-                        // Initialize sum with same type as input
-                        if let Expression::Aggregate(agg) = expr.as_ref() {
-                            if let Some(child_expr) = agg.get_children().first() {
-                                match child_expr.get_return_type().get_type() {
-                                    TypeId::Integer => Value::new(0),
-                                    TypeId::BigInt => Value::new(BigInt(0)),
-                                    _ => Value::new(0), // Default to Integer
+            // Initialize aggregates with correct types
+            self.plan.get_aggregate_types().iter()
+                .zip(self.plan.get_aggregates().iter())
+                .map(|(agg_type, expr)| {
+                    match agg_type {
+                        AggregationType::Count | AggregationType::CountStar => {
+                            Value::new(Val::BigInt(0)) // COUNT always returns BigInt
+                        }
+                        AggregationType::Sum | AggregationType::Avg => {
+                            // Initialize with same type as input
+                            if let Expression::Aggregate(agg) = expr.as_ref() {
+                                if let Some(child_expr) = agg.get_children().first() {
+                                    match child_expr.get_return_type().get_type() {
+                                        TypeId::Integer => Value::new(Val::Integer(0)),
+                                        TypeId::BigInt => Value::new(Val::BigInt(0)),
+                                        TypeId::Decimal => Value::new(Val::Decimal(0.0)),
+                                        _ => Value::new(Val::Integer(0)), // Default
+                                    }
+                                } else {
+                                    Value::new(Val::Integer(0))
                                 }
                             } else {
-                                Value::new(0)
+                                Value::new(Val::Integer(0))
                             }
-                        } else {
-                            Value::new(0)
+                        }
+                        AggregationType::Min | AggregationType::Max => {
+                            Value::new(Val::Null) // Initialize with NULL
                         }
                     }
-                    AggregationType::Min | AggregationType::Max => {
-                        // Use input type for min/max
-                        if let Expression::Aggregate(agg) = expr.as_ref() {
-                            if let Some(child_expr) = agg.get_children().first() {
-                                match child_expr.get_return_type().get_type() {
-                                    TypeId::Integer => Value::new(if *agg_type == AggregationType::Min { i32::MAX } else { i32::MIN }),
-                                    TypeId::BigInt => Value::new(BigInt(if *agg_type == AggregationType::Min { i64::MAX } else { i64::MIN })),
-                                    _ => Value::new(if *agg_type == AggregationType::Min { i32::MAX } else { i32::MIN }),
-                                }
-                            } else {
-                                Value::new(if *agg_type == AggregationType::Min { i32::MAX } else { i32::MIN })
-                            }
-                        } else {
-                            Value::new(if *agg_type == AggregationType::Min { i32::MAX } else { i32::MIN })
-                        }
-                    }
-                    AggregationType::Avg => Value::new(0),
-                }
-            }).collect()
+                })
+                .collect()
         });
 
-        // Update each aggregate based on its type and expression
+        // Update each aggregate value
         for (i, (agg_type, agg_expr)) in self.plan.get_aggregate_types().iter()
             .zip(self.plan.get_aggregates().iter())
-            .enumerate()
+            .enumerate() 
         {
-            match agg_type {
-                AggregationType::Sum => {
-                    let value = match agg_expr.as_ref() {
-                        Expression::Aggregate(agg) => {
-                            if let Some(child_expr) = agg.get_children().first() {
-                                child_expr.evaluate(tuple, &tuple.get_schema())
-                            } else {
-                                continue;
-                            }
-                        }
-                        _ => agg_expr.evaluate(tuple, &tuple.get_schema())
-                    }.map_err(|e| format!("Error evaluating sum: {}", e))?;
+            let value = agg_expr.evaluate(tuple, &tuple.get_schema())
+                .map_err(|e| format!("Error evaluating aggregate: {}", e))?;
 
-                    if !matches!(value.get_value(), Val::Null) {
-                        // Keep the same type as input
-                        match (group[i].get_value(), value.get_value()) {
-                            (Val::Integer(curr), Val::Integer(n)) => {
-                                group[i] = Value::new(curr + n);
-                            }
-                            (Val::BigInt(curr), Val::BigInt(n)) => {
-                                group[i] = Value::new(BigInt(curr + n));
-                            }
-                            _ => return Err("Type mismatch in sum".to_string()),
-                        }
+            if !value.is_null() {
+                match agg_type {
+                    AggregationType::Count => {
+                        group[i] = group[i].add(&Value::new(BigInt(1)))
+                            .map_err(|e| format!("Error computing count: {}", e))?;
                     }
-                }
-                AggregationType::Count | AggregationType::CountStar => {
-                    let current_count = match group[i].get_value() {
-                        Val::BigInt(n) => *n,
-                        _ => 0i64,
-                    };
-                    group[i] = Value::new(BigInt(current_count + 1));
-                }
-                AggregationType::Min | AggregationType::Max => {
-                    let value = if let Expression::Aggregate(agg) = agg_expr.as_ref() {
-                        if let Some(child_expr) = agg.get_children().first() {
-                            child_expr.evaluate(tuple, &tuple.get_schema())
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        agg_expr.evaluate(tuple, &tuple.get_schema())
-                    }.map_err(|e| format!("Error evaluating min/max: {}", e))?;
-
-                    if !matches!(value.get_value(), Val::Null) {
-                        let should_update = match agg_type {
-                            AggregationType::Min => value.compare_less_than(&group[i]) == CmpBool::CmpTrue,
-                            AggregationType::Max => value.compare_greater_than(&group[i]) == CmpBool::CmpTrue,
-                            _ => false,
-                        };
-                        if should_update {
+                    AggregationType::CountStar => {
+                        group[i] = group[i].add(&Value::new(BigInt(1)))
+                            .map_err(|e| format!("Error computing count: {}", e))?;
+                    }
+                    AggregationType::Sum => {
+                        group[i] = group[i].add(&value)
+                            .map_err(|e| format!("Error computing sum: {}", e))?;
+                    }
+                    AggregationType::Min => {
+                        if group[i].is_null() || value.compare_less_than(&group[i]) == CmpBool::CmpTrue {
                             group[i] = value;
                         }
                     }
-                }
-                AggregationType::Avg => {
-                    let value = agg_expr.evaluate(tuple, &tuple.get_schema())
-                        .map_err(|e| format!("Error evaluating avg: {}", e))?;
-
-                    if !matches!(value.get_value(), Val::Null) {
-                        let current_sum = match group[i].get_value() {
-                            Val::Integer(n) => *n,
-                            _ => 0,
-                        };
-
-                        match value.get_value() {
-                            Val::Integer(n) => {
-                                group[i] = Value::new(BigInt((current_sum + n) as i64));
-                            }
-                            _ => return Err("Unsupported type for avg".to_string()),
+                    AggregationType::Max => {
+                        if group[i].is_null() || value.compare_greater_than(&group[i]) == CmpBool::CmpTrue {
+                            group[i] = value;
                         }
+                    }
+                    AggregationType::Avg => {
+                        // For AVG, we'll store running sum and count separately
+                        // Final computation happens in next()
+                        group[i] = group[i].add(&value)?
                     }
                 }
             }
@@ -199,83 +147,31 @@ impl AbstractExecutor for AggregationExecutor {
             return None;
         }
 
-        if !self.initialized {
-            self.init();
-        }
-
         // Process all input tuples if we haven't already
-        let mut has_input = false;
-        if !self.done {
-            while let Some((tuple, _)) = self.child_executor.next() {
-                has_input = true;
-                let key = self.compute_group_key(&tuple)
-                    .map_err(|e| format!("Error computing group key: {}", e))
-                    .unwrap();
-                self.update_group(key, &tuple)
-                    .map_err(|e| format!("Error updating group: {}", e))
-                    .unwrap();
+        while let Some((tuple, _)) = self.child_executor.next() {
+            let key = self.compute_group_key(&tuple).ok()?;
+            self.update_group(key, &tuple).ok()?;
+        }
+
+        // Convert groups into output tuples
+        if !self.groups.is_empty() {
+            if let Some((key, values)) = self.groups.drain().next() {
+                let mut row = Vec::new();
+                row.extend(key);
+                row.extend(values);
+
+                let tuple = Tuple::new(
+                    &row,
+                    self.plan.get_output_schema().clone(),
+                    RID::new(0, 0),
+                );
+
+                return Some((tuple, RID::new(0, 0)));
             }
         }
 
-        // Handle empty input case
-        if !has_input && self.groups.is_empty() && self.plan.get_group_bys().is_empty() {
-            // For empty input with no grouping, return single row with default values
-            let schema = self.plan.get_output_schema();
-            let mut values = Vec::with_capacity(schema.get_column_count() as usize);
-            
-            for (i, agg_type) in self.plan.get_aggregate_types().iter().enumerate() {
-                match agg_type {
-                    AggregationType::Count | AggregationType::CountStar => {
-                        values.push(Value::new(BigInt(0))); // COUNT returns 0 for empty input
-                    }
-                    _ => {
-                        values.push(Value::new(schema.get_column(i)?.get_type())); // Other aggregates return NULL
-                    }
-                }
-            }
-            
-            self.done = true;
-            return Some((Tuple::new(&values, schema.clone(), RID::new(0, 0)), RID::new(0, 0)));
-        }
-
-        // Return next group
-        if let Some((key, values)) = self.groups.iter().next().map(|(k, v)| (k.clone(), v.clone())) {
-            self.groups.remove(&key);
-            
-            if self.groups.is_empty() {
-                self.done = true;
-            }
-
-            let schema = self.plan.get_output_schema();
-            let mut tuple_values = Vec::with_capacity(schema.get_column_count() as usize);
-
-            // Add group by values with correct types from schema
-            for (value, col) in key.iter().zip(schema.get_columns().iter()) {
-                match value.get_value() {
-                    Val::VarLen(s) => {
-                        if col.get_type() == TypeId::VarChar {
-                            tuple_values.push(Value::new(s.as_str()));
-                        }
-                    }
-                    _ => tuple_values.push(value.clone()),
-                }
-            }
-
-            // Add aggregate values with correct types from schema
-            for (value, col) in values.iter().zip(schema.get_columns().iter().skip(key.len())) {
-                match (value.get_value(), col.get_type()) {
-                    (Val::Integer(n), TypeId::Integer) => tuple_values.push(Value::new(*n)),
-                    (Val::Integer(n), TypeId::BigInt) => tuple_values.push(Value::new(BigInt(*n as i64))),
-                    (Val::BigInt(n), TypeId::BigInt) => tuple_values.push(Value::new(BigInt(*n))),
-                    _ => tuple_values.push(value.clone()),
-                }
-            }
-
-            Some((Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0)), RID::new(0, 0)))
-        } else {
-            self.done = true;
-            None
-        }
+        self.done = true;
+        None
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -298,15 +194,18 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::executors::mock_executor::MockExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
 
+    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use crate::types_db::value::Val::{BigInt, Integer};
@@ -314,9 +213,6 @@ mod tests {
     use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -459,7 +355,7 @@ mod tests {
         let agg_plan = Arc::new(AggregationPlanNode::new(
             vec![],
             vec![], // No group by
-            vec![count_expr]        ));
+            vec![count_expr]));
 
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();

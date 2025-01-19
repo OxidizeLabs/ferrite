@@ -1,14 +1,17 @@
-use std::error;
+use colored::Colorize;
 use clap::{Parser, Subcommand};
-use tokio::signal;
-use tkdb::client::DatabaseClient;
-use tkdb::common::db_instance::{DBConfig, DBInstance};
-use tkdb::server::ServerHandle;
-use std::sync::Arc;
-use rustyline::DefaultEditor;
 use env_logger::{Builder, Env};
 use log::{error, info};
+use rustyline::DefaultEditor;
+use std::error;
+use std::sync::Arc;
+use tkdb::client::client::DatabaseClient;
+use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
+use tkdb::server::ServerHandle;
+use tkdb::cli::CLI;
+use tokio::signal;
+use tkdb::common::logger::initialize_logger;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -31,6 +34,7 @@ enum Commands {
         #[arg(short = 'P', long, default_value = "5432")]
         port: u16,
     },
+    Cli
 }
 
 #[tokio::main]
@@ -40,6 +44,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     match cli.command {
         Commands::Server { port } => run_server(port).await,
         Commands::Client { host, port } => run_client(&format!("{}:{}", host, port)).await,
+        Commands::Cli => run_cli().await,
     }
 }
 
@@ -63,30 +68,30 @@ async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
     let mut config = DBConfig::default();
     config.server_enabled = true;
     config.server_port = port;
-    
+
     info!("Starting TKDB server on port {}", port);
-    
+
     // Create database instance
     let db = Arc::new(DBInstance::new(config)?);
-    
+
     // Create and start server
     let mut server = ServerHandle::new(port);
     server.start(db.clone())?;
-    
+
     info!("Server is running. Press Ctrl+C to stop.");
-    
+
     // Wait for shutdown signal
     signal::ctrl_c().await?;
-    
+
     info!("Shutting down server...");
-    
+
     // Graceful shutdown
     server.shutdown()?;
-    
+
     Ok(())
 }
 
-async fn run_client(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
     // Initialize logger with custom format and debug level
     Builder::new()
         .filter_level(log::LevelFilter::Debug)
@@ -113,14 +118,18 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let mut buffer = String::new();
-        
+
         loop {
-            let prompt = if buffer.is_empty() { "tkdb> " } else { "   -> " };
+            let prompt = if buffer.is_empty() {
+                "tkdb> "
+            } else {
+                "   -> "
+            };
             match rl.readline(prompt) {
                 Ok(line) => {
                     rl.add_history_entry(line.as_str())?;
                     buffer.push_str(&line);
-                    
+
                     if line.trim().ends_with(';') {
                         break;
                     }
@@ -142,25 +151,51 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                     println!("\n{}", message);
                 }
 
-                // Print column headers if there are any
+                // Create and format table if there are columns/rows
                 if !results.column_names.is_empty() {
-                    println!("\n{}", results.column_names.join(" | "));
-                    println!("{}", "-".repeat(results.column_names.join(" | ").len()));
-                }
+                    use prettytable::{Table, Row, Cell, format};
+                    let mut table = Table::new();
+                    
+                    // Set table format with clean borders and proper alignment
+                    table.set_format(*format::consts::FORMAT_BOX_CHARS);
+                    
+                    // Add header row with bold and centered headers
+                    table.set_titles(Row::new(
+                        results.column_names
+                            .iter()
+                            .map(|name| {
+                                let mut cell = Cell::new(&name.bold().to_string());
+                                cell.align(format::Alignment::CENTER);
+                                cell
+                            })
+                            .collect()
+                    ));
 
-                // Print rows if there are any
-                for row in results.rows {
-                    println!("{}", row.iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" | "));
+                    // Add data rows with right alignment for numeric values
+                    for row in results.rows {
+                        table.add_row(Row::new(
+                            row.iter()
+                                .map(|v| {
+                                    let mut cell = Cell::new(&v.to_string());
+                                    if v.is_numeric() {
+                                        cell.align(format::Alignment::RIGHT);
+                                    }
+                                    cell
+                                })
+                                .collect()
+                        ));
+                    }
+
+                    // Print the table
+                    println!();
+                    table.printstd();
+                    println!();
                 }
 
                 // Print generic success message if no specific messages
                 if results.messages.is_empty() && results.column_names.is_empty() {
                     println!("\nQuery executed successfully");
                 }
-                println!(); // Extra newline for readability
             }
             Err(e) => {
                 // Format error message for better readability
@@ -177,7 +212,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
                     DBError::Internal(msg) => format!("Internal Error: {}", msg),
                     DBError::OptimizeError(msg) => format!("Optimization Error: {}", msg),
                     DBError::SqlError(msg) => format!("SQL Error: {}", msg),
-                    DBError::Client(msg) => format!("Database Error: {}", msg)
+                    DBError::Client(msg) => format!("Database Error: {}", msg),
                 };
                 eprintln!("\n{}\n", error_msg);
             }
@@ -185,4 +220,12 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+async fn run_cli() -> Result<(), Box<dyn error::Error>> {
+    initialize_logger();
+
+    let cli = CLI::new();
+
+    Ok(cli.unwrap().run().unwrap())
 }

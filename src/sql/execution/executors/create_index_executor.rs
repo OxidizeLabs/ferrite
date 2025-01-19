@@ -167,6 +167,7 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::IndexType;
@@ -175,7 +176,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -295,7 +295,7 @@ mod tests {
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             bpm,
             catalog,
-            transaction_context
+            transaction_context,
         )));
 
         execution_context
@@ -310,7 +310,7 @@ mod tests {
 
         {
             let mut catalog_guard = catalog.write();
-            catalog_guard.create_table("test_table", schema.clone());
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
         let exec_context = create_test_executor_context();
@@ -341,7 +341,7 @@ mod tests {
 
         {
             let mut catalog_guard = catalog.write();
-            catalog_guard.create_table("test_table", schema.clone());
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
         let columns = vec![0, 1];
@@ -373,7 +373,7 @@ mod tests {
         // Create table and initial index
         {
             let mut catalog_guard = catalog.write();
-            catalog_guard.create_table("test_table", schema.clone());
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
             catalog_guard.create_index(
                 "test_index",
                 "test_table",
@@ -439,7 +439,7 @@ mod tests {
         // Create test table
         {
             let mut catalog_guard = catalog.write();
-            catalog_guard.create_table("test_table", schema.clone());
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
         let exec_context = create_test_executor_context();
@@ -480,7 +480,7 @@ mod tests {
         // Create table
         {
             let mut catalog_guard = catalog.write();
-            catalog_guard.create_table("test_table", schema.clone());
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
         let exec_context = create_test_executor_context();

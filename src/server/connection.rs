@@ -158,10 +158,16 @@ async fn handle_client_request(
     debug!("{}", format_log(client_id, "Request", "Parsing request"));
     let request = serde_json::from_slice(data)?;
 
-    debug!("{}", format_log(client_id, "Request", &format!("Handling {:?}", request)));
+    debug!(
+        "{}",
+        format_log(client_id, "Request", &format!("Handling {:?}", request))
+    );
     match db.handle_network_query(request, client_id).await {
         Ok(response) => {
-            debug!("{}", format_log(client_id, "Response", "Query handled successfully"));
+            debug!(
+                "{}",
+                format_log(client_id, "Response", "Query handled successfully")
+            );
             Ok(response)
         }
         Err(e) => {
@@ -176,17 +182,19 @@ async fn send_response(
     response: DatabaseResponse,
 ) -> Result<(), Box<dyn StdError>> {
     let data = serde_json::to_vec(&response)?;
-    
+
     // Send data in chunks if needed
     let mut offset = 0;
     while offset < data.len() {
         let bytes_written = stream.write(&data[offset..]).await?;
         if bytes_written == 0 {
-            return Err(Box::new(DBError::Io("Failed to write response".to_string())));
+            return Err(Box::new(DBError::Io(
+                "Failed to write response".to_string(),
+            )));
         }
         offset += bytes_written;
     }
-    
+
     stream.flush().await?;
     Ok(())
 }

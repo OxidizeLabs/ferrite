@@ -1,14 +1,14 @@
 use crate::common::config::{
-    Lsn, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
+    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
 };
 use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use serde::{Deserialize, Serialize};
 
 /// Represents a link to a previous version of this tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -92,7 +92,7 @@ pub struct Transaction {
     read_ts: RwLock<Timestamp>,
     commit_ts: RwLock<Timestamp>,
     undo_logs: Mutex<Vec<UndoLog>>,
-    write_set: Mutex<HashMap<u32, HashSet<RID>>>,
+    write_set: Mutex<HashMap<TableOidT, HashSet<RID>>>,
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
     prev_lsn: RwLock<Lsn>,
 }
@@ -115,7 +115,7 @@ impl Transaction {
             read_ts: RwLock::new(0),
             commit_ts: RwLock::new(INVALID_TS),
             undo_logs: Mutex::new(Vec::new()),
-            write_set: Mutex::new(HashMap::new()),
+            write_set: Mutex::new(HashMap::with_capacity(8)),
             scan_predicates: Mutex::new(HashMap::new()),
             prev_lsn: RwLock::new(INVALID_LSN),
         }
@@ -227,19 +227,22 @@ impl Transaction {
         size
     }
 
-    /// Appends a write set entry.
-    ///
-    /// # Parameters
-    /// - `t`: The table OID.
-    /// - `rid`: The row ID.
-    pub fn append_write_set(&self, t: u32, rid: RID) {
+    /// Appends a write operation to the transaction's write set
+    pub fn append_write_set(&self, table_oid: TableOidT, rid: RID) {
         let mut write_set = self.write_set.lock().unwrap();
-        write_set.entry(t).or_insert_with(HashSet::new).insert(rid);
+        write_set
+            .entry(table_oid)
+            .or_insert_with(HashSet::new)
+            .insert(rid);
     }
 
-    /// Returns the write sets.
-    pub fn write_sets(&self) -> HashMap<u32, HashSet<RID>> {
-        self.write_set.lock().unwrap().clone()
+    /// Gets all write operations performed in this transaction
+    pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
+        let write_set = self.write_set.lock().unwrap();
+        write_set
+            .iter()
+            .flat_map(|(&table_oid, rids)| rids.iter().map(move |&rid| (table_oid, rid)))
+            .collect()
     }
 
     /// Appends a scan predicate.
@@ -284,7 +287,6 @@ impl Default for Transaction {
         Transaction::new(0, IsolationLevel::ReadUncommitted)
     }
 }
-
 
 /// Formatter implementation for `IsolationLevel`.
 impl fmt::Display for IsolationLevel {
@@ -435,13 +437,13 @@ mod tests {
         txn.append_write_set(2, rid1);
 
         // Test get write sets
-        let write_sets = txn.write_sets();
+        let write_sets = txn.get_write_set();
         assert_eq!(write_sets.len(), 2); // Two tables
-        assert_eq!(write_sets.get(&1).unwrap().len(), 2); // Two RIDs in table 1
-        assert_eq!(write_sets.get(&2).unwrap().len(), 1); // One RID in table 2
-        assert!(write_sets.get(&1).unwrap().contains(&rid1));
-        assert!(write_sets.get(&1).unwrap().contains(&rid2));
-        assert!(write_sets.get(&2).unwrap().contains(&rid1));
+        assert_eq!(write_sets.get(1).iter().len(), 2); // Two RIDs in table 1
+        assert_eq!(write_sets.get(2).iter().len(), 1); // One RID in table 2
+        assert_eq!(write_sets.get(1).unwrap(), &(1, rid1));
+        assert_eq!(write_sets.get(1).unwrap(), &(1, rid2));
+        assert_eq!(write_sets.get(2).unwrap(), &(1, rid1));
     }
 
     #[test]
@@ -519,18 +521,12 @@ mod tests {
             "READ_UNCOMMITTED"
         );
         assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
-        assert_eq!(
-            IsolationLevel::ReadCommitted.to_string(),
-            "READ_COMMITTED"
-        );
+        assert_eq!(IsolationLevel::ReadCommitted.to_string(), "READ_COMMITTED");
         assert_eq!(
             IsolationLevel::RepeatableRead.to_string(),
             "REPEATABLE_READ"
         );
-        assert_eq!(
-            IsolationLevel::Serializable.to_string(),
-            "SERIALIZABLE"
-        );
+        assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
     }
 
     #[test]

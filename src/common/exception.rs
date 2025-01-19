@@ -1,13 +1,13 @@
 use crate::common::config::{FrameId, PageId};
 use crate::types_db::type_id::TypeId;
+use serde_json;
+use sqlparser::parser::ParserError;
 use std::error::Error;
+use std::error::Error as StdError;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use thiserror::Error;
-use std::error::Error as StdError;
 use std::io;
-use sqlparser::parser::ParserError;
-use serde_json;
+use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum LockError {
@@ -364,7 +364,7 @@ impl From<PageError> for DBError {
 impl From<FlushError> for DBError {
     fn from(error: FlushError) -> Self {
         match error {
-            _ => DBError::Internal(error.to_string())
+            _ => DBError::Internal(error.to_string()),
         }
     }
 }

@@ -1,7 +1,6 @@
 pub mod bigint_type;
 pub mod boolean_type;
 pub mod decimal_type;
-pub mod integer_parent_type;
 pub mod integer_type;
 pub mod limits;
 pub mod smallint_type;

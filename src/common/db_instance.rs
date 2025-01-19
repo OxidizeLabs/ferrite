@@ -1,8 +1,9 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalog::catalog::Catalog;
+use crate::client::client::ClientSession;
 use crate::common::exception::DBError;
-use crate::common::result_writer::{CliResultWriter, ResultWriter};
+use crate::common::result_writer::{CliResultWriter, NetworkResultWriter, ResultWriter};
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
@@ -26,14 +27,6 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-
-/// Represents a client's session with the database
-#[derive(Debug)]
-struct ClientSession {
-    id: u64,
-    current_transaction: Option<Arc<TransactionContext>>,
-    isolation_level: IsolationLevel,
-}
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
@@ -60,6 +53,7 @@ pub struct DBInstance {
     transaction_factory: Arc<TransactionManagerFactory>,
     execution_engine: Arc<Mutex<ExecutionEngine>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
+    log_manager: Arc<RwLock<LogManager>>,
     config: DBConfig,
     writer: Arc<Mutex<dyn ResultWriter>>,
     client_sessions: Arc<Mutex<HashMap<u64, ClientSession>>>,
@@ -130,10 +124,11 @@ impl DBInstance {
 
         // Initialize recovery components
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+        log_manager.write().run_flush_thread();
 
         // Initialize transaction components
         let transaction_factory =
-            Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager));
+            Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager.clone()));
 
         // Initialize execution engine
         let execution_engine = Arc::new(Mutex::new(ExecutionEngine::new(
@@ -148,6 +143,7 @@ impl DBInstance {
             transaction_factory,
             execution_engine,
             checkpoint_manager: None,
+            log_manager,
             config,
             writer: Arc::new(Mutex::new(CliResultWriter::new())),
             client_sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -368,12 +364,13 @@ impl DBInstance {
         match query {
             DatabaseRequest::Query(sql) => {
                 let mut writer = NetworkResultWriter::new();
-                
+
                 // Create transaction context
                 let txn_ctx = if let Some(txn) = &session.current_transaction {
                     txn.clone()
                 } else {
-                    self.transaction_factory.begin_transaction(session.isolation_level)
+                    self.transaction_factory
+                        .begin_transaction(session.isolation_level)
                 };
 
                 // Create execution context
@@ -384,13 +381,19 @@ impl DBInstance {
                 )));
 
                 // Execute query
-                match self.execution_engine.lock().execute_sql(&sql, exec_ctx, &mut writer) {
+                match self
+                    .execution_engine
+                    .lock()
+                    .execute_sql(&sql, exec_ctx, &mut writer)
+                {
                     Ok(_) => {
                         if session.current_transaction.is_none() {
                             // Auto-commit if not in transaction
                             if !self.transaction_factory.commit_transaction(txn_ctx.clone()) {
                                 self.transaction_factory.abort_transaction(txn_ctx);
-                                return Err(DBError::Execution("Failed to commit transaction".to_string()));
+                                return Err(DBError::Execution(
+                                    "Failed to commit transaction".to_string(),
+                                ));
                             }
                         }
                         debug!("Query executed successfully");
@@ -792,44 +795,5 @@ impl DBInstance {
                 Err(e)
             }
         }
-    }
-}
-
-// New result writer for network responses
-struct NetworkResultWriter {
-    column_names: Vec<String>,
-    rows: Vec<Vec<Value>>,
-    messages: Vec<String>,
-}
-
-impl NetworkResultWriter {
-    fn new() -> Self {
-        Self {
-            column_names: Vec::new(),
-            rows: Vec::new(),
-            messages: Vec::new(),
-        }
-    }
-
-    fn into_results(self) -> QueryResults {
-        QueryResults {
-            column_names: self.column_names,
-            rows: self.rows,
-            messages: self.messages,
-        }
-    }
-}
-
-impl ResultWriter for NetworkResultWriter {
-    fn write_message(&mut self, message: &str) {
-        self.messages.push(message.to_string());
-    }
-
-    fn write_schema_header(&mut self, column_names: Vec<String>) {
-        self.column_names = column_names;
-    }
-
-    fn write_row(&mut self, values: Vec<Value>) {
-        self.rows.push(values);
     }
 }

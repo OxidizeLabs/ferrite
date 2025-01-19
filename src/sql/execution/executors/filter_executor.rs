@@ -121,6 +121,7 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -130,7 +131,7 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
-    use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableHeap;
@@ -141,7 +142,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -215,6 +215,10 @@ mod tests {
 
         pub fn lock_manager(&self) -> Arc<LockManager> {
             Arc::clone(&self.lock_manager)
+        }
+
+        pub fn transaction_context(&self) -> &Arc<TransactionContext> {
+            &self.transaction_context
         }
 
         fn cleanup(&self) {
@@ -336,7 +340,7 @@ mod tests {
         )
     }
 
-    fn setup_test_table(table_heap: &Arc<TableHeap>, schema: &Schema) {
+    fn setup_test_table(table_heap: &Arc<TableHeap>, schema: &Schema, transaction_context: &Arc<TransactionContext>) {
         let test_data = vec![
             (1, "Alice", 25),
             (2, "Bob", 30),
@@ -352,8 +356,8 @@ mod tests {
                 Value::new(age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(0, false);
-            table_heap.insert_tuple(&meta, &mut tuple).unwrap();
+            let meta = TupleMeta::new(0);
+            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
         }
     }
 
@@ -361,15 +365,16 @@ mod tests {
     fn test_filter_equals() {
         let test_context = TestContext::new("filter_eq_test");
         let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
 
         // Create catalog and table
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let mut binding = catalog.write();
-        let table_info = binding.create_table("test_table", schema.clone()).unwrap();
+        let table_info = binding.create_table("test_table".to_string(), schema.clone()).unwrap();
 
         // Set up test data
         let table_heap = table_info.get_table_heap();
-        setup_test_table(&table_heap, &schema);
+        setup_test_table(&table_heap, &schema, transaction_context);
 
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
 
@@ -413,11 +418,12 @@ mod tests {
     fn test_filter_greater_than() {
         let test_context = TestContext::new("filter_gt_test");
         let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
 
         // Create catalog and table with Arc<RwLock> wrapping
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let mut binding = catalog.write();
-        let table_info = binding.create_table("test_table", schema.clone()).unwrap();
+        let table_info = binding.create_table("test_table".to_string(), schema.clone()).unwrap();
 
         // Set up test data
         let table_heap = table_info.get_table_heap();
@@ -437,8 +443,8 @@ mod tests {
                 Value::new(*age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(0, false);
-            table_heap.insert_tuple(&meta, &mut tuple).unwrap();
+            let meta = TupleMeta::new(0);
+            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
             debug!("Inserted: id={}, name={}, age={}", id, name, age);
         }
 
@@ -495,7 +501,7 @@ mod tests {
 
         // Create catalog with the test table
         let mut catalog = create_catalog(&test_context);
-        catalog.create_table("test_table", schema.clone());
+        catalog.create_table("test_table".to_string(), schema.clone());
         let catalog = Arc::new(RwLock::new(catalog));
 
         // Create filter for age > 100 (no matches)
@@ -520,6 +526,7 @@ mod tests {
     fn test_filter_with_transaction() {
         let test_context = TestContext::new("filter_transaction_test");
         let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
 
         // Create catalog and wrap it in Arc<RwLock> first
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
@@ -528,7 +535,7 @@ mod tests {
         let table_heap = {
             let mut catalog_guard = catalog.write();
             let table_info = catalog_guard
-                .create_table("test_table", schema.clone())
+                .create_table("test_table".to_string(), schema.clone())
                 .unwrap();
             table_info.get_table_heap().clone()
         };
@@ -555,8 +562,8 @@ mod tests {
                 Value::new(age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(insert_txn.get_transaction_id(), false);
-            table_heap.insert_tuple(&meta, &mut tuple).unwrap();
+            let meta = TupleMeta::new(insert_txn.get_transaction_id());
+            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
         }
 
         // Commit insert transaction
@@ -567,7 +574,7 @@ mod tests {
         let executor_context = Arc::new(RwLock::new(ExecutionContext::new(
             test_context.bpm(),
             Arc::clone(&catalog),
-            test_context.transaction_context.clone()
+            test_context.transaction_context.clone(),
         )));
 
         // Create table scan plan

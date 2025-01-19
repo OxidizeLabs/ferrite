@@ -121,14 +121,11 @@ impl AbstractExecutor for InsertExecutor {
             if let Some((mut tuple, _)) = child_executor.next() {
                 debug!("Got tuple from child executor: {:?}", tuple.get_values());
 
+                // Get transaction context
+                let txn_ctx = self.context.read().get_transaction_context();
+                
                 // Create tuple metadata
-                let tuple_meta = TupleMeta::new(
-                    self.context
-                        .read()
-                        .get_transaction_context()
-                        .get_transaction_id(),
-                    false,
-                );
+                let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
 
                 debug!(
                     "Inserting tuple with transaction ID {} into table '{}'",
@@ -136,8 +133,8 @@ impl AbstractExecutor for InsertExecutor {
                     self.plan.get_table_name()
                 );
 
-                // Insert tuple into table heap
-                match self.table_heap.insert_tuple(&tuple_meta, &mut tuple) {
+                // Insert tuple into table heap with transaction context
+                match self.table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx)) {
                     Ok(rid) => {
                         info!(
                             "Successfully inserted tuple into '{}' at RID {:?}: {:?}",
@@ -145,10 +142,6 @@ impl AbstractExecutor for InsertExecutor {
                             rid,
                             tuple.get_values()
                         );
-
-                        // Add to transaction's write set
-                        let txn_ctx = self.context.write().get_transaction_context();
-                        txn_ctx.append_write_set_atomic(self.plan.get_table_oid(), rid);
 
                         Some((tuple, rid))
                     }
@@ -192,12 +185,12 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
+    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::execution_engine::ExecutionEngine;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -325,11 +318,11 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_name = "test_table";
+        let table_name = "test_table".to_string();
         {
             let mut catalog = test_ctx.catalog.write();
             catalog
-                .create_table(table_name, schema.clone())
+                .create_table(table_name.clone(), schema.clone())
                 .expect("Failed to create table");
         }
 
@@ -358,7 +351,7 @@ mod tests {
         let table_oid = {
             let catalog = test_ctx.catalog.read();
             catalog
-                .get_table(table_name)
+                .get_table(table_name.as_str())
                 .expect("Table not found")
                 .get_table_oidt()
         };
@@ -397,12 +390,12 @@ mod tests {
 
         // Create schema and table
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let table_name = "test_table_multi";
+        let table_name = "test_table_multi".to_string();
 
         {
             let mut catalog = test_ctx.catalog.write();
             catalog
-                .create_table(table_name, schema.clone())
+                .create_table(table_name.clone(), schema.clone())
                 .expect("Failed to create table");
         }
 
@@ -429,7 +422,7 @@ mod tests {
         let table_oid = {
             let catalog = test_ctx.catalog.read();
             catalog
-                .get_table(table_name)
+                .get_table(table_name.as_str())
                 .expect("Table not found")
                 .get_table_oidt()
         };
@@ -475,7 +468,7 @@ mod tests {
     #[test]
     fn test_insert_transaction_rollback() {
         let test_ctx = TestContext::new("insert_rollback");
-        let table_name = "test_rollback_table";
+        let table_name = "test_rollback_table".to_string();
 
         // Create schema and table
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
@@ -483,7 +476,7 @@ mod tests {
         {
             let mut catalog = test_ctx.catalog.write();
             catalog
-                .create_table(table_name, schema.clone())
+                .create_table(table_name.clone(), schema.clone())
                 .expect("Failed to create table");
         }
 
@@ -500,7 +493,7 @@ mod tests {
         let table_oid = {
             let catalog = test_ctx.catalog.read();
             catalog
-                .get_table(table_name)
+                .get_table(table_name.as_str())
                 .expect("Table not found")
                 .get_table_oidt()
         };

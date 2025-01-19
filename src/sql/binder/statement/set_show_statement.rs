@@ -1,5 +1,5 @@
-use crate::sql::binder::bound_statement::BoundStatement;
 use crate::common::statement_type::StatementType;
+use crate::sql::binder::bound_statement::BoundStatement;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Display, Formatter};

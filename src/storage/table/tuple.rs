@@ -7,20 +7,21 @@ use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use crate::common::config::TxnId;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TupleMeta {
-    timestamp: u64,
+    timestamp: u64,  // Transaction ID that created/modified the tuple
     is_deleted: bool,
 }
 
 impl TupleMeta {
     /// Creates a new `TupleMeta` instance.
-    pub fn new(timestamp: u64, is_deleted: bool) -> Self {
+    pub fn new(txn_id: TxnId) -> Self {
         Self {
-            timestamp,
-            is_deleted,
+            timestamp: txn_id,
+            is_deleted: false,
         }
     }
 
@@ -311,18 +312,18 @@ mod tests {
 
     #[test]
     fn test_tuple_meta() {
-        let meta = TupleMeta::new(1234567890, false);
+        let meta = TupleMeta::new(1234567890);
         assert_eq!(meta.get_timestamp(), 1234567890);
         assert_eq!(meta.is_deleted(), false);
 
-        let meta_deleted = TupleMeta::new(9876543210, true);
+        let meta_deleted = TupleMeta::new(9876543210);
         assert_eq!(meta_deleted.get_timestamp(), 9876543210);
         assert_eq!(meta_deleted.is_deleted(), true);
     }
 
     #[test]
     fn test_tuple_meta_serialization() -> Result<(), Box<dyn std::error::Error>> {
-        let meta = TupleMeta::new(1234567890, false);
+        let meta = TupleMeta::new(1234567890);
         let serialized = bincode::serialize(&meta)?;
         let deserialized: TupleMeta = bincode::deserialize(&serialized)?;
 

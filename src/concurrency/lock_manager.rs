@@ -1,4 +1,3 @@
-use log::{debug, error, info, warn};
 use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
@@ -8,6 +7,7 @@ use crate::concurrency::lock_manager::LockMode::{
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction::{Transaction, TransactionState};
 use crate::concurrency::transaction_manager::TransactionManager;
+use log::{debug, error, info, warn};
 use parking_lot::{Condvar, Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1446,7 +1446,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let table_info = catalog.create_table("test_table", schema).unwrap();
+        let table_info = catalog.create_table("test_table".to_string(), schema).unwrap();
         let table_oid = table_info.get_table_oidt();
         drop(catalog);
 

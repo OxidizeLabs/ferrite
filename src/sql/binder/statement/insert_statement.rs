@@ -1,7 +1,7 @@
+use crate::common::statement_type::StatementType;
 use crate::sql::binder::bound_statement::BoundStatement;
 use crate::sql::binder::bound_table_ref::BoundTableRef;
 use crate::sql::binder::statement::select_statement::SelectStatement;
-use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};

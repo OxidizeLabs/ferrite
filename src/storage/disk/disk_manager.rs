@@ -4,7 +4,6 @@ use chrono::Utc;
 use log::{debug, error, info, trace, warn};
 use mockall::automock;
 use spin::{Mutex, RwLock};
-use std::{fmt, fs};
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -15,6 +14,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use std::{fmt, fs};
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
