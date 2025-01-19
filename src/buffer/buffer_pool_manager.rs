@@ -515,55 +515,55 @@ impl BufferPoolManager {
     pub fn flush_page(&self, page_id: PageId) -> Option<bool> {
         // Step 1: Determine the frame ID associated with the page ID
         let frame_id = {
-            let page_table = self.page_table.read(); // Acquire read lock on the page table
+            let page_table = self.page_table.read();
             page_table.get(&page_id).copied()
         };
 
         if let Some(frame_id) = frame_id {
-            warn!("Flushing page {} from frame {}", page_id, frame_id);
+            debug!("Attempting to flush page {} from frame {}", page_id, frame_id);
 
-            // Step 2: Get a clone of the page Arc to release the pages lock early
             let page_to_flush = {
-                let pages = self.pages.read(); // Acquire read lock on pages
-                pages[frame_id as usize].as_ref().cloned() // Clone the Arc to avoid holding the pages lock during I/O
+                let pages = self.pages.read();
+                pages[frame_id as usize].as_ref().cloned()
             };
 
             if let Some(page_arc) = page_to_flush {
-                // Step 3: Perform the disk I/O operation outside of critical sections
                 let mut flush_successful = false;
                 {
-                    let mut page = page_arc.write(); // Acquire write lock on the page
+                    let mut page = page_arc.write();
 
                     if page.as_page_trait_mut().is_dirty() {
                         let data = page.as_page_trait().get_data();
-                        debug!("Page data before flushing: {:?}", &data[..64]);
+                        debug!("Flushing dirty page {}, first 64 bytes: {:?}", page_id, &data[..64]);
 
-                        // Perform the disk write
-                        self.disk_manager
-                            .write_page(page_id, &data)
-                            .expect("Failed to write page");
-
-                        warn!("Page data written to disk: {:?}", &data[..64]);
-
-                        page.as_page_trait_mut().set_dirty(false); // Reset dirty flag after flushing
-                        flush_successful = true;
+                        match self.disk_manager.write_page(page_id, &data) {
+                            Ok(_) => {
+                                debug!("Successfully wrote page {} to disk", page_id);
+                                page.as_page_trait_mut().set_dirty(false);
+                                flush_successful = true;
+                            },
+                            Err(e) => {
+                                error!("Failed to write page {} to disk: {}", page_id, e);
+                                return None;
+                            }
+                        }
                     } else {
-                        warn!("Page {} is not dirty, no need to flush", page_id);
+                        debug!("Page {} is not dirty, skipping flush", page_id);
                     }
-                } // Release the page lock after the I/O operation is complete
+                }
 
                 if flush_successful {
-                    info!("Page {} flushed successfully", page_id);
+                    debug!("Page {} flushed successfully", page_id);
                     Some(true)
                 } else {
                     Some(false)
                 }
             } else {
-                warn!("Failed to find page in frame {}", frame_id);
+                warn!("No page found in frame {}", frame_id);
                 None
             }
         } else {
-            warn!("Page ID {} not found in page table", page_id);
+            debug!("Page {} not found in buffer pool", page_id);
             None
         }
     }

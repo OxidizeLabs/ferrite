@@ -3,5 +3,5 @@ mod connection;
 mod protocol;
 mod config;
 
-pub use server::ServerHandle;
 pub use protocol::{DatabaseRequest, DatabaseResponse, QueryResults};
+pub use server::ServerHandle;

@@ -1,7 +1,7 @@
-use crate::types_db::value::Value;
 use crate::concurrency::transaction::IsolationLevel;
-use serde::{Deserialize, Serialize};
 use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DatabaseRequest {
@@ -17,7 +17,10 @@ pub enum DatabaseRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DatabaseResponse {
     Results(QueryResults),
-    PrepareOk { stmt_id: u64, param_types: Vec<TypeId> },
+    PrepareOk {
+        stmt_id: u64,
+        param_types: Vec<TypeId>,
+    },
     Error(String),
 }
 

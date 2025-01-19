@@ -97,8 +97,8 @@ impl PageTrait for Page {
 
     /// Sets the dirty flag of this page.
     fn set_dirty(&mut self, is_dirty: bool) {
+        debug!("Setting page {} dirty flag to {}", self.page_id, is_dirty);
         self.is_dirty = is_dirty;
-        info!("Set dirty flag for Page ID {}: {}", self.page_id, is_dirty);
     }
 
     /// Returns the pin count of this page.

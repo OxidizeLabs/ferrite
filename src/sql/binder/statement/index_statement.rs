@@ -1,7 +1,7 @@
+use crate::common::statement_type::StatementType;
 use crate::sql::binder::bound_statement::BoundStatement;
 use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
 use crate::sql::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
-use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
@@ -97,9 +97,9 @@ impl Display for IndexStatement {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::sql::binder::bound_statement::AnyBoundStatement;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::sql::binder::bound_statement::AnyBoundStatement;
     use crate::types_db::type_id::TypeId;
 
     #[test]

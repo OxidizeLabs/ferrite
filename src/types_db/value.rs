@@ -26,7 +26,7 @@ pub enum Size {
     ElemTypeId(TypeId),
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Value {
     pub(crate) value_: Val,
     pub(crate) size_: Size,
@@ -114,6 +114,30 @@ impl Value {
     /// Returns true if this value represents NULL
     pub fn is_null(&self) -> bool {
         matches!(self.value_, Val::Null)
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self.value_,
+            Val::Decimal(_) |
+            Val::TinyInt(_) |
+            Val::SmallInt(_) |
+            Val::Integer(_) |
+            Val::BigInt(_)
+        )
+    }
+
+    pub fn new_with_type(val: Val, type_id: TypeId) -> Self {
+        Self {
+            value_: val,
+            size_: type_id.get_value().size_,
+            manage_data_: false,
+            type_id_: type_id,
+        }
+    }
+
+    pub fn get_type_id(&self) -> TypeId {
+        self.type_id_
     }
 }
 

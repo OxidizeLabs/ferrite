@@ -2460,7 +2460,7 @@ mod tests {
                 PlanNode::CreateTable(create_table) => {
                     let mut catalog = self.catalog.write();
                     catalog.create_table(
-                        create_table.get_table_name(),
+                        create_table.get_table_name().to_string(),
                         create_table.get_output_schema().clone(),
                     );
                     Ok(())

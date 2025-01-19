@@ -144,7 +144,7 @@ mod tests {
     fn setup_test_table(test_name: &str) -> Arc<TableHeap> {
         let ctx = TestContext::new(test_name);
         let bpm = ctx.bpm.clone();
-        Arc::new(TableHeap::new(bpm))
+        Arc::new(TableHeap::new(bpm, 0))
     }
 
     fn create_test_schema() -> Schema {

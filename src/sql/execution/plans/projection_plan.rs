@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn create_mock_table_scan(ctx: &TestContext, name: &str, schema: Schema) -> PlanNode {
-        let table_heap = Arc::new(TableHeap::new(ctx.bpm.clone()));
+        let table_heap = Arc::new(TableHeap::new(ctx.bpm.clone(), 0));
         let table_info = TableInfo::new(
             schema.clone(),
             name.to_string(),

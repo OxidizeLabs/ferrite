@@ -11,6 +11,7 @@ use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+use crate::sql::execution::transaction_context::TransactionContext;
 
 /// TableHeap represents a physical table on disk.
 /// This is just a doubly-linked list of pages.
@@ -19,6 +20,7 @@ pub struct TableHeap {
     first_page_id: PageId,
     latch: RwLock<()>,
     last_page_id: PageId,
+    table_oid: TableOidT,
 }
 
 /// The TableInfo struct maintains metadata about a table.
@@ -44,7 +46,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// A new `TableHeap` instance.
-    pub fn new(bpm: Arc<BufferPoolManager>) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>, table_oid: TableOidT) -> Self {
         let table_page = bpm.new_page_guarded(NewPageType::Table);
         let page_guard = table_page.unwrap();
         let first_page_id = page_guard.get_page_id();
@@ -63,6 +65,7 @@ impl TableHeap {
             first_page_id,
             latch: RwLock::new(()),
             last_page_id,
+            table_oid,
         }
     }
 
@@ -79,16 +82,31 @@ impl TableHeap {
     /// # Returns
     ///
     /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
-    pub fn insert_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
+    pub fn insert_tuple(
+        &self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+        txn_ctx: Option<Arc<TransactionContext>>,
+    ) -> Result<RID, String> {
+        debug!("Inserting tuple into table heap");
         let _write_guard = self.latch.write();
 
         // Helper function to try inserting into a page
         let mut try_insert = |page_id: PageId| -> Option<Option<RID>> {
             if let Some(page_guard) = self.bpm.fetch_page_guarded(page_id) {
-                if let Some(mut table_page_guard) = page_guard.into_specific_type::<TablePage, 8>()
-                {
-                    return table_page_guard
-                        .access_mut(|table_page| table_page.insert_tuple(meta, tuple));
+                if let Some(mut table_page_guard) = page_guard.into_specific_type::<TablePage, 8>() {
+                    let rid = table_page_guard.access_mut(|table_page| {
+                        table_page.insert_tuple(meta, tuple)
+                    });
+                    
+                    // If insert successful and we have transaction context, add to write set
+                    if let Some(Some(rid)) = rid {
+                        if let Some(txn_ctx) = &txn_ctx {
+                            debug!("Adding page {} to transaction write set", page_id);
+                            txn_ctx.append_write_set_atomic(self.get_table_oid(), rid);
+                        }
+                    }
+                    return rid;
                 }
             }
             None
@@ -136,9 +154,10 @@ impl TableHeap {
         meta: &TupleMeta,
         tuple: &mut Tuple,
         rid: RID,
+        txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
-
+        
         // Helper function to try updating in a page
         let mut try_update = |page_id: PageId| -> Option<Result<RID, String>> {
             if let Some(page_guard) = self.bpm.fetch_page_guarded(page_id) {
@@ -328,6 +347,7 @@ impl TableHeap {
             first_page_id: self.first_page_id,
             last_page_id: self.last_page_id,
             latch: RwLock::new(()),
+            table_oid: self.table_oid,
         });
 
         TableIterator::new(table_heap, start_rid, stop_at_rid)
@@ -491,6 +511,11 @@ impl TableHeap {
         }
         count
     }
+
+    /// Gets the table OID.
+    pub fn get_table_oid(&self) -> TableOidT {
+        self.table_oid
+    }
 }
 
 impl TableInfo {
@@ -593,6 +618,11 @@ mod tests {
                 disk_manager.clone(),
                 replacer.clone(),
             ));
+
+            // Create a test table with schema and OID
+            let table_oid = 1; // Use a test OID
+            let table_heap = Arc::new(TableHeap::new(bpm.clone(), table_oid));
+
             Self {
                 bpm,
                 db_file,
@@ -624,7 +654,8 @@ mod tests {
     fn test_table_heap_creation() {
         let ctx = TestContext::new("test_table_heap_creation");
         let bpm = ctx.bpm.clone();
-        let table_heap = TableHeap::new(bpm);
+        let table_oid = 1; // Use a test OID
+        let table_heap = TableHeap::new(bpm, table_oid);
 
         assert_ne!(table_heap.get_first_page_id(), INVALID_PAGE_ID);
         assert_eq!(table_heap.get_num_pages(), 1);
@@ -634,16 +665,17 @@ mod tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let ctx = TestContext::new("test_insert_and_get_tuple");
-        let table_heap = TableHeap::new(ctx.bpm.clone());
+        let table_oid = 1; // Use a test OID
+        let table_heap = TableHeap::new(ctx.bpm.clone(), table_oid);
         let schema = create_test_schema();
         let rid = RID::new(0, 0);
 
         let tuple_values = vec![Value::new(1), Value::new("Alice"), Value::new(30)];
         let mut tuple = Tuple::new(&tuple_values, schema.clone(), rid);
-        let meta = TupleMeta::new(0, false);
+        let meta = TupleMeta::new(0);
 
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(&meta, &mut tuple, None)
             .expect("Failed to insert tuple");
 
         let (retrieved_meta, retrieved_tuple) =
@@ -658,18 +690,19 @@ mod tests {
     fn test_update_tuple_meta() {
         let ctx = TestContext::new("test_update_tuple_meta");
         let bpm = ctx.bpm.clone();
-        let table_heap = TableHeap::new(bpm);
+        let table_oid = 1; // Use a test OID
+        let table_heap = TableHeap::new(bpm, table_oid);
         let schema = create_test_schema();
 
         let tuple_values = vec![Value::new(1), Value::new("Bob"), Value::new(25)];
         let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0));
-        let meta = TupleMeta::new(0, false);
+        let meta = TupleMeta::new(0);
 
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(&meta, &mut tuple, None)
             .expect("Failed to insert tuple");
 
-        let updated_meta = TupleMeta::new(1, true);
+        let updated_meta = TupleMeta::new(1);
         table_heap.update_tuple_meta(&updated_meta, rid);
 
         let retrieved_meta = table_heap
@@ -683,7 +716,8 @@ mod tests {
     fn test_table_iterator() {
         let ctx = TestContext::new("test_table_iterator");
         let bpm = ctx.bpm.clone();
-        let table_heap = TableHeap::new(bpm);
+        let table_oid = 1; // Use a test OID
+        let table_heap = TableHeap::new(bpm, table_oid);
         let schema = create_test_schema();
 
         // Insert multiple tuples
@@ -695,9 +729,9 @@ mod tests {
                 Value::new(20 + i),
             ];
             let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, i as u32));
-            let meta = TupleMeta::new(0, false);
+            let meta = TupleMeta::new(0);
             let rid = table_heap
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(&meta, &mut tuple, None)
                 .expect("Failed to insert tuple");
             inserted_rids.push(rid);
             debug!("Inserted tuple with RID: {:?}", rid);
@@ -729,7 +763,8 @@ mod tests {
     fn test_table_heap_debug() {
         let ctx = TestContext::new("test_table_heap_debug");
         let bpm = ctx.bpm.clone();
-        let table_heap = TableHeap::new(bpm);
+        let table_oid = 1; // Use a test OID
+        let table_heap = TableHeap::new(bpm, table_oid);
 
         let debug_output = format!("{:?}", table_heap);
         assert!(debug_output.contains("TableHeap"));

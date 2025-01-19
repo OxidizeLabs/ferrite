@@ -359,10 +359,11 @@ mod index_scan_executor_tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::IndexType;
@@ -372,7 +373,6 @@ mod index_scan_executor_tests {
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Arc;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,
@@ -430,7 +430,7 @@ mod index_scan_executor_tests {
             let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
                 buffer_pool_manager,
                 catalog,
-                transaction_context
+                transaction_context,
             )));
 
             Self {
@@ -470,11 +470,12 @@ mod index_scan_executor_tests {
         let context_guard = context.read();
         let catalog = context_guard.get_catalog();
         let mut catalog_guard = catalog.write();
+        let transaction_context = context_guard.get_transaction_context();
 
         // Create table
         let table_name = "test_table".to_string();
         let table_info = catalog_guard
-            .create_table(&table_name, schema.clone())
+            .create_table(table_name.clone(), schema.clone())
             .unwrap();
         let table_id = table_info.get_table_oidt();
 
@@ -489,8 +490,8 @@ mod index_scan_executor_tests {
                 schema.clone(),
                 RID::new(0, i),
             );
-            let tuple_meta = TupleMeta::new(i as u64, false);
-            table_heap.insert_tuple(&tuple_meta, &mut tuple).unwrap();
+            let tuple_meta = TupleMeta::new(i as u64);
+            table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone())).unwrap();
         }
 
         // Create index on id column
@@ -515,6 +516,7 @@ mod index_scan_executor_tests {
         let context_guard = context.read();
         let catalog = context_guard.get_catalog();
         let catalog_guard = catalog.read();
+        let transaction_context = context_guard.get_transaction_context();
 
         let table_info = catalog_guard.get_table(table_name).unwrap();
         let table_heap = table_info.get_table_heap();
@@ -527,8 +529,8 @@ mod index_scan_executor_tests {
                 schema.clone(),
                 RID::new(0, 0),
             );
-            let tuple_meta = TupleMeta::new(i, false);
-            table_heap.insert_tuple(&tuple_meta, &mut tuple).unwrap();
+            let tuple_meta = TupleMeta::new(i);
+            table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone())).unwrap();
         }
     }
 

@@ -403,7 +403,7 @@ mod unit_tests {
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 
@@ -427,7 +427,7 @@ mod unit_tests {
         let (meta, mut tuple) = create_test_tuple(1);
 
         let tuple_rid_id = page.insert_tuple(&meta, &mut tuple).unwrap();
-        let new_meta = TupleMeta::new(456, true);
+        let new_meta = TupleMeta::new(456);
 
         page.update_tuple_meta(&new_meta, &tuple_rid_id).unwrap();
         let retrieved_meta = page.get_tuple_meta(&tuple_rid_id).unwrap();
@@ -458,7 +458,7 @@ mod unit_tests {
 
         let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
 
-        let new_meta = TupleMeta::new(789, false);
+        let new_meta = TupleMeta::new(789);
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
@@ -515,7 +515,7 @@ mod tuple_operation_tests {
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 
@@ -550,7 +550,7 @@ mod tuple_operation_tests {
         let (meta, mut tuple) = create_test_tuple(1);
 
         let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
-        let new_meta = TupleMeta::new(456, true);
+        let new_meta = TupleMeta::new(456);
 
         page.update_tuple_meta(&new_meta, &rid).unwrap();
         let retrieved_meta = page.get_tuple_meta(&rid).unwrap();
@@ -566,7 +566,7 @@ mod tuple_operation_tests {
         let (meta, mut tuple) = create_test_tuple(1);
 
         let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
-        let new_meta = TupleMeta::new(789, false);
+        let new_meta = TupleMeta::new(789);
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
@@ -596,7 +596,7 @@ mod error_handling_tests {
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 
@@ -614,7 +614,7 @@ mod error_handling_tests {
     fn test_invalid_meta_update() {
         let mut page = TablePage::new(1);
         let invalid_rid = RID::new(1, 100);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         assert!(matches!(
             page.update_tuple_meta(&meta, &invalid_rid),
             Err(PageError::TupleInvalid)
@@ -652,7 +652,7 @@ mod capacity_tests {
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 
@@ -714,7 +714,7 @@ mod concurrency_safety_tests {
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 
@@ -782,7 +782,7 @@ mod serialization_tests {
         let values = vec![Value::new(42), Value::new("Test")];
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
         (meta, tuple)
     }
 

@@ -1,9 +1,9 @@
+use crate::common::statement_type::StatementType;
 use crate::sql::binder::bound_expression::BoundExpression;
 use crate::sql::binder::bound_order_by::BoundOrderBy;
 use crate::sql::binder::bound_statement::BoundStatement;
 use crate::sql::binder::bound_table_ref::BoundTableRef;
 use crate::sql::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
-use crate::common::statement_type::StatementType;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display};

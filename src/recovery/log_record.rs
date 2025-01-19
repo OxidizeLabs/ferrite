@@ -318,6 +318,10 @@ impl LogRecord {
             self.size, self.lsn, self.txn_id, self.prev_lsn, self.log_record_type as i32,
         )
     }
+
+    pub fn is_commit(&self) -> bool {
+        matches!(self.log_record_type, LogRecordType::Commit)
+    }
 }
 
 #[cfg(test)]

@@ -9,16 +9,14 @@ pub fn initialize_logger() {
     INIT.call_once(|| {
         let mut builder = Builder::new();
 
-        let is_test = env::var("RUST_TEST").is_ok();
-        let default_level = if is_test {
-            LevelFilter::Debug
-        } else {
-            LevelFilter::Info
-        };
-
         builder
-            .filter_level(default_level)
-            .filter_module("rustyline", LevelFilter::Warn)
+            .filter_level(LevelFilter::Debug)
+            .filter_module("tkdb", LevelFilter::Debug)
+            .filter_module("tkdb::buffer", LevelFilter::Debug)
+            .filter_module("tkdb::storage", LevelFilter::Debug)
+            .filter_module("tkdb::concurrency", LevelFilter::Debug)
+            .filter_module("tkdb::recovery", LevelFilter::Debug)
+            .filter_module("rustyline", LevelFilter::Info)
             .format_timestamp_millis()
             .parse_default_env()
             .init();

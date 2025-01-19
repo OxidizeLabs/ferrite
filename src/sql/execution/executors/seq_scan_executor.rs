@@ -156,6 +156,7 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
@@ -166,7 +167,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::fs;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -274,7 +274,7 @@ mod tests {
             Value::new(age),
         ];
         let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-        let meta = TupleMeta::new(0, false);
+        let meta = TupleMeta::new(0);
         (meta, tuple)
     }
 
@@ -297,7 +297,7 @@ mod tests {
         // Create transaction and table
         let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
         let table_name = "test_table";
-        let table_info = catalog.create_table(table_name, schema.clone()).unwrap();
+        let table_info = catalog.create_table(table_name.to_string(), schema.clone()).unwrap();
         let table_heap = table_info.get_table_heap();
 
         // Insert test data
@@ -306,7 +306,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
                 .expect("Failed to insert tuple");
         }
 
@@ -320,7 +320,7 @@ mod tests {
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
             Arc::new(RwLock::new(catalog)),
-            transaction_context
+            transaction_context,
         )));
 
         let mut executor = SeqScanExecutor::new(context, plan);
@@ -379,7 +379,7 @@ mod tests {
         // Create transaction and empty table
         let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
         let table_name = "empty_table";
-        let table_info = catalog.create_table(table_name, schema.clone()).unwrap();
+        let table_info = catalog.create_table(table_name.to_string(), schema.clone()).unwrap();
 
         // Create scan plan and executor
         let plan = Arc::new(SeqScanPlanNode::new(
@@ -391,7 +391,7 @@ mod tests {
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
             Arc::new(RwLock::new(catalog)),
-            transaction_context
+            transaction_context,
         )));
 
         let mut executor = SeqScanExecutor::new(context, plan);

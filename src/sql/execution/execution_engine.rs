@@ -10,17 +10,19 @@ use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, info};
+use log::{debug, error, info};
 use parking_lot::{Mutex, RawRwLock, RwLock};
 use sqlparser::ast::Statement::{CreateIndex, CreateTable, Insert};
-use std::sync::Arc;
-use crate::sql::execution::transaction_context::TransactionContext;
-use crate::types_db::type_id::TypeId;
-use sqlparser::parser::Parser;
 use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+use std::sync::Arc;
+use crate::sql::execution::plans::insert_plan::InsertNode;
+use crate::storage::table::tuple::TupleMeta;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -94,12 +96,8 @@ impl ExecutionEngine {
         context: Arc<RwLock<ExecutionContext>>,
         writer: &mut dyn ResultWriter,
     ) -> Result<bool, DBError> {
-        // Create root executor
         let mut root_executor = self.create_executor(plan, context)?;
-
-        info!("Initializing executor");
         root_executor.init();
-        debug!("Executor initialization complete");
 
         match plan {
             PlanNode::Insert(_) | PlanNode::CreateTable(_) | PlanNode::CreateIndex(_) => {
@@ -120,56 +118,42 @@ impl ExecutionEngine {
                 }
             }
             _ => {
-                debug!("Plan: {}", plan);
-
-                let mut has_results = false;
-                let mut row_count = 0;
-
-                // Get schema information
                 let schema = root_executor.get_output_schema();
                 let columns = schema.get_columns();
 
-                // Write schema header
+                // Write schema header with proper aggregate function names
                 writer.write_schema_header(
                     columns
                         .iter()
                         .map(|col| {
-                            if col.get_name().starts_with("sum_") {
-                                format!("SUM({})", col.get_name().trim_start_matches("sum_"))
-                            } else if col.get_name().starts_with("count_") {
-                                format!("COUNT({})", col.get_name().trim_start_matches("count_"))
-                            } else if col.get_name().starts_with("avg_") {
-                                format!("AVG({})", col.get_name().trim_start_matches("avg_"))
-                            } else if col.get_name().starts_with("min_") {
-                                format!("MIN({})", col.get_name().trim_start_matches("min_"))
-                            } else if col.get_name().starts_with("max_") {
-                                format!("MAX({})", col.get_name().trim_start_matches("max_"))
+                            let col_name = col.get_name();
+                            if col_name.starts_with("sum_") {
+                                format!("SUM({})", &col_name[4..])
+                            } else if col_name.starts_with("count_") {
+                                format!("COUNT({})", &col_name[6..])
+                            } else if col_name.starts_with("avg_") {
+                                format!("AVG({})", &col_name[4..])
+                            } else if col_name.starts_with("min_") {
+                                format!("MIN({})", &col_name[4..])
+                            } else if col_name.starts_with("max_") {
+                                format!("MAX({})", &col_name[4..])
                             } else {
-                                col.get_name().to_string()
+                                col_name.to_string()
                             }
                         })
                         .collect()
                 );
 
-                // Process rows
-                debug!("Starting result processing");
-                while let Some((tuple, _rid)) = root_executor.next() {
+                let mut has_results = false;
+                let mut row_count = 0;
+
+                while let Some((tuple, _)) = root_executor.next() {
                     has_results = true;
                     row_count += 1;
-
-                    if row_count % 1000 == 0 {
-                        debug!("Processed {} rows", row_count);
-                    }
-
                     writer.write_row(tuple.get_values().to_vec());
                 }
 
-                debug!(
-                    "Result processing complete. Found {} matching rows",
-                    row_count
-                );
-
-                info!("Query execution finished. Processed {} rows", row_count);
+                debug!("Processed {} rows", row_count);
                 Ok(has_results)
             }
         }
@@ -182,8 +166,7 @@ impl ExecutionEngine {
         context: Arc<RwLock<ExecutionContext>>,
     ) -> Result<Box<dyn AbstractExecutor>, DBError> {
         debug!("Creating executor for plan: {}", plan);
-        plan.create_executor(context)
-            .map_err(DBError::Execution)
+        plan.create_executor(context).map_err(DBError::Execution)
     }
 
     /// Create a logical plan from SQL
@@ -230,7 +213,7 @@ impl ExecutionEngine {
                 "mock_table".to_string(),
                 vec![], // No children initially
             )
-            .with_tuples(mock_tuples),
+                .with_tuples(mock_tuples),
         )
     }
 
@@ -248,7 +231,7 @@ impl ExecutionEngine {
 
         // Create logical plan to validate semantics
         let _logical_plan = self.create_logical_plan(sql)?;
-        
+
         // For now, return empty parameter types since we don't support parameters yet
         Ok(Vec::new())
     }
@@ -263,5 +246,34 @@ impl ExecutionEngine {
     ) -> Result<bool, DBError> {
         // For now, just execute as regular SQL since we don't support parameters
         self.execute_sql(sql, context, writer)
+    }
+
+    fn execute_insert(&self, plan: &InsertNode, txn_ctx: Arc<TransactionContext>) -> Result<(), DBError> {
+        debug!("Executing insert plan");
+        
+        let binding = self.catalog.read();
+        let table_info = binding
+            .get_table(plan.get_table_name())
+            .ok_or_else(|| DBError::TableNotFound(plan.get_table_name().to_string()))?;
+        
+        // Create tuple meta with just the transaction ID
+        let meta = TupleMeta::new(txn_ctx.get_transaction_id());
+        
+        // Get the first tuple from input tuples
+        let input_tuples = plan.get_input_tuples();
+        if input_tuples.is_empty() {
+            return Err(DBError::Execution("No tuples to insert".to_string()));
+        }
+        
+        let mut tuple = input_tuples[0].clone();  // Clone the first tuple
+        
+        // Insert tuple with transaction context
+        if let Err(e) = table_info.get_table_heap().insert_tuple(&meta, &mut tuple, Some(txn_ctx)) {
+            error!("Failed to insert tuple: {}", e);
+            return Err(DBError::Execution(format!("Insert failed: {}", e)));
+        }
+        
+        debug!("Insert executed successfully");
+        Ok(())
     }
 }

@@ -197,6 +197,7 @@ impl Iterator for TableScanIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -211,9 +212,16 @@ mod tests {
     use crate::types_db::value::Value;
     use chrono::Utc;
     use parking_lot::RwLock;
+    use crate::catalog::catalog::Catalog;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
+        transaction_context: Arc<TransactionContext>,
         db_file: String,
         db_log_file: String,
     }
@@ -240,11 +248,28 @@ mod tests {
                 disk_manager.clone(),
                 replacer.clone(),
             ));
+
+            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+
+            let catalog = Arc::new(RwLock::new(Catalog::new(bpm.clone(),0,0, HashMap::default(), HashMap::default(), HashMap::default(), HashMap::default())));
+
+            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+
+            let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
+
+            let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            let transaction_context = Arc::new(TransactionContext::new(txn,lock_manager, transaction_manager));
+
             Self {
                 bpm,
+                transaction_context,
                 db_file,
                 db_log_file,
             }
+        }
+
+        fn get_transaction_context(&self) -> &Arc<TransactionContext> {
+            &self.transaction_context
         }
 
         fn cleanup(&self) {
@@ -262,7 +287,7 @@ mod tests {
     fn setup_test_table(test_name: &str) -> Arc<TableHeap> {
         let ctx = TestContext::new(test_name);
         let bpm = ctx.bpm.clone();
-        Arc::new(TableHeap::new(bpm))
+        Arc::new(TableHeap::new(bpm, 0))
     }
 
     fn create_test_schema() -> Schema {
@@ -310,6 +335,9 @@ mod tests {
 
     #[test]
     fn test_table_iterator_single_tuple() {
+        let ctx = TestContext::new("test_table_iterator_single_tuple");
+        let transaction_context = ctx.get_transaction_context();
+
         let table_heap = setup_test_table("test_table_iterator_single_tuple");
         let schema = Schema::new(vec![
             Column::new("col_1", TypeId::Integer),
@@ -322,10 +350,10 @@ mod tests {
             schema.clone(),
             rid,
         );
-        let meta = TupleMeta::new(123, false);
+        let meta = TupleMeta::new(123);
 
         table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
             .expect("failed to insert tuple");
 
         let mut iterator = TableIterator::new(table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
@@ -343,7 +371,10 @@ mod tests {
 
     #[test]
     fn test_table_iterator_multiple_tuples() {
-        let table_heap = setup_test_table("test_table_iterator_single_tuple");
+        let ctx = TestContext::new("test_table_iterator_multiple_tuples");
+        let transaction_context = ctx.get_transaction_context();
+
+        let table_heap = setup_test_table("test_table_iterator_multiple_tuples");
         let schema = Schema::new(vec![
             Column::new("col_1", TypeId::Integer),
             Column::new("col_2", TypeId::Integer),
@@ -364,16 +395,16 @@ mod tests {
             rid_2,
         );
 
-        let meta_1 = TupleMeta::new(123, false);
-        let meta_2 = TupleMeta::new(124, false);
+        let meta_1 = TupleMeta::new(123);
+        let meta_2 = TupleMeta::new(124);
 
         table_heap
-            .insert_tuple(&meta_1, &mut tuple_1)
+            .insert_tuple(&meta_1, &mut tuple_1, Some(transaction_context.clone()))
             .expect("failed to insert tuple 1");
 
         // insert tuple twice
         table_heap
-            .insert_tuple(&meta_2, &mut tuple_2)
+            .insert_tuple(&meta_2, &mut tuple_2, Some(transaction_context.clone()))
             .expect("failed to insert tuple 2");
 
         let mut iterator = TableIterator::new(table_heap, rid_1, RID::new(INVALID_PAGE_ID, 1));

@@ -48,7 +48,9 @@ impl TransactionContext {
     /// Thread-safe method to append to write set
     pub fn append_write_set_atomic(&self, table_oid: TableOidT, rid: RID) {
         let mut write_set = self.write_set.lock();
-        write_set.push((table_oid, rid));
+        if !write_set.contains(&(table_oid, rid)) {
+            write_set.push((table_oid, rid));
+        }
     }
 
     /// Get all write operations performed in this transaction

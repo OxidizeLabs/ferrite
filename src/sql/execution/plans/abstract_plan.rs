@@ -485,16 +485,16 @@ mod basic_behaviour {
             info!("Creating tables...");
 
             // Create tables in catalog
-            let users_info = catalog.create_table("users", users_schema.clone())
+            let users_info = catalog.create_table("users".to_string(), users_schema.clone())
                 .ok_or("Failed to create users table")?;
             info!("Created users table: {}", users_info.get_table_name());
             info!("Users schema: {:?}", users_schema);
 
-            let orders_info = catalog.create_table("orders", orders_schema.clone())
+            let orders_info = catalog.create_table("orders".to_string(), orders_schema.clone())
                 .ok_or("Failed to create orders table")?;
             info!("Created orders table: {}", orders_info.get_table_name());
 
-            let products_info = catalog.create_table("products", products_schema.clone())
+            let products_info = catalog.create_table("products".to_string(), products_schema.clone())
                 .ok_or("Failed to create products table")?;
             info!("Created products table: {}", products_info.get_table_name());
 
@@ -730,16 +730,16 @@ mod complex_behaviour {
             info!("Creating tables...");
 
             // Create tables in catalog
-            catalog.create_table("users", users_schema.clone())
+            catalog.create_table("users".to_string(), users_schema.clone())
                 .ok_or("Failed to create users table")?;
 
-            catalog.create_table("orders", orders_schema.clone())
+            catalog.create_table("orders".to_string(), orders_schema.clone())
                 .ok_or("Failed to create orders table")?;
 
-            catalog.create_table("products", products_schema.clone())
+            catalog.create_table("products".to_string(), products_schema.clone())
                 .ok_or("Failed to create products table")?;
 
-            catalog.create_table("order_items", order_items_schema.clone())
+            catalog.create_table("order_items".to_string(), order_items_schema.clone())
                 .ok_or("Failed to create order_items table")?;
 
             Ok(())

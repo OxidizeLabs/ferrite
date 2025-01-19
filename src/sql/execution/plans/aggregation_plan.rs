@@ -3,13 +3,13 @@ use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use log::debug;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
-use log::debug;
-use crate::types_db::type_id::TypeId;
 
 /// Plan node for aggregation operations
 #[derive(Debug, Clone, PartialEq)]
@@ -41,21 +41,21 @@ impl AggregationPlanNode {
     ) -> Self {
         // Create output schema based on group bys and aggregates
         let mut columns = Vec::new();
-        
+
         // Add group by columns first
         for expr in &group_bys {
             match expr.as_ref() {
                 Expression::ColumnRef(col_ref) => {
                     columns.push(Column::new(
                         col_ref.get_return_type().get_name(),
-                        col_ref.get_return_type().get_type()
+                        col_ref.get_return_type().get_type(),
                     ));
                 }
                 _ => {
                     // For non-column expressions, use a generic name
                     columns.push(Column::new(
                         "expr",
-                        TypeId::Integer // Default type for expressions
+                        TypeId::Integer, // Default type for expressions
                     ));
                 }
             }
@@ -84,9 +84,9 @@ impl AggregationPlanNode {
                         _ => {
                             if let Some(child) = agg_expr.get_children().first() {
                                 if let Expression::ColumnRef(col_ref) = child.as_ref() {
-                                    format!("{}({})", 
-                                        agg_expr.get_agg_type(),
-                                        col_ref.get_return_type().get_name()
+                                    format!("{}({})",
+                                            agg_expr.get_agg_type(),
+                                            col_ref.get_return_type().get_name()
                                     )
                                 } else {
                                     format!("{}(expr)", agg_expr.get_agg_type())
@@ -104,7 +104,7 @@ impl AggregationPlanNode {
                     if let Expression::ColumnRef(col_ref) = expr.as_ref() {
                         columns.push(Column::new(
                             col_ref.get_return_type().get_name(),
-                            col_ref.get_return_type().get_type()
+                            col_ref.get_return_type().get_type(),
                         ));
                     }
                 }
@@ -255,11 +255,11 @@ impl Display for AggregationPlanNode {
 mod tests {
     use super::*;
     use crate::catalog::column::Column;
+    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::types_db::type_id::TypeId;
-    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     #[test]
     fn test_aggregation_plan_node_creation() {

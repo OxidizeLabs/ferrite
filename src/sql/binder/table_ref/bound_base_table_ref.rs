@@ -1,6 +1,6 @@
-use crate::sql::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
+use crate::sql::binder::bound_table_ref::{BoundTableRef, TableReferenceType};
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display};

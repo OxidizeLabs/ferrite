@@ -95,7 +95,8 @@ impl AbstractExecutor for CreateTableExecutor {
 
             // Create the table
             debug!("Creating new table '{}' in catalog", table_name);
-            match catalog_guard.create_table(table_name, schema) {
+            let table_info = catalog_guard.create_table(table_name.to_string(), schema);
+            match table_info {
                 Some(table_info) => {
                     info!(
                         "Successfully created table '{}' with OID {}",

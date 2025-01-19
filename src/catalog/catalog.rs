@@ -10,6 +10,7 @@ use log::{info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::sync::Arc;
 
 /// The Catalog is a non-persistent catalog that is designed for
@@ -63,48 +64,27 @@ impl Catalog {
     ///
     /// # Returns
     /// A (non-owning) pointer to the metadata for the table.
-    pub fn create_table(&mut self, table_name: &str, schema: Schema) -> Option<&TableInfo> {
-        // Debug: Print input schema details
-        info!("Creating table '{}' with schema:", table_name);
-        for i in 0..schema.get_column_count() {
-            let column = schema.get_column(i as usize).unwrap();
-            info!(
-                "Column {}: Name = {}, Type = {:?}, Offset = {}",
-                i,
-                column.get_name(),
-                column.get_type(),
-                column.get_offset()
-            );
-        }
-
-        // Check if table already exists
-        if self.table_names.contains_key(table_name) {
-            warn!("Table '{}' already exists", table_name);
-            return None;
-        }
-
-        // Create new table heap
-        let table = Arc::new(TableHeap::new(self.bpm.clone()));
+    pub fn create_table(&mut self, name: String, schema: Schema) -> Option<TableInfo> {
+        let table_oid = self.next_table_oid;
+        let table_heap = Arc::new(TableHeap::new(self.bpm.clone(), table_oid));
 
         // Increment table OID (note: this was .add(1) before, which might be incorrect)
         self.next_table_oid += 1;
-        let table_oid = self.next_table_oid;
 
         // Create table info
-        let table_info = TableInfo::new(schema.clone(), table_name.to_string(), table, table_oid);
+        let table_info = TableInfo::new(schema.clone(), name.clone(), table_heap, table_oid);
 
         // Add to catalog maps
-        self.table_names.insert(table_name.to_string(), table_oid);
-        self.tables.insert(table_oid, table_info);
+        self.table_names.insert(name.clone(), table_oid);
+        self.tables.insert(table_oid, table_info.clone());
 
         // Print confirmation
         info!(
             "Table '{}' created successfully with OID {}",
-            table_name, table_oid
+            name, table_oid
         );
 
-        // Return reference to the newly created table info
-        self.tables.get(&table_oid)
+        Some(table_info)
     }
 
     /// Queries table metadata by name.
@@ -242,6 +222,11 @@ impl Catalog {
                 .map(|table_schema| table_schema.get_table_schema())
         })
     }
+
+    /// Gets a reference to the buffer pool manager
+    pub fn get_buffer_pool(&self) -> Arc<BufferPoolManager> {
+        self.bpm.clone()
+    }
 }
 
 impl Display for Catalog {
@@ -376,9 +361,7 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_info = catalog.create_table("test_table", schema.clone());
-        assert!(table_info.is_some());
-
+        let table_oid = catalog.create_table("test_table".to_string(), schema.clone());
         let retrieved_info = catalog.get_table("test_table");
         assert!(retrieved_info.is_some());
         assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
@@ -397,12 +380,9 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_info = catalog
-            .create_table("test_get_table_by_oid", schema.clone())
-            .unwrap();
-        let table_oid = table_info.get_table_oidt();
+        let table_info = catalog.create_table("test_get_table_by_oid".to_string(), schema.clone()).unwrap();
 
-        let retrieved_info = catalog.get_table_by_oid(table_oid);
+        let retrieved_info = catalog.get_table_by_oid(table_info.get_table_oidt());
         assert!(retrieved_info.is_some());
         assert_eq!(
             retrieved_info.unwrap().get_table_name(),
@@ -422,8 +402,8 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        catalog.create_table("test_get_table_names_a", schema.clone());
-        catalog.create_table("test_get_table_names_b", schema.clone());
+        catalog.create_table("test_get_table_names_a".to_string(), schema.clone());
+        catalog.create_table("test_get_table_names_b".to_string(), schema.clone());
 
         let table_names = catalog.get_table_names();
         assert_eq!(table_names.len(), 2);
@@ -443,7 +423,7 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        catalog.create_table("test_get_table_schema", schema.clone());
+        catalog.create_table("test_get_table_schema".to_string(), schema.clone());
 
         let retrieved_schema = catalog.get_table_schema("test_get_table_schema");
         assert!(retrieved_schema.is_some());
@@ -461,8 +441,9 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        let table_info = catalog.create_table("indexed_table", schema.clone());
-        assert!(table_info.is_some(), "Failed to create table");
+        let table_info = catalog.create_table("indexed_table".to_string(), schema.clone()).unwrap();
+        let retrieved_info = catalog.get_table_by_oid(table_info.get_table_oidt());
+        assert!(retrieved_info.is_some(), "Failed to create table");
 
         // Test getting indexes for non-existent table
         let no_table_indexes = catalog.get_table_indexes("nonexistent_table");
@@ -525,8 +506,8 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_heap = Arc::new(TableHeap::new(bpm.clone()));
-        let table_heap2 = Arc::new(TableHeap::new(bpm));
+        let table_heap = Arc::new(TableHeap::new(bpm.clone(), 1));
+        let table_heap2 = Arc::new(TableHeap::new(bpm, 1));
 
         // Create two identical TableInfo instances
         let info1 = TableInfo::new(
@@ -567,12 +548,14 @@ mod unit_tests {
         ]);
 
         // First creation should succeed
-        let result1 = catalog.create_table("duplicate_table", schema.clone());
-        assert!(result1.is_some());
+        let table_info_1 = catalog.create_table("duplicate_table".to_string(), schema.clone()).unwrap();
+        let table_oid_1 = table_info_1.get_table_oidt();
+        assert!(table_oid_1 != 0);
 
         // Second creation with same name should fail
-        let result2 = catalog.create_table("duplicate_table", schema.clone());
-        assert!(result2.is_none());
+        let table_info_2 = catalog.create_table("duplicate_table".to_string(), schema.clone()).unwrap();
+        let table_oid_2 = table_info_2.get_table_oidt();
+        assert!(table_oid_2== 0);
     }
 
     #[test]
@@ -590,12 +573,8 @@ mod unit_tests {
         ]);
 
         // Create table with schema
-        catalog.create_table("schema_test", schema.clone());
-
-        // Test retrieving schema
-        let retrieved_schema = catalog.get_table_schema("schema_test");
-        assert!(retrieved_schema.is_some());
-        let retrieved_schema = retrieved_schema.unwrap();
+        let table_info = catalog.create_table("schema_test".to_string(), schema.clone()).unwrap();
+        let retrieved_schema = table_info.get_table_schema();
 
         // Verify schema details
         assert_eq!(retrieved_schema.get_column_count(), 4);
@@ -620,7 +599,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        catalog.create_table("test_table", schema.clone());
+        let table_oid = catalog.create_table("test_table".to_string(), schema.clone());
 
         // Test creating an index
         let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
@@ -662,7 +641,7 @@ mod unit_tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        catalog.create_table("lookup_test", table_schema.clone());
+        let table_oid = catalog.create_table("lookup_test".to_string(), table_schema.clone());
 
         // Create an index
         let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);

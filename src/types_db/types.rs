@@ -8,7 +8,7 @@ use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Val::Null;
-use crate::types_db::value::Value;
+use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type::VectorType;
 use std::mem::size_of;
@@ -107,16 +107,21 @@ pub trait Type {
     fn compare_greater_than_equals(&self, _other: &Value) -> CmpBool {
         unimplemented!()
     }
-    fn add(&self, _other: &Value) -> Value {
+    fn add(&self, other: &Value) -> Result<Value, String> {
+        let type_id = self.get_type_id();
+        if !type_id.get_value().is_numeric() {
+            return Err(format!("Cannot perform addition on type {:?}", type_id));
+        }
+        // Implementation for specific types...
         unimplemented!()
     }
-    fn subtract(&self, _other: &Value) -> Value {
+    fn subtract(&self, _other: &Value) -> Result<Value, String> {
         unimplemented!()
     }
-    fn multiply(&self, _other: &Value) -> Value {
+    fn multiply(&self, _other: &Value) -> Result<Value, String> {
         unimplemented!()
     }
-    fn divide(&self, _other: &Value) -> Value {
+    fn divide(&self, _other: &Value) -> Result<Value, String> {
         unimplemented!()
     }
     fn modulo(&self, _other: &Value) -> Value {
