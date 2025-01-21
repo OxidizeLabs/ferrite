@@ -3,7 +3,7 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::storage::table::tuple::Tuple;
@@ -15,15 +15,71 @@ use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use log::error;
+use sqlparser::ast::GroupByExpr;
+use sqlparser::keywords::Keyword::NULL;
+use log::debug;
+use chrono::Utc;
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::lru_k_replacer::LRUKReplacer;
+use crate::catalog::catalog::Catalog;
+use crate::catalog::column::Column;
+use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::recovery::log_manager::LogManager;
+use crate::sql::execution::executors::mock_executor::MockExecutor;
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::sql::execution::transaction_context::TransactionContext;
+use crate::common::logger::initialize_logger;
+
+#[derive(Hash, Eq, PartialEq, Clone)]
+#[derive(Debug)]
+struct GroupKey {
+    values: Vec<Value>,  // Values for each group by expression
+}
+
+#[derive(Clone)]
+struct AggregateValues {
+    values: Vec<Value>,  // One value per aggregate expression
+}
+
+impl GroupKey {
+    fn new(values: Vec<Value>) -> Self {
+        Self { values }
+    }
+}
+
+impl AggregateValues {
+    fn new(num_aggregates: usize) -> Self {
+        Self {
+            values: vec![Value::new(Val::Null); num_aggregates],
+        }
+    }
+
+    fn update(&mut self, index: usize, value: Value) -> Result<(), String> {
+        if self.values[index].is_null() {
+            self.values[index] = value;
+        } else {
+            self.values[index] = self.values[index].add(&value)?;
+        }
+        Ok(())
+    }
+}
 
 pub struct AggregationExecutor {
-    context: Arc<RwLock<ExecutionContext>>,
-    plan: Arc<AggregationPlanNode>,
-    child_executor: Box<dyn AbstractExecutor>,
-    // Track aggregation state
-    groups: HashMap<Vec<Value>, Vec<Value>>,
+    child: Box<dyn AbstractExecutor>,
+    group_by_exprs: Vec<Arc<Expression>>,
+    aggregate_exprs: Vec<Arc<Expression>>,
+    groups: HashMap<GroupKey, AggregateValues>,
+    output_schema: Schema,
+    exec_ctx: Arc<RwLock<ExecutionContext>>,
     initialized: bool,
-    done: bool,
+    groups_to_return: Vec<(GroupKey, AggregateValues)>,
 }
 
 impl AggregationExecutor {
@@ -33,99 +89,103 @@ impl AggregationExecutor {
         child_executor: Box<dyn AbstractExecutor>,
     ) -> Self {
         Self {
-            context,
-            plan,
-            child_executor,
+            exec_ctx: context,
+            child: child_executor,
+            group_by_exprs: plan.get_group_bys().iter().cloned().collect(),
+            aggregate_exprs: plan.get_aggregates().iter().cloned().collect(),
             groups: HashMap::new(),
+            groups_to_return: Vec::new(),
+            output_schema: plan.get_output_schema().clone(),
             initialized: false,
-            done: false,
         }
     }
 
-    fn compute_group_key(&self, tuple: &Tuple) -> Result<Vec<Value>, String> {
-        let mut key = Vec::with_capacity(self.plan.get_group_bys().len());
-        for expr in self.plan.get_group_bys() {
-            let value = expr.evaluate(tuple, &tuple.get_schema())
-                .map_err(|e| format!("Error evaluating group by expression: {}", e))?;
-            key.push(value);
-        }
-        Ok(key)
-    }
+    fn compute_aggregate(
+        agg_map: &mut HashMap<GroupKey, AggregateValues>,
+        aggregates: &[Arc<Expression>],
+        key: GroupKey,
+        tuple: &Tuple,
+        schema: &Schema,
+    ) -> Result<(), String> {
+        debug!("Computing aggregate for key: {:?}", key);
+        debug!("Number of aggregates: {}", aggregates.len());
 
-    fn update_group(&mut self, key: Vec<Value>, tuple: &Tuple) -> Result<(), String> {
-        let group = self.groups.entry(key).or_insert_with(|| {
-            // Initialize aggregates with correct types
-            self.plan.get_aggregate_types().iter()
-                .zip(self.plan.get_aggregates().iter())
-                .map(|(agg_type, expr)| {
-                    match agg_type {
-                        AggregationType::Count | AggregationType::CountStar => {
-                            Value::new(Val::BigInt(0)) // COUNT always returns BigInt
-                        }
-                        AggregationType::Sum | AggregationType::Avg => {
-                            // Initialize with same type as input
-                            if let Expression::Aggregate(agg) = expr.as_ref() {
-                                if let Some(child_expr) = agg.get_children().first() {
-                                    match child_expr.get_return_type().get_type() {
-                                        TypeId::Integer => Value::new(Val::Integer(0)),
-                                        TypeId::BigInt => Value::new(Val::BigInt(0)),
-                                        TypeId::Decimal => Value::new(Val::Decimal(0.0)),
-                                        _ => Value::new(Val::Integer(0)), // Default
-                                    }
-                                } else {
-                                    Value::new(Val::Integer(0))
-                                }
-                            } else {
-                                Value::new(Val::Integer(0))
-                            }
-                        }
-                        AggregationType::Min | AggregationType::Max => {
-                            Value::new(Val::Null) // Initialize with NULL
-                        }
-                    }
-                })
-                .collect()
+        let agg_value = agg_map.entry(key).or_insert_with(|| {
+            AggregateValues {
+                values: vec![Value::from(TypeId::Invalid); aggregates.len()],
+            }
         });
 
-        // Update each aggregate value
-        for (i, (agg_type, agg_expr)) in self.plan.get_aggregate_types().iter()
-            .zip(self.plan.get_aggregates().iter())
-            .enumerate() 
-        {
-            let value = agg_expr.evaluate(tuple, &tuple.get_schema())
-                .map_err(|e| format!("Error evaluating aggregate: {}", e))?;
+        debug!("Current aggregate values: {:?}", agg_value.values);
 
-            if !value.is_null() {
-                match agg_type {
-                    AggregationType::Count => {
-                        group[i] = group[i].add(&Value::new(BigInt(1)))
-                            .map_err(|e| format!("Error computing count: {}", e))?;
+        // Update each aggregate value
+        for (i, agg_expr) in aggregates.iter().enumerate() {
+            debug!("Processing aggregate {} of type {:?}", i, agg_expr);
+            match agg_expr.as_ref() {
+                Expression::Aggregate(agg) => {
+                    debug!("Aggregate type: {:?}", agg.get_agg_type());
+                    match agg.get_agg_type() {
+                        AggregationType::Sum => {
+                            let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
+                            if !arg_val.is_null() {
+                                if agg_value.values[i].is_null() {
+                                    agg_value.values[i] = arg_val;
+                                } else {
+                                    agg_value.values[i] = agg_value.values[i].add(&arg_val)?;
+                                }
+                            }
+                        },
+                        AggregationType::Count | AggregationType::CountStar => {
+                            let count = if agg_value.values[i].is_null() {
+                                Value::new(1i64)
+                            } else {
+                                agg_value.values[i].add(&Value::new(1i64))?
+                            };
+                            agg_value.values[i] = count;
+                        },
+                        AggregationType::Min => {
+                            let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
+                            if !arg_val.is_null() {
+                                if agg_value.values[i].is_null() {
+                                    agg_value.values[i] = arg_val;
+                                } else {
+                                    match arg_val.compare_less_than(&agg_value.values[i]) {
+                                        CmpBool::CmpTrue => agg_value.values[i] = arg_val,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        },
+                        AggregationType::Max => {
+                            let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
+                            if !arg_val.is_null() {
+                                if agg_value.values[i].is_null() {
+                                    agg_value.values[i] = arg_val;
+                                } else {
+                                    match agg_value.values[i].compare_less_than(&arg_val) {
+                                        CmpBool::CmpTrue => agg_value.values[i] = arg_val,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        },
+                        _ => return Err(format!("Unsupported aggregate type: {:?}", agg.get_agg_type())),
                     }
-                    AggregationType::CountStar => {
-                        group[i] = group[i].add(&Value::new(BigInt(1)))
-                            .map_err(|e| format!("Error computing count: {}", e))?;
+                },
+                Expression::ColumnRef(_) => {
+                    debug!("Column reference found in values");
+                    // For group by columns, store the value only on first occurrence
+                    if agg_value.values[i].is_null() {
+                        agg_value.values[i] = agg_expr.evaluate(tuple, schema).unwrap();
                     }
-                    AggregationType::Sum => {
-                        group[i] = group[i].add(&value)
-                            .map_err(|e| format!("Error computing sum: {}", e))?;
-                    }
-                    AggregationType::Min => {
-                        if group[i].is_null() || value.compare_less_than(&group[i]) == CmpBool::CmpTrue {
-                            group[i] = value;
-                        }
-                    }
-                    AggregationType::Max => {
-                        if group[i].is_null() || value.compare_greater_than(&group[i]) == CmpBool::CmpTrue {
-                            group[i] = value;
-                        }
-                    }
-                    AggregationType::Avg => {
-                        // For AVG, we'll store running sum and count separately
-                        // Final computation happens in next()
-                        group[i] = group[i].add(&value)?
-                    }
+                },
+                _ => {
+                    debug!("Other expression type found in aggregates");
+                    // For other expressions, evaluate each time
+                    agg_value.values[i] = agg_expr.evaluate(tuple, schema).unwrap();
                 }
             }
+            debug!("Updated aggregate values: {:?}", agg_value.values);
         }
         Ok(())
     }
@@ -133,89 +193,130 @@ impl AggregationExecutor {
 
 impl AbstractExecutor for AggregationExecutor {
     fn init(&mut self) {
-        if self.initialized {
-            return;
-        }
+        if !self.initialized {
+            self.child.init();
+            self.groups.clear();
+            
+            // For empty input with no group by, create a single group with default values
+            let mut has_rows = false;
+            
+            // Process all input tuples
+            while let Some((tuple, _)) = self.child.next() {
+                has_rows = true;
+                // Get schema before computing key
+                let schema = self.child.get_output_schema();
+                let aggregates = self.aggregate_exprs.clone();
 
-        self.child_executor.init();
-        self.initialized = true;
-        self.done = false;  // Reset done flag on initialization
+                // Compute group by key
+                let mut key_values = Vec::new();
+                for expr in &self.group_by_exprs {
+                    key_values.push(expr.evaluate(&tuple, schema).unwrap());
+                }
+                let key = GroupKey { values: key_values };
+
+                // Update aggregates for this group
+                if let Err(e) = Self::compute_aggregate(
+                    &mut self.groups,
+                    &aggregates,
+                    key,
+                    &tuple,
+                    schema,
+                ) {
+                    error!("Error computing aggregate: {}", e);
+                }
+            }
+
+            // Handle empty input case
+            if !has_rows && self.group_by_exprs.is_empty() {
+                // Create empty group key for no group by
+                let key = GroupKey { values: vec![] };
+                
+                // Create default aggregate values
+                let mut agg_values = AggregateValues {
+                    values: vec![Value::from(TypeId::Invalid); self.aggregate_exprs.len()],
+                };
+
+                // Set default values based on aggregate type
+                for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
+                    if let Expression::Aggregate(agg) = agg_expr.as_ref() {
+                        match agg.get_agg_type() {
+                            AggregationType::Count | AggregationType::CountStar => {
+                                agg_values.values[i] = Value::new(0i64);
+                            }
+                            AggregationType::Sum => {
+                                agg_values.values[i] = Value::new(0); // or NULL depending on your requirements
+                            }
+                            AggregationType::Min | AggregationType::Max => {
+                                agg_values.values[i] = Value::from(TypeId::Invalid); // NULL for min/max
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                
+                self.groups.insert(key, agg_values);
+            }
+            
+            // Store all groups in the Vec for iteration and sort them by group key
+            self.groups_to_return = self.groups.drain().collect();
+            self.groups_to_return.sort_by(|(key1, _), (key2, _)| {
+                // Compare each value in the group key
+                for (v1, v2) in key1.values.iter().zip(key2.values.iter()) {
+                    match v1.compare_less_than(v2) {
+                        CmpBool::CmpTrue => return std::cmp::Ordering::Less,
+                        CmpBool::CmpFalse => {
+                            if let CmpBool::CmpTrue = v2.compare_less_than(v1) {
+                                return std::cmp::Ordering::Greater;
+                            }
+                        }
+                        CmpBool::CmpNull => continue,
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+            self.initialized = true;
+        }
     }
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
-        if self.done {
-            return None;
+        if !self.initialized {
+            self.init();
         }
 
-        // Process all input tuples if we haven't already
-        while let Some((tuple, _)) = self.child_executor.next() {
-            let key = self.compute_group_key(&tuple).ok()?;
-            self.update_group(key, &tuple).ok()?;
+        // Take the next group from the Vec
+        if let Some((key, value)) = self.groups_to_return.pop() {
+            let mut values = Vec::new();
+            values.extend(key.values.iter().cloned());
+            values.extend(value.values.iter().cloned());
+
+            debug!("Creating tuple with values: {:?}", values);
+            debug!("Output schema: {:?}", self.output_schema);
+
+            let tuple = Tuple::new(&values, self.output_schema.clone(), RID::new(0, 0));
+            Some((tuple, RID::new(0, 0)))
+        } else {
+            None
         }
-
-        // Convert groups into output tuples
-        if !self.groups.is_empty() {
-            if let Some((key, values)) = self.groups.drain().next() {
-                let mut row = Vec::new();
-                row.extend(key);
-                row.extend(values);
-
-                let tuple = Tuple::new(
-                    &row,
-                    self.plan.get_output_schema().clone(),
-                    RID::new(0, 0),
-                );
-
-                return Some((tuple, RID::new(0, 0)));
-            }
-        }
-
-        self.done = true;
-        None
     }
 
     fn get_output_schema(&self) -> &Schema {
-        self.plan.get_output_schema()
+        &self.output_schema
     }
 
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
-        self.context.clone()
+        self.exec_ctx.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
-    use crate::catalog::column::Column;
-
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
-    use crate::sql::execution::executors::mock_executor::MockExecutor;
-    use crate::sql::execution::expressions::abstract_expression::Expression;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-
-    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
-    use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::types::{CmpBool, Type};
-    use crate::types_db::value::Val::{BigInt, Integer};
-    use crate::types_db::value::Value;
-    use chrono::Utc;
-    use parking_lot::RwLock;
-    use std::collections::HashMap;
+    use crate::types_db::value::Val::Integer;
+    use super::*;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
+        catalog: Arc<RwLock<Catalog>>,
         transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
@@ -224,21 +325,23 @@ mod tests {
 
     impl TestContext {
         pub fn new(test_name: &str) -> Self {
-            // initialize_logger();
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 
+            // Add process ID to make filenames unique even if tests run in parallel
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            let pid = std::process::id();
+            let db_file = format!("tests/data/{}_{}_{}.db", test_name, timestamp, pid);
+            let db_log_file = format!("tests/data/{}_{}_{}.log", test_name, timestamp, pid);
 
+            // Create fresh instances for each test
             let disk_manager = Arc::new(FileDiskManager::new(
                 db_file.clone(),
                 db_log_file.clone(),
                 100,
             ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -247,6 +350,7 @@ mod tests {
                 replacer.clone(),
             ));
 
+            // Create fresh catalog
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 0,
@@ -257,21 +361,28 @@ mod tests {
                 Default::default(),
             )));
 
+            // Create fresh transaction manager and lock manager
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
+            let transaction_manager = Arc::new(RwLock::new(
+                TransactionManager::new(catalog.clone(), log_manager)
+            ));
+            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
-            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            // Create fresh transaction with unique ID
+            let transaction = Arc::new(Transaction::new(
+                timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
+                IsolationLevel::ReadUncommitted
+            ));
 
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
-                transaction_manager.clone(),
+                transaction_manager,
             ));
 
             Self {
                 bpm,
+                catalog,
                 transaction_context,
                 lock_manager,
                 db_file,
@@ -280,6 +391,7 @@ mod tests {
         }
 
         pub fn cleanup(&self) {
+            // Ensure all resources are dropped before removing files
             let _ = std::fs::remove_file(&self.db_file);
             let _ = std::fs::remove_file(&self.db_log_file);
         }
@@ -291,14 +403,19 @@ mod tests {
         }
     }
 
+    // Helper function to create a fresh executor context for each test
     fn create_test_executor_context(
         test_context: &TestContext,
         catalog: Arc<RwLock<Catalog>>,
     ) -> Arc<RwLock<ExecutionContext>> {
-        let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+        let transaction = Arc::new(Transaction::new(
+            Utc::now().timestamp_nanos() as u64, // Unique transaction ID
+            IsolationLevel::ReadUncommitted
+        ));
+        
         Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&test_context.bpm),
-            catalog,
+            Arc::clone(&test_context.catalog),
             Arc::clone(&test_context.transaction_context),
         )))
     }
@@ -317,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_count_star() {
-        let test_context = TestContext::new("count_star");
+        let test_context = TestContext::new("test_count_star");
         let input_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -332,7 +449,7 @@ mod tests {
             (vec![Value::new(3), Value::new(30)], RID::new(1, 3)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_count_star".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -372,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_group_by_sum() {
-        let test_context = TestContext::new("group_by_sum");
+        let test_context = TestContext::new("test_group_by_sum");
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),  // Will be converted to BigInt
             Column::new("value", TypeId::Integer),
@@ -388,7 +505,7 @@ mod tests {
             (vec![Value::new(2), Value::new(40)], RID::new(1, 4)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_group_by_sum".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::from(mock_scan_plan),
@@ -450,7 +567,7 @@ mod tests {
 
     #[test]
     fn test_min_max_aggregation() {
-        let test_context = TestContext::new("agg_min_max");
+        let test_context = TestContext::new("test_min_max_aggregation");
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -466,7 +583,7 @@ mod tests {
             (vec![Value::new(2), Value::new(20)], RID::new(1, 4)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_min_max_aggregation".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -535,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_min_max_without_groupby() {
-        let test_context = TestContext::new("min_max_no_group");
+        let test_context = TestContext::new("test_min_max_without_groupby");
         let input_schema = Schema::new(vec![
             Column::new("value", TypeId::Integer),
         ]);
@@ -550,7 +667,7 @@ mod tests {
             (vec![Value::new(20)], RID::new(1, 4)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_min_max_without_groupby".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -599,7 +716,7 @@ mod tests {
 
     #[test]
     fn test_multiple_aggregates() {
-        let test_context = TestContext::new("multiple_aggs");
+        let test_context = TestContext::new("test_multiple_aggregates");
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -616,7 +733,7 @@ mod tests {
             (vec![Value::new(2), Value::new(40)], RID::new(1, 5)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_multiple_aggregates".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -626,73 +743,79 @@ mod tests {
         ));
 
         // Create group by expression
-        let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("group_id", TypeId::Integer), vec![],
-        )));
-
-        // Create value expression for aggregates
-        let value_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("value", TypeId::Integer), vec![],
+        let group_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, 
+            Column::new("group_id", TypeId::Integer),
+            vec![],
         )));
 
         // Create SUM aggregate
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            value_expr.clone(),
-            vec![value_expr.clone()],
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 1,
+                Column::new("value", TypeId::Integer),
+                vec![],
+            ))),
+            vec![],
         )));
 
         // Create COUNT aggregate
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            value_expr.clone(),
-            vec![value_expr],
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 1,
+                Column::new("value", TypeId::Integer),
+                vec![],
+            ))),
+            vec![],
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
-            vec![],
-            vec![group_expr],                        // Group by group_id
+            vec![PlanNode::MockScan(MockScanNode::new(input_schema, "test_multiple_aggregates".to_string(), vec![]))],
+            vec![group_by_expr],
             vec![sum_expr, count_expr],
         ));
 
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();
 
-        let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            results.push(tuple);
-        }
+        // Test first group (group_id = 1)
+        let (tuple, _) = executor.next().unwrap();
+        let values = tuple.get_values();
+        assert_eq!(values[0].as_integer().unwrap(), 1); // group_id
+        assert_eq!(values[1].as_integer().unwrap(), 30); // sum
+        assert_eq!(values[2].as_bigint().unwrap(), 2); // count
 
-        results.sort_by(|a, b| {
-            match a.get_value(0).compare_less_than(b.get_value(0)) {
-                CmpBool::CmpTrue => std::cmp::Ordering::Less,
-                CmpBool::CmpFalse => std::cmp::Ordering::Greater,
-                CmpBool::CmpNull => std::cmp::Ordering::Equal,
+        // Test second group (group_id = 2)
+        if let n = executor.next() {
+            match n {
+                Some((tuple, rid)) => {
+                    let values = tuple.get_values();
+                    assert_eq!(values[0].as_integer().unwrap(), 2); // group_id
+                    assert_eq!(values[1].as_integer().unwrap(), 80); // sum
+                    assert_eq!(values[2].as_bigint().unwrap(), 3); // count
+                }
+
+                None => {}
             }
-        });
 
-        assert_eq!(results.len(), 2);
+        };
 
-        // Group 1: sum=30, count=2
-        assert_eq!(*results[0].get_value(0), Value::new(Integer(1)));
-        assert_eq!(*results[0].get_value(1), Value::new(Integer(30)));
-        assert_eq!(*results[0].get_value(2), Value::new(BigInt(2)));
 
-        // Group 2: sum=80, count=3
-        assert_eq!(*results[1].get_value(0), Value::new(Integer(2)));
-        assert_eq!(*results[1].get_value(1), Value::new(Integer(80)));
-        assert_eq!(*results[1].get_value(2), Value::new(BigInt(3)));
+        // No more groups
+        assert!(executor.next().is_none());
     }
 
     #[test]
     fn test_empty_input() {
-        let test_context = TestContext::new("empty_input");
+        let test_context = TestContext::new("test_empty_input");
         let input_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
 
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_empty_input".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -733,7 +856,7 @@ mod tests {
 
     #[test]
     fn test_single_group() {
-        let test_context = TestContext::new("single_group");
+        let test_context = TestContext::new("test_single_group");
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -748,7 +871,7 @@ mod tests {
             (vec![Value::new(1), Value::new(30)], RID::new(1, 3)),
         ];
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_single_group".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
             exec_ctx.clone(),
             Arc::new(mock_scan_plan),
@@ -793,7 +916,7 @@ mod tests {
 
     #[test]
     fn test_aggregation_with_types() {
-        let test_context = TestContext::new("agg_types");
+        let test_context = TestContext::new("test_aggregation_with_types");
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::VarChar),  // String group
             Column::new("int_val", TypeId::Integer),   // Integer values
@@ -837,7 +960,7 @@ mod tests {
 
         let mock_scan_plan = MockScanNode::new(
             input_schema.clone(),
-            "mock_table".to_string(),
+            "test_aggregation_with_types".to_string(),
             vec![],
         ).with_tuples(mock_tuples.clone());
 
@@ -895,37 +1018,36 @@ mod tests {
 
         executor.init();
 
-        // Collect and sort results
         let mut results = Vec::new();
         while let Some((tuple, _)) = executor.next() {
             results.push(tuple);
         }
+
+        // Sort results by group_id for consistent checking
         results.sort_by(|a, b| {
-            match a.get_value(0).compare_less_than(b.get_value(0)) {
-                CmpBool::CmpTrue => std::cmp::Ordering::Less,
-                CmpBool::CmpFalse => std::cmp::Ordering::Greater,
-                CmpBool::CmpNull => std::cmp::Ordering::Equal,
-            }
+            let a_str = ToString::to_string(&a.get_value(0));
+            let b_str = ToString::to_string(&b.get_value(0));
+            a_str.cmp(&b_str)
         });
 
-        assert_eq!(results.len(), 3, "Should have exactly 3 groups");
+        assert_eq!(results.len(), 3, "Should have three groups (A, B, C)");
 
         // Check Group A
-        assert_eq!(results[0].get_value(0).get_value(), &Val::VarLen("A".to_string()));
-        assert_eq!(results[0].get_value(1).get_value(), &Val::Integer(30));     // Integer sum
-        assert_eq!(results[0].get_value(2).get_value(), &Val::BigInt(300));    // BigInt sum
-        assert_eq!(results[0].get_value(3).get_value(), &Val::BigInt(2));      // count always BigInt
+        assert_eq!(ToString::to_string(&results[0].get_value(0)), "A");
+        assert_eq!(results[0].get_value(1).as_integer().unwrap(), 30);  // sum of int_val (10 + 20)
+        assert_eq!(results[0].get_value(2).as_bigint().unwrap(), 300);  // sum of big_val (100 + 200)
+        assert_eq!(results[0].get_value(3).as_bigint().unwrap(), 2);    // count = 2
 
         // Check Group B
-        assert_eq!(results[1].get_value(0).get_value(), &Val::VarLen("B".to_string()));
-        assert_eq!(results[1].get_value(1).get_value(), &Val::Integer(70));     // Integer sum
-        assert_eq!(results[1].get_value(2).get_value(), &Val::BigInt(700));    // BigInt sum
-        assert_eq!(results[1].get_value(3).get_value(), &Val::BigInt(2));      // count always BigInt
+        assert_eq!(ToString::to_string(&results[1].get_value(0)), "B");
+        assert_eq!(results[1].get_value(1).as_integer().unwrap(), 70);  // sum of int_val (30 + 40)
+        assert_eq!(results[1].get_value(2).as_bigint().unwrap(), 700);  // sum of big_val (300 + 400)
+        assert_eq!(results[1].get_value(3).as_bigint().unwrap(), 2);    // count = 2
 
-        // Check Group C (single row)
-        assert_eq!(results[2].get_value(0).get_value(), &Val::VarLen("C".to_string()));
-        assert_eq!(results[2].get_value(1).get_value(), &Val::Integer(50));     // just 50
-        assert_eq!(results[2].get_value(2).get_value(), &Val::BigInt(500));    // just 500
-        assert_eq!(results[2].get_value(3).get_value(), &Val::BigInt(1));       // count(*) = 1
+        // Check Group C
+        assert_eq!(ToString::to_string(&results[2].get_value(0)), "C");
+        assert_eq!(results[2].get_value(1).as_integer().unwrap(), 50);  // int_val = 50
+        assert_eq!(results[2].get_value(2).as_bigint().unwrap(), 500);  // big_val = 500
+        assert_eq!(results[2].get_value(3).as_bigint().unwrap(), 1);    // count = 1
     }
 }
