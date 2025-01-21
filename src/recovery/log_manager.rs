@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::atomic::AtomicBool;
 
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
@@ -14,12 +16,52 @@ use std::time::Duration;
 pub struct LogManager {
     next_lsn: AtomicU64,
     persistent_lsn: AtomicU64,
-    log_buffer: Arc<Mutex<Vec<u8>>>,
-    flush_buffer: Arc<Mutex<Vec<u8>>>,
+    log_buffer: Arc<RwLock<LogBuffer>>,
     flush_thread: Option<thread::JoinHandle<()>>,
-    stop_flag: Arc<RwLock<bool>>,
+    stop_flag: Arc<AtomicBool>,
     disk_manager: Arc<FileDiskManager>,
-    force_flush: Arc<Mutex<bool>>,
+    log_queue: (Sender<LogRecord>, Receiver<LogRecord>),
+}
+
+#[derive(Debug)]
+struct LogBuffer {
+    data: Vec<u8>,
+    write_pos: usize,
+}
+
+impl LogBuffer {
+    fn new(size: usize) -> Self {
+        Self {
+            data: vec![0; size],
+            write_pos: 0,
+        }
+    }
+
+    fn append(&mut self, bytes: &[u8]) -> bool {
+        if self.write_pos + bytes.len() > self.data.len() {
+            return false;
+        }
+        self.data[self.write_pos..self.write_pos + bytes.len()].copy_from_slice(bytes);
+        self.write_pos += bytes.len();
+        true
+    }
+
+    fn clear(&mut self) {
+        self.write_pos = 0;
+        self.data.fill(0);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.write_pos == 0
+    }
+
+    fn used_size(&self) -> usize {
+        self.write_pos
+    }
+
+    fn get_data(&self) -> &[u8] {
+        &self.data[..self.write_pos]
+    }
 }
 
 impl LogManager {
@@ -31,96 +73,66 @@ impl LogManager {
     /// # Returns
     /// A new `LogManager` instance.
     pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
-        debug!("Creating new LogManager instance");
-        let manager = Self {
+        let (sender, receiver) = bounded(1000); // Bounded channel for backpressure
+        
+        Self {
             next_lsn: AtomicU64::new(0),
             persistent_lsn: AtomicU64::new(INVALID_LSN),
-            log_buffer: Arc::new(Mutex::new(vec![0; LOG_BUFFER_SIZE as usize])),
-            flush_buffer: Arc::new(Mutex::new(vec![0; LOG_BUFFER_SIZE as usize])),
-            stop_flag: Arc::new(RwLock::new(false)),
+            log_buffer: Arc::new(RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize))),
             flush_thread: None,
+            stop_flag: Arc::new(AtomicBool::new(false)),
             disk_manager,
-            force_flush: Arc::new(Mutex::new(false)),
-        };
-        debug!("LogManager initialized with buffer size: {}", LOG_BUFFER_SIZE);
-        manager
+            log_queue: (sender, receiver),
+        }
     }
 
     /// Runs the flush thread which writes the log buffer's content to the disk.
     pub fn run_flush_thread(&mut self) {
-        debug!("Starting flush thread");
         let log_buffer = Arc::clone(&self.log_buffer);
-        let flush_buffer = Arc::clone(&self.flush_buffer);
         let disk_manager = Arc::clone(&self.disk_manager);
         let stop_flag = Arc::clone(&self.stop_flag);
-        let force_flush = Arc::clone(&self.force_flush);
+        let receiver = self.log_queue.1.clone();
 
         self.flush_thread = Some(thread::spawn(move || {
-            info!("Flush thread started");
+            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
             
-            while !*stop_flag.read() {
-                let should_flush = {
-                    let log_buf = log_buffer.lock();
-                    let force = *force_flush.lock();
-                    let buffer_usage = log_buf.iter().take_while(|&&x| x != 0).count();
-                    force || buffer_usage >= LOG_BUFFER_SIZE as usize * 3/4 // Flush at 75% capacity
-                };
-
-                if should_flush {
-                    trace!("Flushing log buffer to disk");
-                    // Swap buffers
-                    {
-                        let mut flush_buf = flush_buffer.lock();
-                        let mut log_buf = log_buffer.lock();
-                        let used_size = log_buf.iter().take_while(|&&x| x != 0).count();
-                        if used_size > 0 {
-                            // Only copy the used portion of the buffer
-                            flush_buf[..used_size].copy_from_slice(&log_buf[..used_size]);
-                            log_buf.fill(0); // Clear the log buffer
-                            *force_flush.lock() = false;
+            while !stop_flag.load(Ordering::SeqCst) {
+                // Process queued log records
+                while let Ok(record) = receiver.try_recv() {
+                    let bytes = record.to_string();
+                    if !flush_buffer.append(bytes.as_bytes()) {
+                        // Buffer full, flush it
+                        if !flush_buffer.is_empty() {
+                            if let Err(e) = disk_manager.write_log(flush_buffer.get_data()) {
+                                error!("Failed to write log to disk: {}", e);
+                            }
+                            flush_buffer.clear();
                         }
+                        // Try append again
+                        flush_buffer.append(bytes.as_bytes());
                     }
+                }
 
-                    // Write to disk
-                    let flush_buf = flush_buffer.lock();
-                    let used_size = flush_buf.iter().take_while(|&&x| x != 0).count();
-                    if used_size > 0 {
-                        if let Err(e) = disk_manager.write_log(&flush_buf[..used_size]) {
-                            error!("Failed to write log to disk: {}", e);
-                        }
+                // Periodically flush if buffer not empty
+                if !flush_buffer.is_empty() {
+                    if let Err(e) = disk_manager.write_log(flush_buffer.get_data()) {
+                        error!("Failed to write log to disk: {}", e);
                     }
+                    flush_buffer.clear();
                 }
 
                 thread::sleep(Duration::from_millis(10));
             }
-            info!("Flush thread terminating");
         }));
-        debug!("Flush thread spawned successfully");
     }
 
     pub fn shut_down(&mut self) {
-        info!("Initiating LogManager shutdown");
-        // Set the stop flag to indicate that the worker thread should stop
-        {
-            let mut stop_flag = self.stop_flag.write();
-            debug!("Setting stop flag to true");
-            *stop_flag = true;
-        }
-
-        // Wait for the worker thread to finish
+        self.stop_flag.store(true, Ordering::SeqCst);
         if let Some(handle) = self.flush_thread.take() {
-            debug!("Waiting for flush thread to terminate");
-            match handle.join() {
-                Ok(_) => info!("Flush thread terminated successfully"),
-                Err(e) => {
-                    error!("Flush thread panicked during shutdown: {:?}", e);
-                    warn!("Some log records may not have been written to disk");
-                }
-            }
-        } else {
-            debug!("No flush thread was running");
+            handle.join().unwrap_or_else(|e| {
+                error!("Flush thread panicked: {:?}", e);
+            });
         }
-        info!("LogManager shutdown complete");
     }
 
     /// Appends a log record to the log buffer.
@@ -131,42 +143,22 @@ impl LogManager {
     /// # Returns
     /// The log sequence number (LSN) of the appended log record.
     pub fn append_log_record(&mut self, log_record: &LogRecord) -> Lsn {
-        trace!("Appending log record: {:?}", log_record);
         let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
         
-        let log_record_bytes = log_record.to_string();
-        let record_size = log_record_bytes.len();
-        
-        {
-            let mut log_buffer = self.log_buffer.lock();
-            let used_size = log_buffer.iter().take_while(|&&x| x != 0).count();
-            
-            // Check if buffer has enough space
-            if used_size + record_size > LOG_BUFFER_SIZE as usize {
-                warn!("Log buffer full, forcing flush");
-                *self.force_flush.lock() = true;
-                // Wait for flush to complete
-                while *self.force_flush.lock() {
-                    thread::sleep(Duration::from_millis(1));
-                }
-            }
-            
-            // Write to the buffer starting at the first unused position
-            log_buffer[used_size..used_size + record_size]
-                .copy_from_slice(log_record_bytes.as_bytes());
+        // Clone the record before sending
+        if let Err(e) = self.log_queue.0.send(log_record.clone()) {
+            error!("Failed to queue log record: {}", e);
+            // Handle error appropriately
         }
 
-        // Force immediate flush for commit records
+        // For commit records, wait for flush
         if log_record.is_commit() {
-            debug!("Commit record detected, forcing flush");
-            *self.force_flush.lock() = true;
-            // Wait for flush to complete
-            while *self.force_flush.lock() {
+            // Wait for buffer to be flushed
+            while !self.log_buffer.read().is_empty() {
                 thread::sleep(Duration::from_millis(1));
             }
         }
 
-        debug!("Log record appended with LSN {}", lsn);
         lsn
     }
 
@@ -194,13 +186,13 @@ impl LogManager {
     }
 
     /// Returns a reference to the log buffer.
-    pub fn get_log_buffer(&self) -> &Arc<Mutex<Vec<u8>>> {
+    pub fn get_log_buffer(&self) -> &Arc<RwLock<LogBuffer>> {
         trace!("Accessing log buffer");
         &self.log_buffer
     }
 
     pub fn get_log_buffer_size(&self) -> usize {
-        let size = self.log_buffer.lock().len();
+        let size = self.log_buffer.read().data.len();
         trace!("Retrieved log buffer size: {}", size);
         size
     }
@@ -354,31 +346,52 @@ mod tests {
     #[test]
     fn test_log_record_types() {
         let mut ctx = TestContext::new("record_types_test");
+        let mut next_lsn = 0;
 
-        // Test Begin record
+        // Create all records first
         let begin_record = LogRecord::new_transaction_record(
             1,
             INVALID_LSN,
             LogRecordType::Begin,
         );
-        let begin_lsn = ctx.log_manager.append_log_record(&begin_record);
 
-        // Test Commit record
+        // Append begin record and get LSN
+        let begin_lsn = {
+            let lsn = ctx.log_manager.append_log_record(&begin_record);
+            next_lsn += 1;
+            assert_eq!(lsn, 0);
+            lsn
+        };
+
+        // Small delay between operations
+        thread::sleep(Duration::from_millis(1));
+
+        // Create and append commit record
         let commit_record = LogRecord::new_transaction_record(
             1,
             begin_lsn,
             LogRecordType::Commit,
         );
+        let commit_lsn = ctx.log_manager.append_log_record(&commit_record);
+        next_lsn += 1;
+        assert_eq!(commit_lsn, 1);
 
-        // Test Abort record
+        thread::sleep(Duration::from_millis(1));
+
+        // Create and append abort record
         let abort_record = LogRecord::new_transaction_record(
             2,
             INVALID_LSN,
             LogRecordType::Abort,
         );
-        ctx.log_manager.append_log_record(&abort_record);
+        let abort_lsn = ctx.log_manager.append_log_record(&abort_record);
+        next_lsn += 1;
+        assert_eq!(abort_lsn, 2);
 
-        assert_eq!(ctx.log_manager.get_next_lsn(), 3);
+        // Final verification
+        let final_lsn = ctx.log_manager.get_next_lsn();
+        assert_eq!(final_lsn, next_lsn, 
+            "Expected LSN {} but got {}", next_lsn, final_lsn);
     }
 
     #[test]
@@ -458,28 +471,50 @@ mod tests {
     #[test]
     fn test_log_level_transitions() {
         let mut ctx = TestContext::new("log_level_test");
-
-        // Test trace-level logging
-        trace!("Testing trace-level logging");
+        
+        // Create log record once and reuse
         let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
-        ctx.log_manager.append_log_record(&log_record);
 
-        // Test debug-level logging
-        debug!("Testing debug-level logging");
-        ctx.log_manager.set_persistent_lsn(42);
-
-        // Test info-level logging
-        info!("Testing info-level logging");
-        ctx.log_manager.run_flush_thread();
-
-        // Test warning-level logging
-        warn!("Testing warning-level logging");
-        for _ in 0..1000 {  // Fill buffer to trigger warning
+        // Test trace-level logging with minimal lock holding
+        {
+            trace!("Testing trace-level logging");
             ctx.log_manager.append_log_record(&log_record);
         }
 
-        // Test error-level logging
-        error!("Testing error-level logging");
-        ctx.log_manager.shut_down();
+        // Test debug-level logging in separate scope
+        {
+            debug!("Testing debug-level logging");
+            ctx.log_manager.set_persistent_lsn(42);
+        }
+
+        // Test info-level logging in separate scope
+        {
+            info!("Testing info-level logging");
+            ctx.log_manager.run_flush_thread();
+        }
+
+        // Test warning-level logging in separate scope
+        {
+            warn!("Testing warning-level logging");
+            // Fill buffer in chunks to avoid holding lock too long
+            for chunk in 0..10 {
+                for i in 0..100 {
+                    let record = LogRecord::new_transaction_record(
+                        (chunk * 100 + i) as TxnId,
+                        INVALID_LSN,
+                        LogRecordType::Begin
+                    );
+                    ctx.log_manager.append_log_record(&record);
+                }
+                // Give other threads a chance to run
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        // Test error-level logging in separate scope
+        {
+            error!("Testing error-level logging");
+            ctx.log_manager.shut_down();
+        }
     }
 }
