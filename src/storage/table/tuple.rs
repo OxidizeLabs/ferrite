@@ -8,35 +8,53 @@ use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use crate::common::config::TxnId;
+use crate::common::time::TimeStamp;
 
 /// Metadata associated with a tuple.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
 pub struct TupleMeta {
-    timestamp: u64,  // Transaction ID that created/modified the tuple
-    is_deleted: bool,
+    creator_txn_id: TxnId,
+    commit_ts: TimeStamp,
+    deleted: bool,
 }
 
 impl TupleMeta {
     /// Creates a new `TupleMeta` instance.
     pub fn new(txn_id: TxnId) -> Self {
         Self {
-            timestamp: txn_id,
-            is_deleted: false,
+            creator_txn_id: txn_id,
+            commit_ts: TimeStamp::MAX,
+            deleted: false,
         }
     }
 
-    /// Returns the timestamp of the tuple.
-    pub fn get_timestamp(&self) -> u64 {
-        self.timestamp
+    /// Returns the transaction ID that created/modified the tuple.
+    pub fn get_creator_txn_id(&self) -> TxnId {
+        self.creator_txn_id
+    }
+
+    /// Returns the commit timestamp when the tuple became visible.
+    pub fn get_commit_timestamp(&self) -> TimeStamp {
+        self.commit_ts
+    }
+
+    /// Sets the commit timestamp when the tuple became visible.
+    pub fn set_commit_timestamp(&mut self, ts: TimeStamp) {
+        self.commit_ts = ts;
+    }
+
+    /// Returns whether the tuple is committed.
+    pub fn is_committed(&self) -> bool {
+        self.commit_ts != TimeStamp::MAX
     }
 
     /// Returns whether the tuple is marked as deleted.
     pub fn is_deleted(&self) -> bool {
-        self.is_deleted
+        self.deleted
     }
 
-    pub fn mark_as_deleted(&mut self) {
-        self.is_deleted = true
+    pub fn set_deleted(&mut self, deleted: bool) {
+        self.deleted = deleted;
     }
 }
 
@@ -132,6 +150,10 @@ impl Tuple {
         &self.values
     }
 
+    pub fn get_values_mut(&mut self) -> &mut Vec<Value> {
+        &mut self.values
+    }
+
     /// Returns a reference to the schema of this tuple.
     ///
     /// This method constructs a schema based on the types of values in the tuple.
@@ -185,7 +207,7 @@ impl Tuple {
                     .get_column(i)
                     .map(|col| col.get_name().to_string())
                     .unwrap_or_else(|| format!("Column_{}", i));
-                format!("{}: {:#}", col_name, value)
+                format!("{}: {}", col_name, value)
             })
             .collect::<Vec<String>>()
             .join(", ")
@@ -240,8 +262,7 @@ mod tests {
     fn test_tuple_to_string_detailed() {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
-        let expected =
-            "id: Integer(1), name: VarLen(\"Alice\"), age: Integer(30), is_student: Boolean(true)";
+        let expected = "id: 1, name: Alice, age: 30, is_student: true";
         assert_eq!(tuple.to_string_detailed(schema), expected);
     }
 
@@ -312,13 +333,30 @@ mod tests {
 
     #[test]
     fn test_tuple_meta() {
-        let meta = TupleMeta::new(1234567890);
-        assert_eq!(meta.get_timestamp(), 1234567890);
+        let mut meta = TupleMeta::new(1);
+        assert_eq!(meta.get_creator_txn_id(), 1);
+        assert_eq!(meta.is_committed(), false);
         assert_eq!(meta.is_deleted(), false);
 
-        let meta_deleted = TupleMeta::new(9876543210);
-        assert_eq!(meta_deleted.get_timestamp(), 9876543210);
-        assert_eq!(meta_deleted.is_deleted(), true);
+        meta.set_deleted(true);
+        assert_eq!(meta.is_deleted(), true);
+
+        // Test copy semantics
+        let meta2 = meta;
+        assert_eq!(meta2.get_creator_txn_id(), 1);
+        assert_eq!(meta2.is_committed(), false);
+        assert_eq!(meta2.is_deleted(), true);
+
+        // Both meta and meta2 should be usable since meta was copied, not moved
+        assert_eq!(meta.get_creator_txn_id(), 1);
+        assert_eq!(meta.is_committed(), false);
+        assert_eq!(meta.is_deleted(), true);
+
+        // Modifying one shouldn't affect the other
+        let mut meta3 = meta;
+        meta3.set_deleted(false);
+        assert_eq!(meta3.is_deleted(), false);
+        assert_eq!(meta.is_deleted(), true);
     }
 
     #[test]
@@ -327,7 +365,8 @@ mod tests {
         let serialized = bincode::serialize(&meta)?;
         let deserialized: TupleMeta = bincode::deserialize(&serialized)?;
 
-        assert_eq!(meta.get_timestamp(), deserialized.get_timestamp());
+        assert_eq!(meta.get_creator_txn_id(), deserialized.get_creator_txn_id());
+        assert_eq!(meta.is_committed(), deserialized.is_committed());
         assert_eq!(meta.is_deleted(), deserialized.is_deleted());
 
         Ok(())
