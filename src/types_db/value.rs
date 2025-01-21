@@ -139,6 +139,51 @@ impl Value {
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
     }
+
+    fn add(&self, other: &Value) -> Result<Value, String> {
+        if self.is_null() || other.is_null() {
+            return Ok(Value::new(Val::Null));
+        }
+
+        match (&self.value_, &other.value_) {
+            (Val::Integer(a), Val::Integer(b)) => {
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (Val::BigInt(a), Val::BigInt(b)) => {
+                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
+            },
+            (Val::Integer(a), Val::BigInt(b)) => {
+                Ok(Value::new_with_type(Val::BigInt(*a as i64 + b), TypeId::BigInt))
+            },
+            (Val::BigInt(a), Val::Integer(b)) => {
+                Ok(Value::new_with_type(Val::BigInt(a + *b as i64), TypeId::BigInt))
+            },
+            (Val::Decimal(a), Val::Decimal(b)) => {
+                Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
+            },
+            (Val::SmallInt(a), Val::SmallInt(b)) => {
+                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
+            },
+            (Val::TinyInt(a), Val::TinyInt(b)) => {
+                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
+            },
+            // Promote smaller types to larger ones
+            (Val::TinyInt(a), Val::Integer(b)) => {
+                Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
+            },
+            (Val::Integer(a), Val::TinyInt(b)) => {
+                Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
+            },
+            (Val::SmallInt(a), Val::Integer(b)) => {
+                Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
+            },
+            (Val::Integer(a), Val::SmallInt(b)) => {
+                Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
+            },
+            _ => Err(format!("Cannot add values of types {:?} and {:?}", 
+                self.get_type_id(), other.get_type_id()))
+        }
+    }
 }
 
 impl Type for Value {
@@ -211,6 +256,100 @@ impl Type for Value {
                 CmpBool::CmpFalse => CmpBool::CmpTrue,
                 CmpBool::CmpNull => CmpBool::CmpNull,
             },
+        }
+    }
+
+    fn add(&self, other: &Value) -> Result<Value, String> {
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::BigInt, TypeId::BigInt) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
+            },
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                let a = self.as_smallint()?;
+                let b = other.as_smallint()?;
+                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
+            },
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                let a = self.as_tinyint()?;
+                let b = other.as_tinyint()?;
+                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
+            },
+            (TypeId::Decimal, TypeId::Decimal) => {
+                let a = self.as_decimal()?;
+                let b = other.as_decimal()?;
+                Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
+            },
+            // Handle type promotions
+            (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
+            },
+            _ => Err(format!("Cannot add values of types {:?} and {:?}", 
+                self.get_type_id(), other.get_type_id()))
+        }
+    }
+
+    fn as_integer(&self) -> Result<i32, String> {
+        match &self.value_ {
+            Val::Integer(i) => Ok(*i),
+            Val::TinyInt(i) => Ok(*i as i32),
+            Val::SmallInt(i) => Ok(*i as i32),
+            Val::BigInt(i) => Ok(*i as i32),
+            _ => Err(format!("Cannot convert {:?} to integer", self.type_id_))
+        }
+    }
+
+    fn as_bigint(&self) -> Result<i64, String> {
+        match &self.value_ {
+            Val::BigInt(i) => Ok(*i),
+            Val::Integer(i) => Ok(*i as i64),
+            Val::SmallInt(i) => Ok(*i as i64),
+            Val::TinyInt(i) => Ok(*i as i64),
+            _ => Err(format!("Cannot convert {:?} to bigint", self.type_id_))
+        }
+    }
+
+    fn as_smallint(&self) -> Result<i16, String> {
+        match &self.value_ {
+            Val::SmallInt(i) => Ok(*i),
+            Val::TinyInt(i) => Ok(*i as i16),
+            _ => Err(format!("Cannot convert {:?} to smallint", self.type_id_))
+        }
+    }
+
+    fn as_tinyint(&self) -> Result<i8, String> {
+        match &self.value_ {
+            Val::TinyInt(i) => Ok(*i),
+            _ => Err(format!("Cannot convert {:?} to tinyint", self.type_id_))
+        }
+    }
+
+    fn as_decimal(&self) -> Result<f64, String> {
+        match &self.value_ {
+            Val::Decimal(d) => Ok(*d),
+            Val::Integer(i) => Ok(*i as f64),
+            Val::BigInt(i) => Ok(*i as f64),
+            Val::SmallInt(i) => Ok(*i as f64),
+            Val::TinyInt(i) => Ok(*i as f64),
+            _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_))
         }
     }
 }
@@ -311,35 +450,18 @@ impl<T: Into<Val>> From<T> for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            // Detailed representation (activated by {:?} or {:#})
-            write!(f, "{:?}", self.value_)
-        } else {
-            // Simple representation (activated by {})
-            match &self.value_ {
-                Val::Integer(i) => write!(f, "{}", i),
-                Val::Decimal(fl) => write!(f, "{}", fl),
-                Val::Boolean(b) => write!(f, "{}", b),
-                Val::VarLen(s) => write!(f, "{}", s),
-                Val::TinyInt(t) => write!(f, "{}", t),
-                Val::SmallInt(sm) => write!(f, "{}", sm),
-                Val::BigInt(bi) => write!(f, "{}", bi),
-                Val::Timestamp(ti) => write!(f, "{}", ti),
-                Val::ConstVarLen(c) => write!(f, "{}", c),
-                Val::Vector(v) => {
-                    write!(f, "[")?;
-                    let mut first = true;
-                    for value in v.iter() {
-                        if !first {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{}", value)?;
-                        first = false;
-                    }
-                    write!(f, "]")
-                }
-                Val::Null => write!(f, "Null"),
-            }
+        match &self.value_ {
+            Val::Null => write!(f, "NULL"),
+            Val::Boolean(b) => write!(f, "{}", b),
+            Val::TinyInt(i) => write!(f, "{}", i),
+            Val::SmallInt(i) => write!(f, "{}", i),
+            Val::Integer(i) => write!(f, "{}", i),
+            Val::BigInt(i) => write!(f, "{}", i),
+            Val::Decimal(d) => write!(f, "{}", d),
+            Val::Timestamp(ts) => write!(f, "{}", ts),
+            Val::VarLen(s) => write!(f, "{}", s),
+            Val::Vector(v) => write!(f, "{:?}", v),
+            Val::ConstVarLen(s) => write!(f, "{}", s),
         }
     }
 }

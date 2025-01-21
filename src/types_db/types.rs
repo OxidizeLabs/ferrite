@@ -1,3 +1,4 @@
+use std::format;
 use crate::types_db::bigint_type::BigIntType;
 use crate::types_db::boolean_type::BooleanType;
 use crate::types_db::decimal_type::DecimalType;
@@ -113,7 +114,51 @@ pub trait Type {
             return Err(format!("Cannot perform addition on type {:?}", type_id));
         }
         // Implementation for specific types...
-        unimplemented!()
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::BigInt, TypeId::BigInt) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
+            },
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                let a = self.as_smallint()?;
+                let b = other.as_smallint()?;
+                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
+            },
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                let a = self.as_tinyint()?;
+                let b = other.as_tinyint()?;
+                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
+            },
+            (TypeId::Decimal, TypeId::Decimal) => {
+                let a = self.as_decimal()?;
+                let b = other.as_decimal()?;
+                Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
+            },
+            // Handle type promotions
+            (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            },
+            (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
+            },
+            _ => Err(format!("Cannot add values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
+        }
     }
     fn subtract(&self, _other: &Value) -> Result<Value, String> {
         unimplemented!()
@@ -158,6 +203,21 @@ pub trait Type {
         unimplemented!()
     }
     fn get_storage_size(&self, _val: &Value) -> u32 {
+        unimplemented!()
+    }
+    fn as_integer(&self) -> Result<i32, String> {
+        unimplemented!()
+    }
+    fn as_bigint(&self) -> Result<i64, String> {
+        unimplemented!()
+    }
+    fn as_smallint(&self) -> Result<i16, String> {
+        unimplemented!()
+    }
+    fn as_tinyint(&self) -> Result<i8, String> {
+        unimplemented!()
+    }
+    fn as_decimal(&self) -> Result<f64, String> {
         unimplemented!()
     }
 }

@@ -33,8 +33,18 @@ impl AggregateExpression {
         arg: Arc<Expression>,
         children: Vec<Arc<Expression>>,
     ) -> Self {
+        // Format the column name based on the aggregate function and its argument
+        let col_name = match &agg_type {
+            AggregationType::CountStar => "COUNT(*)".to_string(),
+            _ => format!(
+                "{}({})",
+                agg_type.to_string(),
+                arg.get_return_type().get_name()
+            ),
+        };
+
         // Determine return type based on aggregation type
-        let ret_type = match agg_type {
+        let mut ret_type = match agg_type {
             AggregationType::CountStar | AggregationType::Count => {
                 Column::new("count_result", TypeId::BigInt)
             }
@@ -55,12 +65,20 @@ impl AggregateExpression {
             }
         };
 
+        // Set the formatted name for the return type
+        ret_type = ret_type.with_name(&col_name);
+
         Self {
             agg_type,
             arg,
             ret_type,
             children,
         }
+    }
+
+    pub fn with_return_type(mut self, ret_type: Column) -> Self {
+        self.ret_type = ret_type;
+        self
     }
 
     pub fn get_agg_type(&self) -> &AggregationType {
@@ -102,7 +120,7 @@ impl ExpressionOps for AggregateExpression {
         &self.children
     }
 
-    fn get_return_type(&self) -> &Column {
+    fn  get_return_type(&self) -> &Column {
         &self.ret_type
     }
 

@@ -1048,4 +1048,109 @@ mod tests {
         assert_eq!(results[2].get_value(2).as_bigint().unwrap(), 500);  // big_val = 500
         assert_eq!(results[2].get_value(3).as_bigint().unwrap(), 1);    // count = 1
     }
+
+    #[test]
+    fn test_aggregation_column_names() {
+        let test_context = TestContext::new("test_aggregation_column_names");
+        let input_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),  // Name column
+            Column::new("age", TypeId::Integer),   // Age column
+        ]);
+
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+
+        // Create test data
+        let mock_tuples = vec![
+            (vec![
+                Value::new("John Doe"),
+                Value::new(35),
+            ], RID::new(0, 0)),
+            (vec![
+                Value::new("John Doe"),
+                Value::new(35),
+            ], RID::new(0, 1)),
+            (vec![
+                Value::new("Jane Smith"),
+                Value::new(64),
+            ], RID::new(0, 2)),
+            (vec![
+                Value::new("Jane Smith"),
+                Value::new(64),
+            ], RID::new(0, 3)),
+        ];
+
+        let mock_scan_plan = MockScanNode::new(
+            input_schema.clone(),
+            "test_aggregation_column_names".to_string(),
+            vec![],
+        ).with_tuples(mock_tuples.clone());
+
+        // Create expressions
+        let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("name", TypeId::VarChar), vec![],
+        )));
+
+        let age_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("age", TypeId::Integer), vec![],
+        )));
+
+        // Create SUM aggregate
+        let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Sum,
+            age_col.clone(),
+            vec![age_col.clone()],
+        )));
+
+        // Create aggregation plan
+        let agg_plan = AggregationPlanNode::new(
+            vec![PlanNode::MockScan(mock_scan_plan.clone())],
+            vec![group_expr],
+            vec![sum_expr],
+        );
+
+        // Create and execute the aggregation
+        let mut executor = AggregationExecutor::new(
+            exec_ctx.clone(),
+            Arc::new(agg_plan),
+            Box::new(MockExecutor::new(
+                exec_ctx,
+                Arc::new(mock_scan_plan),
+                0,
+                mock_tuples,
+                input_schema,
+            )),
+        );
+
+        executor.init();
+
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            results.push(tuple);
+        }
+
+        // Sort results by name for consistent checking
+        results.sort_by(|a, b| {
+            let a_str = ToString::to_string(&a.get_value(0));
+            let b_str = ToString::to_string(&b.get_value(0));
+            a_str.cmp(&b_str)
+        });
+
+        assert_eq!(results.len(), 2, "Should have two groups");
+
+        // Check output schema column names
+        let output_schema = executor.get_output_schema();
+        assert_eq!(output_schema.get_columns()[0].get_name(), "name", 
+            "First column should be named 'name'");
+        assert_eq!(output_schema.get_columns()[1].get_name(), "SUM(age)", 
+            "Second column should be named 'SUM(age)'");
+
+        // Check first group (Jane Smith)
+        assert_eq!(ToString::to_string(&results[0].get_value(0)), "Jane Smith");
+        assert_eq!(results[0].get_value(1).as_integer().unwrap(), 128); // 64 + 64
+
+        // Check second group (John Doe)
+        assert_eq!(ToString::to_string(&results[1].get_value(0)), "John Doe");
+        assert_eq!(results[1].get_value(1).as_integer().unwrap(), 70);  // 35 + 35
+    }
 }

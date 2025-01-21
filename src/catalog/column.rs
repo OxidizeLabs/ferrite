@@ -19,7 +19,7 @@ impl Column {
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar => length,
-            TypeId::Vector => length * std::mem::size_of::<f64>(),
+            TypeId::Vector => length * size_of::<f64>(),
             _ => panic!("Cannot get size of invalid type"),
         }
     }
@@ -82,6 +82,10 @@ impl Column {
 
     pub fn is_inlined(&self) -> bool {
         self.column_type != TypeId::VarChar
+    }
+
+    pub fn set_name(&mut self, new_name: &str) {
+        self.column_name = new_name.to_string();
     }
 }
 

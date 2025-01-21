@@ -12,6 +12,7 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -65,6 +66,7 @@ impl ProjectionExecutor {
 
     fn evaluate_projection_expressions(&self, tuple: &Tuple) -> Result<Vec<Value>, ExpressionError> {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
+        let input_schema = self.child_executor.get_output_schema();
         
         for expr in self.plan.get_expressions() {
             match expr.as_ref() {
@@ -74,9 +76,25 @@ impl ProjectionExecutor {
                     let idx = values.len();
                     values.push(tuple.get_value(idx).clone());
                 }
+                Expression::ColumnRef(col_ref) => {
+                    // For column references in aggregation results, use the column index
+                    // from the input schema's matching column name
+                    let col_name = col_ref.get_return_type().get_name();
+                    let idx = input_schema
+                        .get_columns()
+                        .iter()
+                        .position(|c| c.get_name() == col_name)
+                        .ok_or_else(|| {
+                            ExpressionError::InvalidOperation(format!(
+                                "Column {} not found in input schema",
+                                col_name
+                            ))
+                        })?;
+                    values.push(tuple.get_value(idx).clone());
+                }
                 _ => {
-                    // For non-aggregate expressions, evaluate normally
-                    let value = expr.evaluate(tuple, &self.child_executor.get_output_schema())?;
+                    // For other expressions, evaluate normally
+                    let value = expr.evaluate(tuple, input_schema)?;
                     values.push(value);
                 }
             }
@@ -359,6 +377,96 @@ mod tests {
         let (tuple2, _rid2) = executor.next().unwrap();
         assert_eq!(tuple2.get_value(0).get_value(), &Val::from(2));
         assert_eq!(tuple2.get_value(1).get_value(), &Val::from("Bob"));
+        assert_eq!(tuple2.get_values().len(), 2);
+
+        // No more tuples
+        assert!(executor.next().is_none());
+    }
+
+    #[test]
+    fn test_projection_over_aggregation() {
+        // Create input schema (simulating aggregation output)
+        let input_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),
+            Column::new("SUM(age)", TypeId::Integer),
+        ]);
+
+        // Create test data simulating aggregation results
+        let tuples: Vec<(Vec<Value>, RID)> = vec![
+            (
+                vec![
+                    Value::new("Alice"),
+                    Value::new(75),  // Sum of ages for Alice
+                ],
+                RID::new(0, 0)
+            ),
+            (
+                vec![
+                    Value::new("Bob"),
+                    Value::new(45),  // Sum of ages for Bob
+                ],
+                RID::new(0, 1)
+            ),
+        ];
+
+        // Create output schema for projection
+        let output_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),
+            Column::new("total_age", TypeId::Integer),
+        ]);
+
+        // Create expressions for projection
+        let expressions = vec![
+            // Project the name column - use exact same name as input
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,
+                0,
+                Column::new("name", TypeId::VarChar),
+                vec![],
+            ))),
+            // Project the aggregated age column - use exact same name as input
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,
+                1,
+                Column::new("SUM(age)", TypeId::Integer), // Match input schema name
+                vec![],
+            ))),
+        ];
+
+        // Create executor context
+        let (_, context) = create_test_executor_context();
+
+        // Create mock scan plan to simulate aggregation output
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_agg".to_string(), vec![]);
+
+        // Create child executor (simulating aggregation executor)
+        let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
+            tuples,
+            input_schema,
+        ));
+
+        // Create projection plan with output schema that renames SUM(age) to total_age
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![]));
+
+        // Create projection executor
+        let mut executor = ProjectionExecutor::new(child_executor, context, plan);
+
+        // Initialize and get results
+        executor.init();
+
+        // First tuple (Alice's group)
+        let (tuple1, _) = executor.next().unwrap();
+        assert_eq!(tuple1.get_value(0).get_value(), &Val::from("Alice"));
+        assert_eq!(tuple1.get_value(1).get_value(), &Val::from(75));
+        assert_eq!(tuple1.get_values().len(), 2);
+
+        // Second tuple (Bob's group)
+        let (tuple2, _) = executor.next().unwrap();
+        assert_eq!(tuple2.get_value(0).get_value(), &Val::from("Bob"));
+        assert_eq!(tuple2.get_value(1).get_value(), &Val::from(45));
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples
