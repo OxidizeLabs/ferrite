@@ -42,7 +42,7 @@ pub enum LogRecordType {
 ///--------------------------
 /// | HEADER | prev_page_id | page_id |
 ///--------------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LogRecord {
     size: i32,
     lsn: Lsn,
