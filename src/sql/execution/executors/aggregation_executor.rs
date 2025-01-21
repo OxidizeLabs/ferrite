@@ -780,31 +780,29 @@ mod tests {
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();
 
-        // Test first group (group_id = 1)
-        let (tuple, _) = executor.next().unwrap();
-        let values = tuple.get_values();
-        assert_eq!(values[0].as_integer().unwrap(), 1); // group_id
-        assert_eq!(values[1].as_integer().unwrap(), 30); // sum
-        assert_eq!(values[2].as_bigint().unwrap(), 2); // count
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            results.push(tuple);
+        }
 
-        // Test second group (group_id = 2)
-        if let n = executor.next() {
-            match n {
-                Some((tuple, rid)) => {
-                    let values = tuple.get_values();
-                    assert_eq!(values[0].as_integer().unwrap(), 2); // group_id
-                    assert_eq!(values[1].as_integer().unwrap(), 80); // sum
-                    assert_eq!(values[2].as_bigint().unwrap(), 3); // count
-                }
+        // Sort results by group_id for consistent checking
+        results.sort_by(|a, b| {
+            let a_val = a.get_value(0).as_integer().unwrap();
+            let b_val = b.get_value(0).as_integer().unwrap();
+            a_val.cmp(&b_val)
+        });
 
-                None => {}
-            }
+        assert_eq!(results.len(), 2, "Should have exactly 2 groups");
 
-        };
+        // Check first group (group_id = 1)
+        assert_eq!(results[0].get_value(0).as_integer().unwrap(), 1);
+        assert_eq!(results[0].get_value(1).as_integer().unwrap(), 30); // sum = 10 + 20
+        assert_eq!(results[0].get_value(2).as_bigint().unwrap(), 2);   // count = 2
 
-
-        // No more groups
-        assert!(executor.next().is_none());
+        // Check second group (group_id = 2)
+        assert_eq!(results[1].get_value(0).as_integer().unwrap(), 2);
+        assert_eq!(results[1].get_value(1).as_integer().unwrap(), 80); // sum = 10 + 30 + 40
+        assert_eq!(results[1].get_value(2).as_bigint().unwrap(), 3);   // count = 3
     }
 
     #[test]
