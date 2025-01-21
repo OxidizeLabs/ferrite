@@ -277,3 +277,214 @@ impl ExecutionEngine {
         Ok(())
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use std::collections::HashMap;
+//     use super::*;
+//     use crate::catalog::column::Column;
+//     use crate::common::logger::initialize_logger;
+//     use crate::storage::table::table_heap::{TableHeap, TableInfo};
+//     use crate::types_db::type_id::TypeId;
+//     use crate::types_db::value::Value;
+//     use std::sync::Arc;
+//     use parking_lot::RwLock;
+//     use crate::storage::table::tuple::Tuple;
+//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+//     use crate::buffer::lru_k_replacer::LRUKReplacer;
+//     use crate::common::statement_type::StatementType::TransactionStatement;
+//     use crate::storage::disk::disk_manager::FileDiskManager;
+//     use crate::storage::disk::disk_scheduler::DiskScheduler;
+//     use crate::concurrency::transaction_manager::TransactionManager;
+//     use crate::concurrency::lock_manager::LockManager;
+//     use crate::concurrency::transaction::{IsolationLevel, Transaction};
+//     use crate::recovery::log_manager::LogManager;
+//
+//     struct TestContext {
+//         pub engine: ExecutionEngine,
+//         pub catalog: Arc<RwLock<Catalog>>,
+//         pub exec_ctx: Arc<RwLock<ExecutionContext>>,
+//         pub planner: QueryPlanner,
+//         _bpm: Arc<BufferPoolManager>,
+//         _transaction_context: Arc<TransactionContext>,
+//         db_file: String,
+//         db_log_file: String,
+//     }
+//
+//     impl TestContext {
+//         fn new(test_name: &str) -> Self {
+//             initialize_logger();
+//
+//             // Create unique file names for this test
+//             let db_file = format!("{}.db", test_name);
+//             let db_log_file = format!("{}.log", test_name);
+//
+//             // Initialize components
+//             let disk_manager = Arc::new(FileDiskManager::new(db_file.clone(), db_log_file.clone(), 10));
+//             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+//             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
+//             let bpm = Arc::new(BufferPoolManager::new(
+//                 10,
+//                 disk_scheduler.clone(),
+//                 disk_manager.clone(),
+//                 replacer,
+//             ));
+//
+//             let log_manager = Arc::new(RwLock::new(LogManager::new(
+//                 disk_manager.clone(),
+//             )));
+//
+//             let catalog = Arc::new(RwLock::new(Catalog::new(
+//                 Arc::clone(&bpm),
+//                 0,
+//                 0,
+//                 HashMap::new(),
+//                 HashMap::new(),
+//                 HashMap::new(),
+//                 HashMap::new(),
+//             )));
+//
+//             let txn_manager = Arc::new(RwLock::new(TransactionManager::new(
+//                 catalog.clone(),
+//                 log_manager.clone(),
+//             )));
+//
+//             let lock_manager = Arc::new(LockManager::new(txn_manager.clone()));
+//
+//             let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+//             let transaction_context = Arc::new(TransactionContext::new(
+//                 txn,
+//                 lock_manager,
+//                 txn_manager
+//             ));
+//
+//             let transaction_factory = Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager.clone()));
+//
+//             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
+//                 bpm.clone(),
+//                 catalog.clone(),
+//                 transaction_context.clone(),
+//             )));
+//
+//             let engine = ExecutionEngine::new(
+//                 catalog.clone(),
+//                 bpm.clone(),
+//                 transaction_factory
+//             );
+//
+//             let planner = QueryPlanner::new(catalog.clone());
+//
+//             Self {
+//                 engine,
+//                 catalog,
+//                 exec_ctx,
+//                 planner,
+//                 _bpm: bpm,
+//                 _transaction_context: transaction_context,
+//                 db_file,
+//                 db_log_file,
+//             }
+//         }
+//
+//         fn create_test_table(&self, table_name: &str, schema: Schema) -> Result<(TableInfo), String> {
+//             let mut catalog = self.catalog.write();
+//             Ok(catalog.create_table(table_name.to_string(), schema.clone()).unwrap())
+//         }
+//
+//         fn insert_tuples(&self, table_name: &str, tuples: Vec<Vec<Value>>, schema: Schema) -> Result<(), String> {
+//             let catalog = self.catalog.read();
+//             let table = catalog.get_table(table_name).unwrap();
+//
+//             for values in tuples {
+//                 let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+//                 table.insert_tuple(&tuple, &mut self.exec_ctx.write()).map_err(|e| e.to_string())?;
+//             }
+//             Ok(())
+//         }
+//
+//         fn cleanup(&self) {
+//             let _ = std::fs::remove_file(&self.db_file);
+//             let _ = std::fs::remove_file(&self.db_log_file);
+//         }
+//     }
+//
+//     impl Drop for TestContext {
+//         fn drop(&mut self) {
+//             self.cleanup();
+//         }
+//     }
+//
+//     #[test]
+//     fn test_group_by_column_names() {
+//         let mut ctx = TestContext::new("test_group_by_column_names");
+//
+//         // Create test table
+//         let table_schema = Schema::new(vec![
+//             Column::new("name", TypeId::VarChar),
+//             Column::new("age", TypeId::Integer),
+//             Column::new("salary", TypeId::BigInt),
+//         ]);
+//
+//         let table_name = "employees";
+//         ctx.create_test_table(table_name, table_schema.clone()).unwrap();
+//
+//         // Insert test data
+//         let test_data = vec![
+//             vec![Value::new("Alice"), Value::new(25), Value::new(50000i64)],
+//             vec![Value::new("Alice"), Value::new(25), Value::new(52000i64)],
+//             vec![Value::new("Bob"), Value::new(30), Value::new(60000i64)],
+//             vec![Value::new("Bob"), Value::new(30), Value::new(65000i64)],
+//             vec![Value::new("Charlie"), Value::new(35), Value::new(70000i64)],
+//         ];
+//         ctx.insert_tuples(table_name, test_data, table_schema).unwrap();
+//
+//         // Test different GROUP BY queries
+//         let test_cases = vec![
+//             (
+//                 "SELECT name, SUM(age) as total_age, COUNT(*) as emp_count FROM employees GROUP BY name",
+//                 vec!["name", "total_age", "emp_count"],
+//                 3, // Expected number of groups
+//             ),
+//             (
+//                 "SELECT name, AVG(salary) as avg_salary FROM employees GROUP BY name",
+//                 vec!["name", "avg_salary"],
+//                 3,
+//             ),
+//             (
+//                 "SELECT name, MIN(age) as min_age, MAX(salary) as max_salary FROM employees GROUP BY name",
+//                 vec!["name", "min_age", "max_salary"],
+//                 3,
+//             ),
+//         ];
+//
+//         for (sql, expected_columns, expected_groups) in test_cases {
+//             // Parse and execute query
+//             let statement = ctx.planner.create_logical_plan(sql).unwrap();
+//
+//             let result = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), );
+//
+//             // Check column names
+//             let schema = result.get_output_schema();
+//             for (i, expected_name) in expected_columns.iter().enumerate() {
+//                 assert_eq!(
+//                     schema.get_columns()[i].get_name(),
+//                     *expected_name,
+//                     "Column name mismatch for query: {}",
+//                     sql
+//                 );
+//             }
+//
+//             // Check number of result groups
+//             let mut row_count = 0;
+//             while result.next().unwrap().is_some() {
+//                 row_count += 1;
+//             }
+//             assert_eq!(
+//                 row_count,
+//                 expected_groups,
+//                 "Incorrect number of groups for query: {}",
+//                 sql
+//             );
+//         }
+//     }
+// }

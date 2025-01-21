@@ -14,110 +14,57 @@ use std::sync::Arc;
 /// Plan node for aggregation operations
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {
-    output_schema: Schema,
     children: Vec<PlanNode>,
-    group_bys: Vec<Arc<Expression>>,
-    aggregates: Vec<Arc<Expression>>,
-}
-
-/// Represents a key in an aggregation operation.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct AggregateKey {
-    pub group_bys: Vec<Value>,
-}
-
-/// Represents a value for each of the running aggregates.
-#[derive(Debug, Clone)]
-pub struct AggregateValue {
-    pub aggregates: Vec<Value>,
+    group_by_exprs: Vec<Arc<Expression>>,
+    aggregate_exprs: Vec<Arc<Expression>>,
+    output_schema: Schema,
 }
 
 impl AggregationPlanNode {
     /// Constructs a new AggregationPlanNode.
     pub fn new(
         children: Vec<PlanNode>,
-        group_bys: Vec<Arc<Expression>>,
-        aggregates: Vec<Arc<Expression>>,
+        group_by_exprs: Vec<Arc<Expression>>,
+        aggregate_exprs: Vec<Arc<Expression>>,
     ) -> Self {
-        // Create output schema based on group bys and aggregates
         let mut columns = Vec::new();
-
-        // Add group by columns first
-        for expr in &group_bys {
-            match expr.as_ref() {
-                Expression::ColumnRef(col_ref) => {
-                    columns.push(Column::new(
-                        col_ref.get_return_type().get_name(),
-                        col_ref.get_return_type().get_type(),
-                    ));
-                }
-                _ => {
-                    // For non-column expressions, use a generic name
-                    columns.push(Column::new(
-                        "expr",
-                        TypeId::Integer, // Default type for expressions
-                    ));
-                }
+        
+        // Add group by columns with their original names
+        for expr in &group_by_exprs {
+            if let Expression::ColumnRef(col_ref) = expr.as_ref() {
+                // Keep the original column name for group by columns
+                columns.push(col_ref.get_return_type().clone());
             }
         }
 
-        // Add aggregate columns
-        for expr in &aggregates {
-            match expr.as_ref() {
-                Expression::Aggregate(agg_expr) => {
-                    let col_type = match agg_expr.get_agg_type() {
-                        AggregationType::Count | AggregationType::CountStar => TypeId::BigInt,
-                        _ => {
-                            if let Some(child) = agg_expr.get_children().first() {
-                                match child.as_ref() {
-                                    Expression::ColumnRef(col_ref) => col_ref.get_return_type().get_type(),
-                                    _ => TypeId::Integer,
-                                }
-                            } else {
-                                TypeId::Integer
-                            }
-                        }
-                    };
-
-                    let col_name = match agg_expr.get_agg_type() {
-                        AggregationType::CountStar => "COUNT(*)".to_string(),
-                        _ => {
-                            if let Some(child) = agg_expr.get_children().first() {
-                                if let Expression::ColumnRef(col_ref) = child.as_ref() {
-                                    format!("{}({})",
-                                            agg_expr.get_agg_type(),
-                                            col_ref.get_return_type().get_name()
-                                    )
-                                } else {
-                                    format!("{}(expr)", agg_expr.get_agg_type())
-                                }
-                            } else {
-                                format!("{}(expr)", agg_expr.get_agg_type())
-                            }
-                        }
-                    };
-
-                    columns.push(Column::new(&col_name, col_type));
-                }
-                _ => {
-                    // For non-aggregate expressions, treat as a pass-through column
-                    if let Expression::ColumnRef(col_ref) = expr.as_ref() {
-                        columns.push(Column::new(
-                            col_ref.get_return_type().get_name(),
-                            col_ref.get_return_type().get_type(),
-                        ));
-                    }
-                }
+        // Add aggregate columns with properly formatted names
+        for expr in &aggregate_exprs {
+            if let Expression::Aggregate(agg) = expr.as_ref() {
+                let mut col = agg.get_return_type().clone();
+                // Get the actual column name from the aggregate argument
+                let arg_name = match agg.get_arg().as_ref() {
+                    Expression::ColumnRef(col_ref) => col_ref.get_return_type().get_name().to_string(),
+                    _ => "*".to_string(), // Use * for COUNT(*) etc.
+                };
+                
+                // Format name as FUNCTION(column)
+                let new_name = if *agg.get_agg_type() == AggregationType::CountStar {
+                    "COUNT(*)".to_string()
+                } else {
+                    format!("{}({})", 
+                        agg.get_agg_type().to_string().to_uppercase(),
+                        arg_name)
+                };
+                
+                columns.push(col.with_name(&new_name));
             }
         }
-
-        debug!("Created AggregationPlanNode with schema: {:?}", columns);
 
         Self {
-            output_schema: Schema::new(columns),
             children,
-            group_bys,
-            aggregates,
+            group_by_exprs,
+            aggregate_exprs,
+            output_schema: Schema::new(columns),
         }
     }
 
@@ -128,17 +75,17 @@ impl AggregationPlanNode {
 
     /// Returns all group by expressions.
     pub fn get_group_bys(&self) -> &[Arc<Expression>] {
-        &self.group_bys
+        &self.group_by_exprs
     }
 
     /// Returns all aggregate expressions.
     pub fn get_aggregates(&self) -> &[Arc<Expression>] {
-        &self.aggregates
+        &self.aggregate_exprs
     }
 
     /// Returns all aggregate types.
     pub fn get_aggregate_types(&self) -> Vec<AggregationType> {
-        self.aggregates.iter().map(|expr| {
+        self.aggregate_exprs.iter().map(|expr| {
             match expr.as_ref() {
                 Expression::Aggregate(agg) => agg.get_agg_type().clone(),
                 Expression::ColumnRef(_) => AggregationType::Sum, // Default for column refs
@@ -151,25 +98,9 @@ impl AggregationPlanNode {
         self.output_schema = schema;
         self
     }
-}
 
-impl AggregateKey {
-    pub fn new(group_bys: Vec<Value>) -> Self {
-        Self { group_bys }
-    }
-}
-
-impl AggregateValue {
-    pub fn new(aggregates: Vec<Value>) -> Self {
-        Self { aggregates }
-    }
-
-    pub fn get_aggregate(&self, index: usize) -> &Value {
-        &self.aggregates[index]
-    }
-
-    pub fn set_aggregate(&mut self, index: usize, value: Value) {
-        self.aggregates[index] = value;
+    pub fn get_output_schema(&self) -> &Schema {
+        &self.output_schema
     }
 }
 
@@ -192,7 +123,7 @@ impl Display for AggregationPlanNode {
         write!(f, "→ Aggregate")?;
 
         // Add aggregate expressions with their types
-        for expr in self.aggregates.iter() {
+        for expr in self.aggregate_exprs.iter() {
             match expr.as_ref() {
                 Expression::Aggregate(agg_expr) => {
                     match agg_expr.get_agg_type() {
@@ -220,9 +151,9 @@ impl Display for AggregationPlanNode {
         }
 
         // Add group by expressions if any
-        if !self.group_bys.is_empty() {
+        if !self.group_by_exprs.is_empty() {
             write!(f, "\n   Group By: [")?;
-            for (i, expr) in self.group_bys.iter().enumerate() {
+            for (i, expr) in self.group_by_exprs.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
@@ -291,16 +222,6 @@ mod tests {
         assert_eq!(agg_node.get_group_bys().len(), 0);
         assert_eq!(agg_node.get_aggregates().len(), 1);
         assert_eq!(agg_node.get_aggregate_types()[0], AggregationType::CountStar);
-    }
-
-    #[test]
-    fn test_aggregate_key_equality() {
-        let key1 = AggregateKey::new(vec![Value::from(1), Value::from("test")]);
-        let key2 = AggregateKey::new(vec![Value::from(1), Value::from("test")]);
-        let key3 = AggregateKey::new(vec![Value::from(2), Value::from("test")]);
-
-        assert_eq!(key1, key2);
-        assert_ne!(key1, key3);
     }
 
     #[test]

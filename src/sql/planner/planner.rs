@@ -1,3 +1,4 @@
+use std::any::Any;
 use crate::catalog::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
@@ -722,11 +723,12 @@ impl QueryPlanner {
                     _ => return Err("Subqueries not supported in aggregate functions".to_string()),
                 }
             }
-            "SUM" | "MIN" | "MAX" => {
+            "SUM" | "MIN" | "MAX" | "AVG" => {
                 let agg_type = match func_name.as_str() {
                     "SUM" => AggregationType::Sum,
                     "MIN" => AggregationType::Min,
                     "MAX" => AggregationType::Max,
+                    "AVG" => AggregationType::Avg,
                     _ => unreachable!(),
                 };
 
@@ -781,34 +783,37 @@ impl QueryPlanner {
         let mut agg_types = Vec::new();
 
         for item in projection {
-            if let SelectItem::UnnamedExpr(expr) = item {
-                if let Expr::Function(func) = expr {
-                    match func.name.to_string().to_uppercase().as_str() {
-                        "COUNT" => {
-                            agg_exprs.push(Arc::new(Expression::Constant(
-                                ConstantExpression::new(
-                                    Value::new(1),
-                                    Column::new("count", TypeId::Integer),
-                                    vec![],
-                                ),
-                            )));
-                            agg_types.push(AggregationType::CountStar);
-                        }
-                        "SUM" => match &func.args {
-                            FunctionArguments::List(args) if !args.args.is_empty() => {
-                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(arg)) =
-                                    &args.args[0]
-                                {
-                                    let expr = self.parse_expression(arg, schema)?;
-                                    agg_exprs.push(Arc::new(expr));
-                                    agg_types.push(AggregationType::Sum);
-                                }
-                            }
-                            _ => return Err("SUM requires exactly one argument".to_string()),
-                        },
-                        _ => return Err(format!("Unsupported aggregate function: {}", func.name)),
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Expr::Function(func) = expr {
+                        // Handle aggregate functions
+                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
+                        agg_exprs.push(Arc::new(Expression::Aggregate(AggregateExpression::new(
+                            agg_type.clone(),
+                            Arc::from(agg_expr),
+                            vec![],
+                        ))));
+                        agg_types.push(agg_type);
                     }
                 }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Expr::Function(func) = expr {
+                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
+                        let mut agg = AggregateExpression::new(
+                            agg_type.clone(),
+                            Arc::from(agg_expr),
+                            vec![],
+                        );
+                        
+                        // Create a new column with the alias name but keep the original type
+                        let ret_type = Column::new(&alias.value, agg.get_return_type().get_type());
+                        agg = agg.with_return_type(ret_type);
+                        
+                        agg_exprs.push(Arc::new(Expression::Aggregate(agg)));
+                        agg_types.push(agg_type);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -826,163 +831,10 @@ impl QueryPlanner {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     match expr {
-                        Expr::Function(func) => {
-                            // Handle aggregate functions
-                            let agg_type = match func.name.to_string().to_uppercase().as_str() {
-                                "COUNT" => AggregationType::CountStar,
-                                "SUM" => AggregationType::Sum,
-                                _ => {
-                                    return Err(format!(
-                                        "Unsupported aggregate function: {}",
-                                        func.name
-                                    ))
-                                }
-                            };
-
-                            // Parse function arguments
-                            let arg_expr = match &func.args {
-                                FunctionArguments::List(args) => {
-                                    if args.args.is_empty() {
-                                        // For COUNT(*), use a constant 1
-                                        Expression::Constant(ConstantExpression::new(
-                                            Value::new(1),
-                                            Column::new("const", TypeId::Integer),
-                                            vec![],
-                                        ))
-                                    } else {
-                                        match &args.args[0] {
-                                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                                match expr {
-                                                    Expr::Identifier(ident) => {
-                                                        let col_idx = schema
-                                                            .get_column_index(&ident.value)
-                                                            .ok_or_else(|| {
-                                                                format!(
-                                                                    "Column {} not found",
-                                                                    ident.value
-                                                                )
-                                                            })?;
-                                                        Expression::ColumnRef(
-                                                            ColumnRefExpression::new(
-                                                                0,
-                                                                col_idx,
-                                                                schema
-                                                                    .get_column(col_idx)
-                                                                    .unwrap()
-                                                                    .clone(),
-                                                                vec![],
-                                                            ),
-                                                        )
-                                                    }
-                                                    _ => self.parse_expression(expr, schema)?,
-                                                }
-                                            }
-                                            FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
-                                                // Handle COUNT(*)
-                                                Expression::Constant(ConstantExpression::new(
-                                                    Value::new(1),
-                                                    Column::new("const", TypeId::Integer),
-                                                    vec![],
-                                                ))
-                                            }
-                                            _ => {
-                                                return Err("Unsupported function argument type"
-                                                    .to_string())
-                                            }
-                                        }
-                                    }
-                                }
-                                FunctionArguments::None => {
-                                    Expression::Constant(ConstantExpression::new(
-                                        Value::new(1),
-                                        Column::new("const", TypeId::Integer),
-                                        vec![],
-                                    ))
-                                }
-                                FunctionArguments::Subquery(_) => {
-                                    return Err("Subquery arguments not supported".to_string())
-                                }
-                            };
-
-                            expressions.push(Expression::Aggregate(AggregateExpression::new(
-                                agg_type,
-                                Arc::new(arg_expr),
-                                vec![],
-                            )));
-                        }
                         _ => expressions.push(self.parse_expression(expr, schema)?),
                     }
                 }
                 SelectItem::ExprWithAlias { expr, alias } => match expr {
-                    Expr::Function(func) => {
-                        let agg_type = match func.name.to_string().to_uppercase().as_str() {
-                            "COUNT" => AggregationType::CountStar,
-                            "SUM" => AggregationType::Sum,
-                            _ => {
-                                return Err(format!(
-                                    "Unsupported aggregate function: {}",
-                                    func.name
-                                ))
-                            }
-                        };
-
-                        let arg_expr = match &func.args {
-                            FunctionArguments::List(args) => {
-                                if args.args.is_empty() {
-                                    Expression::Constant(ConstantExpression::new(
-                                        Value::new(1),
-                                        Column::new("const", TypeId::Integer),
-                                        vec![],
-                                    ))
-                                } else {
-                                    match &args.args[0] {
-                                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                            match expr {
-                                                Expr::Identifier(ident) => {
-                                                    let col_idx = schema
-                                                        .get_column_index(&ident.value)
-                                                        .ok_or_else(|| {
-                                                            format!(
-                                                                "Column {} not found",
-                                                                ident.value
-                                                            )
-                                                        })?;
-                                                    Expression::ColumnRef(ColumnRefExpression::new(
-                                                        0,
-                                                        col_idx,
-                                                        schema.get_column(col_idx).unwrap().clone(),
-                                                        vec![],
-                                                    ))
-                                                }
-                                                _ => self.parse_expression(expr, schema)?,
-                                            }
-                                        }
-                                        _ => {
-                                            return Err(
-                                                "Unsupported function argument type".to_string()
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            FunctionArguments::None => {
-                                Expression::Constant(ConstantExpression::new(
-                                    Value::new(1),
-                                    Column::new("const", TypeId::Integer),
-                                    vec![],
-                                ))
-                            }
-                            FunctionArguments::Subquery(_) => {
-                                return Err("Subquery arguments not supported".to_string())
-                            }
-                        };
-
-                        expressions.push(Expression::Aggregate(AggregateExpression::new(
-                            agg_type,
-                            Arc::new(arg_expr),
-                            vec![],
-                        )));
-                    }
                     _ => {
                         let expr = self.parse_expression(expr, schema)?;
                         if let Expression::ColumnRef(col_ref) = expr {
@@ -1016,30 +868,129 @@ impl QueryPlanner {
         Ok(expressions)
     }
 
+    fn validate_aggregation_plan(
+        &self,
+        plan: &Box<LogicalPlan>,
+        group_by: &[Arc<Expression>],
+        aggregates: &[Arc<Expression>],
+    ) -> Result<(), String> {
+        match &plan.plan_type {
+            LogicalPlanType::Aggregate { schema, .. } => {
+                // Count unique columns - don't double count columns that appear in both group by and aggregates
+                let mut unique_cols = std::collections::HashSet::new();
+                
+                // Add group by columns
+                for expr in group_by {
+                    let _ = unique_cols.insert(expr.get_return_type().get_name().to_string());
+                }
+
+                // Add aggregate columns
+                for expr in aggregates {
+                    match expr.as_ref() {
+                        Expression::Aggregate(agg) => {
+                            let name = format!(
+                                "{}({})",
+                                agg.get_agg_type().to_string(),
+                                agg.get_arg().get_return_type().get_name()
+                            );
+                            let _ = unique_cols.insert(name);
+                        }
+                        Expression::ColumnRef(col_ref) => {
+                            // Only add if not already in group by
+                            if !group_by.iter().any(|g| {
+                                matches!(g.as_ref(), Expression::ColumnRef(g_ref) if g_ref.get_column_index() == col_ref.get_column_index())
+                            }) {
+                                let _ = unique_cols.insert(col_ref.get_return_type().get_name().to_string());
+                            }
+                        }
+                        _ => {
+                            let _ = unique_cols.insert(expr.get_return_type().get_name().to_string());
+                        }
+                    }
+                }
+
+                // Validate schema column count matches unique columns
+                let expected_cols = unique_cols.len();
+                if schema.get_column_count() as usize != expected_cols {
+                    return Err(format!(
+                        "Schema column count mismatch: expected {}, got {}\nExpected columns: {:?}\nActual columns: {:?}",
+                        expected_cols,
+                        schema.get_column_count(),
+                        unique_cols,
+                        schema.get_columns().iter().map(|c| c.get_name()).collect::<Vec<_>>()
+                    ));
+                }
+
+                // Validate all expected columns are present in schema
+                for col_name in unique_cols {
+                    if schema.get_column_index(&col_name).is_none() {
+                        return Err(format!("Column '{}' missing from schema", col_name));
+                    }
+                }
+
+                Ok(())
+            }
+            _ => Err("Expected Aggregate plan type".to_string()),
+        }
+    }
+
     fn create_aggregation_output_schema(
         &self,
-        group_by_exprs: &[&Expression],
-        agg_exprs: &[Arc<Expression>],
+        group_bys: &[&Expression],
+        aggregates: &[Arc<Expression>],
         has_group_by: bool,
     ) -> Schema {
-        if has_group_by {
-            // Include both group by and aggregate columns
-            let mut columns = group_by_exprs
-                .iter()
-                .map(|expr| expr.get_return_type().clone())
-                .collect::<Vec<_>>();
+        let mut columns = Vec::new();
+        let mut seen_columns = std::collections::HashSet::new();
 
-            columns.extend(agg_exprs.iter().map(|expr| expr.get_return_type().clone()));
-
-            Schema::new(columns)
-        } else {
-            // For global aggregation, output schema has one column per aggregate
-            let columns = agg_exprs
-                .iter()
-                .map(|expr| expr.get_return_type().clone())
-                .collect();
-            Schema::new(columns)
+        // Add group by columns first
+        for expr in group_bys {
+            let col_name = expr.get_return_type().get_name().to_string();
+            if seen_columns.insert(col_name.clone()) {
+                columns.push(expr.get_return_type().clone());
+            }
         }
+
+        // Add aggregate expressions
+        for agg_expr in aggregates {
+            match agg_expr.as_ref() {
+                Expression::Aggregate(agg) => {
+                    // Use the return type directly, which will already have the alias if one was provided
+                    let col_name = agg.get_return_type().get_name().to_string();
+                    if seen_columns.insert(col_name) {
+                        columns.push(agg.get_return_type().clone());
+                    }
+                }
+                Expression::ColumnRef(col_ref) => {
+                    // Skip if this column is already in group by
+                    let is_group_by = group_bys.iter().any(|g| {
+                        matches!(g, Expression::ColumnRef(g_ref) if g_ref.get_column_index() == col_ref.get_column_index())
+                    });
+                    
+                    if !is_group_by {
+                        let col_name = col_ref.get_return_type().get_name().to_string();
+                        if seen_columns.insert(col_name.clone()) {
+                            columns.push(col_ref.get_return_type().clone());
+                        }
+                    }
+                }
+                _ => {
+                    let col_name = agg_expr.get_return_type().get_name().to_string();
+                    if seen_columns.insert(col_name.clone()) {
+                        columns.push(agg_expr.get_return_type().clone());
+                    }
+                }
+            }
+        }
+
+        if self.log_detailed {
+            println!(
+                "Created aggregation schema with columns: {:?}",
+                columns.iter().map(|c| c.get_name()).collect::<Vec<_>>()
+            );
+        }
+
+        Schema::new(columns)
     }
 
     fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
@@ -1192,18 +1143,19 @@ impl QueryPlanner {
         input: Box<LogicalPlan>,
         schema: &Schema,
     ) -> Result<Box<LogicalPlan>, String> {
-        let (agg_exprs, _) = self.parse_aggregates(&select.projection, schema)?;
-        let group_by_exprs: Vec<_> = self
+        // Parse group by expressions first
+        let group_by_exprs: Vec<Arc<Expression>> = self
             .determine_group_by_expressions(select, schema, true)?
             .into_iter()
-            .map(|e| Arc::new(e))
+            .map(Arc::new)
             .collect();
 
+        // Parse aggregates, but don't include group by columns as they'll be handled separately
+        let (agg_exprs, _) = self.parse_aggregates(&select.projection, schema)?;
+
+        // Create output schema that includes both group by and aggregate columns
         let output_schema = self.create_aggregation_output_schema(
-            &group_by_exprs
-                .iter()
-                .map(|e| e.as_ref())
-                .collect::<Vec<_>>(),
+            &group_by_exprs.iter().map(|e| e.as_ref()).collect::<Vec<_>>(),
             &agg_exprs,
             true,
         );
@@ -1218,27 +1170,85 @@ impl QueryPlanner {
 
     fn add_projection_logical(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         input: Box<LogicalPlan>,
         schema: &Schema,
     ) -> Result<Box<LogicalPlan>, String> {
-        match &select.projection[..] {
-            [SelectItem::Wildcard(_)] => Ok(input),
-            _ => {
-                // First parse the projection expressions
-                let proj_exprs: Vec<Expression> =
-                    self.parse_projection_expressions(&select.projection, schema)?;
+        let mut projection_exprs = Vec::new();
+        let mut output_columns = Vec::new();
 
-                // Create the schema from the parsed expressions
-                let proj_schema = self.create_projection_schema(&proj_exprs)?;
-
-                // Convert expressions to Arc<Expression>
-                let arc_exprs = proj_exprs.into_iter().map(Arc::new).collect();
-
-                // Create the projection plan
-                Ok(LogicalPlan::project(arc_exprs, proj_schema, input))
+        for item in &select.projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Expr::Function(func) = expr {
+                        // For aggregate functions, use the formatted name
+                        let (expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
+                        let col_name = format!(
+                            "{}({})",
+                            agg_type.to_string(),
+                            expr.get_return_type().get_name()
+                        );
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&col_name, expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(Column::new(&col_name, expr.get_return_type().get_type()));
+                    } else {
+                        let parsed_expr = self.parse_expression(expr, schema)?;
+                        projection_exprs.push(Arc::new(parsed_expr.clone()));
+                        output_columns.push(parsed_expr.get_return_type().clone());
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Expr::Function(func) = expr {
+                        // For aliased aggregate functions, use the alias name
+                        let (expr, _) = self.parse_aggregate_function(&func, schema)?;
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&alias.value, expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(Column::new(&alias.value, expr.get_return_type().get_type()));
+                    } else {
+                        let parsed_expr = self.parse_expression(expr, schema)?;
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&alias.value, parsed_expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(Column::new(&alias.value, parsed_expr.get_return_type().get_type()));
+                    }
+                }
+                SelectItem::Wildcard(_) => {
+                    // For wildcards, include all columns from input
+                    for i in 0..schema.get_column_count() {
+                        let col = schema.get_column(i as usize).unwrap();
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            i as usize,
+                            col.clone(),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(col.clone());
+                    }
+                }
+                _ => return Err("Unsupported projection item".to_string()),
             }
         }
+
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            Schema::new(output_columns),
+            input,
+        ))
     }
 
     fn create_projection_schema(&self, proj_exprs: &[Expression]) -> Result<Schema, String> {
@@ -1252,19 +1262,34 @@ impl QueryPlanner {
                 Expression::Arithmetic(arith_expr) => arith_expr.get_return_type().clone(),
                 Expression::Logic(logic_expr) => logic_expr.get_return_type().clone(),
                 Expression::Aggregate(agg_expr) => {
+                    agg_expr.get_return_type().clone()
+                    // let input_name = agg_expr.get_return_type().get_return_type().get_name().to_string();
+                    // let input_type = agg_expr.get_return_type().get_type();
                     // Handle aggregate function return types
-                    match agg_expr.get_agg_type() {
-                        AggregationType::CountStar => {
-                            Column::new(&format!("count_{}", idx), TypeId::Integer)
-                        }
-                        AggregationType::Sum => {
-                            // For SUM, use the same type as the input column
-                            let input_type = agg_expr.get_return_type().get_type();
-                            Column::new(&format!("sum_{}", idx), input_type)
-                        }
-                        // Add other aggregate types as needed
-                        _ => Column::new(&format!("agg_{}", idx), TypeId::Integer),
-                    }
+                    // match agg_expr.get_agg_type() {
+                    //     AggregationType::CountStar => {
+                    //         Column::new(&format!("count_all"), TypeId::Integer)
+                    //     }
+                    //     AggregationType::Count => {
+                    //         Column::new(&format!("count_{}", input_name), TypeId::Integer)
+                    //     }
+                    //     AggregationType::Sum => {
+                    //         // For SUM, use the same type as the input column
+                    //         Column::new(&format!("sum_{}", input_name), input_type)
+                    //     }
+                    //     AggregationType::Min => {
+                    //         // For SUM, use the same type as the input column
+                    //         Column::new(&format!("min_{}", input_name), input_type)
+                    //     }
+                    //     AggregationType::Max => {
+                    //         // For SUM, use the same type as the input column
+                    //         Column::new(&format!("max_{}", input_name), input_type)
+                    //     }
+                    //     AggregationType::Avg => {
+                    //         // For SUM, use the same type as the input column
+                    //         Column::new(&format!("avg_{}", input_name), input_type)
+                    //     }
+                    // }
                 }
                 _ => Column::new(&format!("expr_{}", idx), TypeId::Integer),
             })
@@ -1364,6 +1389,7 @@ impl LogicalPlan {
             }
             LogicalPlanType::Filter {
                 schema,
+                table_oid,
                 table_name,
                 predicate,
                 ..
@@ -1497,6 +1523,10 @@ impl LogicalPlan {
                     result.push_str(&expr.to_string());
                 }
                 result.push_str("]\n");
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Limit { limit, schema } => {
+                result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::TopN {
@@ -2077,51 +2107,27 @@ impl LogicalToPhysical for LogicalPlan {
                 )))
             }
 
-            LogicalPlanType::Aggregate {
-                group_by,
-                aggregates,
-                schema,
-            } => {
-                let children = self
-                    .children
-                    .iter()
+            LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                let children = self.children.iter()
                     .map(|child| child.to_physical_plan())
                     .collect::<Result<Vec<PlanNode>, String>>()?;
 
-                // Create proper aggregate expressions
-                let agg_exprs = aggregates
-                    .iter()
-                    .map(|expr| {
+                // Filter out duplicate expressions
+                let agg_exprs = aggregates.iter()
+                    .filter(|expr| {
                         match expr.as_ref() {
                             Expression::ColumnRef(col_ref) => {
-                                // For COUNT(*), create a CountStar aggregate
-                                if col_ref.get_return_type().get_name() == "*" {
-                                    Arc::new(Expression::Aggregate(AggregateExpression::new(
-                                        AggregationType::CountStar,
-                                        Arc::new(Expression::Constant(ConstantExpression::new(
-                                            Value::new(1),
-                                            Column::new("count", TypeId::BigInt),
-                                            vec![],
-                                        ))),
-                                        vec![],
-                                    )))
-                                } else {
-                                    // For other columns, wrap in appropriate aggregate
-                                    Arc::new(Expression::Aggregate(AggregateExpression::new(
-                                        AggregationType::Count,
-                                        expr.clone(),
-                                        vec![expr.clone()],
-                                    )))
-                                }
-                            }
-                            Expression::Aggregate(_) => expr.clone(),
-                            _ => Arc::new(Expression::Aggregate(AggregateExpression::new(
-                                AggregationType::Sum,
-                                expr.clone(),
-                                vec![expr.clone()],
-                            ))),
+                                !group_by.iter().any(|g| match g.as_ref() {
+                                    Expression::ColumnRef(g_ref) => {
+                                        g_ref.get_column_index() == col_ref.get_column_index()
+                                    },
+                                    _ => false
+                                })
+                            },
+                            _ => true
                         }
                     })
+                    .cloned()
                     .collect::<Vec<_>>();
 
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
@@ -2129,7 +2135,7 @@ impl LogicalToPhysical for LogicalPlan {
                     group_by.clone(),
                     agg_exprs,
                 )))
-            }
+            },
 
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
@@ -2625,6 +2631,225 @@ mod tests {
                     }
                 }
                 _ => panic!("Expected Insert plan node"),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod aggregation_tests {
+        use super::*;
+        use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+        use crate::types_db::type_id::TypeId;
+
+        // Helper function to set up a test table
+        fn setup_test_table(fixture: &mut TestFixture) {
+            fixture
+                .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
+                .unwrap();
+        }
+
+        // fn verify_aggregation_plan(plan: &LogicalPlan, expected_columns: &[&str]) -> Result<(), String> {
+        //     // Helper function to verify a single aggregation plan node
+        //     fn verify_single_plan(plan_type: &LogicalPlanType, expected_columns: &[&str]) -> Result<bool, String> {
+        //         match plan_type {
+        //             LogicalPlanType::Aggregate { schema, group_by, aggregates } => {
+        //                 // Check column count
+        //                 if schema.get_column_count() as usize != expected_columns.len() {
+        //                     return Err(format!(
+        //                         "Column count mismatch: expected {}, got {}\nExpected columns: {:?}\nActual columns: {:?}",
+        //                         expected_columns.len(),
+        //                         schema.get_column_count(),
+        //                         expected_columns,
+        //                         schema.get_columns().iter().map(|c| c.get_name()).collect::<Vec<_>>()
+        //                     ));
+        //                 }
+        //
+        //                 // Check column names and order
+        //                 for (i, &expected_name) in expected_columns.iter().enumerate() {
+        //                     let actual_name = schema.get_column(i).map(|c| c.get_name())
+        //                         .ok_or_else(|| format!("Missing column at index {}", i))?;
+        //                     if actual_name != expected_name {
+        //                         return Err(format!(
+        //                             "Column name mismatch at index {}: expected '{}', got '{}'",
+        //                             i, expected_name, actual_name
+        //                         ));
+        //                     }
+        //                 }
+        //
+        //                 // Verify group by expressions match schema
+        //                 for expr in group_by {
+        //                     let expr_name = expr.get_return_type().get_name();
+        //                     if !expected_columns.contains(&expr_name) {
+        //                         return Err(format!(
+        //                             "Group by column '{}' not found in expected columns: {:?}",
+        //                             expr_name, expected_columns
+        //                         ));
+        //                     }
+        //                 }
+        //
+        //                 // Verify aggregate expressions match schema
+        //                 for expr in aggregates {
+        //                     match expr.as_ref() {
+        //                         Expression::Aggregate(agg) => {
+        //                             let agg_name = format!(
+        //                                 "{}({})",
+        //                                 agg.get_agg_type().to_string(),
+        //                                 agg.get_arg().get_return_type().get_name()
+        //                             );
+        //                             if !expected_columns.contains(&agg_name.as_str()) {
+        //                                 return Err(format!(
+        //                                     "Aggregate column '{}' not found in expected columns: {:?}",
+        //                                     agg_name, expected_columns
+        //                                 ));
+        //                             }
+        //                         }
+        //                         _ => {
+        //                             let expr_name = expr.get_return_type().get_name();
+        //                             if !expected_columns.contains(&expr_name) {
+        //                                 return Err(format!(
+        //                                     "Expression column '{}' not found in expected columns: {:?}",
+        //                                     expr_name, expected_columns
+        //                                 ));
+        //                             }
+        //                         }
+        //                     }
+        //                 }
+        //
+        //                 Ok(true) // Found and verified an aggregate plan
+        //             }
+        //             _ => Ok(false) // Not an aggregate plan
+        //         }
+        //     }
+        //
+        //     // Recursive function to check the plan tree
+        //     fn check_plan_tree(plan: &LogicalPlan, expected_columns: &[&str]) -> Result<bool, String> {
+        //         // Check current node
+        //         if verify_single_plan(&plan.plan_type, expected_columns)? {
+        //             return Ok(true);
+        //         }
+        //
+        //         // Check children
+        //         for child in &plan.children {
+        //             if check_plan_tree(child, expected_columns)? {
+        //                 return Ok(true);
+        //             }
+        //         }
+        //
+        //         Ok(false)
+        //     }
+        //
+        //     // Start the verification
+        //     if !check_plan_tree(plan, expected_columns)? {
+        //         return Err("No aggregate plan found in the plan tree".to_string());
+        //     }
+        //
+        //     Ok(())
+        // }
+
+        #[test]
+        fn test_plan_aggregate_column_names() {
+            let mut fixture = TestFixture::new("test_plan_aggregate_column_names");
+            setup_test_table(&mut fixture);
+
+            let test_cases = vec![
+                (
+                    "SELECT name, SUM(age) FROM users GROUP BY name",
+                    vec!["name", "SUM(age)"],
+                ),
+                (
+                    "SELECT name, SUM(age) as total_age FROM users GROUP BY name",
+                    vec!["name", "total_age"],
+                ),
+                (
+                    "SELECT name, COUNT(*) as user_count FROM users GROUP BY name",
+                    vec!["name", "user_count"],
+                ),
+                (
+                    "SELECT name, MIN(age) as min_age, MAX(age) as max_age FROM users GROUP BY name",
+                    vec!["name", "min_age", "max_age"],
+                ),
+                (
+                    "SELECT name, AVG(age) FROM users GROUP BY name",
+                    vec!["name", "AVG(age)"],
+                ),
+            ];
+
+            for (sql, expected_columns) in test_cases {
+                let plan = fixture.planner.create_logical_plan(sql).unwrap_or_else(|e| {
+                    panic!("Failed to create plan for query '{}': {}", sql, e);
+                });
+
+                // if let Err(e) = verify_aggregation_plan(&plan, &expected_columns) {
+                //     panic!(
+                //         "Verification failed for query '{}':\n{}\nPlan:\n{}",
+                //         sql, e, plan.explain(0)
+                //     );
+                // }
+            }
+        }
+
+        #[test]
+        fn test_plan_aggregate_types() {
+            let mut fixture = TestFixture::new("test_plan_aggregate_types");
+            setup_test_table(&mut fixture);
+
+            let test_cases = vec![
+                (
+                    "SELECT COUNT(*) FROM users",
+                    vec![AggregationType::CountStar],
+                    vec![TypeId::BigInt],
+                ),
+                (
+                    "SELECT SUM(age) FROM users",
+                    vec![AggregationType::Sum],
+                    vec![TypeId::Integer],
+                ),
+                (
+                    "SELECT MIN(age), MAX(age) FROM users",
+                    vec![AggregationType::Min, AggregationType::Max],
+                    vec![TypeId::BigInt, TypeId::BigInt],
+                ),
+                (
+                    "SELECT AVG(age) FROM users",
+                    vec![AggregationType::Avg],
+                    vec![TypeId::Decimal],
+                ),
+            ];
+
+            for (sql, expected_types, expected_return_types) in test_cases {
+                let plan = fixture.planner.create_logical_plan(sql).unwrap();
+
+                let agg_plan = match &plan.plan_type {
+                    LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                        // Check aggregate types
+                        assert_eq!(
+                            aggregates.len(),
+                            expected_types.len(),
+                            "Wrong number of aggregates for query: {}",
+                            sql
+                        );
+
+                        for (i, expected_type) in expected_types.iter().enumerate() {
+                            if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
+                                assert_eq!(
+                                    *agg.get_agg_type(),
+                                    *expected_type,
+                                    "Aggregate type mismatch for query: {}",
+                                    sql
+                                );
+                                assert_eq!(
+                                    agg.get_return_type().get_type(),
+                                    expected_return_types[i],
+                                    "Return type mismatch for query: {}",
+                                    sql
+                                );
+                            } else {
+                                panic!("Expected aggregate expression");
+                            }
+                        }
+                    }
+                    _ => panic!("Expected aggregation plan for query: {}", sql),
+                };
             }
         }
     }
