@@ -1,39 +1,46 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::logger::initialize_logger;
-use chrono::Utc;
 use log::{debug, error, info, trace, warn};
 use mockall::automock;
 use spin::{Mutex, RwLock};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::future::Future;
-use std::io::{BufReader, BufWriter, Read, Result as IoResult, Seek, SeekFrom, Write};
+use std::io::{
+    BufReader, BufWriter, Error, ErrorKind, Read, Result as IoResult, Seek, SeekFrom, Write,
+};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
-use tokio::io::AsyncSeekExt;
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
 #[automock]
 pub trait DiskIO: Send + Sync {
-    fn write_page(
-        &self,
-        page_id: PageId,
-        page_data: &[u8; DB_PAGE_SIZE as usize],
-    ) -> Result<(), std::io::Error>;
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()>;
     fn read_page(
         &self,
         page_id: PageId,
         page_data: &mut [u8; DB_PAGE_SIZE as usize],
-    ) -> Result<(), std::io::Error>;
+    ) -> IoResult<()>; // Default implementations for retry methods
+    fn write_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()>;
+    fn read_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()>;
 }
 
 /// The `FileDiskManager` is responsible for managing disk I/O operations,
 /// including reading and writing pages and managing log files.
 pub struct FileDiskManager {
+    disk_io: Arc<RwLock<Box<dyn DiskIO>>>,
     db_io: Arc<RwLock<BufWriter<File>>>,
     log_io: Arc<RwLock<BufWriter<File>>>,
     db_read_buffer: Arc<RwLock<BufReader<File>>>,
@@ -52,6 +59,95 @@ pub struct DiskMetrics {
     write_throughput_bytes: AtomicU64,
     read_errors: AtomicU64,
     write_errors: AtomicU64,
+}
+
+// Create a real disk I/O implementation
+struct RealDiskIO {
+    db_io: Arc<RwLock<BufWriter<File>>>,
+    db_read_buffer: Arc<RwLock<BufReader<File>>>,
+}
+
+impl DiskIO for RealDiskIO {
+    fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        // Use checked multiplication to prevent overflow
+        let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
+            Some(off) => off,
+            None => {
+                warn!(
+                    target: "tkdb::storage",
+                    "Page ID {} would cause offset overflow", page_id
+                );
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Page ID would cause offset overflow",
+                ));
+            }
+        };
+
+        let mut db_io = self.db_io.write();
+        let writer = db_io.get_mut();
+        writer.seek(SeekFrom::Start(offset))?;
+        writer.write_all(page_data)?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    fn read_page(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
+        // Use checked multiplication to prevent overflow
+        let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
+            Some(off) => off,
+            None => {
+                warn!(
+                    target: "tkdb::storage",
+                    "Page ID {} would cause offset overflow, returning zeroed page", page_id
+                );
+                // Fill the buffer with zeros but return an error to trigger error metrics
+                page_data.fill(0);
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Page ID would cause offset overflow",
+                ));
+            }
+        };
+
+        let mut db_reader = self.db_read_buffer.write();
+        let reader = db_reader.get_mut();
+        reader.seek(SeekFrom::Start(offset))?;
+        match reader.read_exact(page_data) {
+            Ok(_) => Ok(()),
+            Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
+                warn!(
+                    target: "tkdb::storage",
+                    "Read beyond EOF for page {}, returning zeroed page", page_id
+                );
+                page_data.fill(0);
+                // Return an error to trigger error metrics
+                Err(Error::new(ErrorKind::InvalidInput, "Read beyond EOF"))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // Default implementations for retry methods
+    fn write_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
+        self.write_page(page_id, page_data)
+    }
+
+    fn read_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
+        self.read_page(page_id, page_data)
+    }
 }
 
 impl FileDiskManager {
@@ -90,6 +186,7 @@ impl FileDiskManager {
                 );
                 panic!("Database file initialization failed")
             });
+
         let log_io = OpenOptions::new()
             .read(true)
             .write(true)
@@ -101,7 +198,20 @@ impl FileDiskManager {
         let db_read = OpenOptions::new().read(true).open(db_file).unwrap();
         OpenOptions::new().read(true).open(log_file).unwrap();
 
+        // Clone the file handle for the real disk IO
+        let real_disk_io = RealDiskIO {
+            db_io: Arc::new(RwLock::new(BufWriter::with_capacity(
+                buffer_size,
+                db_io.try_clone().unwrap(),
+            ))),
+            db_read_buffer: Arc::new(RwLock::new(BufReader::with_capacity(
+                buffer_size,
+                db_read.try_clone().unwrap(),
+            ))),
+        };
+
         Self {
+            disk_io: Arc::new(RwLock::new(Box::new(real_disk_io))),
             db_io: Arc::new(RwLock::new(BufWriter::with_capacity(buffer_size, db_io))),
             log_io: Arc::new(RwLock::new(BufWriter::with_capacity(buffer_size, log_io))),
             db_read_buffer: Arc::new(RwLock::new(BufReader::with_capacity(buffer_size, db_read))),
@@ -336,7 +446,7 @@ impl FileDiskManager {
             let writer = db_io.get_mut();
 
             for (page_id, page_data) in pages {
-                let offset = *page_id as u64 * DB_PAGE_SIZE as u64;
+                let offset = *page_id as u64 * DB_PAGE_SIZE;
                 trace!("Writing page {} at offset {}", page_id, offset);
 
                 if let Err(e) = writer.seek(SeekFrom::Start(offset)) {
@@ -388,7 +498,7 @@ impl FileDiskManager {
 
         for &page_id in page_ids {
             let mut page_data = [0u8; DB_PAGE_SIZE as usize];
-            let offset = page_id as u64 * DB_PAGE_SIZE as u64;
+            let offset = page_id as u64 * DB_PAGE_SIZE;
             reader.seek(SeekFrom::Start(offset))?;
 
             match reader.read_exact(&mut page_data) {
@@ -412,7 +522,7 @@ impl FileDiskManager {
         debug!(target: "tkdb::storage", "Starting async write for page {}", page_id);
 
         let result = {
-            let offset = page_id as u64 * DB_PAGE_SIZE as u64;
+            let offset = page_id as u64 * DB_PAGE_SIZE;
             let mut db_io = self.db_io.write();
             let writer = db_io.get_mut();
 
@@ -431,7 +541,7 @@ impl FileDiskManager {
                     "Async write completed for page {} (took {:?})",
                     page_id, duration
                 );
-                self.record_metrics("write", start, DB_PAGE_SIZE as u64, false);
+                self.record_metrics("write", start, DB_PAGE_SIZE, false);
                 Ok(())
             }
             Err(e) => {
@@ -439,7 +549,7 @@ impl FileDiskManager {
                     target: "tkdb::storage",
                     "Async write failed for page {}: {}", page_id, e
                 );
-                self.record_metrics("write", start, DB_PAGE_SIZE as u64, true);
+                self.record_metrics("write", start, DB_PAGE_SIZE, true);
                 Err(e)
             }
         }
@@ -489,7 +599,7 @@ impl FileDiskManager {
                     "Async read completed for page {} (took {:?})",
                     page_id, duration
                 );
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, false);
+                self.record_metrics("read", start, DB_PAGE_SIZE, false);
                 Ok(data)
             }
             Err(e) => {
@@ -497,79 +607,8 @@ impl FileDiskManager {
                     target: "tkdb::storage",
                     "Async read failed for page {}: {}", page_id, e
                 );
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, true);
+                self.record_metrics("read", start, DB_PAGE_SIZE, true);
                 Err(e)
-            }
-        }
-    }
-
-    fn write_page_with_retry(
-        &self,
-        page_id: PageId,
-        page_data: &[u8; DB_PAGE_SIZE as usize],
-    ) -> IoResult<()> {
-        let start = Instant::now();
-        let mut attempts = 0;
-
-        trace!(
-            target: "tkdb::storage",
-            "Starting write operation for page {}", page_id
-        );
-
-        loop {
-            match self.write_page(page_id, page_data) {
-                Ok(_) => {
-                    let duration = start.elapsed();
-                    debug!(
-                        target: "tkdb::storage",
-                        "Successfully wrote page {} after {} attempts in {:?}",
-                        page_id, attempts + 1, duration
-                    );
-                    self.record_metrics("write", start, DB_PAGE_SIZE as u64, false);
-                    return Ok(());
-                }
-                Err(e) if attempts < Self::MAX_RETRIES => {
-                    warn!(
-                        target: "tkdb::storage",
-                        "Write failed for page {}, attempt {}/{}: {}",
-                        page_id, attempts + 1, Self::MAX_RETRIES, e
-                    );
-                    thread::sleep(Duration::from_millis(Self::RETRY_DELAY_MS));
-                    attempts += 1;
-                }
-                Err(e) => {
-                    error!(
-                        target: "tkdb::storage",
-                        "Write failed for page {} after {} attempts: {}",
-                        page_id, attempts + 1, e
-                    );
-                    self.record_metrics("write", start, DB_PAGE_SIZE as u64, true);
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    fn read_page_with_retry(
-        &self,
-        page_id: PageId,
-        page_data: &mut [u8; DB_PAGE_SIZE as usize],
-    ) -> IoResult<()> {
-        let mut attempts = 0;
-        loop {
-            match self.read_page(page_id, page_data) {
-                Ok(_) => return Ok(()),
-                Err(e) if attempts < Self::MAX_RETRIES => {
-                    warn!(
-                        "Read failed, attempt {}/{}: {}",
-                        attempts + 1,
-                        Self::MAX_RETRIES,
-                        e
-                    );
-                    thread::sleep(Duration::from_millis(Self::RETRY_DELAY_MS));
-                    attempts += 1;
-                }
-                Err(e) => return Err(e),
             }
         }
     }
@@ -643,76 +682,147 @@ impl FileDiskManager {
             true
         }
     }
-}
 
-impl DiskIO for FileDiskManager {
-    fn write_page(
+    #[cfg(test)]
+    pub fn set_disk_io(&self, mock_disk_io: Box<dyn DiskIO>) {
+        *self.disk_io.write() = mock_disk_io;
+    }
+
+    // Update write_page to use disk_io
+    pub(crate) fn write_page(
         &self,
         page_id: PageId,
         page_data: &[u8; DB_PAGE_SIZE as usize],
-    ) -> Result<(), std::io::Error> {
-        let offset = page_id as u64 * DB_PAGE_SIZE as u64;
-        trace!("Writing page {} at offset {}", page_id, offset);
-
-        let mut db_io = self.db_io.write();
-        let db_io_writer = db_io.get_mut();
-        db_io_writer.seek(SeekFrom::Start(offset))?;
-        db_io_writer.write_all(page_data)?;
-        db_io_writer.flush()?;
-        self.num_writes.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+    ) -> IoResult<()> {
+        self.disk_io.read().write_page(page_id, page_data)
     }
 
-    fn read_page(
+    // Update read_page to use disk_io
+    pub(crate) fn read_page(
         &self,
         page_id: PageId,
         page_data: &mut [u8; DB_PAGE_SIZE as usize],
     ) -> IoResult<()> {
         let start = Instant::now();
+        let result = self.disk_io.read().read_page(page_id, page_data);
 
-        // Use checked multiplication to prevent overflow
-        let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
-            Some(off) => off,
-            None => {
-                warn!(
-                    target: "tkdb::storage",
-                    "Page ID {} would cause offset overflow, returning zeroed page", page_id
-                );
-                page_data.fill(0);
-                // Record this as an error since it's an invalid page access
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, true);
-                return Ok(());
-            }
-        };
-
-        let mut db_reader = self.db_read_buffer.write();
-        let reader = db_reader.get_mut();
-
-        reader.seek(SeekFrom::Start(offset))?;
-        match reader.read_exact(page_data) {
+        match result {
             Ok(_) => {
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, false);
-                Ok(())
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                warn!(
-                    target: "tkdb::storage",
-                    "Read beyond EOF for page {}, returning zeroed page", page_id
-                );
-                page_data.fill(0);
-                // Record EOF reads as errors
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, true);
+                self.record_metrics("read", start, DB_PAGE_SIZE, false);
                 Ok(())
             }
             Err(e) => {
-                error!(
-                    target: "tkdb::storage",
-                    "Failed to read page {}: {}", page_id, e
-                );
-                self.record_metrics("read", start, DB_PAGE_SIZE as u64, true);
-                Err(e)
+                self.record_metrics("read", start, DB_PAGE_SIZE, true);
+                if e.kind() == ErrorKind::InvalidInput {
+                    // For overflow and EOF cases, we've already zeroed the buffer
+                    Ok(())
+                } else {
+                    Err(e)
+                }
             }
         }
+    }
+
+    pub fn write_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
+        let start = Instant::now();
+        let mut attempts = 0;
+
+        debug!(
+            target: "tkdb::storage",
+            "Starting write operation for page {} with retry",
+            page_id
+        );
+
+        while attempts < Self::MAX_RETRIES {
+            match self.write_page(page_id, page_data) {
+                Ok(_) => {
+                    let duration = start.elapsed();
+                    info!(
+                        target: "tkdb::storage",
+                        "Successfully wrote page {} after {} attempts (took {:?})",
+                        page_id, attempts + 1, duration
+                    );
+                    self.record_metrics("write", start, DB_PAGE_SIZE, false);
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(
+                        target: "tkdb::storage",
+                        "Write failed for page {}, attempt {}/{}: {}",
+                        page_id, attempts + 1, Self::MAX_RETRIES, e
+                    );
+                    if attempts + 1 < Self::MAX_RETRIES {
+                        thread::sleep(Duration::from_millis(Self::RETRY_DELAY_MS));
+                    }
+                    attempts += 1;
+                    if attempts == Self::MAX_RETRIES {
+                        error!(
+                            target: "tkdb::storage",
+                            "Write failed for page {} after {} attempts: {}",
+                            page_id, attempts, e
+                        );
+                        self.record_metrics("write", start, DB_PAGE_SIZE, true);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        unreachable!("Loop should return before reaching this point");
+    }
+
+    pub fn read_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
+        let start = Instant::now();
+        let mut attempts = 0;
+
+        debug!(
+            target: "tkdb::storage",
+            "Starting read operation for page {} with retry",
+            page_id
+        );
+
+        while attempts < Self::MAX_RETRIES {
+            match self.read_page(page_id, page_data) {
+                Ok(_) => {
+                    let duration = start.elapsed();
+                    debug!(
+                        target: "tkdb::storage",
+                        "Successfully read page {} after {} attempts (took {:?})",
+                        page_id, attempts + 1, duration
+                    );
+                    self.record_metrics("read", start, DB_PAGE_SIZE, false);
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(
+                        target: "tkdb::storage",
+                        "Read failed for page {}, attempt {}/{}: {}",
+                        page_id, attempts + 1, Self::MAX_RETRIES, e
+                    );
+                    if attempts + 1 < Self::MAX_RETRIES {
+                        thread::sleep(Duration::from_millis(Self::RETRY_DELAY_MS));
+                    }
+                    attempts += 1;
+                    if attempts == Self::MAX_RETRIES {
+                        error!(
+                            target: "tkdb::storage",
+                            "Read failed for page {} after {} attempts: {}",
+                            page_id, attempts, e
+                        );
+                        self.record_metrics("read", start, DB_PAGE_SIZE, true);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        unreachable!("Loop should return before reaching this point");
     }
 }
 
@@ -728,6 +838,7 @@ impl fmt::Debug for FileDiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use mockall::predicate::{always, eq};
     use std::io::{Error, ErrorKind};
 
@@ -991,11 +1102,40 @@ mod tests {
         #[test]
         fn test_invalid_page_reads() {
             let ctx = TestContext::new("test_invalid_page_reads");
+            let disk_manager = ctx.disk_manager.write();
             let mut buffer = [0u8; DB_PAGE_SIZE as usize];
 
-            let result = ctx.disk_manager.write().read_page(PageId::MAX, &mut buffer);
-            assert!(result.is_ok());
-            assert_eq!(buffer, [0u8; DB_PAGE_SIZE as usize]);
+            // Test reading PageId::MAX (should return zeroed buffer)
+            let result = disk_manager.read_page(PageId::MAX, &mut buffer);
+            assert!(result.is_ok(), "Should handle overflow gracefully");
+            assert_eq!(
+                buffer, [0u8; DB_PAGE_SIZE as usize],
+                "Should return zeroed buffer for invalid page"
+            );
+
+            // Test reading beyond EOF
+            let result = disk_manager.read_page(1_000_000, &mut buffer);
+            assert!(result.is_ok(), "Should handle EOF gracefully");
+            assert_eq!(
+                buffer, [0u8; DB_PAGE_SIZE as usize],
+                "Should return zeroed buffer for EOF"
+            );
+        }
+
+        #[test]
+        fn test_invalid_page_writes() {
+            let ctx = TestContext::new("test_invalid_page_writes");
+            let disk_manager = ctx.disk_manager.write();
+            let test_data = [42u8; DB_PAGE_SIZE as usize];
+
+            // Test writing to PageId::MAX (should fail)
+            let result = disk_manager.write_page(PageId::MAX, &test_data);
+            assert!(result.is_err(), "Should fail on overflow");
+            assert_eq!(
+                result.unwrap_err().kind(),
+                ErrorKind::InvalidInput,
+                "Should return InvalidInput error for overflow"
+            );
         }
 
         #[test]
@@ -1143,18 +1283,18 @@ mod tests {
             let attempts_clone = attempts.clone();
 
             // Create a mock that fails twice then succeeds
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_write_page()
-                .times(3)
-                .returning(move |_, _| {
-                    let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                    if current_attempt < 2 {
-                        Err(Error::new(ErrorKind::Other, "Temporary error"))
-                    } else {
-                        Ok(())
-                    }
-                });
+            let mut mock = MockDiskIO::new();
+            mock.expect_write_page().times(3).returning(move |_, _| {
+                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
+                if current_attempt < 2 {
+                    Err(Error::new(ErrorKind::Other, "Temporary error"))
+                } else {
+                    Ok(())
+                }
+            });
+
+            // Set the mock implementation
+            disk_manager.set_disk_io(Box::new(mock));
 
             // Test the retry mechanism
             let test_data = [42u8; DB_PAGE_SIZE as usize];
@@ -1176,14 +1316,16 @@ mod tests {
             let attempts_clone = attempts.clone();
 
             // Create a mock that always fails
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_write_page()
+            let mut mock = MockDiskIO::new();
+            mock.expect_write_page()
                 .times(FileDiskManager::MAX_RETRIES as usize)
                 .returning(move |_, _| {
                     attempts_clone.fetch_add(1, Ordering::SeqCst);
                     Err(Error::new(ErrorKind::Other, "Persistent error"))
                 });
+
+            // Set the mock implementation
+            disk_manager.set_disk_io(Box::new(mock));
 
             // Test the retry mechanism
             let test_data = [42u8; DB_PAGE_SIZE as usize];
@@ -1205,19 +1347,19 @@ mod tests {
             let attempts_clone = attempts.clone();
 
             // Create a mock that fails once then succeeds
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_read_page()
-                .times(2)
-                .returning(move |_, buf| {
-                    let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                    if current_attempt == 0 {
-                        Err(Error::new(ErrorKind::Other, "Temporary read error"))
-                    } else {
-                        buf[0] = 42; // Set test data
-                        Ok(())
-                    }
-                });
+            let mut mock = MockDiskIO::new();
+            mock.expect_read_page().times(2).returning(move |_, buf| {
+                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
+                if current_attempt == 0 {
+                    Err(Error::new(ErrorKind::Other, "Temporary read error"))
+                } else {
+                    buf[0] = 42; // Set test data
+                    Ok(())
+                }
+            });
+
+            // Set the mock implementation
+            disk_manager.set_disk_io(Box::new(mock));
 
             // Test the retry mechanism
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
@@ -1236,34 +1378,30 @@ mod tests {
         fn test_read_with_retry_metrics() {
             let ctx = TestContext::new("test_read_with_retry_metrics");
             let disk_manager = ctx.disk_manager.write();
-
-            // Write test data first
-            let mut test_data = [0u8; DB_PAGE_SIZE as usize];
-            test_data[0] = 42;
-            assert!(disk_manager.write_page(0, &test_data).is_ok());
-
-            // Force some retries by temporarily corrupting the file
             let attempts = Arc::new(AtomicUsize::new(0));
             let attempts_clone = attempts.clone();
 
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_read_page()
-                .times(2)
-                .returning(move |_, _| {
-                    let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                    if current_attempt == 0 {
-                        Err(Error::new(ErrorKind::Other, "Simulated read error"))
-                    } else {
-                        Ok(())
-                    }
-                });
+            // Create a mock that fails once then succeeds
+            let mut mock = MockDiskIO::new();
+            mock.expect_read_page().times(2).returning(move |_, buf| {
+                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
+                if current_attempt == 0 {
+                    Err(Error::new(ErrorKind::Other, "Simulated read error"))
+                } else {
+                    buf[0] = 42; // Set test data
+                    Ok(())
+                }
+            });
 
-            // Perform read with retry
+            // Set the mock implementation
+            disk_manager.set_disk_io(Box::new(mock));
+
+            // Test the retry mechanism
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
             let result = disk_manager.read_page_with_retry(0, &mut read_buffer);
 
             assert!(result.is_ok(), "Read should eventually succeed");
+            assert_eq!(read_buffer[0], 42, "Should have read correct data");
 
             // Verify metrics
             assert_eq!(
@@ -1284,20 +1422,26 @@ mod tests {
             let start_time = Instant::now();
 
             // Create a mock that fails twice then succeeds
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_write_page()
-                .times(3)
+            let mut mock = MockDiskIO::new();
+            mock.expect_write_page()
+                .times(FileDiskManager::MAX_RETRIES as usize)
                 .returning(|_, _| Err(Error::new(ErrorKind::Other, "Temporary error")));
+
+            // Set the mock implementation
+            disk_manager.set_disk_io(Box::new(mock));
 
             // Attempt write that will fail
             let test_data = [42u8; DB_PAGE_SIZE as usize];
-            let _ = disk_manager.write_page_with_retry(0, &test_data);
+            let result = disk_manager.write_page_with_retry(0, &test_data);
 
             // Verify that appropriate time has elapsed
             let elapsed = start_time.elapsed();
+            assert!(result.is_err(), "Write should fail after retries");
             assert!(
-                elapsed >= Duration::from_millis(FileDiskManager::RETRY_DELAY_MS * 2),
+                elapsed
+                    >= Duration::from_millis(
+                        FileDiskManager::RETRY_DELAY_MS * (FileDiskManager::MAX_RETRIES - 1) as u64
+                    ),
                 "Should have waited appropriate retry delay time"
             );
         }
