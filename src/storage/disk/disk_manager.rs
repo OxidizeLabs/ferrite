@@ -150,6 +150,7 @@ impl DiskIO for RealDiskIO {
     }
 }
 
+#[automock]
 impl FileDiskManager {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 100;
