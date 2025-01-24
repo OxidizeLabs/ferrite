@@ -129,7 +129,7 @@ impl AbstractExecutor for InsertExecutor {
 
                 debug!(
                     "Inserting tuple with transaction ID {} into table '{}'",
-                    tuple_meta.get_timestamp(),
+                    tuple_meta.get_commit_timestamp(),
                     self.plan.get_table_name()
                 );
 
@@ -202,7 +202,7 @@ mod tests {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
         transaction_context: Arc<TransactionContext>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_manager: Arc<TransactionManager>,
         transaction_factory: Arc<TransactionManagerFactory>,
         lock_manager: Arc<LockManager>,
         db_file: String,
@@ -245,10 +245,9 @@ mod tests {
             )));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
-                Arc::clone(&catalog),
+            let transaction_manager = Arc::new(TransactionManager::new(
                 log_manager.clone(),
-            )));
+            ));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
@@ -262,6 +261,7 @@ mod tests {
             let transaction_factory = Arc::new(TransactionManagerFactory::new(
                 Arc::clone(&catalog),
                 log_manager,
+                buffer_pool.clone(),
             ));
 
             Self {
@@ -455,13 +455,10 @@ mod tests {
         // Commit the transaction
         {
             let exec_ctx_guard = exec_ctx.read();
-            let mut txn_manager = test_ctx.transaction_manager.write();
-            assert!(txn_manager.commit(
-                exec_ctx_guard
-                    .get_transaction_context()
-                    .get_transaction()
-                    .clone()
-            ));
+            let mut txn_manager = test_ctx.transaction_manager.clone();
+            assert!(txn_manager.commit(exec_ctx_guard
+                                           .get_transaction_context()
+                                           .get_transaction().clone(), test_ctx.buffer_pool.clone()));
         }
     }
 
@@ -519,8 +516,7 @@ mod tests {
         {
             let exec_ctx_guard = exec_ctx.read();
             let txn_ctx = exec_ctx_guard.get_transaction_context();
-            let mut txn_manager = test_ctx.transaction_manager.write();
-            txn_manager.abort(txn_ctx.get_transaction());
+            test_ctx.transaction_manager.abort(txn_ctx.get_transaction());
         }
 
         // Verify the rollback by checking the table is empty

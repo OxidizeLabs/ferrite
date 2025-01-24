@@ -145,7 +145,7 @@ mod tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
@@ -188,7 +188,7 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+                Arc::new(TransactionManager::new(log_manager));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
@@ -543,8 +543,8 @@ mod tests {
         // Insert test data using a separate transaction
         let insert_txn = test_context
             .transaction_manager
-            .write()
-            .begin(IsolationLevel::ReadCommitted);
+            .begin(IsolationLevel::ReadCommitted)
+            .unwrap();
 
         let test_data = vec![
             (1, "Alice", 25),
@@ -567,7 +567,7 @@ mod tests {
         }
 
         // Commit insert transaction
-        test_context.transaction_manager.write().commit(insert_txn);
+        test_context.transaction_manager.commit(insert_txn, test_context.bpm());
 
         // Create executor context with new transaction
         let txn = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));

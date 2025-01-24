@@ -128,7 +128,7 @@ impl DBInstance {
 
         // Initialize transaction components
         let transaction_factory =
-            Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager.clone()));
+            Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager.clone(), buffer_pool_manager.clone()));
 
         // Initialize execution engine
         let execution_engine = Arc::new(Mutex::new(ExecutionEngine::new(
@@ -322,13 +322,12 @@ impl DBInstance {
 
     pub fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        let mut txn_manager_guard = txn_manager.write();
 
-        let txn = txn_manager_guard
+        let txn = txn_manager
             .get_transaction(&txn_id)
             .ok_or_else(|| DBError::Transaction(format!("Transaction {} not found", txn_id)))?;
 
-        if !txn_manager_guard.commit(txn) {
+        if !txn_manager.commit(txn, self.buffer_pool_manager.clone()) {
             warn!("Transaction commit failed");
             return Err(DBError::Transaction(
                 "Failed to commit transaction".to_string(),
@@ -340,13 +339,12 @@ impl DBInstance {
 
     pub fn abort_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        let mut txn_manager_guard = txn_manager.write();
 
-        let txn = txn_manager_guard
+        let txn = txn_manager
             .get_transaction(&txn_id)
             .ok_or_else(|| DBError::Transaction(format!("Transaction {} not found", txn_id)))?;
 
-        txn_manager_guard.abort(txn);
+        txn_manager.abort(txn);
         Ok(())
     }
 
@@ -554,7 +552,7 @@ impl DBInstance {
     }
 
     fn create_lock_manager(
-        transaction_manager: &Arc<RwLock<TransactionManager>>,
+        transaction_manager: &Arc<TransactionManager>,
     ) -> Result<Option<Arc<LockManager>>, DBError> {
         Ok(if cfg!(not(feature = "disable-lock-manager")) {
             let lock_manager = Arc::new(LockManager::new(Arc::clone(transaction_manager)));
@@ -565,12 +563,11 @@ impl DBInstance {
     }
 
     fn create_transaction_manager(
-        catalog: Arc<RwLock<Catalog>>,
         log_manager: Arc<RwLock<LogManager>>,
     ) -> Result<Option<Arc<RwLock<TransactionManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-transaction-manager")) {
             let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+                Arc::new(RwLock::new(TransactionManager::new(log_manager)));
             Some(transaction_manager)
         } else {
             None

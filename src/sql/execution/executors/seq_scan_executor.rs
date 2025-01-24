@@ -170,7 +170,7 @@ mod tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
@@ -214,7 +214,7 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+                Arc::new(TransactionManager::new(log_manager));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));

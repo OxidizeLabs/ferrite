@@ -253,7 +253,7 @@ mod tests {
 
             let catalog = Arc::new(RwLock::new(Catalog::new(bpm.clone(),0,0, HashMap::default(), HashMap::default(), HashMap::default(), HashMap::default())));
 
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(catalog, log_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
