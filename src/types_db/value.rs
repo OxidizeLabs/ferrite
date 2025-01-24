@@ -450,27 +450,31 @@ impl<T: Into<Val>> From<T> for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match &self.value_ {
-            Val::Null => write!(f, "NULL"),
-            Val::Boolean(b) => write!(f, "{}", b),
-            Val::TinyInt(i) => write!(f, "{}", i),
-            Val::SmallInt(i) => write!(f, "{}", i),
-            Val::Integer(i) => write!(f, "{}", i),
-            Val::BigInt(i) => write!(f, "{}", i),
-            Val::Decimal(d) => write!(f, "{}", d),
-            Val::Timestamp(ts) => write!(f, "{}", ts),
-            Val::VarLen(s) => write!(f, "{}", s),
+        match self.get_val() {
             Val::Vector(v) => {
-                write!(f, "[")?;
-                for (i, val) in v.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", val)?;
-                }
-                write!(f, "]")
+                // Format vector values using explicit ToString trait
+                let values: Vec<String> = v.iter()
+                    .map(|value| ToString::to_string(value))
+                    .collect();
+                write!(f, "[{}]", values.join(", "))
             }
+            Val::Integer(i) => write!(f, "{}", i),
+            Val::SmallInt(s) => write!(f, "{}", s),
+            Val::TinyInt(t) => write!(f, "{}", t),
+            Val::BigInt(b) => write!(f, "{}", b),
+            Val::Decimal(d) => write!(f, "{}", d),
+            Val::Boolean(b) => write!(f, "{}", b),
+            Val::VarLen(s) => write!(f, "{}", s),
             Val::ConstVarLen(s) => write!(f, "{}", s),
+            Val::Timestamp(ts) => {
+                let secs = ts;
+                let seconds = secs % 60;
+                let minutes = (secs / 60) % 60;
+                let hours = (secs / 3600) % 24;
+                let days = secs / 86400;
+                write!(f, "{} days {}:{}:{} UTC", days, hours, minutes, seconds)
+            }
+            Val::Null => write!(f, "NULL"),
         }
     }
 }
