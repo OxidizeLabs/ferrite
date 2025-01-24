@@ -589,6 +589,7 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use chrono::Utc;
+    use crate::common::time::TimeStamp;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -754,7 +755,7 @@ mod tests {
             assert_eq!(tuple.get_value(0), &Value::new(i as i32));
             assert_eq!(tuple.get_value(1), &Value::new(format!("Name{}", i)));
             assert_eq!(tuple.get_value(2), &Value::new(20 + i as i32));
-            assert_eq!(meta.get_timestamp(), 0);
+            assert_eq!(meta.get_commit_timestamp(), TimeStamp::new(0));
             assert_eq!(meta.is_deleted(), false);
         }
     }

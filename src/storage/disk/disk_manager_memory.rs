@@ -61,6 +61,14 @@ impl DiskIO for DiskManagerMemory {
             ))
         }
     }
+
+    fn write_page_with_retry(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        todo!()
+    }
+
+    fn read_page_with_retry(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        todo!()
+    }
 }
 
 /// DiskManagerUnlimitedMemory replicates the utility of DiskManager on memory.
@@ -193,5 +201,13 @@ impl DiskIO for DiskManagerUnlimitedMemory {
 
         self.post_process_latency(page_id);
         Ok(())
+    }
+
+    fn write_page_with_retry(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        todo!()
+    }
+
+    fn read_page_with_retry(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+        todo!()
     }
 }

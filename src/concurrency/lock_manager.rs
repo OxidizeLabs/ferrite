@@ -142,7 +142,7 @@ pub struct LockRequestQueue {
 /// LockManager handles transactions asking for locks on records.
 #[derive(Debug)]
 pub struct LockManager {
-    transaction_manager: Arc<RwLock<TransactionManager>>,
+    transaction_manager: Arc<TransactionManager>,
     table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
     txn_locks: Mutex<HashMap<TxnId, TxnLockState>>,
     row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
@@ -221,7 +221,7 @@ impl LockManager {
     ///
     /// # Returns
     /// A new `LockManager` instance.
-    pub fn new(transaction_manager: Arc<RwLock<TransactionManager>>) -> Self {
+    pub fn new(transaction_manager: Arc<TransactionManager>) -> Self {
         Self {
             transaction_manager,
             table_lock_map: Mutex::new(HashMap::new()),
@@ -260,8 +260,7 @@ impl LockManager {
                 if lm.has_cycle(&mut txn_id) {
                     warn!("Deadlock detected, aborting transaction: {}", abort_txn = txn_id,);
 
-                    let txn_mgr_guard = txn_mgr.write();
-                    if let Some(txn) = txn_mgr_guard.get_transaction(&txn_id) {
+                    if let Some(txn) = txn_mgr.get_transaction(&txn_id) {
                         txn.set_state(TransactionState::Aborted);
                     }
                 }
@@ -638,8 +637,7 @@ impl LockManager {
                 );
 
                 // Using parking_lot Mutex
-                let txn_mgr = self.transaction_manager.write();
-                if let Some(txn) = txn_mgr.get_transaction(&txn_id) {
+                if let Some(txn) =  self.transaction_manager.get_transaction(&txn_id) {
                     txn.set_state(TransactionState::Aborted);
                 }
             }
@@ -1412,7 +1410,7 @@ mod tests {
             )));
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
             let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(Arc::clone(&catalog), log_manager)));
+                Arc::new(TransactionManager::new(Arc::clone(&log_manager)));
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             Self {

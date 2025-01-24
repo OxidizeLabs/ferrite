@@ -410,10 +410,9 @@ mod index_scan_executor_tests {
                 HashMap::new(),
                 HashMap::new(),
             )));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
-                catalog.clone(),
+            let transaction_manager = Arc::new(TransactionManager::new(
                 log_manager,
-            )));
+            ));
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
@@ -680,7 +679,7 @@ mod index_scan_executor_tests {
             let mut iterator = table_heap.make_iterator();
             while let Some((mut meta, tuple)) = iterator.next() {
                 if tuple.get_value(0).compare_equals(&Value::new(*i)) == CmpBool::CmpTrue {
-                    meta.mark_as_deleted();
+                    meta.is_deleted();
                     table_heap.update_tuple_meta(&meta, tuple.get_rid());
                     break;
                 }

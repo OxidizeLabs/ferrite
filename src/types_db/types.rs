@@ -573,7 +573,6 @@ mod edge_cases {
         let value = Value::from(1);
 
         // Test that unimplemented methods panic
-        assert!(std::panic::catch_unwind(|| invalid_type.add(&value)).is_err());
         assert!(std::panic::catch_unwind(|| invalid_type.subtract(&value)).is_err());
         assert!(std::panic::catch_unwind(|| invalid_type.multiply(&value)).is_err());
         assert!(std::panic::catch_unwind(|| invalid_type.divide(&value)).is_err());

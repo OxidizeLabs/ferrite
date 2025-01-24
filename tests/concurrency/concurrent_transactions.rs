@@ -57,6 +57,7 @@ impl ConcurrentTestContext {
         let transaction_factory = Arc::new(TransactionManagerFactory::new(
             catalog.clone(),
             log_manager,
+            buffer_pool_manager.clone(),
         ));
 
         let execution_engine = Arc::new(RwLock::new(ExecutionEngine::new(

@@ -416,7 +416,7 @@ mod unit_tests {
         assert_eq!(page.num_tuples, 1);
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
-        assert_eq!(retrieved_meta.get_timestamp(), meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), meta.get_commit_timestamp());
         assert_eq!(retrieved_meta.is_deleted(), meta.is_deleted());
         assert_eq!(retrieved_tuple.get_value(0), tuple.get_value(0));
     }
@@ -432,7 +432,7 @@ mod unit_tests {
         page.update_tuple_meta(&new_meta, &tuple_rid_id).unwrap();
         let retrieved_meta = page.get_tuple_meta(&tuple_rid_id).unwrap();
 
-        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), new_meta.get_commit_timestamp());
         assert_eq!(retrieved_meta.is_deleted(), new_meta.is_deleted());
         assert_eq!(page.num_deleted_tuples, 1);
     }
@@ -467,7 +467,7 @@ mod unit_tests {
         }
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
-        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), new_meta.get_commit_timestamp());
         assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
     }
     #[test]
@@ -538,7 +538,7 @@ mod tuple_operation_tests {
         let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
 
-        assert_eq!(retrieved_meta.get_timestamp(), meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), meta.get_commit_timestamp());
         assert_eq!(retrieved_meta.is_deleted(), meta.is_deleted());
         assert_eq!(retrieved_tuple.get_value(0), tuple.get_value(0));
         assert_eq!(retrieved_tuple.get_value(1), tuple.get_value(1));
@@ -555,7 +555,7 @@ mod tuple_operation_tests {
         page.update_tuple_meta(&new_meta, &rid).unwrap();
         let retrieved_meta = page.get_tuple_meta(&rid).unwrap();
 
-        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), new_meta.get_commit_timestamp());
         assert_eq!(retrieved_meta.is_deleted(), new_meta.is_deleted());
         assert_eq!(page.get_num_deleted_tuples(), 1);
     }
@@ -575,7 +575,7 @@ mod tuple_operation_tests {
         }
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
-        assert_eq!(retrieved_meta.get_timestamp(), new_meta.get_timestamp());
+        assert_eq!(retrieved_meta.get_commit_timestamp(), new_meta.get_commit_timestamp());
         assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
     }
 }
@@ -705,6 +705,8 @@ mod concurrency_safety_tests {
     use crate::types_db::value::Value;
     use std::sync::Arc;
     use std::thread;
+    use crate::common::time::TimeStamp;
+    use crate::types_db::value::Val::Timestamp;
 
     fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
         let schema = Schema::new(vec![
@@ -753,7 +755,7 @@ mod concurrency_safety_tests {
 
             let handle = thread::spawn(move || {
                 let (retrieved_meta, retrieved_tuple) = page_clone.get_tuple(&rid).unwrap();
-                assert_eq!(retrieved_meta.get_timestamp(), 123);
+                assert_eq!(retrieved_meta.get_commit_timestamp(), TimeStamp::new(123));
                 assert_eq!(retrieved_tuple.get_value(0), &Value::from(1));
             });
 
@@ -806,7 +808,7 @@ mod serialization_tests {
 
         // Verify tuple
         let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid)?;
-        assert_eq!(deserialized_meta.get_timestamp(), meta.get_timestamp());
+        assert_eq!(deserialized_meta.get_commit_timestamp(), meta.get_commit_timestamp());
         assert_eq!(deserialized_meta.is_deleted(), meta.is_deleted());
         assert_eq!(deserialized_tuple.get_values(), tuple.get_values());
 

@@ -187,7 +187,7 @@ mod tests {
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         lock_manager: Arc<LockManager>,
         db_file: String,
@@ -224,10 +224,9 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
             )));
-            let transaction_manager = Arc::new(RwLock::new(TransactionManager::new(
-                catalog.clone(),
+            let transaction_manager = Arc::new(TransactionManager::new(
                 log_manager,
-            )));
+            ));
 
             let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 

@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub struct TransactionContext {
     transaction: Arc<Transaction>,
     lock_manager: Arc<LockManager>,
-    transaction_manager: Arc<RwLock<TransactionManager>>,
+    transaction_manager: Arc<TransactionManager>,
     write_set: Mutex<Vec<(TableOidT, RID)>>, // Make write_set thread-safe
 }
 
@@ -19,7 +19,7 @@ impl TransactionContext {
     pub fn new(
         transaction: Arc<Transaction>,
         lock_manager: Arc<LockManager>,
-        transaction_manager: Arc<RwLock<TransactionManager>>,
+        transaction_manager: Arc<TransactionManager>,
     ) -> Self {
         Self {
             transaction,
@@ -41,7 +41,7 @@ impl TransactionContext {
         self.lock_manager.clone()
     }
 
-    pub fn get_transaction_manager(&self) -> Arc<RwLock<TransactionManager>> {
+    pub fn get_transaction_manager(&self) -> Arc<TransactionManager> {
         self.transaction_manager.clone()
     }
 

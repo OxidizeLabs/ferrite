@@ -151,7 +151,7 @@ mod tests {
 
         pub struct TestContext {
             catalog: Arc<RwLock<Catalog>>,
-            transaction_manager: Arc<RwLock<TransactionManager>>,
+            transaction_manager: Arc<TransactionManager>,
             transaction_context: Arc<TransactionContext>,
             lock_manager: Arc<LockManager>,
             buffer_pool_manager: Arc<BufferPoolManager>,
@@ -194,12 +194,10 @@ mod tests {
 
                 let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
                 let transaction_manager =
-                    Arc::new(RwLock::new(TransactionManager::new(catalog.clone(), log_manager)));
+                    Arc::new(TransactionManager::new(log_manager));
                 let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
-                let transaction = transaction_manager
-                    .write()
-                    .begin(IsolationLevel::Serializable);
+                let transaction = transaction_manager.begin(IsolationLevel::Serializable).unwrap();
 
                 let transaction_context = Arc::new(TransactionContext::new(
                     transaction,
@@ -228,8 +226,12 @@ mod tests {
                 self.transaction_context.clone()
             }
 
-            pub fn transaction_manager(&self) -> &Arc<RwLock<TransactionManager>> {
+            pub fn transaction_manager(&self) -> &Arc<TransactionManager> {
                 &self.transaction_manager
+            }
+
+            pub fn buffer_pool_manager(&self) -> Arc<BufferPoolManager> {
+                self.buffer_pool_manager.clone()
             }
         }
     }
@@ -322,8 +324,7 @@ mod tests {
 
             test_ctx
                 .transaction_manager()
-                .write()
-                .commit(test_ctx.transaction_context().get_transaction().clone());
+                .commit(test_ctx.transaction_context().get_transaction().clone(), test_ctx.buffer_pool_manager().clone());
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();
@@ -382,8 +383,7 @@ mod tests {
             // Commit transaction
             test_ctx
                 .transaction_manager()
-                .write()
-                .commit(test_ctx.transaction_context().get_transaction().clone());
+                .commit(test_ctx.transaction_context().get_transaction().clone(), test_ctx.buffer_pool_manager().clone());
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();
@@ -406,7 +406,6 @@ mod tests {
             // Abort transaction
             test_ctx
                 .transaction_manager()
-                .write()
                 .abort(test_ctx.transaction_context().get_transaction().clone());
 
             {

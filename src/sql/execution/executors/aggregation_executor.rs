@@ -363,9 +363,9 @@ mod tests {
 
             // Create fresh transaction manager and lock manager
             let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(RwLock::new(
-                TransactionManager::new(catalog.clone(), log_manager)
-            ));
+            let transaction_manager = Arc::new(
+                TransactionManager::new(log_manager)
+            );
             let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             // Create fresh transaction with unique ID
