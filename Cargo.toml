@@ -36,6 +36,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 sqlparser = "0.53"
 clap = { version = "4.5.26", features = ["derive"] }
 crossbeam-channel = "0.5.14"
+mockall_double = "0.3.1"
 
 # Metrics
 #metrics = "0.21"
