@@ -307,6 +307,141 @@ impl Type for Value {
         }
     }
 
+    fn subtract(&self, other: &Value) -> Result<Value, String> {
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a - b), TypeId::Integer))
+            },
+            (TypeId::BigInt, TypeId::BigInt) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a - b), TypeId::BigInt))
+            },
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                let a = self.as_smallint()?;
+                let b = other.as_smallint()?;
+                Ok(Value::new_with_type(Val::SmallInt(a - b), TypeId::SmallInt))
+            },
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                let a = self.as_tinyint()?;
+                let b = other.as_tinyint()?;
+                Ok(Value::new_with_type(Val::TinyInt(a - b), TypeId::TinyInt))
+            },
+            (TypeId::Decimal, TypeId::Decimal) => {
+                let a = self.as_decimal()?;
+                let b = other.as_decimal()?;
+                Ok(Value::new_with_type(Val::Decimal(a - b), TypeId::Decimal))
+            },
+            _ => Err(format!("Cannot subtract values of types {:?} and {:?}", 
+                self.get_type_id(), other.get_type_id()))
+        }
+    }
+
+    fn multiply(&self, other: &Value) -> Result<Value, String> {
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a * b), TypeId::Integer))
+            },
+            (TypeId::BigInt, TypeId::BigInt) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a * b), TypeId::BigInt))
+            },
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                let a = self.as_smallint()?;
+                let b = other.as_smallint()?;
+                Ok(Value::new_with_type(Val::SmallInt(a * b), TypeId::SmallInt))
+            },
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                let a = self.as_tinyint()?;
+                let b = other.as_tinyint()?;
+                Ok(Value::new_with_type(Val::TinyInt(a * b), TypeId::TinyInt))
+            },
+            (TypeId::Decimal, TypeId::Decimal) => {
+                let a = self.as_decimal()?;
+                let b = other.as_decimal()?;
+                Ok(Value::new_with_type(Val::Decimal(a * b), TypeId::Decimal))
+            },
+            _ => Err(format!("Cannot multiply values of types {:?} and {:?}", 
+                self.get_type_id(), other.get_type_id()))
+        }
+    }
+
+    fn divide(&self, other: &Value) -> Result<Value, String> {
+        if self.is_zero(other) {
+            return Err("Division by zero".to_string());
+        }
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                let a = self.as_integer()?;
+                let b = other.as_integer()?;
+                Ok(Value::new_with_type(Val::Integer(a / b), TypeId::Integer))
+            },
+            (TypeId::BigInt, TypeId::BigInt) => {
+                let a = self.as_bigint()?;
+                let b = other.as_bigint()?;
+                Ok(Value::new_with_type(Val::BigInt(a / b), TypeId::BigInt))
+            },
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                let a = self.as_smallint()?;
+                let b = other.as_smallint()?;
+                Ok(Value::new_with_type(Val::SmallInt(a / b), TypeId::SmallInt))
+            },
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                let a = self.as_tinyint()?;
+                let b = other.as_tinyint()?;
+                Ok(Value::new_with_type(Val::TinyInt(a / b), TypeId::TinyInt))
+            },
+            (TypeId::Decimal, TypeId::Decimal) => {
+                let a = self.as_decimal()?;
+                let b = other.as_decimal()?;
+                Ok(Value::new_with_type(Val::Decimal(a / b), TypeId::Decimal))
+            },
+            _ => Err(format!("Cannot divide values of types {:?} and {:?}", 
+                self.get_type_id(), other.get_type_id()))
+        }
+    }
+
+    fn modulo(&self, other: &Value) -> Value {
+        if self.is_zero(other) {
+            return Value::new(Val::Null);
+        }
+        match (self.get_type_id(), other.get_type_id()) {
+            (TypeId::Integer, TypeId::Integer) => {
+                if let (Ok(a), Ok(b)) = (self.as_integer(), other.as_integer()) {
+                    Value::new_with_type(Val::Integer(a % b), TypeId::Integer)
+                } else {
+                    Value::new(Val::Null)
+                }
+            },
+            _ => Value::new(Val::Null)
+        }
+    }
+
+    fn min(&self, other: &Value) -> Value {
+        match self.compare_less_than(other) {
+            CmpBool::CmpTrue => self.clone(),
+            CmpBool::CmpFalse => other.clone(),
+            CmpBool::CmpNull => Value::new(Val::Null),
+        }
+    }
+
+    fn max(&self, other: &Value) -> Value {
+        match self.compare_greater_than(other) {
+            CmpBool::CmpTrue => self.clone(),
+            CmpBool::CmpFalse => other.clone(),
+            CmpBool::CmpNull => Value::new(Val::Null),
+        }
+    }
+
+    fn to_string(&self, val: &Value) -> String {
+        ToString::to_string(&val)
+    }
+
     fn as_integer(&self) -> Result<i32, String> {
         match &self.value_ {
             Val::Integer(i) => Ok(*i),
@@ -350,6 +485,17 @@ impl Type for Value {
             Val::SmallInt(i) => Ok(*i as f64),
             Val::TinyInt(i) => Ok(*i as f64),
             _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_))
+        }
+    }
+
+    fn is_zero(&self, val: &Value) -> bool {
+        match val.get_val() {
+            Val::Integer(i) => *i == 0,
+            Val::BigInt(i) => *i == 0,
+            Val::SmallInt(i) => *i == 0,
+            Val::TinyInt(i) => *i == 0,
+            Val::Decimal(f) => *f == 0.0,
+            _ => false,
         }
     }
 }

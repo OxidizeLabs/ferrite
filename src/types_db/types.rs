@@ -61,6 +61,7 @@ pub trait Type {
                     | TypeId::BigInt
                     | TypeId::Decimal
                     | TypeId::Timestamp
+                    | TypeId::VarChar
                     | TypeId::Char
             ),
             TypeId::Char => matches!(
@@ -111,138 +112,68 @@ pub trait Type {
             _ => panic!("Invalid type for max value"),
         }
     }
-    fn compare_equals(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn compare_not_equals(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn compare_less_than(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn compare_less_than_equals(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn compare_greater_than(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn compare_greater_than_equals(&self, _other: &Value) -> CmpBool {
-        unimplemented!()
-    }
-    fn add(&self, other: &Value) -> Result<Value, String> {
-        let type_id = self.get_type_id();
-        if !type_id.get_value().is_numeric() {
-            return Err(format!("Cannot perform addition on type {:?}", type_id));
-        }
-        // Implementation for specific types...
-        match (self.get_type_id(), other.get_type_id()) {
-            (TypeId::Integer, TypeId::Integer) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            }
-            (TypeId::BigInt, TypeId::BigInt) => {
-                let a = self.as_bigint()?;
-                let b = other.as_bigint()?;
-                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            }
-            (TypeId::SmallInt, TypeId::SmallInt) => {
-                let a = self.as_smallint()?;
-                let b = other.as_smallint()?;
-                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            }
-            (TypeId::TinyInt, TypeId::TinyInt) => {
-                let a = self.as_tinyint()?;
-                let b = other.as_tinyint()?;
-                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            }
-            (TypeId::Decimal, TypeId::Decimal) => {
-                let a = self.as_decimal()?;
-                let b = other.as_decimal()?;
-                Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
-            }
-            // Handle type promotions
-            (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            }
-            (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            }
-            (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
-                let a = self.as_bigint()?;
-                let b = other.as_bigint()?;
-                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            }
-            _ => Err(format!(
-                "Cannot add values of types {:?} and {:?}",
-                self.get_type_id(),
-                other.get_type_id()
-            )),
-        }
-    }
-    fn subtract(&self, _other: &Value) -> Result<Value, String> {
-        unimplemented!()
-    }
-    fn multiply(&self, _other: &Value) -> Result<Value, String> {
-        unimplemented!()
-    }
-    fn divide(&self, _other: &Value) -> Result<Value, String> {
-        unimplemented!()
-    }
-    fn modulo(&self, _other: &Value) -> Value {
-        unimplemented!()
-    }
-    fn min(&self, _other: &Value) -> Value {
-        unimplemented!()
-    }
-    fn max(&self, _other: &Value) -> Value {
-        unimplemented!()
-    }
+    fn compare_equals(&self, other: &Value) -> CmpBool;
+    fn compare_not_equals(&self, other: &Value) -> CmpBool;
+    fn compare_less_than(&self, other: &Value) -> CmpBool;
+    fn compare_less_than_equals(&self, other: &Value) -> CmpBool;
+    fn compare_greater_than(&self, other: &Value) -> CmpBool;
+    fn compare_greater_than_equals(&self, other: &Value) -> CmpBool;
+    fn add(&self, other: &Value) -> Result<Value, String>;
+    fn subtract(&self, other: &Value) -> Result<Value, String>;
+    fn multiply(&self, other: &Value) -> Result<Value, String>;
+    fn divide(&self, other: &Value) -> Result<Value, String>;
+    fn modulo(&self, other: &Value) -> Value;
+    fn min(&self, other: &Value) -> Value;
+    fn max(&self, other: &Value) -> Value;
+    fn to_string(&self, val: &Value) -> String;
     fn sqrt(&self, _val: &Value) -> Value {
-        unimplemented!()
+        Value::new(Val::Null)
     }
     fn operate_null(&self, _left: &Value, _right: &Value) -> Value {
-        unimplemented!()
+        Value::new(Val::Null)
     }
-    fn is_zero(&self, _val: &Value) -> bool {
-        unimplemented!()
+    fn is_zero(&self, val: &Value) -> bool {
+        match val.get_val() {
+            Val::Integer(i) => *i == 0,
+            Val::BigInt(i) => *i == 0,
+            Val::SmallInt(i) => *i == 0,
+            Val::TinyInt(i) => *i == 0,
+            Val::Decimal(f) => *f == 0.0,
+            _ => false,
+        }
     }
     fn is_inlined(&self, _val: &Value) -> bool {
-        unimplemented!()
+        true
     }
-    fn to_string(&self, _val: &Value) -> String {
-        unimplemented!()
+    fn copy(&self, val: &Value) -> Value {
+        val.clone()
     }
-    fn copy(&self, _val: &Value) -> Value {
-        unimplemented!()
-    }
-    fn cast_as(&self, _val: &Value, _type_id: TypeId) -> Value {
-        unimplemented!()
+    fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
+        if !self.is_coercible_from(type_id) {
+            return Value::new(Val::Null);
+        }
+        val.clone()
     }
     fn get_data(&self, _val: &Value) -> &[u8] {
-        unimplemented!()
+        &[]
     }
     fn get_storage_size(&self, _val: &Value) -> u32 {
-        unimplemented!()
+        get_type_size(self.get_type_id()) as u32
     }
     fn as_integer(&self) -> Result<i32, String> {
-        unimplemented!()
+        Err("Cannot convert to integer".to_string())
     }
     fn as_bigint(&self) -> Result<i64, String> {
-        unimplemented!()
+        Err("Cannot convert to bigint".to_string())
     }
     fn as_smallint(&self) -> Result<i16, String> {
-        unimplemented!()
+        Err("Cannot convert to smallint".to_string())
     }
     fn as_tinyint(&self) -> Result<i8, String> {
-        unimplemented!()
+        Err("Cannot convert to tinyint".to_string())
     }
     fn as_decimal(&self) -> Result<f64, String> {
-        unimplemented!()
+        Err("Cannot convert to decimal".to_string())
     }
 }
 
@@ -580,25 +511,5 @@ mod edge_cases {
     #[should_panic(expected = "Invalid type for max value")]
     fn test_invalid_max_value_type() {
         let _ = BooleanType::get_max_value(TypeId::Vector);
-    }
-
-    #[test]
-    fn test_unimplemented_methods() {
-        let invalid_type = InvalidType;
-        let value = Value::from(1);
-
-        // Test that unimplemented methods panic
-        assert!(std::panic::catch_unwind(|| invalid_type.subtract(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.multiply(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.divide(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.modulo(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.min(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.max(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.sqrt(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.is_zero(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.is_inlined(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.copy(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.get_data(&value)).is_err());
-        assert!(std::panic::catch_unwind(|| invalid_type.get_storage_size(&value)).is_err());
     }
 }
