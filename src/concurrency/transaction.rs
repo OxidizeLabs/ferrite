@@ -438,12 +438,34 @@ mod tests {
 
         // Test get write sets
         let write_sets = txn.get_write_set();
-        assert_eq!(write_sets.len(), 2); // Two tables
-        assert_eq!(write_sets.get(1).iter().len(), 2); // Two RIDs in table 1
-        assert_eq!(write_sets.get(2).iter().len(), 1); // One RID in table 2
-        assert_eq!(write_sets.get(1).unwrap(), &(1, rid1));
-        assert_eq!(write_sets.get(1).unwrap(), &(1, rid2));
-        assert_eq!(write_sets.get(2).unwrap(), &(1, rid1));
+        assert_eq!(write_sets.len(), 3); // Total number of write records
+        
+        // Check each write record
+        let mut found_table1_rid1 = false;
+        let mut found_table1_rid2 = false;
+        let mut found_table2_rid1 = false;
+
+        for (table_id, rid) in write_sets {
+            match table_id {
+                1 => {
+                    if rid == rid1 {
+                        found_table1_rid1 = true;
+                    } else if rid == rid2 {
+                        found_table1_rid2 = true;
+                    }
+                }
+                2 => {
+                    if rid == rid1 {
+                        found_table2_rid1 = true;
+                    }
+                }
+                _ => panic!("Unexpected table ID"),
+            }
+        }
+
+        assert!(found_table1_rid1, "Missing write record for table 1, rid1");
+        assert!(found_table1_rid2, "Missing write record for table 1, rid2");
+        assert!(found_table2_rid1, "Missing write record for table 2, rid1");
     }
 
     #[test]
