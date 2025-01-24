@@ -222,6 +222,8 @@ impl fmt::Display for VectorType {
     }
 }
 
+pub static VECTOR_TYPE_INSTANCE: VectorType = VectorType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

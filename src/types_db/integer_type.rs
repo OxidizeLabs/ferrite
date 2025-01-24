@@ -238,6 +238,8 @@ impl Type for IntegerType {
     }
 }
 
+pub static INTEGER_TYPE_INSTANCE: IntegerType = IntegerType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

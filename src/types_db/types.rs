@@ -1,17 +1,27 @@
-use std::format;
+use crate::types_db::bigint_type;
 use crate::types_db::bigint_type::BigIntType;
+use crate::types_db::boolean_type;
 use crate::types_db::boolean_type::BooleanType;
+use crate::types_db::const_len_type;
+use crate::types_db::decimal_type;
 use crate::types_db::decimal_type::DecimalType;
+use crate::types_db::integer_type;
 use crate::types_db::integer_type::IntegerType;
+use crate::types_db::invalid_type;
 use crate::types_db::invalid_type::InvalidType;
+use crate::types_db::smallint_type;
 use crate::types_db::smallint_type::SmallIntType;
+use crate::types_db::timestamp_type;
 use crate::types_db::timestamp_type::TimestampType;
+use crate::types_db::tinyint_type;
 use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
+use crate::types_db::varlen_type;
 use crate::types_db::varlen_type::VarCharType;
-use crate::types_db::vector_type::VectorType;
+use crate::types_db::vector_type;
+use std::format;
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -43,6 +53,17 @@ pub trait Type {
             ),
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
             TypeId::VarChar => matches!(
+                type_id,
+                TypeId::Boolean
+                    | TypeId::TinyInt
+                    | TypeId::SmallInt
+                    | TypeId::Integer
+                    | TypeId::BigInt
+                    | TypeId::Decimal
+                    | TypeId::Timestamp
+                    | TypeId::Char
+            ),
+            TypeId::Char => matches!(
                 type_id,
                 TypeId::Boolean
                     | TypeId::TinyInt
@@ -119,45 +140,48 @@ pub trait Type {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::BigInt, TypeId::BigInt) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            },
+            }
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 let a = self.as_smallint()?;
                 let b = other.as_smallint()?;
                 Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            },
+            }
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 let a = self.as_tinyint()?;
                 let b = other.as_tinyint()?;
                 Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            },
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
                 let a = self.as_decimal()?;
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
-            },
+            }
             // Handle type promotions
             (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            },
-            _ => Err(format!("Cannot add values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!(
+                "Cannot add values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
     fn subtract(&self, _other: &Value) -> Result<Value, String> {
@@ -234,16 +258,17 @@ impl From<bool> for CmpBool {
 
 pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
     match type_id {
-        TypeId::Boolean => &BOOLEAN_TYPE_INSTANCE,
-        TypeId::TinyInt => &TINYINT_TYPE_INSTANCE,
-        TypeId::SmallInt => &SMALLINT_TYPE_INSTANCE,
-        TypeId::Integer => &INTEGER_TYPE_INSTANCE,
-        TypeId::BigInt => &BIGINT_TYPE_INSTANCE,
-        TypeId::Decimal => &DECIMAL_TYPE_INSTANCE,
-        TypeId::VarChar => &VARLEN_TYPE_INSTANCE,
-        TypeId::Timestamp => &TIMESTAMP_TYPE_INSTANCE,
-        TypeId::Vector => &VECTOR_TYPE_INSTANCE,
-        TypeId::Invalid => &INVALID_TYPE_INSTANCE,
+        TypeId::Boolean => &boolean_type::BOOLEAN_TYPE_INSTANCE,
+        TypeId::TinyInt => &tinyint_type::TINYINT_TYPE_INSTANCE,
+        TypeId::SmallInt => &smallint_type::SMALLINT_TYPE_INSTANCE,
+        TypeId::Integer => &integer_type::INTEGER_TYPE_INSTANCE,
+        TypeId::BigInt => &bigint_type::BIGINT_TYPE_INSTANCE,
+        TypeId::Decimal => &decimal_type::DECIMAL_TYPE_INSTANCE,
+        TypeId::VarChar => &varlen_type::VARCHAR_TYPE_INSTANCE,
+        TypeId::Timestamp => &timestamp_type::TIMESTAMP_TYPE_INSTANCE,
+        TypeId::Vector => &vector_type::VECTOR_TYPE_INSTANCE,
+        TypeId::Invalid => &invalid_type::INVALID_TYPE_INSTANCE,
+        TypeId::Char => &const_len_type::CHAR_TYPE_INSTANCE,
     }
 }
 
@@ -255,6 +280,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
         TypeId::VarChar | TypeId::Invalid => 0,
         TypeId::Vector => size_of::<Arc<Vec<Value>>>() as u64,
+        TypeId::Char => 0,
     }
 }
 
@@ -270,20 +296,9 @@ pub fn type_id_to_string(type_id: TypeId) -> String {
         TypeId::Timestamp => "Timestamp".to_string(),
         TypeId::Vector => "Vector".to_string(),
         TypeId::Invalid => "Invalid".to_string(),
+        TypeId::Char => "Char".to_string(),
     }
 }
-
-// Ensure singleton instances are created for each type
-static BOOLEAN_TYPE_INSTANCE: BooleanType = BooleanType;
-static TINYINT_TYPE_INSTANCE: TinyIntType = TinyIntType;
-static SMALLINT_TYPE_INSTANCE: SmallIntType = SmallIntType;
-static INTEGER_TYPE_INSTANCE: IntegerType = IntegerType;
-static BIGINT_TYPE_INSTANCE: BigIntType = BigIntType;
-static DECIMAL_TYPE_INSTANCE: DecimalType = DecimalType;
-static VARLEN_TYPE_INSTANCE: VarCharType = VarCharType;
-static TIMESTAMP_TYPE_INSTANCE: TimestampType = TimestampType;
-static VECTOR_TYPE_INSTANCE: VectorType = VectorType;
-static INVALID_TYPE_INSTANCE: InvalidType = InvalidType;
 
 #[cfg(test)]
 mod unit_tests {

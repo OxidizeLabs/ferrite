@@ -107,6 +107,8 @@ impl Type for BooleanType {
     }
 }
 
+pub static BOOLEAN_TYPE_INSTANCE: BooleanType = BooleanType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -285,6 +285,8 @@ impl Type for SmallIntType {
     }
 }
 
+pub static SMALLINT_TYPE_INSTANCE: SmallIntType = SmallIntType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

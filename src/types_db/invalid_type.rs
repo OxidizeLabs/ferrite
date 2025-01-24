@@ -73,6 +73,8 @@ impl Type for InvalidType {
     }
 }
 
+pub static INVALID_TYPE_INSTANCE: InvalidType = InvalidType;
+
 #[cfg(test)]
 mod tests {
     use super::*;
