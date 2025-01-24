@@ -67,7 +67,7 @@ impl LogicExpression {
     }
 
     fn get_bool_as_cmp_bool(val: &Value) -> CmpBool {
-        match val.get_value() {
+        match val.get_val() {
             Val::Boolean(b) => {
                 if *b {
                     CmpBool::CmpTrue

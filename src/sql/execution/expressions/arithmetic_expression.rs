@@ -81,7 +81,7 @@ impl ExpressionOps for ArithmeticExpression {
         let left_value = self.left.evaluate(tuple, schema)?;
         let right_value = self.right.evaluate(tuple, schema)?;
 
-        match (left_value.get_value(), right_value.get_value()) {
+        match (left_value.get_val(), right_value.get_val()) {
             (Val::Integer(l), Val::Integer(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r),
@@ -173,7 +173,7 @@ impl ExpressionOps for ArithmeticExpression {
             .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             .unwrap();
 
-        match (left_value.get_value(), right_value.get_value()) {
+        match (left_value.get_val(), right_value.get_val()) {
             (Val::Integer(l), Val::Integer(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r),

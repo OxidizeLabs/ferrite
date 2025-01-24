@@ -368,14 +368,14 @@ mod tests {
 
         // First tuple
         let (tuple1, _rid1) = executor.next().unwrap();
-        assert_eq!(tuple1.get_value(0).get_value(), &Val::from(1));
-        assert_eq!(tuple1.get_value(1).get_value(), &Val::from("Alice"));
+        assert_eq!(tuple1.get_value(0).get_val(), &Val::from(1));
+        assert_eq!(tuple1.get_value(1).get_val(), &Val::from("Alice"));
         assert_eq!(tuple1.get_values().len(), 2);
 
         // Second tuple
         let (tuple2, _rid2) = executor.next().unwrap();
-        assert_eq!(tuple2.get_value(0).get_value(), &Val::from(2));
-        assert_eq!(tuple2.get_value(1).get_value(), &Val::from("Bob"));
+        assert_eq!(tuple2.get_value(0).get_val(), &Val::from(2));
+        assert_eq!(tuple2.get_value(1).get_val(), &Val::from("Bob"));
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples
@@ -458,14 +458,14 @@ mod tests {
 
         // First tuple (Alice's group)
         let (tuple1, _) = executor.next().unwrap();
-        assert_eq!(tuple1.get_value(0).get_value(), &Val::from("Alice"));
-        assert_eq!(tuple1.get_value(1).get_value(), &Val::from(75));
+        assert_eq!(tuple1.get_value(0).get_val(), &Val::from("Alice"));
+        assert_eq!(tuple1.get_value(1).get_val(), &Val::from(75));
         assert_eq!(tuple1.get_values().len(), 2);
 
         // Second tuple (Bob's group)
         let (tuple2, _) = executor.next().unwrap();
-        assert_eq!(tuple2.get_value(0).get_value(), &Val::from("Bob"));
-        assert_eq!(tuple2.get_value(1).get_value(), &Val::from(45));
+        assert_eq!(tuple2.get_value(0).get_val(), &Val::from("Bob"));
+        assert_eq!(tuple2.get_value(1).get_val(), &Val::from(45));
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples

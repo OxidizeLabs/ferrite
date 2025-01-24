@@ -71,7 +71,7 @@ impl Value {
         }
     }
 
-    pub fn get_value(&self) -> &Val {
+    pub fn get_val(&self) -> &Val {
         &self.value_
     }
 

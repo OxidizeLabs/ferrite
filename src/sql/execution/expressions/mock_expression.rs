@@ -203,6 +203,6 @@ mod tests {
         let (tuple, schema) = create_test_tuple();
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result.get_value(), &Val::Null);
+        assert_eq!(result.get_val(), &Val::Null);
     }
 }

@@ -34,7 +34,7 @@ impl ArrayExpression {
             .map(|expr| {
                 let val = eval_func(expr)
                     .map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))?;
-                match val.get_value() {
+                match val.get_val() {
                     Val::Decimal(d) => {
                         // Convert f64 to i32, handling potential loss of precision
                         let rounded_value = d.round() as i32;
@@ -139,11 +139,11 @@ mod tests {
             .evaluate(&tuple, &schema)
             .expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
-        if let Val::Vector(vec) = result.get_value() {
+        if let Val::Vector(vec) = result.get_val() {
             assert_eq!(vec.len(), 3);
-            assert_eq!(vec[0].get_value(), &Val::Integer(1));
-            assert_eq!(vec[1].get_value(), &Val::Integer(2));
-            assert_eq!(vec[2].get_value(), &Val::Integer(3));
+            assert_eq!(vec[0].get_val(), &Val::Integer(1));
+            assert_eq!(vec[1].get_val(), &Val::Integer(2));
+            assert_eq!(vec[2].get_val(), &Val::Integer(3));
         } else {
             panic!("Expected Vector value");
         }
