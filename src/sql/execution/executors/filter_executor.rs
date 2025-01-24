@@ -40,7 +40,7 @@ impl FilterExecutor {
         );
 
         match predicate.evaluate(tuple, self.plan.get_output_schema()) {
-            Ok(value) => match value.get_value() {
+            Ok(value) => match value.get_val() {
                 Val::Boolean(b) => {
                     debug!(
                         "Predicate evaluation result: {}, for tuple: {:?}",
@@ -402,7 +402,7 @@ mod tests {
         while let Some((tuple, _)) = executor.next() {
             let tuple_values = tuple.get_values();
             let name = tuple_values[1].to_string();
-            let age = match tuple_values[2].get_value() {
+            let age = match tuple_values[2].get_val() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer value for age"),
             };
@@ -474,7 +474,7 @@ mod tests {
         // Collect filtered results
         let mut results = Vec::new();
         while let Some((tuple, _)) = executor.next() {
-            let age = match tuple.get_value(2).get_value() {
+            let age = match tuple.get_value(2).get_val() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer value for age"),
             };
@@ -604,7 +604,7 @@ mod tests {
         // Collect results
         let mut results = Vec::new();
         while let Some((tuple, _)) = executor.next() {
-            let age = match tuple.get_value(2).get_value() {
+            let age = match tuple.get_value(2).get_val() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer for age"),
             };

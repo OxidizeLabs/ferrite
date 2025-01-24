@@ -56,7 +56,7 @@ impl StringExpression {
 impl ExpressionOps for StringExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let arg_value = self.arg.evaluate(tuple, schema)?;
-        match arg_value.get_value() {
+        match arg_value.get_val() {
             Val::VarLen(s) | Val::ConstVarLen(s) => {
                 let computed = self.perform_computation(s);
                 Ok(Value::new(Val::VarLen(computed)))
@@ -75,7 +75,7 @@ impl ExpressionOps for StringExpression {
         let arg_value =
             self.arg
                 .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        match arg_value.get_value() {
+        match arg_value.get_val() {
             Val::VarLen(s) | Val::ConstVarLen(s) => {
                 let computed = self.perform_computation(s);
                 Ok(Value::new(Val::VarLen(computed)))
@@ -157,7 +157,7 @@ mod unit_tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result.get_value(), &Val::VarLen("hello".to_string()));
+        assert_eq!(result.get_val(), &Val::VarLen("hello".to_string()));
     }
 
     #[test]
@@ -178,7 +178,7 @@ mod unit_tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result.get_value(), &Val::VarLen("HELLO".to_string()));
+        assert_eq!(result.get_val(), &Val::VarLen("HELLO".to_string()));
     }
 
     #[test]

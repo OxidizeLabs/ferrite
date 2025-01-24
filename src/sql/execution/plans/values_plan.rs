@@ -319,9 +319,9 @@ mod tests {
             let values = row.evaluate(&schema).unwrap();
 
             assert_eq!(values.len(), 3);
-            assert_eq!(values[0].get_value(), &Val::Integer(42));
-            assert_eq!(values[1].get_value(), &Val::VarLen("NULL".to_string()));
-            assert_eq!(values[2].get_value(), &Val::Boolean(true));
+            assert_eq!(values[0].get_val(), &Val::Integer(42));
+            assert_eq!(values[1].get_val(), &Val::VarLen("NULL".to_string()));
+            assert_eq!(values[2].get_val(), &Val::Boolean(true));
         }
     }
 

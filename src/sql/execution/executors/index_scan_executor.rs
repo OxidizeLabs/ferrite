@@ -301,7 +301,7 @@ impl AbstractExecutor for IndexScanExecutor {
                             let mut predicates_match = true;
                             for predicate in predicate_keys {
                                 if let Ok(result) = predicate.evaluate(&tuple, &output_schema) {
-                                    match result.get_value() {
+                                    match result.get_val() {
                                         Val::Boolean(b) => {
                                             if !b {
                                                 predicates_match = false;

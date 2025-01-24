@@ -16,7 +16,7 @@ impl Type for BigIntType {
     }
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => (l == *r).into(),
             (Val::BigInt(l), Val::Integer(r)) => (l == *r as i64).into(),
             (Val::BigInt(_), Val::Null) => CmpBool::CmpNull,
@@ -33,7 +33,7 @@ impl Type for BigIntType {
     }
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => (l < *r).into(),
             (Val::BigInt(l), Val::Integer(r)) => (l < *r as i64).into(),
             (Val::BigInt(_), Val::Null) => CmpBool::CmpNull,
@@ -42,7 +42,7 @@ impl Type for BigIntType {
     }
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => (l <= *r).into(),
             (Val::BigInt(l), Val::Integer(r)) => (l <= *r as i64).into(),
             (Val::BigInt(_), Val::Null) | (Val::Null, Val::BigInt(_)) => CmpBool::CmpNull,
@@ -51,7 +51,7 @@ impl Type for BigIntType {
     }
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => (l > *r).into(),
             (Val::BigInt(l), Val::Integer(r)) => (l > *r as i64).into(),
             (Val::BigInt(_), Val::Null) | (Val::Null, Val::BigInt(_)) => CmpBool::CmpNull,
@@ -60,7 +60,7 @@ impl Type for BigIntType {
     }
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => (l >= *r).into(),
             (Val::BigInt(l), Val::Integer(r)) => (l >= *r as i64).into(),
             (Val::BigInt(_), Val::Null) | (Val::Null, Val::BigInt(_)) => CmpBool::CmpNull,
@@ -73,7 +73,7 @@ impl Type for BigIntType {
     }
 
     fn subtract(&self, other: &Value) -> Result<Value, String> {
-        match (self.get_type_id().get_value().value_, other.get_value()) {
+        match (self.get_type_id().get_value().value_, other.get_val()) {
             (Val::BigInt(l), Val::BigInt(r)) => {
                 l.checked_sub(*r)
                     .map(|result| Value::new(Val::BigInt(result)))
@@ -89,7 +89,7 @@ impl Type for BigIntType {
     }
 
     fn to_string(&self, val: &Value) -> String {
-        match val.get_value() {
+        match val.get_val() {
             Val::BigInt(n) => n.to_string(),
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),

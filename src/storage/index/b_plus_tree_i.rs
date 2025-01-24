@@ -328,10 +328,10 @@ impl BPlusTree {
 
         // Helper to format a key-value for display
         let format_key = |key: &Value| -> String {
-            match key.get_value() {
+            match key.get_val() {
                 Val::Integer(i) => i.to_string(),
                 Val::VarLen(s) => s.clone(),
-                _ => format!("{:?}", key.get_value()),
+                _ => format!("{:?}", key.get_val()),
             }
         };
 
@@ -992,7 +992,7 @@ mod test_utils {
     }
 
     pub fn get_integer_from_value(value: &Value) -> i32 {
-        match value.get_value() {
+        match value.get_val() {
             Val::Integer(i) => *i,
             _ => panic!("Expected integer value"),
         }
@@ -1242,7 +1242,7 @@ mod basic_behavior_tests {
         // Verify ordering
         let result_ids: Vec<i32> = result
             .iter()
-            .map(|(value, _)| match value.get_value() {
+            .map(|(value, _)| match value.get_val() {
                 Val::Integer(i) => *i,
                 _ => panic!("Expected integer value"),
             })
@@ -1592,7 +1592,7 @@ mod split_behavior_tests {
 
         let values: Vec<i32> = result
             .iter()
-            .map(|(value, _)| match value.get_value() {
+            .map(|(value, _)| match value.get_val() {
                 Val::Integer(i) => *i,
                 _ => panic!("Expected integer value"),
             })
@@ -1634,7 +1634,7 @@ mod split_behavior_tests {
         assert_eq!(result.len(), 6, "Should find all 6 values");
         let values: Vec<i32> = result
             .iter()
-            .map(|(tuple, _)| match tuple.get_value() {
+            .map(|(tuple, _)| match tuple.get_val() {
                 Val::Integer(i) => *i,
                 _ => panic!("Expected integer value"),
             })

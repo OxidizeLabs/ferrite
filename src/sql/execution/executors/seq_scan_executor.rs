@@ -330,17 +330,17 @@ mod tests {
         let mut found_tuples = Vec::new();
         while let Some((tuple, _)) = executor.next() {
             // Get values from tuple using proper indexing
-            let id = match tuple.get_value(0).get_value() {
+            let id = match tuple.get_value(0).get_val() {
                 Val::Integer(i) => *i,
                 _ => panic!("Expected Integer value for id"),
             };
 
-            let name = match tuple.get_value(1).get_value() {
+            let name = match tuple.get_value(1).get_val() {
                 Val::VarLen(s) => s.clone(),
                 _ => panic!("Expected VarLen value for name"),
             };
 
-            let age = match tuple.get_value(2).get_value() {
+            let age = match tuple.get_value(2).get_val() {
                 Val::Integer(i) => *i,
                 _ => panic!("Expected Integer value for age"),
             };

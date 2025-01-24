@@ -52,7 +52,7 @@ impl TypeId {
     }
 
     pub fn from_value(value: &Value) -> Self {
-        match value.get_value() {
+        match value.get_val() {
             Val::Boolean(_) => TypeId::Boolean,
             Val::TinyInt(_) => TypeId::TinyInt,
             Val::SmallInt(_) => TypeId::SmallInt,

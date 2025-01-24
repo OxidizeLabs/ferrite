@@ -8,7 +8,7 @@ use std::fmt::Display;
 #[derive(Clone)]
 pub struct BoundConstant {
     /// The constant being bound.
-    val: Value,
+    value: Value,
 }
 
 impl BoundConstant {
@@ -16,7 +16,7 @@ impl BoundConstant {
     where
         T: Into<Value>,
     {
-        Self { val: val.into() }
+        Self { value: val.into() }
     }
 
     pub fn new_vector<I>(iter: I) -> Self
@@ -25,7 +25,7 @@ impl BoundConstant {
         I::Item: Into<Value>,
     {
         Self {
-            val: Value::new_vector(iter),
+            value: Value::new_vector(iter),
         }
     }
 }
@@ -50,7 +50,7 @@ impl BoundExpression for BoundConstant {
 
 impl Display for BoundConstant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.val.get_value() {
+        match self.value.get_val() {
             Val::Boolean(b) => write!(f, "{}", b),
             Val::TinyInt(i) => write!(f, "{}", i),
             Val::SmallInt(i) => write!(f, "{}", i),
