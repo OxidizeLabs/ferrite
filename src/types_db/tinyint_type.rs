@@ -2,8 +2,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
 
-// Implementation for TinyIntType
-#[derive(Debug)]
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct TinyIntType;
 
 impl TinyIntType {
@@ -20,9 +19,27 @@ impl Type for TinyIntType {
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::TinyInt(r) => CmpBool::from(0 == *r),
-            Val::SmallInt(r) => CmpBool::from(0 == (*r).try_into().unwrap_or(i8::MAX)),
-            Val::Integer(r) => CmpBool::from(0 == (*r).try_into().unwrap_or(i8::MAX)),
-            Val::BigInt(r) => CmpBool::from(0 == (*r).try_into().unwrap_or(i8::MAX)),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 == val)
+                } else {
+                    CmpBool::CmpFalse
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 == val)
+                } else {
+                    CmpBool::CmpFalse
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 == val)
+                } else {
+                    CmpBool::CmpFalse
+                }
+            }
             Val::Decimal(r) => CmpBool::from((0 as f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -40,9 +57,27 @@ impl Type for TinyIntType {
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::TinyInt(r) => CmpBool::from(0 < *r),
-            Val::SmallInt(r) => CmpBool::from(0 < (*r).try_into().unwrap_or(i8::MAX)),
-            Val::Integer(r) => CmpBool::from(0 < (*r).try_into().unwrap_or(i8::MAX)),
-            Val::BigInt(r) => CmpBool::from(0 < (*r).try_into().unwrap_or(i8::MAX)),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 < val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 < val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 < val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
             Val::Decimal(r) => CmpBool::from((0 as f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -52,9 +87,27 @@ impl Type for TinyIntType {
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::TinyInt(r) => CmpBool::from(0 <= *r),
-            Val::SmallInt(r) => CmpBool::from(0 <= (*r).try_into().unwrap_or(i8::MAX)),
-            Val::Integer(r) => CmpBool::from(0 <= (*r).try_into().unwrap_or(i8::MAX)),
-            Val::BigInt(r) => CmpBool::from(0 <= (*r).try_into().unwrap_or(i8::MAX)),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 <= val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 <= val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 <= val)
+                } else {
+                    CmpBool::from(*r > 0)
+                }
+            }
             Val::Decimal(r) => CmpBool::from((0 as f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -64,9 +117,27 @@ impl Type for TinyIntType {
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::TinyInt(r) => CmpBool::from(0 > *r),
-            Val::SmallInt(r) => CmpBool::from(0 > (*r).try_into().unwrap_or(i8::MIN)),
-            Val::Integer(r) => CmpBool::from(0 > (*r).try_into().unwrap_or(i8::MIN)),
-            Val::BigInt(r) => CmpBool::from(0 > (*r).try_into().unwrap_or(i8::MIN)),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 > val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 > val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 > val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
             Val::Decimal(r) => CmpBool::from((0 as f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -76,9 +147,27 @@ impl Type for TinyIntType {
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::TinyInt(r) => CmpBool::from(0 >= *r),
-            Val::SmallInt(r) => CmpBool::from(0 >= (*r).try_into().unwrap_or(i8::MIN)),
-            Val::Integer(r) => CmpBool::from(0 >= (*r).try_into().unwrap_or(i8::MIN)),
-            Val::BigInt(r) => CmpBool::from(0 >= (*r).try_into().unwrap_or(i8::MIN)),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 >= val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 >= val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    CmpBool::from(0 >= val)
+                } else {
+                    CmpBool::from(*r < 0)
+                }
+            }
             Val::Decimal(r) => CmpBool::from((0 as f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -87,11 +176,15 @@ impl Type for TinyIntType {
 
     fn add(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::TinyInt(r) => Ok(Value::new(*r)),
+            Val::TinyInt(r) => {
+                r.checked_add(0)
+                    .map(Value::new)
+                    .ok_or_else(|| "TinyInt overflow in addition".to_string())
+            }
             Val::SmallInt(r) => {
                 i8::try_from(*r)
                     .map(Value::new)
-                    .map_err(|_| "Integer overflow in addition".to_string())
+                    .map_err(|_| "SmallInt overflow in addition".to_string())
             }
             Val::Integer(r) => {
                 i8::try_from(*r)
@@ -101,7 +194,7 @@ impl Type for TinyIntType {
             Val::BigInt(r) => {
                 i8::try_from(*r)
                     .map(Value::new)
-                    .map_err(|_| "Integer overflow in addition".to_string())
+                    .map_err(|_| "BigInt overflow in addition".to_string())
             }
             Val::Decimal(r) => Ok(Value::new(*r as i8)),
             Val::Null => Ok(Value::new(Val::Null)),
@@ -117,19 +210,19 @@ impl Type for TinyIntType {
                     .ok_or_else(|| "TinyInt overflow in subtraction".to_string())
             }
             Val::SmallInt(r) => {
-                i8::try_from(-*r)
-                    .map(Value::new)
-                    .map_err(|_| "Integer overflow in subtraction".to_string())
+                i8::try_from(*r)
+                    .map(|v| Value::new(-v))
+                    .map_err(|_| "SmallInt overflow in subtraction".to_string())
             }
             Val::Integer(r) => {
-                i8::try_from(-*r)
-                    .map(Value::new)
+                i8::try_from(*r)
+                    .map(|v| Value::new(-v))
                     .map_err(|_| "Integer overflow in subtraction".to_string())
             }
             Val::BigInt(r) => {
-                i8::try_from(-*r)
-                    .map(Value::new)
-                    .map_err(|_| "Integer overflow in subtraction".to_string())
+                i8::try_from(*r)
+                    .map(|v| Value::new(-v))
+                    .map_err(|_| "BigInt overflow in subtraction".to_string())
             }
             Val::Decimal(r) => Ok(Value::new(-(*r as i8))),
             Val::Null => Ok(Value::new(Val::Null)),
@@ -139,8 +232,13 @@ impl Type for TinyIntType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) |
-            Val::BigInt(_) | Val::Decimal(_) => Ok(Value::new(0i8)),
+            Val::TinyInt(r) => {
+                r.checked_mul(0)
+                    .map(Value::new)
+                    .ok_or_else(|| "TinyInt overflow in multiplication".to_string())
+            }
+            Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_) |
+            Val::Decimal(_) => Ok(Value::new(0i8)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply TinyInt by non-numeric type".to_string()),
         }
@@ -175,9 +273,27 @@ impl Type for TinyIntType {
     fn min(&self, other: &Value) -> Value {
         match other.get_val() {
             Val::TinyInt(r) => Value::new(0i8.min(*r)),
-            Val::SmallInt(r) => Value::new(0i8.min((*r).try_into().unwrap_or(i8::MIN))),
-            Val::Integer(r) => Value::new(0i8.min((*r).try_into().unwrap_or(i8::MIN))),
-            Val::BigInt(r) => Value::new(0i8.min((*r).try_into().unwrap_or(i8::MIN))),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.min(val))
+                } else {
+                    Value::new(if *r < 0 { i8::MIN } else { 0 })
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.min(val))
+                } else {
+                    Value::new(if *r < 0 { i8::MIN } else { 0 })
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.min(val))
+                } else {
+                    Value::new(if *r < 0 { i8::MIN } else { 0 })
+                }
+            }
             _ => Value::new(Val::Null),
         }
     }
@@ -185,9 +301,27 @@ impl Type for TinyIntType {
     fn max(&self, other: &Value) -> Value {
         match other.get_val() {
             Val::TinyInt(r) => Value::new(0i8.max(*r)),
-            Val::SmallInt(r) => Value::new(0i8.max((*r).try_into().unwrap_or(i8::MAX))),
-            Val::Integer(r) => Value::new(0i8.max((*r).try_into().unwrap_or(i8::MAX))),
-            Val::BigInt(r) => Value::new(0i8.max((*r).try_into().unwrap_or(i8::MAX))),
+            Val::SmallInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.max(val))
+                } else {
+                    Value::new(if *r > 0 { i8::MAX } else { 0 })
+                }
+            }
+            Val::Integer(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.max(val))
+                } else {
+                    Value::new(if *r > 0 { i8::MAX } else { 0 })
+                }
+            }
+            Val::BigInt(r) => {
+                if let Ok(val) = i8::try_from(*r) {
+                    Value::new(0i8.max(val))
+                } else {
+                    Value::new(if *r > 0 { i8::MAX } else { 0 })
+                }
+            }
             _ => Value::new(Val::Null),
         }
     }
@@ -211,16 +345,19 @@ mod tests {
         let zero = Value::new(0i8);
         let one = Value::new(1i8);
         let neg_one = Value::new(-1i8);
+        let big = Value::new(i16::MAX);
         let null = Value::new(Val::Null);
 
         // Test equals
         assert_eq!(tinyint_type.compare_equals(&zero), CmpBool::CmpTrue);
         assert_eq!(tinyint_type.compare_equals(&one), CmpBool::CmpFalse);
+        assert_eq!(tinyint_type.compare_equals(&big), CmpBool::CmpFalse);
         assert_eq!(tinyint_type.compare_equals(&null), CmpBool::CmpNull);
 
         // Test less than
         assert_eq!(tinyint_type.compare_less_than(&one), CmpBool::CmpTrue);
         assert_eq!(tinyint_type.compare_less_than(&neg_one), CmpBool::CmpFalse);
+        assert_eq!(tinyint_type.compare_less_than(&big), CmpBool::CmpTrue);
         assert_eq!(tinyint_type.compare_less_than(&null), CmpBool::CmpNull);
     }
 
@@ -249,15 +386,18 @@ mod tests {
         let tinyint_type = TinyIntType::new();
         let pos = Value::new(1i8);
         let neg = Value::new(-1i8);
-        let decimal = Value::new(1.5f64);
+        let big = Value::new(i16::MAX);
+        let small = Value::new(i16::MIN);
 
         // Test min/max
         assert_eq!(Type::min(&tinyint_type, &pos), Value::new(0i8));
         assert_eq!(Type::min(&tinyint_type, &neg), Value::new(-1i8));
-        assert_eq!(Type::min(&tinyint_type, &decimal), Value::new(Val::Null));
+        assert_eq!(Type::min(&tinyint_type, &big), Value::new(0i8));
+        assert_eq!(Type::min(&tinyint_type, &small), Value::new(i8::MIN));
 
         assert_eq!(Type::max(&tinyint_type, &pos), Value::new(1i8));
         assert_eq!(Type::max(&tinyint_type, &neg), Value::new(0i8));
-        assert_eq!(Type::max(&tinyint_type, &decimal), Value::new(Val::Null));
+        assert_eq!(Type::max(&tinyint_type, &big), Value::new(i8::MAX));
+        assert_eq!(Type::max(&tinyint_type, &small), Value::new(0i8));
     }
 }
