@@ -457,18 +457,18 @@ mod tests {
     }
 
     impl TestContext {
-        fn new() -> Self {
+        fn new(name: &str) -> Self {
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir
                 .path()
-                .join("test.db")
+                .join(format!("{name}.db"))
                 .to_str()
                 .unwrap()
                 .to_string();
             let log_path = temp_dir
                 .path()
-                .join("test.log")
+                .join(format!("{name}.log"))
                 .to_str()
                 .unwrap()
                 .to_string();
@@ -542,11 +542,23 @@ mod tests {
         ) -> Result<Arc<Transaction>, String> {
             self.txn_manager.begin(isolation_level)
         }
+
+        fn lock_manager(&self) -> Arc<LockManager> {
+            self.lock_manager.clone()
+        }
+
+        fn buffer_pool_manager(&self) -> Arc<BufferPoolManager> {
+            self.buffer_pool.clone()
+        }
+
+        fn transaction_manager(&self) -> Arc<TransactionManager> {
+            self.txn_manager.clone()
+        }
     }
 
     #[test]
     fn test_begin_transaction() {
-        let ctx = TestContext::new();
+        let ctx = TestContext::new("test_begin_transaction");
 
         // Begin transaction - the ID will be 0 since it's the first transaction
         let txn = ctx
@@ -582,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_commit_transaction() {
-        let ctx = TestContext::new();
+        let ctx = TestContext::new("test_commit_transaction");
 
         // Begin transaction
         let txn = {
@@ -636,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_abort_transaction() {
-        let ctx = TestContext::new();
+        let ctx = TestContext::new("test_abort_transaction");
 
         // Begin transaction
         let txn = ctx
@@ -687,56 +699,67 @@ mod tests {
 
     #[test]
     fn test_transaction_isolation() {
-        let ctx = TestContext::new();
+        // Setup test context
+        let ctx = TestContext::new("test_transaction_isolation");
+        let mut txn_manager = ctx.txn_manager.clone();
+        let catalog = ctx.catalog.clone();
 
-        // Create two transactions
-        let txn1 = ctx.begin_transaction(IsolationLevel::Serializable).unwrap();
-        let txn2 = ctx.begin_transaction(IsolationLevel::Serializable).unwrap();
-
-        // Create test table and insert data with first transaction
         let (table_oid, table_heap) = ctx.create_test_table();
-        let mut tuple = TestContext::create_test_tuple();
-
+        // Create two transactions with different isolation levels
+        let txn1 = txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let txn2 = txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
         let txn_ctx1 = Arc::new(TransactionContext::new(
             txn1.clone(),
-            ctx.lock_manager.clone(),
-            ctx.txn_manager.clone(),
+            ctx.lock_manager(),
+            ctx.transaction_manager()
         ));
-
-        let rid = table_heap
-            .insert_tuple(
-                &TupleMeta::new(txn1.get_transaction_id()),
-                &mut tuple,
-                Some(txn_ctx1),
-            )
-            .unwrap();
-
-        txn1.append_write_set(table_oid, rid);
-
-        // Try to modify same tuple with second transaction
-        let mut modified_tuple = tuple.clone();
-        modified_tuple.get_values_mut()[1] = Value::new(200);
-
         let txn_ctx2 = Arc::new(TransactionContext::new(
             txn2.clone(),
-            ctx.lock_manager.clone(),
-            ctx.txn_manager.clone(),
+            ctx.lock_manager(),
+            ctx.transaction_manager()
         ));
 
-        // Should fail due to write-write conflict
-        assert!(table_heap
-            .update_tuple(
-                &TupleMeta::new(txn2.get_transaction_id()),
-                &mut modified_tuple,
-                rid,
-                Some(txn_ctx2),
-            )
-            .is_err());
+        // Insert a tuple with txn1
+        let mut tuple = TestContext::create_test_tuple();
+
+         // Insert tuple
+        let rid = table_heap.insert_tuple(
+                    &TupleMeta::new(txn1.get_transaction_id()),
+                    &mut tuple,
+                    Some(txn_ctx1),
+                ).unwrap();
+
+
+        // Attempt to update the same tuple with txn2 before txn1 commits
+        let mut modified_tuple = tuple.clone();
+        modified_tuple.set_values(vec![Value::new(200)]);
+
+        // This should fail because txn1 hasn't committed yet
+        assert!(table_heap.update_tuple(
+            &TupleMeta::new(txn2.get_transaction_id()),
+            &mut modified_tuple,
+            rid,
+            Some(txn_ctx2.clone())
+        ).is_err(), "Update should fail due to uncommitted write from txn1");
+
+        // Commit txn1
+        txn_manager.commit(txn1, ctx.buffer_pool.clone());
+
+        // Now txn2 should be able to update the tuple
+        assert!(table_heap.update_tuple(
+            &TupleMeta::new(txn2.get_transaction_id()),
+            &mut modified_tuple,
+            rid,
+            Some(txn_ctx2)
+        ).is_ok(), "Update should succeed after txn1 commits");
+
+        // Cleanup
+        txn_manager.commit(txn2, ctx.buffer_pool);
     }
 
     #[test]
     fn test_transaction_manager_shutdown() {
-        let ctx = TestContext::new();
+        let ctx = TestContext::new("test_transaction_manager_shutdown");
 
         // Start a transaction
         let txn1 = ctx
@@ -760,7 +783,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_transactions() {
-        let ctx = TestContext::new();
+        let ctx = TestContext::new("test_concurrent_transactions");
         let thread_count = 10;
         let mut handles = vec![];
 
