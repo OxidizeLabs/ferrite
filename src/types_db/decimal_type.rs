@@ -2,7 +2,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
 
-// Implementation for DecimalType
+#[derive(Debug)]
 pub struct DecimalType;
 
 impl DecimalType {
@@ -22,11 +22,13 @@ impl Type for DecimalType {
                 if r.is_nan() {
                     CmpBool::CmpFalse
                 } else {
-                    CmpBool::from(0.0 == *r)
+                    CmpBool::from((0.0 == *r))
                 }
             }
-            Val::Integer(r) => CmpBool::from(0.0 == *r as f64),
             Val::BigInt(r) => CmpBool::from(0.0 == *r as f64),
+            Val::Integer(r) => CmpBool::from(0.0 == *r as f64),
+            Val::SmallInt(r) => CmpBool::from(0.0 == *r as f64),
+            Val::TinyInt(r) => CmpBool::from(0.0 == *r as f64),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -49,8 +51,10 @@ impl Type for DecimalType {
                     CmpBool::from(0.0 < *r)
                 }
             }
-            Val::Integer(r) => CmpBool::from(0.0 < *r as f64),
             Val::BigInt(r) => CmpBool::from(0.0 < *r as f64),
+            Val::Integer(r) => CmpBool::from(0.0 < *r as f64),
+            Val::SmallInt(r) => CmpBool::from(0.0 < *r as f64),
+            Val::TinyInt(r) => CmpBool::from(0.0 < *r as f64),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -65,8 +69,10 @@ impl Type for DecimalType {
                     CmpBool::from(0.0 <= *r)
                 }
             }
-            Val::Integer(r) => CmpBool::from(0.0 <= *r as f64),
             Val::BigInt(r) => CmpBool::from(0.0 <= *r as f64),
+            Val::Integer(r) => CmpBool::from(0.0 <= *r as f64),
+            Val::SmallInt(r) => CmpBool::from(0.0 <= *r as f64),
+            Val::TinyInt(r) => CmpBool::from(0.0 <= *r as f64),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -81,8 +87,10 @@ impl Type for DecimalType {
                     CmpBool::from(0.0 > *r)
                 }
             }
-            Val::Integer(r) => CmpBool::from(0.0 > *r as f64),
             Val::BigInt(r) => CmpBool::from(0.0 > *r as f64),
+            Val::Integer(r) => CmpBool::from(0.0 > *r as f64),
+            Val::SmallInt(r) => CmpBool::from(0.0 > *r as f64),
+            Val::TinyInt(r) => CmpBool::from(0.0 > *r as f64),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -97,8 +105,10 @@ impl Type for DecimalType {
                     CmpBool::from(0.0 >= *r)
                 }
             }
-            Val::Integer(r) => CmpBool::from(0.0 >= *r as f64),
             Val::BigInt(r) => CmpBool::from(0.0 >= *r as f64),
+            Val::Integer(r) => CmpBool::from(0.0 >= *r as f64),
+            Val::SmallInt(r) => CmpBool::from(0.0 >= *r as f64),
+            Val::TinyInt(r) => CmpBool::from(0.0 >= *r as f64),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -106,9 +116,11 @@ impl Type for DecimalType {
 
     fn add(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Decimal(r) => Ok(Value::new(*r + 0.0)),
-            Val::Integer(r) => Ok(Value::new(*r as f64 + 0.0)),
-            Val::BigInt(r) => Ok(Value::new(*r as f64 + 0.0)),
+            Val::Decimal(r) => Ok(Value::new(*r)),
+            Val::BigInt(r) => Ok(Value::new(*r as f64)),
+            Val::Integer(r) => Ok(Value::new(*r as f64)),
+            Val::SmallInt(r) => Ok(Value::new(*r as f64)),
+            Val::TinyInt(r) => Ok(Value::new(*r as f64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-numeric types to Decimal".to_string()),
         }
@@ -116,9 +128,11 @@ impl Type for DecimalType {
 
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Decimal(r) => Ok(Value::new(0.0 - *r)),
-            Val::Integer(r) => Ok(Value::new(0.0 - *r as f64)),
-            Val::BigInt(r) => Ok(Value::new(0.0 - *r as f64)),
+            Val::Decimal(r) => Ok(Value::new(-*r)),
+            Val::BigInt(r) => Ok(Value::new(-(*r as f64))),
+            Val::Integer(r) => Ok(Value::new(-(*r as f64))),
+            Val::SmallInt(r) => Ok(Value::new(-(*r as f64))),
+            Val::TinyInt(r) => Ok(Value::new(-(*r as f64))),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-numeric types from Decimal".to_string()),
         }
@@ -126,9 +140,8 @@ impl Type for DecimalType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Decimal(r) => Ok(Value::new(0.0 * *r)),
-            Val::Integer(r) => Ok(Value::new(0.0 * *r as f64)),
-            Val::BigInt(r) => Ok(Value::new(0.0 * *r as f64)),
+            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
+            Val::SmallInt(_) | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Decimal by non-numeric type".to_string()),
         }
@@ -136,27 +149,13 @@ impl Type for DecimalType {
 
     fn divide(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Decimal(r) => {
-                if *r == 0.0 {
-                    Err("Division by zero".to_string())
-                } else {
-                    Ok(Value::new(0.0 / *r))
-                }
-            }
-            Val::Integer(r) => {
-                if *r == 0 {
-                    Err("Division by zero".to_string())
-                } else {
-                    Ok(Value::new(0.0 / *r as f64))
-                }
-            }
-            Val::BigInt(r) => {
-                if *r == 0 {
-                    Err("Division by zero".to_string())
-                } else {
-                    Ok(Value::new(0.0 / *r as f64))
-                }
-            }
+            Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
+            Val::BigInt(r) if *r == 0 => Err("Division by zero".to_string()),
+            Val::Integer(r) if *r == 0 => Err("Division by zero".to_string()),
+            Val::SmallInt(r) if *r == 0 => Err("Division by zero".to_string()),
+            Val::TinyInt(r) if *r == 0 => Err("Division by zero".to_string()),
+            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
+            Val::SmallInt(_) | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide Decimal by non-numeric type".to_string()),
         }
@@ -164,27 +163,13 @@ impl Type for DecimalType {
 
     fn modulo(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Decimal(r) => {
-                if *r == 0.0 {
-                    Value::new(Val::Null)
-                } else {
-                    Value::new(0.0 % *r)
-                }
-            }
-            Val::Integer(r) => {
-                if *r == 0 {
-                    Value::new(Val::Null)
-                } else {
-                    Value::new(0.0 % *r as f64)
-                }
-            }
-            Val::BigInt(r) => {
-                if *r == 0 {
-                    Value::new(Val::Null)
-                } else {
-                    Value::new(0.0 % *r as f64)
-                }
-            }
+            Val::Decimal(r) if *r == 0.0 => Value::new(Val::Null),
+            Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
+            Val::Integer(r) if *r == 0 => Value::new(Val::Null),
+            Val::SmallInt(r) if *r == 0 => Value::new(Val::Null),
+            Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
+            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
+            Val::SmallInt(_) | Val::TinyInt(_) => Value::new(0.0f64),
             _ => Value::new(Val::Null),
         }
     }
@@ -195,11 +180,13 @@ impl Type for DecimalType {
                 if r.is_nan() {
                     Value::new(Val::Null)
                 } else {
-                    Value::new(0.0_f64.min(*r))
+                    Value::new(0.0f64.min(*r))
                 }
             }
-            Val::Integer(r) => Value::new(0.0_f64.min(*r as f64)),
-            Val::BigInt(r) => Value::new(0.0_f64.min(*r as f64)),
+            Val::BigInt(r) => Value::new(0.0f64.min(*r as f64)),
+            Val::Integer(r) => Value::new(0.0f64.min(*r as f64)),
+            Val::SmallInt(r) => Value::new(0.0f64.min(*r as f64)),
+            Val::TinyInt(r) => Value::new(0.0f64.min(*r as f64)),
             _ => Value::new(Val::Null),
         }
     }
@@ -210,11 +197,13 @@ impl Type for DecimalType {
                 if r.is_nan() {
                     Value::new(Val::Null)
                 } else {
-                    Value::new(0.0_f64.max(*r))
+                    Value::new(0.0f64.max(*r))
                 }
             }
-            Val::Integer(r) => Value::new(0.0_f64.max(*r as f64)),
-            Val::BigInt(r) => Value::new(0.0_f64.max(*r as f64)),
+            Val::BigInt(r) => Value::new(0.0f64.max(*r as f64)),
+            Val::Integer(r) => Value::new(0.0f64.max(*r as f64)),
+            Val::SmallInt(r) => Value::new(0.0f64.max(*r as f64)),
+            Val::TinyInt(r) => Value::new(0.0f64.max(*r as f64)),
             _ => Value::new(Val::Null),
         }
     }
@@ -235,9 +224,9 @@ mod tests {
     #[test]
     fn test_decimal_comparisons() {
         let decimal_type = DecimalType::new();
-        let zero = Value::new(0.0);
-        let one = Value::new(1.0);
-        let neg_one = Value::new(-1.0);
+        let zero = Value::new(0.0f64);
+        let one = Value::new(1.0f64);
+        let neg_one = Value::new(-1.0f64);
         let nan = Value::new(f64::NAN);
         let null = Value::new(Val::Null);
 
@@ -257,33 +246,37 @@ mod tests {
     #[test]
     fn test_decimal_arithmetic() {
         let decimal_type = DecimalType::new();
-        let two = Value::new(2.0);
-        let zero = Value::new(0.0);
+        let two = Value::new(2.0f64);
+        let zero = Value::new(0.0f64);
+        let infinity = Value::new(f64::INFINITY);
 
         // Test addition
-        assert_eq!(decimal_type.add(&two).unwrap(), Value::new(2.0));
+        assert_eq!(decimal_type.add(&two).unwrap(), Value::new(2.0f64));
         
         // Test division by zero
         assert!(decimal_type.divide(&zero).is_err());
         
         // Test modulo
         assert_eq!(decimal_type.modulo(&zero), Value::new(Val::Null));
+
+        // Test infinity
+        assert!(decimal_type.add(&infinity).is_ok());
     }
 
     #[test]
     fn test_decimal_min_max() {
         let decimal_type = DecimalType::new();
-        let pos = Value::new(1.0);
-        let neg = Value::new(-1.0);
+        let pos = Value::new(1.0f64);
+        let neg = Value::new(-1.0f64);
         let nan = Value::new(f64::NAN);
 
         // Test min/max
-        assert_eq!(decimal_type.min(&pos), Value::new(0.0));
-        assert_eq!(decimal_type.min(&neg), Value::new(-1.0));
-        assert_eq!(decimal_type.min(&nan), Value::new(Val::Null));
+        assert_eq!(Type::min(&decimal_type, &pos), Value::new(0.0f64));
+        assert_eq!(Type::min(&decimal_type, &neg), Value::new(-1.0f64));
+        assert_eq!(Type::min(&decimal_type, &nan), Value::new(Val::Null));
 
-        assert_eq!(decimal_type.max(&pos), Value::new(1.0));
-        assert_eq!(decimal_type.max(&neg), Value::new(0.0));
-        assert_eq!(decimal_type.max(&nan), Value::new(Val::Null));
+        assert_eq!(Type::max(&decimal_type, &pos), Value::new(1.0f64));
+        assert_eq!(Type::max(&decimal_type, &neg), Value::new(0.0f64));
+        assert_eq!(Type::max(&decimal_type, &nan), Value::new(Val::Null));
     }
 }

@@ -2,7 +2,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
 
-// Implementation for BooleanType
+#[derive(Debug)]
 pub struct BooleanType;
 
 impl BooleanType {
@@ -34,7 +34,7 @@ impl Type for BooleanType {
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(!true && *r),
+            Val::Boolean(r) => CmpBool::from(!true && *r), // false < true
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -42,7 +42,7 @@ impl Type for BooleanType {
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(!true || *r),
+            Val::Boolean(r) => CmpBool::from(!true || *r), // false <= true or true <= true
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -50,7 +50,7 @@ impl Type for BooleanType {
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(true && !*r),
+            Val::Boolean(r) => CmpBool::from(true && !*r), // true > false
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -58,21 +58,12 @@ impl Type for BooleanType {
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(true || !*r),
+            Val::Boolean(r) => CmpBool::from(true || !*r), // true >= false or true >= true
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
     }
 
-    fn to_string(&self, val: &Value) -> String {
-        match val.get_val() {
-            Val::Boolean(b) => b.to_string(),
-            Val::Null => "NULL".to_string(),
-            _ => "INVALID".to_string(),
-        }
-    }
-
-    // Boolean type doesn't support arithmetic operations
     fn add(&self, _other: &Value) -> Result<Value, String> {
         Err("Cannot perform addition on boolean values".to_string())
     }
@@ -95,15 +86,23 @@ impl Type for BooleanType {
 
     fn min(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Boolean(r) => Value::new(*r && true),
+            Val::Boolean(r) => Value::new(*r && true), // Logical AND for min
             _ => Value::new(Val::Null),
         }
     }
 
     fn max(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Boolean(r) => Value::new(*r || true),
+            Val::Boolean(r) => Value::new(*r || true), // Logical OR for max
             _ => Value::new(Val::Null),
+        }
+    }
+
+    fn to_string(&self, val: &Value) -> String {
+        match val.get_val() {
+            Val::Boolean(b) => b.to_string(),
+            Val::Null => "NULL".to_string(),
+            _ => "INVALID".to_string(),
         }
     }
 }
@@ -124,12 +123,17 @@ mod tests {
         assert_eq!(bool_type.compare_equals(&false_val), CmpBool::CmpFalse);
         assert_eq!(bool_type.compare_equals(&null_val), CmpBool::CmpNull);
 
-        // Test less than
+        // Test not equals
+        assert_eq!(bool_type.compare_not_equals(&true_val), CmpBool::CmpFalse);
+        assert_eq!(bool_type.compare_not_equals(&false_val), CmpBool::CmpTrue);
+        assert_eq!(bool_type.compare_not_equals(&null_val), CmpBool::CmpNull);
+
+        // Test less than (false < true)
         assert_eq!(bool_type.compare_less_than(&true_val), CmpBool::CmpFalse);
         assert_eq!(bool_type.compare_less_than(&false_val), CmpBool::CmpFalse);
         assert_eq!(bool_type.compare_less_than(&null_val), CmpBool::CmpNull);
 
-        // Test greater than
+        // Test greater than (true > false)
         assert_eq!(bool_type.compare_greater_than(&true_val), CmpBool::CmpFalse);
         assert_eq!(bool_type.compare_greater_than(&false_val), CmpBool::CmpTrue);
         assert_eq!(bool_type.compare_greater_than(&null_val), CmpBool::CmpNull);
@@ -155,14 +159,26 @@ mod tests {
         let false_val = Value::new(false);
         let null_val = Value::new(Val::Null);
 
-        // Test min
-        assert_eq!(bool_type.min(&true_val), Value::new(true));
-        assert_eq!(bool_type.min(&false_val), Value::new(false));
-        assert_eq!(bool_type.min(&null_val), Value::new(Val::Null));
+        // Test min (logical AND)
+        assert_eq!(Type::min(&bool_type, &true_val), Value::new(true));
+        assert_eq!(Type::min(&bool_type, &false_val), Value::new(false));
+        assert_eq!(Type::min(&bool_type, &null_val), Value::new(Val::Null));
 
-        // Test max
-        assert_eq!(bool_type.max(&true_val), Value::new(true));
-        assert_eq!(bool_type.max(&false_val), Value::new(true));
-        assert_eq!(bool_type.max(&null_val), Value::new(Val::Null));
+        // Test max (logical OR)
+        assert_eq!(Type::max(&bool_type, &true_val), Value::new(true));
+        assert_eq!(Type::max(&bool_type, &false_val), Value::new(true));
+        assert_eq!(Type::max(&bool_type, &null_val), Value::new(Val::Null));
+    }
+
+    #[test]
+    fn test_boolean_to_string() {
+        let bool_type = BooleanType::new();
+        let true_val = Value::new(true);
+        let false_val = Value::new(false);
+        let null_val = Value::new(Val::Null);
+
+        assert_eq!(bool_type.to_string(&true_val), "true");
+        assert_eq!(bool_type.to_string(&false_val), "false");
+        assert_eq!(bool_type.to_string(&null_val), "NULL");
     }
 }
