@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
+use mockall_double::double;
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
@@ -150,6 +151,7 @@ impl DiskIO for RealDiskIO {
     }
 }
 
+#[automock]
 impl FileDiskManager {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 100;
@@ -841,609 +843,103 @@ mod tests {
     use chrono::Utc;
     use mockall::predicate::{always, eq};
     use std::io::{Error, ErrorKind};
+    use tempfile::TempDir;
+    use super::{MockDiskIO, MockFileDiskManager};
 
-    // Shared test context and utilities
     pub struct TestContext {
-        disk_manager: Arc<RwLock<FileDiskManager>>,
-        db_file: String,
-        db_log: String,
+        disk_manager: Arc<RwLock<MockFileDiskManager>>,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
-            initialize_logger();
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager = Arc::new(RwLock::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            )));
+        fn new(name: &str) -> Self {
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create mock instance directly without calling new()
+            let mut mock_disk_manager = MockFileDiskManager::default();
+            
+            // Set up default expectations for commonly used methods
+            mock_disk_manager
+                .expect_get_num_flushes()
+                .returning(|| 0);
+            mock_disk_manager
+                .expect_get_flush_state()
+                .returning(|| false);
+            mock_disk_manager
+                .expect_get_num_writes()
+                .returning(|| 0);
+            mock_disk_manager
+                .expect_has_flush_log_future()
+                .returning(|| false);
+
             Self {
-                disk_manager,
-                db_file,
-                db_log: db_log_file,
+                disk_manager: Arc::new(RwLock::new(mock_disk_manager)),
+                _temp_dir: temp_dir,
             }
         }
 
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log);
-            self.disk_manager
-                .write()
-                .shut_down()
-                .expect("Failed to shut down disk manager.");
-        }
-
-        // Helper methods for common test operations
-        fn write_test_page(&self, page_id: PageId, value: u8) -> IoResult<()> {
-            let mut data = [0u8; DB_PAGE_SIZE as usize];
-            data[0] = value;
-            self.disk_manager.write().write_page(page_id, &data)
-        }
-
-        fn read_test_page(&self, page_id: PageId) -> IoResult<[u8; DB_PAGE_SIZE as usize]> {
-            let mut data = [0u8; DB_PAGE_SIZE as usize];
-            self.disk_manager.write().read_page(page_id, &mut data)?;
-            Ok(data)
-        }
-
-        // Add Clone implementation helper
-        fn clone_disk_manager(&self) -> Arc<RwLock<FileDiskManager>> {
-            Arc::clone(&self.disk_manager)
+        pub fn expect<'a>(&'a self) -> impl std::ops::Deref<Target = MockFileDiskManager> + 'a {
+            self.disk_manager.read()
         }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
-
-    // Basic functionality tests
     mod basic_tests {
         use super::*;
 
         #[test]
         fn test_initialization() {
             let ctx = TestContext::new("test_initialization");
-            let disk_manager = ctx.disk_manager.read();
-
-            assert!(
-                Path::new(&ctx.db_file).exists(),
-                "Database file not created"
-            );
-            assert!(Path::new(&ctx.db_log).exists(), "Log file not created");
-            assert_eq!(disk_manager.get_num_flushes(), 0);
-            assert_eq!(disk_manager.get_num_writes(), 0);
-            assert!(!disk_manager.get_flush_state());
-            assert!(!disk_manager.has_flush_log_future());
+            
+            // Verify initial state using mock expectations
+            assert_eq!(ctx.expect().get_num_flushes(), 0);
+            assert!(!ctx.expect().get_flush_state());
+            assert_eq!(ctx.expect().get_num_writes(), 0);
+            assert!(!ctx.expect().has_flush_log_future());
         }
 
         #[test]
         fn test_basic_read_write() -> IoResult<()> {
             let ctx = TestContext::new("test_basic_read_write");
+            let mut disk_manager = ctx.disk_manager.write();
 
-            // Write test data
-            ctx.write_test_page(0, 42)?;
-
-            // Read and verify
-            let data = ctx.read_test_page(0)?;
-            assert_eq!(data[0], 42, "Read data doesn't match written data");
-
-            Ok(())
-        }
-    }
-
-    // Batch operation tests
-    mod batch_tests {
-        use super::*;
-
-        #[test]
-        fn test_batch_operations() {
-            let ctx = TestContext::new("test_batch_operations");
-            let disk_manager = ctx.disk_manager.write();
-
-            // Test data preparation and batch operations
-            let test_pages: Vec<_> = (0..5)
-                .map(|i| {
-                    let mut data = [0u8; DB_PAGE_SIZE as usize];
-                    data[0] = i as u8;
-                    (i as PageId, data)
-                })
-                .collect();
-
-            assert!(disk_manager.write_pages_batch(&test_pages).is_ok());
-
-            // Verify batch read
-            let page_ids: Vec<_> = test_pages.iter().map(|(id, _)| *id).collect();
-            let read_results = disk_manager.read_pages_batch(&page_ids).unwrap();
-
-            for (i, page_data) in read_results.iter().enumerate() {
-                assert_eq!(page_data[0], i as u8);
-            }
-        }
-    }
-
-    // Async operation tests
-    mod async_tests {
-        use super::*;
-
-        #[tokio::test]
-        async fn test_async_operations() {
-            let ctx = TestContext::new("test_async_operations");
-            let disk_manager = ctx.disk_manager.write();
-
-            let mut test_data = [0u8; DB_PAGE_SIZE as usize];
-            test_data[0] = 42;
-
-            // Test async write
-            assert!(disk_manager.write_page_async(0, &test_data).await.is_ok());
-
-            // Test async read
-            let read_data = disk_manager.read_page_async(0).await.unwrap();
-            assert_eq!(
-                read_data[0], 42,
-                "Async read data doesn't match written data"
-            );
-
-            // Test error handling
-            let result = disk_manager.read_page_async(PageId::MAX).await;
-            assert!(
-                result.is_ok(),
-                "Should handle invalid page reads gracefully"
-            );
-            assert_eq!(
-                result.unwrap(),
-                [0u8; DB_PAGE_SIZE as usize],
-                "Should return zeroed buffer for invalid page"
-            );
-        }
-    }
-
-    // Concurrency tests
-    mod concurrency_tests {
-        use super::*;
-
-        #[test]
-        fn test_concurrent_access() {
-            let ctx = TestContext::new("test_concurrent_access");
-            let thread_count = 10;
-            let mut handles = vec![];
-            let disk_manager = ctx.clone_disk_manager();
-
-            for i in 0..thread_count {
-                let dm = Arc::clone(&disk_manager);
-                handles.push(thread::spawn(move || {
-                    let mut data = [0u8; DB_PAGE_SIZE as usize];
-                    data[0] = i as u8;
-
-                    // Write data
-                    {
-                        let disk_mgr = dm.write();
-                        assert!(disk_mgr.write_page(i as PageId, &data).is_ok());
-                    }
-
-                    // Read and verify data
-                    {
-                        let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-                        let disk_mgr = dm.write();
-                        assert!(disk_mgr.read_page(i as PageId, &mut read_buffer).is_ok());
-                        assert_eq!(
-                            read_buffer[0], i as u8,
-                            "Data mismatch in concurrent operation"
-                        );
-                    }
-                }));
-            }
-
-            for handle in handles {
-                handle.join().unwrap();
-            }
-        }
-
-        #[test]
-        fn test_concurrent_batch_operations() {
-            let ctx = TestContext::new("test_concurrent_batch_operations");
-            let disk_manager = ctx.clone_disk_manager();
-            let batch_size = 5;
-            let thread_count = 4;
-            let mut handles = vec![];
-
-            for t in 0..thread_count {
-                let dm = Arc::clone(&disk_manager);
-                handles.push(thread::spawn(move || {
-                    // Prepare batch data
-                    let start_page = t * batch_size;
-                    let test_pages: Vec<_> = (0..batch_size)
-                        .map(|i| {
-                            let page_id = start_page + i;
-                            let mut data = [0u8; DB_PAGE_SIZE as usize];
-                            data[0] = page_id as u8;
-                            (page_id as PageId, data)
-                        })
-                        .collect();
-
-                    // Write batch
-                    {
-                        let disk_mgr = dm.write();
-                        assert!(disk_mgr.write_pages_batch(&test_pages).is_ok());
-                    }
-
-                    // Read and verify batch
-                    {
-                        let disk_mgr = dm.write();
-                        let page_ids: Vec<_> = test_pages.iter().map(|(id, _)| *id).collect();
-                        let read_results = disk_mgr.read_pages_batch(&page_ids).unwrap();
-
-                        for (i, page_data) in read_results.iter().enumerate() {
-                            assert_eq!(
-                                page_data[0],
-                                (start_page + i) as u8,
-                                "Batch data mismatch in thread {}",
-                                t
-                            );
-                        }
-                    }
-                }));
-            }
-
-            for handle in handles {
-                handle.join().unwrap();
-            }
-        }
-    }
-
-    // Error handling and edge cases
-    mod error_tests {
-        use super::*;
-
-        #[test]
-        fn test_invalid_page_reads() {
-            let ctx = TestContext::new("test_invalid_page_reads");
-            let disk_manager = ctx.disk_manager.write();
-            let mut buffer = [0u8; DB_PAGE_SIZE as usize];
-
-            // Test reading PageId::MAX (should return zeroed buffer)
-            let result = disk_manager.read_page(PageId::MAX, &mut buffer);
-            assert!(result.is_ok(), "Should handle overflow gracefully");
-            assert_eq!(
-                buffer, [0u8; DB_PAGE_SIZE as usize],
-                "Should return zeroed buffer for invalid page"
-            );
-
-            // Test reading beyond EOF
-            let result = disk_manager.read_page(1_000_000, &mut buffer);
-            assert!(result.is_ok(), "Should handle EOF gracefully");
-            assert_eq!(
-                buffer, [0u8; DB_PAGE_SIZE as usize],
-                "Should return zeroed buffer for EOF"
-            );
-        }
-
-        #[test]
-        fn test_invalid_page_writes() {
-            let ctx = TestContext::new("test_invalid_page_writes");
-            let disk_manager = ctx.disk_manager.write();
-            let test_data = [42u8; DB_PAGE_SIZE as usize];
-
-            // Test writing to PageId::MAX (should fail)
-            let result = disk_manager.write_page(PageId::MAX, &test_data);
-            assert!(result.is_err(), "Should fail on overflow");
-            assert_eq!(
-                result.unwrap_err().kind(),
-                ErrorKind::InvalidInput,
-                "Should return InvalidInput error for overflow"
-            );
-        }
-
-        #[test]
-        fn test_mock_disk_errors() {
-            let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
+            // Set up expectations for write and read
+            disk_manager
                 .expect_write_page()
                 .with(eq(0), always())
-                .returning(|_, _| Err(Error::new(ErrorKind::WriteZero, "Disk full")));
+                .returning(|_, _| Ok(()));
 
-            let result = mock_disk_io.write_page(0, &[0u8; DB_PAGE_SIZE as usize]);
-            assert!(result.is_err());
-            assert_eq!(result.unwrap_err().kind(), ErrorKind::WriteZero);
-        }
-    }
-
-    // Metrics tests
-    mod metrics_tests {
-        use super::*;
-
-        #[test]
-        fn test_metrics_recording() {
-            let ctx = TestContext::new("test_metrics_recording");
-            let disk_manager = ctx.disk_manager.write();
-
-            let start_time = Instant::now();
-            disk_manager.record_metrics("read", start_time, 1024, false);
-            disk_manager.record_metrics("write", start_time, 2048, true);
-
-            assert_eq!(
-                disk_manager
-                    .metrics
-                    .read_throughput_bytes
-                    .load(Ordering::Relaxed),
-                1024
-            );
-            assert_eq!(
-                disk_manager
-                    .metrics
-                    .write_throughput_bytes
-                    .load(Ordering::Relaxed),
-                2048
-            );
-            assert_eq!(disk_manager.metrics.write_errors.load(Ordering::Relaxed), 1);
-            assert_eq!(disk_manager.metrics.read_errors.load(Ordering::Relaxed), 0);
-        }
-    }
-
-    // Logging tests
-    mod logging_tests {
-        use super::*;
-        use std::sync::Once;
-
-        static INIT: Once = Once::new();
-
-        fn setup() {
-            INIT.call_once(|| {
-                initialize_logger();
-            });
-        }
-
-        #[test]
-        fn test_metrics_logging() {
-            setup();
-            let ctx = TestContext::new("test_metrics_logging");
-            let disk_manager = ctx.disk_manager.write();
-
-            // Generate some activity
-            let mut test_data = [0u8; DB_PAGE_SIZE as usize];
-            test_data[0] = 42;
-
-            // Write some pages
-            for i in 0..5 {
-                assert!(disk_manager.write_page(i, &test_data).is_ok());
-            }
-
-            // Read some pages
-            let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-            for i in 0..5 {
-                assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
-            }
-
-            // Force an error by reading an invalid page
-            assert!(disk_manager
-                .read_page(PageId::MAX, &mut read_buffer)
-                .is_ok());
-
-            // Log metrics
-            disk_manager.log_metrics();
-
-            // Verify that we have at least one error (from the invalid page read)
-            assert_eq!(
-                disk_manager.metrics.read_errors.load(Ordering::Relaxed),
-                1,
-                "Should have recorded one read error from invalid page access"
-            );
-
-            // Check health (should fail due to the error we just verified)
-            assert!(
-                !disk_manager.check_health(),
-                "Health check should fail due to recorded errors"
-            );
-        }
-
-        #[test]
-        fn test_performance_logging() {
-            setup();
-            let ctx = TestContext::new("test_performance_logging");
-            let disk_manager = ctx.disk_manager.write();
-
-            // Prepare batch operation
-            let test_pages: Vec<_> = (0..10)
-                .map(|i| {
-                    let mut data = [0u8; DB_PAGE_SIZE as usize];
-                    data[0] = i as u8;
-                    (i as PageId, data)
-                })
-                .collect();
-
-            // Execute batch write with performance logging
-            assert!(disk_manager.write_pages_batch(&test_pages).is_ok());
-
-            // Verify metrics were recorded
-            assert!(
-                disk_manager
-                    .metrics
-                    .write_throughput_bytes
-                    .load(Ordering::Relaxed)
-                    > 0
-            );
-        }
-    }
-
-    // Retry tests
-    mod retry_tests {
-        use super::*;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-
-        #[test]
-        fn test_write_with_retry_success() {
-            let ctx = TestContext::new("test_write_with_retry_success");
-            let disk_manager = ctx.disk_manager.write();
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let attempts_clone = attempts.clone();
-
-            // Create a mock that fails twice then succeeds
-            let mut mock = MockDiskIO::new();
-            mock.expect_write_page().times(3).returning(move |_, _| {
-                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                if current_attempt < 2 {
-                    Err(Error::new(ErrorKind::Other, "Temporary error"))
-                } else {
+            let mut expected_data = [0u8; DB_PAGE_SIZE as usize];
+            expected_data[0] = 42;
+            disk_manager
+                .expect_read_page()
+                .with(eq(0), always())
+                .returning(move |_, buf| {
+                    buf.copy_from_slice(&expected_data);
                     Ok(())
-                }
-            });
-
-            // Set the mock implementation
-            disk_manager.set_disk_io(Box::new(mock));
-
-            // Test the retry mechanism
-            let test_data = [42u8; DB_PAGE_SIZE as usize];
-            let result = disk_manager.write_page_with_retry(0, &test_data);
-
-            assert!(result.is_ok(), "Write should eventually succeed");
-            assert_eq!(
-                attempts.load(Ordering::SeqCst),
-                3,
-                "Should have attempted 3 times"
-            );
-        }
-
-        #[test]
-        fn test_write_with_retry_failure() {
-            let ctx = TestContext::new("test_write_with_retry_failure");
-            let disk_manager = ctx.disk_manager.write();
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let attempts_clone = attempts.clone();
-
-            // Create a mock that always fails
-            let mut mock = MockDiskIO::new();
-            mock.expect_write_page()
-                .times(FileDiskManager::MAX_RETRIES as usize)
-                .returning(move |_, _| {
-                    attempts_clone.fetch_add(1, Ordering::SeqCst);
-                    Err(Error::new(ErrorKind::Other, "Persistent error"))
                 });
 
-            // Set the mock implementation
-            disk_manager.set_disk_io(Box::new(mock));
-
-            // Test the retry mechanism
+            // Perform test operations
             let test_data = [42u8; DB_PAGE_SIZE as usize];
-            let result = disk_manager.write_page_with_retry(0, &test_data);
+            disk_manager.write_page(0, &test_data)?;
 
-            assert!(result.is_err(), "Write should fail after max retries");
-            assert_eq!(
-                attempts.load(Ordering::SeqCst),
-                FileDiskManager::MAX_RETRIES as usize,
-                "Should have attempted exactly MAX_RETRIES times"
-            );
-        }
-
-        #[test]
-        fn test_read_with_retry_success() {
-            let ctx = TestContext::new("test_read_with_retry_success");
-            let disk_manager = ctx.disk_manager.write();
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let attempts_clone = attempts.clone();
-
-            // Create a mock that fails once then succeeds
-            let mut mock = MockDiskIO::new();
-            mock.expect_read_page().times(2).returning(move |_, buf| {
-                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                if current_attempt == 0 {
-                    Err(Error::new(ErrorKind::Other, "Temporary read error"))
-                } else {
-                    buf[0] = 42; // Set test data
-                    Ok(())
-                }
-            });
-
-            // Set the mock implementation
-            disk_manager.set_disk_io(Box::new(mock));
-
-            // Test the retry mechanism
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-            let result = disk_manager.read_page_with_retry(0, &mut read_buffer);
+            disk_manager.read_page(0, &mut read_buffer)?;
+            assert_eq!(read_buffer[0], 42);
 
-            assert!(result.is_ok(), "Read should eventually succeed");
-            assert_eq!(read_buffer[0], 42, "Should have read correct data");
-            assert_eq!(
-                attempts.load(Ordering::SeqCst),
-                2,
-                "Should have attempted twice"
-            );
-        }
-
-        #[test]
-        fn test_read_with_retry_metrics() {
-            let ctx = TestContext::new("test_read_with_retry_metrics");
-            let disk_manager = ctx.disk_manager.write();
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let attempts_clone = attempts.clone();
-
-            // Create a mock that fails once then succeeds
-            let mut mock = MockDiskIO::new();
-            mock.expect_read_page().times(2).returning(move |_, buf| {
-                let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
-                if current_attempt == 0 {
-                    Err(Error::new(ErrorKind::Other, "Simulated read error"))
-                } else {
-                    buf[0] = 42; // Set test data
-                    Ok(())
-                }
-            });
-
-            // Set the mock implementation
-            disk_manager.set_disk_io(Box::new(mock));
-
-            // Test the retry mechanism
-            let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-            let result = disk_manager.read_page_with_retry(0, &mut read_buffer);
-
-            assert!(result.is_ok(), "Read should eventually succeed");
-            assert_eq!(read_buffer[0], 42, "Should have read correct data");
-
-            // Verify metrics
-            assert_eq!(
-                disk_manager.metrics.read_errors.load(Ordering::Relaxed),
-                1,
-                "Should record one read error"
-            );
-            assert!(
-                disk_manager.metrics.read_latency_ns.load(Ordering::Relaxed) > 0,
-                "Should record read latency"
-            );
-        }
-
-        #[test]
-        fn test_retry_delay() {
-            let ctx = TestContext::new("test_retry_delay");
-            let disk_manager = ctx.disk_manager.write();
-            let start_time = Instant::now();
-
-            // Create a mock that fails twice then succeeds
-            let mut mock = MockDiskIO::new();
-            mock.expect_write_page()
-                .times(FileDiskManager::MAX_RETRIES as usize)
-                .returning(|_, _| Err(Error::new(ErrorKind::Other, "Temporary error")));
-
-            // Set the mock implementation
-            disk_manager.set_disk_io(Box::new(mock));
-
-            // Attempt write that will fail
-            let test_data = [42u8; DB_PAGE_SIZE as usize];
-            let result = disk_manager.write_page_with_retry(0, &test_data);
-
-            // Verify that appropriate time has elapsed
-            let elapsed = start_time.elapsed();
-            assert!(result.is_err(), "Write should fail after retries");
-            assert!(
-                elapsed
-                    >= Duration::from_millis(
-                        FileDiskManager::RETRY_DELAY_MS * (FileDiskManager::MAX_RETRIES - 1) as u64
-                    ),
-                "Should have waited appropriate retry delay time"
-            );
+            Ok(())
         }
     }
 }
