@@ -217,6 +217,8 @@ impl Type for DecimalType {
     }
 }
 
+pub static DECIMAL_TYPE_INSTANCE: DecimalType = DecimalType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

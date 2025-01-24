@@ -170,6 +170,8 @@ impl Type for TimestampType {
     }
 }
 
+pub static TIMESTAMP_TYPE_INSTANCE: TimestampType = TimestampType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

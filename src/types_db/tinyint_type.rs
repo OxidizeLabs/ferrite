@@ -335,6 +335,8 @@ impl Type for TinyIntType {
     }
 }
 
+pub static TINYINT_TYPE_INSTANCE: TinyIntType = TinyIntType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -32,6 +32,7 @@ impl MockExpression {
             TypeId::VarChar => Value::new(name.clone()),
             TypeId::Vector => Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
             TypeId::Invalid => Value::new(Val::Null),
+            TypeId::Char => Value::new(name.clone())
         });
 
         Self {

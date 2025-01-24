@@ -175,6 +175,8 @@ impl Type for BigIntType {
     }
 }
 
+pub static BIGINT_TYPE_INSTANCE: BigIntType = BigIntType;
+
 #[cfg(test)]
 mod tests {
     use super::*;

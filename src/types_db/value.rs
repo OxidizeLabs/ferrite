@@ -15,7 +15,7 @@ pub enum Val {
     Decimal(f64),
     Timestamp(u64),
     VarLen(String),
-    ConstVarLen(String),
+    ConstLen(String),
     Vector(Vec<Value>),
     Null,
 }
@@ -45,7 +45,7 @@ impl Value {
             Val::BigInt(_) => TypeId::BigInt,
             Val::Decimal(_) => TypeId::Decimal,
             Val::Timestamp(_) => TypeId::Timestamp,
-            Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
+            Val::VarLen(_) | Val::ConstLen(_) => TypeId::VarChar,
             Val::Vector(_) => TypeId::Vector,
             Val::Null => TypeId::Invalid,
         };
@@ -84,7 +84,7 @@ impl Value {
             Val::BigInt(_) => 8,
             Val::Decimal(_) => 8,
             Val::Timestamp(_) => 8,
-            Val::VarLen(s) | Val::ConstVarLen(s) => s.len() as u32,
+            Val::VarLen(s) | Val::ConstLen(s) => s.len() as u32,
             Val::Vector(v) => 4 + v.len() as u32 * 4,
             Val::Null => 1,
         }
@@ -100,7 +100,7 @@ impl Value {
             Val::BigInt(i) => bytes.extend_from_slice(&i.to_le_bytes()),
             Val::Decimal(f) => bytes.extend_from_slice(&f.to_le_bytes()),
             Val::Timestamp(t) => bytes.extend_from_slice(&t.to_le_bytes()),
-            Val::VarLen(s) | Val::ConstVarLen(s) => bytes.extend_from_slice(s.as_bytes()),
+            Val::VarLen(s) | Val::ConstLen(s) => bytes.extend_from_slice(s.as_bytes()),
             Val::Vector(v) => {
                 for value in v {
                     bytes.extend(value.as_bytes());
@@ -216,7 +216,7 @@ impl Type for Value {
             (Val::Decimal(l), Val::Decimal(r)) => (l < r).into(),
             (Val::Timestamp(l), Val::Timestamp(r)) => (l < r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l < r).into(),
-            (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l < r).into(),
+            (Val::ConstLen(l), Val::ConstLen(r)) => (l < r).into(),
             _ => CmpBool::CmpFalse,
         }
     }
@@ -243,7 +243,7 @@ impl Type for Value {
             (Val::Decimal(l), Val::Decimal(r)) => (l > r).into(),
             (Val::Timestamp(l), Val::Timestamp(r)) => (l > r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
-            (Val::ConstVarLen(l), Val::ConstVarLen(r)) => (l > r).into(),
+            (Val::ConstLen(l), Val::ConstLen(r)) => (l > r).into(),
             _ => CmpBool::CmpFalse,
         }
     }
@@ -366,6 +366,7 @@ impl From<TypeId> for Val {
             TypeId::Decimal => Val::Decimal(0.0),
             TypeId::Timestamp => Val::Timestamp(0),
             TypeId::VarChar => Val::VarLen(String::new()),
+            TypeId::Char => Val::ConstLen(String::new()),
             TypeId::Vector => Val::Vector(Vec::new()),
             TypeId::Invalid => Val::Null,
         }
@@ -465,7 +466,7 @@ impl Display for Value {
             Val::Decimal(d) => write!(f, "{}", d),
             Val::Boolean(b) => write!(f, "{}", b),
             Val::VarLen(s) => write!(f, "{}", s),
-            Val::ConstVarLen(s) => write!(f, "{}", s),
+            Val::ConstLen(s) => write!(f, "{}", s),
             Val::Timestamp(ts) => {
                 let secs = ts;
                 let seconds = secs % 60;
@@ -498,7 +499,7 @@ impl Hash for Value {
             Val::BigInt(i) => i.hash(state),
             Val::Decimal(f) => f.to_bits().hash(state),
             Val::Timestamp(t) => t.hash(state),
-            Val::VarLen(s) | Val::ConstVarLen(s) => s.hash(state),
+            Val::VarLen(s) | Val::ConstLen(s) => s.hash(state),
             Val::Vector(v) => {
                 for value in v {
                     value.hash(state);

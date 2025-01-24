@@ -13,6 +13,7 @@ pub enum TypeId {
     Decimal,
     Timestamp,
     VarChar,
+    Char,
     Vector,
     Invalid,
 }
@@ -46,6 +47,7 @@ impl TypeId {
             TypeId::Decimal => Value::new(Val::Decimal(0.0)),
             TypeId::Timestamp => Value::new(Val::Timestamp(0)),
             TypeId::VarChar => Value::new(Val::VarLen(String::new())),
+            TypeId::Char => Value::new(Val::ConstLen(String::new())),
             TypeId::Vector => Value::new(Val::Vector(Vec::new())),
             TypeId::Invalid => Value::new(Val::Null),
         }
@@ -60,7 +62,8 @@ impl TypeId {
             Val::BigInt(_) => TypeId::BigInt,
             Val::Decimal(_) => TypeId::Decimal,
             Val::Timestamp(_) => TypeId::Timestamp,
-            Val::VarLen(_) | Val::ConstVarLen(_) => TypeId::VarChar,
+            Val::VarLen(_) => TypeId::VarChar,
+            Val::ConstLen(_) => TypeId::Char,
             Val::Vector(_) => TypeId::Vector,
             Val::Null => TypeId::Invalid,
         }
