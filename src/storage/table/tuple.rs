@@ -1,14 +1,13 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::common::config::TxnId;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
-use crate::types_db::types::Type;
+use crate::common::time::TimeStamp;
 use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use crate::common::config::TxnId;
-use crate::common::time::TimeStamp;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
@@ -55,6 +54,26 @@ impl TupleMeta {
 
     pub fn set_deleted(&mut self, deleted: bool) {
         self.deleted = deleted;
+    }
+
+    /// Checks if this tuple is visible to the given transaction.
+    ///
+    /// A tuple is visible if:
+    /// 1. It was created by the current transaction, OR
+    /// 2. It was created by a committed transaction AND not deleted
+    pub fn is_visible_to(&self, txn_id: TxnId) -> bool {
+        // If this tuple was created by the current transaction, it's visible
+        if self.creator_txn_id == txn_id {
+            return true;
+        }
+
+        // If the tuple is deleted, it's not visible
+        if self.deleted {
+            return false;
+        }
+
+        // If the tuple is committed (has a commit timestamp), it's visible
+        self.is_committed()
     }
 }
 
@@ -158,13 +177,14 @@ impl Tuple {
     ///
     /// This method constructs a schema based on the types of values in the tuple.
     pub fn get_schema(&self) -> Schema {
-        let columns: Vec<Column> = self.values
+        let columns: Vec<Column> = self
+            .values
             .iter()
             .enumerate()
             .map(|(i, value)| {
                 Column::new(
-                    &format!("col_{}", i),  // Default column name
-                    value.get_type_id(),     // Get TypeId from the Value
+                    &format!("col_{}", i), // Default column name
+                    value.get_type_id(),   // Get TypeId from the Value
                 )
             })
             .collect();
@@ -287,10 +307,6 @@ mod tests {
     fn test_tuple_keys_from_tuple() {
         let (tuple, _schema) = create_sample_tuple();
 
-        let key_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("age", TypeId::Integer),
-        ]);
         let key_attrs = vec![0, 2];
         let keys = tuple.keys_from_tuple(key_attrs);
 
@@ -403,11 +419,7 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
 
-        let values = vec![
-            Value::new(1),
-            Value::new("Alice"),
-            Value::new(30),
-        ];
+        let values = vec![Value::new(1), Value::new("Alice"), Value::new(30)];
 
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&values, schema.clone(), rid);
@@ -422,7 +434,8 @@ mod tests {
             assert_eq!(
                 derived_schema.get_column(i as usize).unwrap().get_type(),
                 schema.get_column(i as usize).unwrap().get_type(),
-                "Type mismatch for column {}", i
+                "Type mismatch for column {}",
+                i
             );
         }
     }
