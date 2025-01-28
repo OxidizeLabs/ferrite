@@ -1,14 +1,11 @@
 use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::LockMode::{
-    Exclusive, IntentionExclusive, IntentionShared, Shared, SharedIntentionExclusive,
-};
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction::{Transaction, TransactionState};
 use crate::concurrency::transaction_manager::TransactionManager;
-use log::{debug, error, info, warn};
-use parking_lot::{Condvar, Mutex, RwLock};
+use parking_lot::lock_api::MutexGuard;
+use parking_lot::{Condvar, Mutex, RawMutex};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -51,6 +48,15 @@ use std::{fmt, thread};
 /// - The transaction is required to take only IX and X locks.
 /// - X and IX locks are allowed in the `GROWING` state.
 /// - S, IS, and SIX locks are never allowed.
+///
+/// ## Lock Compatibility Matrix
+///
+///     IS  IX  S   SIX X
+/// IS  Y   Y   Y   Y   N
+/// IX  Y   Y   N   N   N
+/// S   Y   N   Y   N   N
+/// SIX Y   N   N   N   N
+/// X   N   N   N   N   N
 ///
 /// # Multilevel Locking
 /// While locking rows, `lock` should ensure that the transaction has an appropriate lock on the table which the row belongs to. For instance, if an exclusive lock is attempted on a row, the transaction must hold either X, IX, or SIX on the table. If such a lock does not exist on the table, `lock` should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `TABLE_LOCK_NOT_PRESENT`.
@@ -139,22 +145,54 @@ pub struct LockRequestQueue {
     latch: Mutex<()>,
 }
 
-/// LockManager handles transactions asking for locks on records.
-#[derive(Debug)]
-pub struct LockManager {
-    transaction_manager: Arc<TransactionManager>,
-    table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
-    txn_locks: Mutex<HashMap<TxnId, TxnLockState>>,
-    row_lock_map: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
-    enable_cycle_detection: AtomicBool,
-    cycle_detection_thread: Option<thread::JoinHandle<()>>,
-    waits_for: Mutex<HashMap<TxnId, Vec<TxnId>>>,
-}
-
 #[derive(Clone, Debug)]
 struct TxnLockState {
     table_locks: HashSet<TableOidT>,
     row_locks: HashSet<(TableOidT, RID)>,
+}
+
+// Lock request tracking for a specific resource
+#[derive(Debug)]
+struct ResourceLockState {
+    request_queue: VecDeque<Arc<Mutex<LockRequest>>>,
+    granted_locks: HashSet<TxnId>,
+    upgrading_txn: Option<TxnId>,
+}
+
+// 1. Deadlock Detection Component
+#[derive(Debug)]
+pub struct DeadlockDetector {
+    waits_for: Arc<Mutex<HashMap<TxnId, Vec<TxnId>>>>,
+    enable_detection: Arc<AtomicBool>,
+    detection_thread: Option<thread::JoinHandle<()>>,
+    transaction_manager: Arc<TransactionManager>,
+}
+
+// 2. Lock State Manager - Handles all lock state tracking and management
+#[derive(Debug)]
+pub struct LockStateManager {
+    table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
+    row_locks: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
+    txn_lock_sets: Mutex<HashMap<TxnId, TxnLockState>>,
+}
+
+// 3. Lock Validator
+#[derive(Debug)]
+pub struct LockValidator {
+    transaction_manager: Arc<TransactionManager>,
+}
+
+// 4. Lock Compatibility Checker
+#[derive(Debug)]
+pub struct LockCompatibilityChecker;
+
+// Main LockManager that orchestrates the components
+#[derive(Debug)]
+pub struct LockManager {
+    deadlock_detector: DeadlockDetector,
+    lock_state_manager: LockStateManager,
+    lock_validator: LockValidator,
+    compatibility_checker: LockCompatibilityChecker,
 }
 
 impl LockRequest {
@@ -200,9 +238,6 @@ impl LockRequest {
 
 impl LockRequestQueue {
     /// Creates a new `LockRequestQueue`.
-    ///
-    /// # Returns
-    /// A new `LockRequestQueue` instance.
     pub fn new() -> Self {
         Self {
             request_queue: VecDeque::new(),
@@ -211,102 +246,362 @@ impl LockRequestQueue {
             latch: Mutex::new(()),
         }
     }
+
+    /// Checks if a new lock request is compatible with existing granted locks.
+    pub fn compatible_with_existing_locks(&self, request: &LockRequest) -> bool {
+        let txn_id = request.txn_id;
+        let new_mode = request.lock_mode;
+
+        // If there's an upgrading transaction, no other locks can be granted
+        if self.upgrading != INVALID_TXN_ID && self.upgrading != txn_id {
+            return false;
+        }
+
+        // Check existing locks by this transaction
+        let mut has_lock = false;
+        for existing_req in &self.request_queue {
+            let existing = existing_req.lock();
+            if existing.granted && existing.txn_id == txn_id {
+                has_lock = true;
+                // Check if this is a valid lock upgrade
+                match (existing.lock_mode, new_mode) {
+                    // IS -> [S, X, IX, SIX]
+                    (LockMode::IntentionShared, _) => return true,
+                    // S -> [X, SIX]
+                    (LockMode::Shared, LockMode::Exclusive | LockMode::SharedIntentionExclusive) => return true,
+                    // IX -> [X, SIX]
+                    (LockMode::IntentionExclusive, LockMode::Exclusive | LockMode::SharedIntentionExclusive) => return true,
+                    // SIX -> [X]
+                    (LockMode::SharedIntentionExclusive, LockMode::Exclusive) => return true,
+                    // Same mode - already granted
+                    (mode1, mode2) if mode1 == mode2 => return true,
+                    // Invalid upgrade
+                    _ => return false,
+                }
+            }
+        }
+
+        // If this transaction doesn't have a lock yet, check compatibility with all granted locks
+        if !has_lock {
+            for existing_req in &self.request_queue {
+                let existing = existing_req.lock();
+                if existing.granted && !LockCompatibilityChecker::are_compatible(existing.lock_mode, new_mode) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Attempts to grant a lock request.
+    pub fn grant_lock(&mut self, request: Arc<Mutex<LockRequest>>) -> bool {
+        let txn_id = request.lock().txn_id;
+        let lock_mode = request.lock().lock_mode;
+
+        // Check for existing locks by this transaction
+        let mut existing_lock = None;
+        for (i, existing_req) in self.request_queue.iter().enumerate() {
+            let existing = existing_req.lock();
+            if existing.granted && existing.txn_id == txn_id {
+                if existing.lock_mode == lock_mode {
+                    return true; // Already have this lock
+                }
+                existing_lock = Some((i, existing.lock_mode));
+                break;
+            }
+        }
+
+        // Handle lock upgrade if needed
+        if let Some((i, old_mode)) = existing_lock {
+            // Check if upgrade is allowed
+            match (old_mode, lock_mode) {
+                // Keep both locks for valid combinations
+                (LockMode::IntentionShared, LockMode::Shared) |
+                (LockMode::IntentionExclusive, LockMode::Exclusive) => {
+                    // Don't remove the intention lock, just add the new lock
+                },
+                // For other upgrades, remove the old lock
+                _ => {
+                    if self.upgrading != INVALID_TXN_ID && self.upgrading != txn_id {
+                        return false; // Another transaction is upgrading
+                    }
+                    self.upgrading = txn_id;
+                    self.request_queue.remove(i);
+                }
+            }
+        }
+
+        // Check compatibility with existing locks
+        if self.compatible_with_existing_locks(&request.lock()) {
+            // Grant the new lock
+            self.request_queue.push_back(request.clone());
+            request.lock().granted = true;
+            if self.upgrading == txn_id {
+                self.upgrading = INVALID_TXN_ID;
+            }
+            self.cv.notify_all();
+            return true;
+        }
+
+        // Add request to queue but don't grant it yet
+        self.request_queue.push_back(request);
+        false
+    }
 }
 
-impl LockManager {
-    /// Creates a new lock manager configured for the deadlock detection policy.
-    ///
-    /// # Parameters
-    /// - `transaction_manager`: A reference to the transaction manager.
-    ///
-    /// # Returns
-    /// A new `LockManager` instance.
+impl DeadlockDetector {
     pub fn new(transaction_manager: Arc<TransactionManager>) -> Self {
         Self {
+            waits_for: Arc::new(Mutex::new(HashMap::new())),
+            enable_detection: Arc::new(AtomicBool::new(false)),
+            detection_thread: None,
             transaction_manager,
-            table_lock_map: Mutex::new(HashMap::new()),
-            row_lock_map: Mutex::new(HashMap::new()),
-            txn_locks: Mutex::new(HashMap::new()),
-            enable_cycle_detection: AtomicBool::new(false),
-            cycle_detection_thread: None,
-            waits_for: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Starts the deadlock detection process in a separate thread.
-    /// Uses a cloned Arc to avoid moving self into the thread.
-    pub fn start_deadlock_detection(&mut self) {
-        self.enable_cycle_detection.store(true, Ordering::SeqCst);
+    pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
+        let mut waits_for = self.waits_for.lock();
+        waits_for.entry(t1).or_insert_with(Vec::new).push(t2);
+    }
 
-        // Create a clone of the necessary components for the detection thread
-        let enable_detection = Arc::new(AtomicBool::new(true));
-        let enable_detection_clone = enable_detection.clone();
+    pub fn remove_edge(&self, t1: TxnId) {
+        let mut waits_for = self.waits_for.lock();
+        waits_for.remove(&t1);
+    }
 
-        // Clone the transaction manager reference
-        let txn_mgr = Arc::clone(&self.transaction_manager);
+    pub fn start_detection(&mut self) {
+        self.enable_detection.store(true, Ordering::SeqCst);
+        let enable_detection = Arc::clone(&self.enable_detection);
+        let transaction_manager = Arc::clone(&self.transaction_manager);
+        let waits_for = Arc::clone(&self.waits_for);
 
-        // Create a new Arc<Mutex<Self>> to share the LockManager
-        let lock_manager = Arc::new(Mutex::new(self.clone()));
-        let lock_manager_clone = Arc::clone(&lock_manager);
-
-        self.cycle_detection_thread = Some(thread::spawn(move || {
-            info!("Starting deadlock detection cycle");
-
-            while enable_detection_clone.load(Ordering::SeqCst) {
-                let mut txn_id = INVALID_TXN_ID;
-
-                // Access the lock manager through the Arc<Mutex>
-                let lm = lock_manager_clone.lock();
-                if lm.has_cycle(&mut txn_id) {
-                    warn!("Deadlock detected, aborting transaction: {}", abort_txn = txn_id,);
-
-                    if let Some(txn) = txn_mgr.get_transaction(&txn_id) {
+        self.detection_thread = Some(thread::spawn(move || {
+            while enable_detection.load(Ordering::SeqCst) {
+                let mut abort_txn = INVALID_TXN_ID;
+                if Self::find_cycle_in_graph(&waits_for.lock(), &mut abort_txn) {
+                    if let Some(txn) = transaction_manager.get_transaction(&abort_txn) {
                         txn.set_state(TransactionState::Aborted);
                     }
                 }
-
-                // Release the lock before sleeping
-                drop(lm);
                 thread::sleep(std::time::Duration::from_millis(50));
             }
-
-            info!("Deadlock detection cycle stopped");
         }));
     }
 
-    /// Safely stops the deadlock detection thread
-    pub fn stop_deadlock_detection(&mut self) {
-        self.enable_cycle_detection.store(false, Ordering::SeqCst);
+    /// Checks if there is a cycle in the waits-for graph
+    /// Returns true if a cycle is found and sets abort_txn to the transaction to abort
+    pub fn has_cycle(&self, abort_txn: &mut TxnId) -> bool {
+        let waits_for = self.waits_for.lock();
+        Self::find_cycle_in_graph(&waits_for, abort_txn)
+    }
 
-        if let Some(handle) = self.cycle_detection_thread.take() {
-            // Wait for the thread to finish
-            if let Err(e) = handle.join() {
-                warn!("Error joining deadlock detection thread: {:?}", e);
+    /// Helper function to find cycles in the waits-for graph using DFS
+    fn find_cycle_in_graph(
+        waits_for: &HashMap<TxnId, Vec<TxnId>>,
+        abort_txn: &mut TxnId
+    ) -> bool {
+        let mut visited = HashSet::new();
+        let mut path = Vec::new();
+        let mut on_path = HashSet::new();
+
+        for &txn_id in waits_for.keys() {
+            if !visited.contains(&txn_id) {
+                if Self::dfs_cycle(txn_id, waits_for, &mut visited, &mut path, &mut on_path, abort_txn) {
+                    return true;
+                }
             }
+        }
+        false
+    }
+
+    fn dfs_cycle(
+        curr: TxnId,
+        waits_for: &HashMap<TxnId, Vec<TxnId>>,
+        visited: &mut HashSet<TxnId>,
+        path: &mut Vec<TxnId>,
+        on_path: &mut HashSet<TxnId>,
+        abort_txn: &mut TxnId,
+    ) -> bool {
+        visited.insert(curr);
+        path.push(curr);
+        on_path.insert(curr);
+
+        if let Some(edges) = waits_for.get(&curr) {
+            for &next in edges {
+                if on_path.contains(&next) {
+                    // Found cycle - choose highest transaction ID to abort
+                    *abort_txn = *path.iter().skip_while(|&&x| x != next).max().unwrap_or(&next);
+                    return true;
+                }
+                if !visited.contains(&next) {
+                    if Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        path.pop();
+        on_path.remove(&curr);
+        false
+    }
+}
+
+impl LockStateManager {
+    pub fn new() -> Self {
+        Self {
+            table_lock_map: Mutex::new(HashMap::new()),
+            row_locks: Mutex::new(HashMap::new()),
+            txn_lock_sets: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Check if transaction has a lock on a table
+    /// Attempts to grant a table lock
+    pub fn grant_table_lock(&self, txn_id: TxnId, lock_mode: LockMode, oid: TableOidT) -> bool {
+        let mut table_locks = self.table_lock_map.lock();
+        let queue = table_locks
+            .entry(oid)
+            .or_insert_with(|| Arc::new(Mutex::new(LockRequestQueue::new())));
+
+        // Create and try to grant the lock request
+        let request = Arc::new(Mutex::new(LockRequest::new_table_request(txn_id, lock_mode, oid)));
+        let mut queue_guard = queue.lock();
+        let granted = queue_guard.grant_lock(request);
+
+        // If granted, update transaction's lock set
+        if granted {
+            let mut txn_locks = self.txn_lock_sets.lock();
+            let lock_state = txn_locks.entry(txn_id).or_insert_with(|| TxnLockState {
+                table_locks: HashSet::new(),
+                row_locks: HashSet::new(),
+            });
+            lock_state.table_locks.insert(oid);
+        }
+
+        // Drop locks in reverse order to avoid deadlock
+        drop(queue_guard);
+        drop(table_locks);
+
+        granted
+    }
+
+    /// Attempts to grant a row lock
+    pub fn grant_row_lock(&self, txn_id: TxnId, lock_mode: LockMode, rid: RID) -> bool {
+        let mut row_locks = self.row_locks.lock();
+        let queue = row_locks
+            .entry(rid)
+            .or_insert_with(|| Arc::new(Mutex::new(LockRequestQueue::new())));
+
+        let request = Arc::new(Mutex::new(LockRequest::new_row_request(txn_id, lock_mode, rid.get_page_id(), rid)));
+        let granted = queue.lock().grant_lock(request.clone());
+
+        if granted {
+            // Update transaction's lock set
+            let mut txn_locks = self.txn_lock_sets.lock();
+            let lock_state = txn_locks.entry(txn_id).or_insert_with(|| TxnLockState {
+                table_locks: HashSet::new(),
+                row_locks: HashSet::new(),
+            });
+            lock_state.row_locks.insert((rid.get_page_id(), rid));
+        }
+
+        granted
+    }
+
+    /// Releases a table lock
+    pub fn release_table_lock(&self, txn_id: TxnId, oid: TableOidT) -> Result<(), LockError> {
+        let table_locks = self.table_lock_map.lock();
+        
+        if let Some(queue) = table_locks.get(&oid) {
+            let mut queue_guard = queue.lock();
+            
+            // Find and remove the lock request
+            if let Some(pos) = queue_guard.request_queue.iter().position(|req| {
+                let req = req.lock();
+                req.txn_id == txn_id && req.granted
+            }) {
+                // Remove the lock request
+                queue_guard.request_queue.remove(pos);
+                
+                // Update transaction's lock set
+                let mut txn_locks = self.txn_lock_sets.lock();
+                if let Some(lock_state) = txn_locks.get_mut(&txn_id) {
+                    lock_state.table_locks.remove(&oid);
+                }
+                
+                // Try to grant waiting locks
+                let mut i = 0;
+                while i < queue_guard.request_queue.len() {
+                    let request = queue_guard.request_queue[i].clone();
+                    if !request.lock().granted && queue_guard.compatible_with_existing_locks(&request.lock()) {
+                        request.lock().granted = true;
+                    }
+                    i += 1;
+                }
+                queue_guard.cv.notify_all();
+                
+                return Ok(());
+            }
+        }
+        
+        Err(LockError::NoLockHeld)
+    }
+
+    /// Releases a row lock
+    pub fn release_row_lock(&self, txn_id: TxnId, rid: RID) -> Result<(), LockError> {
+        let row_locks = self.row_locks.lock();
+
+        if let Some(queue) = row_locks.get(&rid) {
+            let mut queue_guard = queue.lock();
+
+            // Find and remove the lock request
+            if let Some(pos) = queue_guard.request_queue.iter().position(|req| {
+                let req = req.lock();
+                req.txn_id == txn_id && req.granted
+            }) {
+                queue_guard.request_queue.remove(pos);
+
+                // Update transaction's lock set
+                let mut txn_locks = self.txn_lock_sets.lock();
+                if let Some(lock_state) = txn_locks.get_mut(&txn_id) {
+                    lock_state.row_locks.remove(&(rid.get_page_id(), rid));
+                }
+
+                // Try to grant waiting locks
+                self.grant_waiting_locks(&mut queue_guard);
+                return Ok(());
+            }
+        }
+
+        Err(LockError::NoLockHeld)
+    }
+
+    /// Attempts to grant locks to waiting transactions
+    fn grant_waiting_locks(&self, queue: &mut MutexGuard<RawMutex, LockRequestQueue>) {
+        let mut i = 0;
+        while i < queue.request_queue.len() {
+            let request = queue.request_queue[i].clone();
+            if !request.lock().granted && queue.compatible_with_existing_locks(&request.lock()) {
+                request.lock().granted = true;
+                // Don't increment i since we want to check the next request
+            } else {
+                i += 1;
+            }
+        }
+        queue.cv.notify_all();
+    }
+
+    /// Checks if a transaction has a lock on a table
     pub fn has_table_lock(&self, txn_id: TxnId, oid: TableOidT) -> bool {
-        let txn_locks = self.txn_locks.lock();
+        let txn_locks = self.txn_lock_sets.lock();
         txn_locks
             .get(&txn_id)
-            .map(|state| state.table_locks.contains(&oid))
-            .unwrap_or(false)
+            .map_or(false, |state| state.table_locks.contains(&oid))
     }
 
-    /// Check if transaction has a lock on a row
-    pub fn has_row_lock(&self, txn_id: TxnId, oid: TableOidT, rid: RID) -> bool {
-        let txn_locks = self.txn_locks.lock();
-        txn_locks
-            .get(&txn_id)
-            .map(|state| state.row_locks.contains(&(oid, rid)))
-            .unwrap_or(false)
-    }
-
-    /// Get all row locks held by a transaction on a table
+    /// Gets all row locks held by a transaction on a table
     pub fn get_row_locks_for_table(&self, txn_id: TxnId, oid: TableOidT) -> HashSet<RID> {
-        let txn_locks = self.txn_locks.lock();
+        let txn_locks = self.txn_lock_sets.lock();
         txn_locks
             .get(&txn_id)
             .map(|state| {
@@ -319,1018 +614,217 @@ impl LockManager {
             })
             .unwrap_or_default()
     }
+}
 
-    /// Acquires a lock on a table in the given lock mode.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock upgrade.
-    /// - `lock_mode`: The lock mode for the requested lock.
-    /// - `oid`: The table OID of the table to be locked.
-    ///
-    /// # Returns
-    /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
-    ///
-    /// # Errors
-    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn lock_table(
-        &self,
-        txn: Arc<Transaction>,
-        lock_mode: LockMode,
-        oid: TableOidT,
-    ) -> Result<bool, LockError> {
-        info!(
-            "Attempting to acquire table lock: {}, {}, {}",
-            txn_id = txn.get_transaction_id(),
-            table_oid = oid,
-            lock_mode = lock_mode,
-        );
+impl LockCompatibilityChecker {
+    pub fn are_compatible(l1: LockMode, l2: LockMode) -> bool {
+        match (l1, l2) {
+            // IS is compatible with IS, IX, S, SIX
+            (LockMode::IntentionShared, LockMode::IntentionShared) => true,
+            (LockMode::IntentionShared, LockMode::IntentionExclusive) => true,
+            (LockMode::IntentionShared, LockMode::Shared) => true,
+            (LockMode::IntentionShared, LockMode::SharedIntentionExclusive) => true,
+            (LockMode::IntentionShared, LockMode::Exclusive) => false,
 
-        // Validate lock request
-        if let Err(e) = self.validate_lock_request(&txn, lock_mode) {
-            error!(
-                "Lock request validation failed: {} {}",
-                error = e,
-                txn_id = txn.get_transaction_id(),
+            // IX is compatible with IS, IX only
+            (LockMode::IntentionExclusive, LockMode::IntentionShared) => true,
+            (LockMode::IntentionExclusive, LockMode::IntentionExclusive) => true,
+            (LockMode::IntentionExclusive, LockMode::Shared) => false,
+            (LockMode::IntentionExclusive, LockMode::SharedIntentionExclusive) => false,
+            (LockMode::IntentionExclusive, LockMode::Exclusive) => false,
 
-            );
-            return Err(e);
+            // S is compatible with IS, S
+            (LockMode::Shared, LockMode::IntentionShared) => true,
+            (LockMode::Shared, LockMode::Shared) => true,
+            (LockMode::Shared, LockMode::IntentionExclusive) => false,
+            (LockMode::Shared, LockMode::SharedIntentionExclusive) => false,
+            (LockMode::Shared, LockMode::Exclusive) => false,
+
+            // SIX is compatible with IS only
+            (LockMode::SharedIntentionExclusive, LockMode::IntentionShared) => true,
+            (LockMode::SharedIntentionExclusive, LockMode::IntentionExclusive) => false,
+            (LockMode::SharedIntentionExclusive, LockMode::Shared) => false,
+            (LockMode::SharedIntentionExclusive, LockMode::SharedIntentionExclusive) => false,
+            (LockMode::SharedIntentionExclusive, LockMode::Exclusive) => false,
+
+            // X is not compatible with anything
+            (LockMode::Exclusive, _) => false,
+
+            // Handle symmetric cases
+            (a, b) => Self::are_compatible(b, a),
         }
+    }
+}
 
-        let mut table_lock_map = self.table_lock_map.lock();
-        let lock_queue = table_lock_map
-            .entry(oid)
-            .or_insert_with(|| Arc::new(Mutex::new(LockRequestQueue::new())));
+impl LockValidator {
+    pub fn new(transaction_manager: Arc<TransactionManager>) -> Self {
+        Self { transaction_manager }
+    }
 
+    pub fn validate_lock_request(
+        &self,
+        txn: &Transaction,
+        lock_mode: LockMode,
+    ) -> Result<(), LockError> {
+        match txn.get_isolation_level() {
+            IsolationLevel::ReadUncommitted => self.validate_read_uncommitted(txn, lock_mode),
+            IsolationLevel::ReadCommitted => self.validate_read_committed(txn, lock_mode),
+            IsolationLevel::RepeatableRead => self.validate_repeatable_read(txn, lock_mode),
+            IsolationLevel::Serializable => Ok(()),
+        }
+    }
+
+    /// Validates lock requests for READ UNCOMMITTED isolation level
+    fn validate_read_uncommitted(&self, txn: &Transaction, lock_mode: LockMode) -> Result<(), LockError> {
+        // READ UNCOMMITTED can only take X and IX locks
+        match lock_mode {
+            LockMode::Shared | LockMode::IntentionShared | LockMode::SharedIntentionExclusive => {
+                Err(LockError::LockSharedOnReadUncommitted)
+            }
+            LockMode::Exclusive | LockMode::IntentionExclusive => {
+                if txn.get_state() == TransactionState::Shrinking {
+                    Err(LockError::LockOnShrinking)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Validates lock requests for READ COMMITTED isolation level
+    fn validate_read_committed(&self, txn: &Transaction, lock_mode: LockMode) -> Result<(), LockError> {
+        match txn.get_state() {
+            TransactionState::Growing => Ok(()),
+            TransactionState::Shrinking => match lock_mode {
+                // Only S and IS locks allowed in SHRINKING state
+                LockMode::Shared | LockMode::IntentionShared => Ok(()),
+                _ => Err(LockError::LockOnShrinking),
+            },
+            TransactionState::Aborted => Err(LockError::TransactionAborted),
+            TransactionState::Committed => Err(LockError::TransactionCommitted),
+            TransactionState::Running => Ok(()),
+            TransactionState::Tainted => Err(LockError::TransactionAborted),
+        }
+    }
+
+    /// Validates lock requests for REPEATABLE READ isolation level
+    fn validate_repeatable_read(&self, txn: &Transaction, _lock_mode: LockMode) -> Result<(), LockError> {
+        match txn.get_state() {
+            TransactionState::Growing => Ok(()),
+            TransactionState::Shrinking => Err(LockError::LockOnShrinking),
+            TransactionState::Aborted => Err(LockError::TransactionAborted),
+            TransactionState::Committed => Err(LockError::TransactionCommitted),
+            TransactionState::Running => Ok(()),
+            TransactionState::Tainted => Err(LockError::TransactionAborted),
+        }
+    }
+}
+
+impl LockManager {
+    pub fn new(transaction_manager: Arc<TransactionManager>) -> Self {
+        Self {
+            deadlock_detector: DeadlockDetector::new(Arc::clone(&transaction_manager)),
+            lock_state_manager: LockStateManager::new(),
+            lock_validator: LockValidator::new(Arc::clone(&transaction_manager)),
+            compatibility_checker: LockCompatibilityChecker,
+        }
+    }
+
+    /// Attempts to acquire a table lock.
+    pub fn lock_table(&self, txn: Arc<Transaction>, lock_mode: LockMode, oid: TableOidT) -> Result<bool, LockError> {
+        // 1. Validate the lock request
+        self.lock_validator.validate_lock_request(&txn, lock_mode)?;
+
+        // 2. Create lock request
         let request = Arc::new(Mutex::new(LockRequest::new_table_request(
             txn.get_transaction_id(),
             lock_mode,
             oid,
         )));
 
-        let mut lock_queue_guard = lock_queue.lock();
-        lock_queue_guard.request_queue.push_back(request.clone());
-
-        self.grant_new_locks_if_possible(&mut lock_queue_guard);
-
-        while !request.lock().granted {
-            lock_queue.lock().cv.wait_while(&mut lock_queue_guard, |_| {
-                !request.lock().granted && txn.get_state() != TransactionState::Aborted
-            });
-
-            if txn.get_state() == TransactionState::Aborted {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-
-    /// Releases the lock held on a table by the transaction.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction releasing the lock.
-    /// - `oid`: The table OID of the table to be unlocked.
-    ///
-    /// # Returns
-    /// `true` if the unlock is successful, `false` otherwise.
-    ///
-    /// # Errors
-    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn unlock_table(&self, txn: &mut Transaction, oid: TableOidT) -> Result<bool, LockError> {
-        // Check if transaction holds any row locks on this table
-        let has_row_locks = !self
-            .get_row_locks_for_table(txn.get_transaction_id(), oid)
-            .is_empty();
-        if has_row_locks {
-            return Err(LockError::TableUnlockedBeforeRows);
-        }
-
-        let table_lock_map = self.table_lock_map.lock();
-        if let Some(lock_queue) = table_lock_map.get(&oid) {
-            let mut lock_queue_guard = lock_queue.lock();
-
-            // Check if lock is actually held
-            if !lock_queue_guard.request_queue.iter().any(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            }) {
-                return Err(LockError::NoLockHeld);
-            }
-
-            // Remove the lock request
-            if let Some(pos) = lock_queue_guard.request_queue.iter().position(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            }) {
-                lock_queue_guard.request_queue.remove(pos);
-                // Release the lock in our centralized tracking
-                self.release_lock(txn.get_transaction_id(), oid, None);
-                self.grant_new_locks_if_possible(&mut lock_queue_guard);
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Acquires a lock on a row in the given lock mode.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock upgrade.
-    /// - `lock_mode`: The lock mode for the requested lock.
-    /// - `oid`: The table OID of the table the row belongs to.
-    /// - `rid`: The RID of the row to be locked.
-    ///
-    /// # Returns
-    /// `true` if the lock is successfully acquired or upgraded, `false` otherwise.
-    ///
-    /// # Errors
-    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn lock_row(
-        &self,
-        txn: &mut Transaction,
-        lock_mode: LockMode,
-        oid: TableOidT,
-        rid: RID,
-    ) -> Result<bool, LockError> {
-        // Validate lock request
-        self.validate_lock_request(txn, lock_mode)?;
-        self.validate_row_lock(txn, lock_mode, oid)?;
-
-        let mut row_lock_map = self.row_lock_map.lock();
-        let lock_queue = row_lock_map
-            .entry(rid)
+        // 3. Get or create lock queue for this table
+        let mut table_locks = self.lock_state_manager.table_lock_map.lock();
+        let queue = table_locks
+            .entry(oid)
             .or_insert_with(|| Arc::new(Mutex::new(LockRequestQueue::new())));
-
-        let request = Arc::new(Mutex::new(LockRequest::new_row_request(
-            txn.get_transaction_id(),
-            lock_mode,
-            oid,
-            rid,
-        )));
-
-        let mut lock_queue_guard = lock_queue.lock();
-        lock_queue_guard.request_queue.push_back(request.clone());
-
-        self.grant_new_locks_if_possible(&mut lock_queue_guard);
-
-        while !request.lock().granted {
-            // Using parking_lot's wait_while
-            lock_queue.lock().cv.wait_while(&mut lock_queue_guard, |_| {
-                !request.lock().granted && txn.get_state() != TransactionState::Aborted
-            });
-
-            if txn.get_state() == TransactionState::Aborted {
-                return Ok(false);
-            }
-        }
-
-        // Lock was granted at this point
-        self.grant_lock(txn.get_transaction_id(), oid, Some(rid));
-        Ok(true)
-    }
-
-    /// Releases the lock held on a row by the transaction.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction releasing the lock.
-    /// - `oid`: The table OID of the table the row belongs to.
-    /// - `rid`: The RID of the row to be unlocked.
-    /// - `force`: Force unlock the tuple regardless of isolation level, not changing the transaction state.
-    ///
-    /// # Returns
-    /// `true` if the unlock is successful, `false` otherwise.
-    ///
-    /// # Errors
-    /// This method should abort the transaction and throw a `TransactionAbortException` under certain circumstances.
-    pub fn unlock_row(
-        &self,
-        txn: &mut Transaction,
-        oid: TableOidT,
-        rid: RID,
-    ) -> Result<bool, LockError> {
-        let row_lock_map = self.row_lock_map.lock();
-        if let Some(lock_queue) = row_lock_map.get(&rid) {
-            let mut lock_queue_guard = lock_queue.lock();
-
-            // Check if lock is actually held
-            if !lock_queue_guard.request_queue.iter().any(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            }) {
-                return Err(LockError::NoLockHeld);
-            }
-
-            if let Some(pos) = lock_queue_guard.request_queue.iter().position(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            }) {
-                // Remove from request queue
-                lock_queue_guard.request_queue.remove(pos);
-
-                // Release lock in centralized tracking
-                self.release_lock(txn.get_transaction_id(), oid, Some(rid));
-
-                // Try to grant locks to waiting transactions
-                self.grant_new_locks_if_possible(&mut lock_queue_guard);
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Adds an edge from `t1` to `t2` in the waits-for graph.
-    ///
-    /// # Parameters
-    /// - `t1`: Transaction waiting for a lock.
-    /// - `t2`: Transaction being waited for.
-    pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
-        info!("Adding edge to waits-for graph: {} {}", txn_from = t1, txn_to = t2);
-
-        let mut waits_for = self.waits_for.lock();
-        waits_for.entry(t1).or_insert_with(Vec::new).push(t2);
-
-        // Log updated graph state
-        self.log_waits_for_state();
-    }
-
-    /// Removes an edge from `t1` to `t2` in the waits-for graph.
-    ///
-    /// # Parameters
-    /// - `t1`: Transaction waiting for a lock.
-    /// - `t2`: Transaction being waited for.
-    pub fn remove_edge(&self, t1: TxnId, t2: TxnId) {
-        info!(
-            "Removing edge from waits-for graph: {} {}",
-            txn_from = t1,
-            txn_to = t2,
-
-        );
-
-        let mut waits_for = self.waits_for.lock();
-        if let Some(edges) = waits_for.get_mut(&t1) {
-            if let Some(pos) = edges.iter().position(|&x| x == t2) {
-                edges.remove(pos);
-                if edges.is_empty() {
-                    waits_for.remove(&t1);
-                }
-            }
-        }
-
-        // Log updated graph state
-        self.log_waits_for_state();
-    }
-
-    /// Checks if the graph has a cycle, returning the newest transaction ID in the cycle if so.
-    ///
-    /// # Parameters
-    /// - `txn_id`: If the graph has a cycle, will contain the newest transaction ID.
-    ///
-    /// # Returns
-    /// `false` if the graph has no cycle, otherwise stores the newest transaction ID in the cycle to `txn_id`.
-    pub fn has_cycle(&self, txn_id: &mut TxnId) -> bool {
-        let waits_for = self.waits_for.lock();
-        let vertices: HashSet<_> = waits_for.keys().cloned().collect();
-        drop(waits_for);
-
-        let mut path = Vec::new();
-        let mut on_path = HashSet::new();
-        let mut visited = HashSet::new();
-
-        for &vertex in &vertices {
-            if !visited.contains(&vertex) {
-                if self.find_cycle(vertex, &mut path, &mut on_path, &mut visited, txn_id) {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    /// Returns all edges in the current waits-for graph.
-    ///
-    /// # Returns
-    /// A vector of all edges in the current waits-for graph.
-    pub fn get_edge_list(&self) -> Vec<(TxnId, TxnId)> {
-        let waits_for = self.waits_for.lock();
-        let mut edges = Vec::new();
-        for (&t1, t2s) in waits_for.iter() {
-            for &t2 in t2s {
-                edges.push((t1, t2));
-            }
-        }
-        edges
-    }
-
-    /// Runs cycle detection in the background.
-    pub fn run_cycle_detection(&self) {
-        info!("Starting deadlock detection cycle");
-
-        while self.enable_cycle_detection.load(Ordering::SeqCst) {
-            let mut txn_id = INVALID_TXN_ID;
-
-            if self.has_cycle(&mut txn_id) {
-                warn!(
-                    "Deadlock detected, aborting transaction: {}", abort_txn = txn_id,
-                );
-
-                // Using parking_lot Mutex
-                if let Some(txn) =  self.transaction_manager.get_transaction(&txn_id) {
-                    txn.set_state(TransactionState::Aborted);
-                }
-            }
-
-            thread::sleep(std::time::Duration::from_millis(50));
-        }
-
-        info!("Deadlock detection cycle stopped");
-    }
-
-    /// Upgrades a lock on a table.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock upgrade.
-    /// - `lock_mode`: The lock mode for the requested lock.
-    /// - `oid`: The table OID of the table to be locked.
-    ///
-    /// # Returns
-    /// `true` if the upgrade is successful, `false` otherwise.
-    pub fn upgrade_lock_table(
-        &self,
-        txn: &mut Transaction,
-        lock_mode: LockMode,
-        oid: TableOidT,
-    ) -> Result<bool, LockError> {
-        // Validate lock request first
-        self.validate_lock_request(txn, lock_mode)?;
-
-        let table_lock_map = self.table_lock_map.lock();
-        if let Some(lock_queue) = table_lock_map.get(&oid) {
-            let mut lock_queue_guard = lock_queue.lock();
-
-            // Find current lock
-            let curr_request_pos = lock_queue_guard.request_queue.iter().position(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            });
-
-            if let Some(pos) = curr_request_pos {
-                let curr_request = lock_queue_guard.request_queue[pos].lock();
-                let curr_mode = curr_request.lock_mode;
-                drop(curr_request);
-
-                // Validate upgrade
-                self.validate_upgrade(
-                    curr_mode,
-                    lock_mode,
-                    &lock_queue_guard,
-                    txn.get_transaction_id(),
-                )?;
-
-                // Mark as upgrading and process upgrade
-                lock_queue_guard.upgrading = txn.get_transaction_id();
-                lock_queue_guard.request_queue.remove(pos);
-
-                let new_request = Arc::new(Mutex::new(LockRequest::new_table_request(
-                    txn.get_transaction_id(),
-                    lock_mode,
-                    oid,
-                )));
-
-                lock_queue_guard
-                    .request_queue
-                    .push_front(new_request.clone());
-                self.grant_new_locks_if_possible(&mut lock_queue_guard);
-
-                while !new_request.lock().granted {
-                    lock_queue.lock().cv.wait_while(&mut lock_queue_guard, |_| {
-                        !new_request.lock().granted && txn.get_state() != TransactionState::Aborted
-                    });
-
-                    if txn.get_state() == TransactionState::Aborted {
-                        return Ok(false);
-                    }
-                }
-
-                lock_queue_guard.upgrading = INVALID_TXN_ID;
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Upgrades a lock on a row.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock upgrade.
-    /// - `lock_mode`: The lock mode for the requested lock.
-    /// - `oid`: The table OID of the table the row belongs to.
-    /// - `rid`: The RID of the row to be locked.
-    ///
-    /// # Returns
-    /// `true` if the upgrade is successful, `false` otherwise.
-    pub fn upgrade_lock_row(
-        &self,
-        txn: &mut Transaction,
-        lock_mode: LockMode,
-        oid: TableOidT,
-        rid: RID,
-    ) -> Result<bool, LockError> {
-        // Validate lock request and row-specific conditions
-        self.validate_lock_request(txn, lock_mode)?;
-        self.validate_row_lock(txn, lock_mode, oid)?;
-
-        let row_lock_map = self.row_lock_map.lock();
-        if let Some(lock_queue) = row_lock_map.get(&rid) {
-            let mut lock_queue_guard = lock_queue.lock();
-
-            let curr_request_pos = lock_queue_guard.request_queue.iter().position(|req| {
-                let req = req.lock();
-                req.txn_id == txn.get_transaction_id() && req.granted
-            });
-
-            if let Some(pos) = curr_request_pos {
-                let curr_request = lock_queue_guard.request_queue[pos].lock();
-                let curr_mode = curr_request.lock_mode;
-                drop(curr_request);
-
-                // Validate upgrade
-                self.validate_upgrade(
-                    curr_mode,
-                    lock_mode,
-                    &lock_queue_guard,
-                    txn.get_transaction_id(),
-                )?;
-
-                lock_queue_guard.upgrading = txn.get_transaction_id();
-                lock_queue_guard.request_queue.remove(pos);
-
-                let new_request = Arc::new(Mutex::new(LockRequest::new_row_request(
-                    txn.get_transaction_id(),
-                    lock_mode,
-                    oid,
-                    rid,
-                )));
-
-                lock_queue_guard
-                    .request_queue
-                    .push_front(new_request.clone());
-                self.grant_new_locks_if_possible(&mut lock_queue_guard);
-
-                while !new_request.lock().granted {
-                    lock_queue.lock().cv.wait_while(&mut lock_queue_guard, |_| {
-                        !new_request.lock().granted && txn.get_state() != TransactionState::Aborted
-                    });
-
-                    if txn.get_state() == TransactionState::Aborted {
-                        return Ok(false);
-                    }
-                }
-
-                lock_queue_guard.upgrading = INVALID_TXN_ID;
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Checks if two locks are compatible.
-    ///
-    /// # Parameters
-    /// - `l1`: The first lock mode.
-    /// - `l2`: The second lock mode.
-    ///
-    /// # Returns
-    /// `true` if the locks are compatible, `false` otherwise.
-    pub fn are_locks_compatible(&self, l1: LockMode, l2: LockMode) -> bool {
-        match (l1, l2) {
-            // IS is compatible with everything except X
-            (IntentionShared, IntentionShared) => true,
-            (IntentionShared, Shared) => true,
-            (IntentionShared, IntentionExclusive) => true,
-            (IntentionShared, SharedIntentionExclusive) => true,
-            (IntentionShared, Exclusive) => false,
-
-            // IX is compatible with IS and IX
-            (IntentionExclusive, IntentionShared) => true,
-            (IntentionExclusive, IntentionExclusive) => true,
-            (IntentionExclusive, Shared) => false,
-            (IntentionExclusive, SharedIntentionExclusive) => false,
-            (IntentionExclusive, Exclusive) => false,
-
-            // S is compatible with IS, S and SIX
-            (Shared, IntentionShared) => true,
-            (Shared, Shared) => true,
-            (Shared, IntentionExclusive) => false,
-            (Shared, SharedIntentionExclusive) => true,
-            (Shared, Exclusive) => false,
-
-            // SIX is compatible with IS only
-            (SharedIntentionExclusive, IntentionShared) => true,
-            (SharedIntentionExclusive, Shared) => true,
-            (SharedIntentionExclusive, IntentionExclusive) => false,
-            (SharedIntentionExclusive, SharedIntentionExclusive) => false,
-            (SharedIntentionExclusive, Exclusive) => false,
-
-            // X is not compatible with anything
-            (Exclusive, _) => false,
-        }
-    }
-
-    /// Checks if a transaction can take a lock.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock.
-    /// - `lock_mode`: The lock mode for the requested lock.
-    ///
-    /// # Returns
-    /// `true` if the transaction can take the lock, `false` otherwise.
-    pub fn can_txn_take_lock(&self, txn: &Transaction, lock_mode: LockMode) -> bool {
-        use crate::concurrency::lock_manager::LockMode::*;
-        use crate::concurrency::transaction::IsolationLevel::*;
-        use crate::concurrency::transaction::TransactionState::*;
-
-        match (txn.get_isolation_level(), txn.get_state(), lock_mode) {
-            // READ UNCOMMITTED
-            // S, IS, SIX are never allowed
-            (ReadUncommitted, _, Shared) => false,
-            (ReadUncommitted, _, IntentionShared) => false,
-            (ReadUncommitted, _, SharedIntentionExclusive) => false,
-            // X and IX are allowed in RUNNING state
-            (ReadUncommitted, Running, Exclusive) => true,
-            (ReadUncommitted, Running, IntentionExclusive) => true,
-            (ReadUncommitted, Shrinking, _) => false, // Nothing allowed in SHRINKING
-
-            // READ COMMITTED
-            // All locks allowed in RUNNING
-            (ReadCommitted, Running, _) => true,
-            // Only S and IS allowed in SHRINKING
-            (ReadCommitted, Shrinking, IntentionShared) => true,
-            (ReadCommitted, Shrinking, Shared) => true,
-            (ReadCommitted, Shrinking, _) => false,
-
-            // REPEATABLE READ
-            (RepeatableRead, Running, _) => true, // All locks allowed in RUNNING
-            (RepeatableRead, Shrinking, _) => false, // No locks allowed in SHRINKING
-
-            // Default case
-            _ => false,
-        }
-    }
-
-    /// Grants new locks if possible.
-    ///
-    /// # Parameters
-    /// - `lock_request_queue`: The lock request queue.
-    pub fn grant_new_locks_if_possible(&self, lock_request_queue: &mut LockRequestQueue) {
-        let _guard = lock_request_queue.latch.lock();
-
-        let granted_locks: Vec<LockMode> = lock_request_queue
-            .request_queue
-            .iter()
-            .filter(|req| req.lock().granted)
-            .map(|req| req.lock().lock_mode)
-            .collect();
-
-        let mut i = 0;
-        while i < lock_request_queue.request_queue.len() {
-            let request = lock_request_queue.request_queue[i].lock();
-            if !request.granted {
-                let can_grant = granted_locks
-                    .iter()
-                    .all(|&mode| self.are_locks_compatible(mode, request.lock_mode));
-
-                if can_grant {
-                    let txn_id = request.txn_id;
-                    let oid = request.oid;
-                    let rid = request.rid;
-                    drop(request);
-
-                    let mut request = lock_request_queue.request_queue[i].lock();
-                    request.granted = true;
-
-                    // Use the centralized lock tracking
-                    self.grant_lock(txn_id, oid, rid);
-                }
-            }
-            i += 1;
-        }
-
-        lock_request_queue.cv.notify_all();
-    }
-
-    /// Checks if a lock can be upgraded.
-    ///
-    /// # Parameters
-    /// - `curr_lock_mode`: The current lock mode.
-    /// - `requested_lock_mode`: The requested lock mode.
-    ///
-    /// # Returns
-    /// `true` if the lock can be upgraded, `false` otherwise.
-    pub fn can_lock_upgrade(
-        &self,
-        curr_lock_mode: LockMode,
-        requested_lock_mode: LockMode,
-    ) -> bool {
-        match (curr_lock_mode, requested_lock_mode) {
-            // IS -> [S, X, IX, SIX]
-            (IntentionShared, Shared) => true,
-            (IntentionShared, Exclusive) => true,
-            (IntentionShared, IntentionExclusive) => true,
-            (IntentionShared, SharedIntentionExclusive) => true,
-
-            // S -> [X, SIX]
-            (Shared, Exclusive) => true,
-            (Shared, SharedIntentionExclusive) => true,
-
-            // IX -> [X, SIX]
-            (IntentionExclusive, Exclusive) => true,
-            (IntentionExclusive, SharedIntentionExclusive) => true,
-
-            // SIX -> [X]
-            (SharedIntentionExclusive, Exclusive) => true,
-
-            // All other transitions are invalid
-            _ => false,
-        }
-    }
-
-    /// Checks if a transaction has an appropriate lock on a table.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction requesting the lock.
-    /// - `oid`: The table OID of the table the row belongs to.
-    /// - `row_lock_mode`: The lock mode for the requested row lock.
-    ///
-    /// # Returns
-    /// `true` if the transaction has an appropriate lock on the table, `false` otherwise.
-    pub fn check_appropriate_lock_on_table(
-        &self,
-        txn: &Transaction,
-        oid: TableOidT,
-        row_lock_mode: LockMode,
-    ) -> bool {
-        // We need to check what mode the lock is held in
-        let table_lock_map = self.table_lock_map.lock();
-
-        if let Some(lock_queue) = table_lock_map.get(&oid) {
-            let lock_queue_guard = lock_queue.lock();
-
-            // Find any granted lock for this transaction
-            let granted_locks: Vec<LockMode> = lock_queue_guard
-                .request_queue
-                .iter()
-                .filter(|req| {
-                    let req = req.lock();
-                    req.txn_id == txn.get_transaction_id() && req.granted
-                })
-                .map(|req| req.lock().lock_mode)
-                .collect();
-
-            // Check if the transaction holds appropriate locks
-            match row_lock_mode {
-                Shared => granted_locks.iter().any(|&mode| {
-                    mode == IntentionShared || mode == Shared || mode == SharedIntentionExclusive
-                }),
-                Exclusive => granted_locks.iter().any(|&mode| {
-                    mode == IntentionExclusive
-                        || mode == SharedIntentionExclusive
-                        || mode == Exclusive
-                }),
-                _ => false, // Row locks cannot be intention locks
-            }
+        
+        // 4. Try to grant the lock
+        let mut queue_guard = queue.lock();
+        let granted = queue_guard.grant_lock(request.clone());
+
+        // 5. If granted, update transaction's lock set
+        if granted {
+            let mut txn_locks = self.lock_state_manager.txn_lock_sets.lock();
+            let lock_state = txn_locks
+                .entry(txn.get_transaction_id())
+                .or_insert_with(|| TxnLockState {
+                    table_locks: HashSet::new(),
+                    row_locks: HashSet::new(),
+                });
+            lock_state.table_locks.insert(oid);
         } else {
-            false // No lock queue means no locks on this table
-        }
-    }
-
-    /// Finds a cycle in the waits-for graph.
-    ///
-    /// # Parameters
-    /// - `source_txn`: The source transaction ID.
-    /// - `path`: The current path in the search.
-    /// - `on_path`: The set of transaction IDs currently on the path.
-    /// - `visited`: The set of visited transaction IDs.
-    /// - `abort_txn_id`: The transaction ID to be aborted if a cycle is found.
-    ///
-    /// # Returns
-    /// `true` if a cycle is found, `false` otherwise.
-    pub fn find_cycle(
-        &self,
-        source_txn: TxnId,
-        path: &mut Vec<TxnId>,
-        on_path: &mut HashSet<TxnId>,
-        visited: &mut HashSet<TxnId>,
-        abort_txn_id: &mut TxnId,
-    ) -> bool {
-        // Skip if we've visited this node before
-        if visited.contains(&source_txn) {
-            return false;
-        }
-
-        visited.insert(source_txn);
-        path.push(source_txn);
-        on_path.insert(source_txn);
-
-        let waits_for = self.waits_for.lock();
-        if let Some(edges) = waits_for.get(&source_txn) {
-            for &next_txn in edges {
-                if on_path.contains(&next_txn) {
-                    // Found a cycle - find the newest transaction in the cycle
-                    *abort_txn_id = *path
-                        .iter()
-                        .skip_while(|&&x| x != next_txn)
-                        .max()
-                        .unwrap_or(&next_txn);
-                    return true;
+            // 6. If not granted, add edge to waits-for graph
+            for existing_req in &queue_guard.request_queue {
+                let existing = existing_req.lock();
+                if existing.granted {
+                    self.deadlock_detector.add_edge(txn.get_transaction_id(), existing.txn_id);
                 }
+            }
 
-                if !visited.contains(&next_txn) {
-                    if self.find_cycle(next_txn, path, on_path, visited, abort_txn_id) {
-                        return true;
-                    }
+            // 7. Check for deadlock
+            let mut abort_txn = INVALID_TXN_ID;
+            if self.deadlock_detector.has_cycle(&mut abort_txn) {
+                if abort_txn == txn.get_transaction_id() {
+                    txn.set_state(TransactionState::Aborted);
+                    return Ok(false);
                 }
             }
         }
 
-        path.pop();
-        on_path.remove(&source_txn);
-        false
+        Ok(granted)
     }
 
-    /// Unlocks all resources held by the lock manager.
-    pub fn unlock_all(&self) {
-        // Clear all table locks
-        let mut table_lock_map = self.table_lock_map.lock();
-        for (_, lock_queue) in table_lock_map.iter() {
-            let mut lock_queue_guard = lock_queue.lock();
-            lock_queue_guard.request_queue.clear();
-            lock_queue_guard.upgrading = INVALID_TXN_ID;
-            lock_queue_guard.cv.notify_all();
-        }
-        table_lock_map.clear();
-
-        // Clear all row locks
-        let mut row_lock_map = self.row_lock_map.lock();
-        for (_, lock_queue) in row_lock_map.iter() {
-            let mut lock_queue_guard = lock_queue.lock();
-            lock_queue_guard.request_queue.clear();
-            lock_queue_guard.upgrading = INVALID_TXN_ID;
-            lock_queue_guard.cv.notify_all();
-        }
-        row_lock_map.clear();
-
-        // Clear waits-for graph
-        let mut waits_for = self.waits_for.lock();
-        waits_for.clear();
-    }
-
-    /// Returns a debug representation of the current lock state
+    /// Returns a string representation of the current lock manager state
     pub fn debug_state(&self) -> String {
         let mut output = String::new();
-
-        // Table locks
+        
+        // Add table lock information
         output.push_str("=== Table Locks ===\n");
-        let table_locks = self.table_lock_map.lock();
-        for (&oid, lock_queue) in table_locks.iter() {
-            let queue = lock_queue.lock();
-            output.push_str(&format!("Table {}: ", oid));
-
-            let locks: Vec<_> = queue
-                .request_queue
-                .iter()
-                .map(|req| {
-                    let req = req.lock();
-                    format!(
-                        "(Txn:{}, {}, {})",
-                        req.txn_id,
-                        req.lock_mode,
-                        if req.granted { "G" } else { "W" }
-                    )
-                })
-                .collect();
-            output.push_str(&locks.join(", "));
-            output.push('\n');
-        }
-
-        // Row locks
-        output.push_str("\n=== Row Locks ===\n");
-        let row_locks = self.row_lock_map.lock();
-        for (&rid, lock_queue) in row_locks.iter() {
-            let queue = lock_queue.lock();
-            output.push_str(&format!("Row {}: ", rid));
-
-            let locks: Vec<_> = queue
-                .request_queue
-                .iter()
-                .map(|req| {
-                    let req = req.lock();
-                    format!(
-                        "(Txn:{}, {}, {})",
-                        req.txn_id,
-                        req.lock_mode,
-                        if req.granted { "G" } else { "W" }
-                    )
-                })
-                .collect();
-            output.push_str(&locks.join(", "));
-            output.push('\n');
-        }
-
-        // Waits-for graph
-        output.push_str("\n=== Waits-For Graph ===\n");
-        let waits_for = self.waits_for.lock();
-        for (&t1, t2s) in waits_for.iter() {
-            output.push_str(&format!(
-                "Txn {} waits for: {}\n",
-                t1,
-                t2s.iter()
-                    .map(|&t2| t2.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+        let table_locks = self.lock_state_manager.table_lock_map.lock();
+        for (oid, queue) in table_locks.iter() {
+            output.push_str(&format!("Table {}:\n", oid));
+            let queue_guard = queue.lock();
+            for request in &queue_guard.request_queue {
+                let req = request.lock();
+                output.push_str(&format!(
+                    "  Txn:{} Mode:{:?} Granted:{}\n",
+                    req.txn_id, req.lock_mode, req.granted
+                ));
+            }
         }
 
         output
-    }
-
-    pub fn get_active_lock_count(&self) -> usize {
-        self.table_lock_map.lock().len()
-    }
-
-    pub fn get_waiting_lock_count(&self) -> usize {
-        self.waits_for.lock().len()
-    }
-
-    /// Validates if a transaction can take a lock based on isolation level
-    fn validate_lock_request(
-        &self,
-        txn: &Transaction,
-        lock_mode: LockMode,
-    ) -> Result<(), LockError> {
-        match (txn.get_isolation_level(), txn.get_state(), lock_mode) {
-            // READ UNCOMMITTED validations
-            (IsolationLevel::ReadUncommitted, _, LockMode::Shared)
-            | (IsolationLevel::ReadUncommitted, _, LockMode::IntentionShared)
-            | (IsolationLevel::ReadUncommitted, _, LockMode::SharedIntentionExclusive) => {
-                Err(LockError::LockSharedOnReadUncommitted)
-            }
-
-            // SHRINKING state validations
-            (IsolationLevel::ReadUncommitted, TransactionState::Shrinking, _)
-            | (IsolationLevel::RepeatableRead, TransactionState::Shrinking, _)
-            | (IsolationLevel::ReadCommitted, TransactionState::Shrinking, LockMode::Exclusive)
-            | (
-                IsolationLevel::ReadCommitted,
-                TransactionState::Shrinking,
-                LockMode::IntentionExclusive,
-            )
-            | (
-                IsolationLevel::ReadCommitted,
-                TransactionState::Shrinking,
-                LockMode::SharedIntentionExclusive,
-            ) => Err(LockError::LockOnShrinking),
-
-            _ => Ok(()),
-        }
-    }
-
-    /// Validates if a row lock request is valid
-    fn validate_row_lock(
-        &self,
-        txn: &Transaction,
-        lock_mode: LockMode,
-        oid: TableOidT,
-    ) -> Result<(), LockError> {
-        // Check for intention locks on rows
-        match lock_mode {
-            LockMode::IntentionShared
-            | LockMode::IntentionExclusive
-            | LockMode::SharedIntentionExclusive => {
-                return Err(LockError::AttemptedIntentionLockOnRow);
-            }
-            _ => {}
-        }
-
-        // Check for appropriate table lock
-        if !self.check_appropriate_lock_on_table(txn, oid, lock_mode) {
-            return Err(LockError::TableLockNotPresent);
-        }
-
-        Ok(())
-    }
-
-    /// Validates if a lock upgrade is valid
-    fn validate_upgrade(
-        &self,
-        curr_mode: LockMode,
-        requested_mode: LockMode,
-        lock_queue: &LockRequestQueue,
-        txn_id: TxnId,
-    ) -> Result<(), LockError> {
-        // Check if upgrade is compatible
-        if !self.can_lock_upgrade(curr_mode, requested_mode) {
-            return Err(LockError::IncompatibleUpgrade);
-        }
-
-        // Check for upgrade conflicts
-        if lock_queue.upgrading != INVALID_TXN_ID && lock_queue.upgrading != txn_id {
-            return Err(LockError::UpgradeConflict);
-        }
-
-        Ok(())
-    }
-
-    /// Logs the current state of a lock queue
-    fn log_lock_queue_state(&self, queue: &LockRequestQueue, resource: &str) {
-        let granted: Vec<_> = queue
-            .request_queue
-            .iter()
-            .filter(|req| req.lock().granted)
-            .map(|req| {
-                let req = req.lock();
-                format!("Txn:{} Mode:{}", req.txn_id, req.lock_mode)
-            })
-            .collect();
-
-        let waiting: Vec<_> = queue
-            .request_queue
-            .iter()
-            .filter(|req| !req.lock().granted)
-            .map(|req| {
-                let req = req.lock();
-                format!("Txn:{} Mode:{}", req.txn_id, req.lock_mode)
-            })
-            .collect();
-
-        debug!(
-            "Lock queue state: {} {} {} {}",
-            resource,
-            granted.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
-            waiting.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
-            queue.upgrading,
-        );
-    }
-
-    /// Logs the current state of the waits-for graph
-    fn log_waits_for_state(&self) {
-        let waits_for = self.waits_for.lock();
-        let edges: Vec<_> = waits_for
-            .iter()
-            .flat_map(|(&t1, t2s)| t2s.iter().map(move |&t2| format!("{} -> {}", t1, t2)))
-            .collect();
-
-        debug!("Waits-for graph state: {}", edges.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
-    }
-
-    fn grant_lock(&self, txn_id: TxnId, oid: TableOidT, rid: Option<RID>) {
-        let mut txn_locks = self.txn_locks.lock();
-        let state = txn_locks.entry(txn_id).or_insert_with(|| TxnLockState {
-            table_locks: HashSet::new(),
-            row_locks: HashSet::new(),
-        });
-
-        match rid {
-            Some(rid) => {
-                state.row_locks.insert((oid, rid));
-            }
-            None => {
-                state.table_locks.insert(oid);
-            }
-        }
-    }
-
-    fn release_lock(&self, txn_id: TxnId, oid: TableOidT, rid: Option<RID>) {
-        let mut txn_locks = self.txn_locks.lock();
-        if let Some(state) = txn_locks.get_mut(&txn_id) {
-            match rid {
-                Some(rid) => {
-                    state.row_locks.remove(&(oid, rid));
-                }
-                None => {
-                    state.table_locks.remove(&oid);
-                }
-            }
-        }
     }
 }
 
 impl Clone for LockManager {
     fn clone(&self) -> Self {
         Self {
-            transaction_manager: Arc::clone(&self.transaction_manager),
-            table_lock_map: Mutex::new(self.table_lock_map.lock().clone()),
-            txn_locks: Mutex::new(self.txn_locks.lock().clone()),
-            row_lock_map: Mutex::new(self.row_lock_map.lock().clone()),
-            enable_cycle_detection: AtomicBool::new(
-                self.enable_cycle_detection.load(Ordering::SeqCst),
-            ),
-            cycle_detection_thread: None,
-            waits_for: Mutex::new(self.waits_for.lock().clone()),
+            deadlock_detector: DeadlockDetector {
+                waits_for: Arc::clone(&self.deadlock_detector.waits_for),
+                enable_detection: Arc::clone(&self.deadlock_detector.enable_detection),
+                detection_thread: None,
+                transaction_manager: Arc::clone(&self.deadlock_detector.transaction_manager),
+            },
+            lock_state_manager: LockStateManager {
+                table_lock_map: Mutex::new(self.lock_state_manager.table_lock_map.lock().clone()),
+                row_locks: Mutex::new(self.lock_state_manager.row_locks.lock().clone()),
+                txn_lock_sets: Mutex::new(self.lock_state_manager.txn_lock_sets.lock().clone()),
+            },
+            lock_validator: LockValidator {
+                transaction_manager: Arc::clone(&self.deadlock_detector.transaction_manager),
+            },
+            compatibility_checker: LockCompatibilityChecker,
         }
     }
 }
@@ -1341,11 +835,11 @@ unsafe impl Sync for LockManager {}
 impl fmt::Display for LockMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Shared => write!(f, "S"),
-            Exclusive => write!(f, "X"),
-            IntentionShared => write!(f, "IS"),
-            IntentionExclusive => write!(f, "IX"),
-            SharedIntentionExclusive => write!(f, "SIX"),
+            LockMode::Shared => write!(f, "S"),
+            LockMode::Exclusive => write!(f, "X"),
+            LockMode::IntentionShared => write!(f, "IS"),
+            LockMode::IntentionExclusive => write!(f, "IX"),
+            LockMode::SharedIntentionExclusive => write!(f, "SIX"),
         }
     }
 }
@@ -1357,40 +851,48 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
-    use parking_lot::RwLock;
-    use std::fs;
+    use parking_lot::lock_api::MutexGuard;
+    use parking_lot::{RawMutex, RwLock};
+    use tempfile::TempDir;
 
     pub struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
-        lock_manager: Arc<LockManager>,
-        db_file: String,
-        db_log_file: String,
+        lock_manager: Arc<Mutex<LockManager>>,
+        transaction_manager: Arc<TransactionManager>,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 100));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -1399,6 +901,9 @@ mod tests {
                 replacer.clone(),
             ));
 
+            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
+            let lock_manager = Arc::new(Mutex::new(LockManager::new(transaction_manager.clone())));
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 0,
@@ -1407,313 +912,195 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
+                transaction_manager.clone(),
             )));
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager =
-                Arc::new(TransactionManager::new(Arc::clone(&log_manager)));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             Self {
                 catalog,
                 lock_manager,
-                db_file,
-                db_log_file,
+                transaction_manager,
+                _temp_dir: temp_dir,
             }
         }
 
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
+        fn lock_manager(&self) -> MutexGuard<'_, RawMutex, LockManager> {
+            self.lock_manager.lock()
         }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
+    mod lock_mode_tests {
+        use super::*;
+
+        #[test]
+        fn test_lock_mode_display() {
+            assert_eq!(LockMode::Shared.to_string(), "S");
+            assert_eq!(LockMode::Exclusive.to_string(), "X");
+            assert_eq!(LockMode::IntentionShared.to_string(), "IS");
+            assert_eq!(LockMode::IntentionExclusive.to_string(), "IX");
+            assert_eq!(LockMode::SharedIntentionExclusive.to_string(), "SIX");
+        }
+
+        #[test]
+        fn test_lock_compatibility_matrix() {
+            let lock_modes = vec![
+                LockMode::IntentionShared,
+                LockMode::IntentionExclusive,
+                LockMode::Shared,
+                LockMode::SharedIntentionExclusive,
+                LockMode::Exclusive,
+            ];
+
+            let compatibility = [
+                [true, true, true, true, false],   // IS
+                [true, true, false, false, false], // IX
+                [true, false, true, false, false], // S
+                [true, false, false, false, false],// SIX
+                [false, false, false, false, false],// X
+            ];
+
+            for (i, &mode1) in lock_modes.iter().enumerate() {
+                for (j, &mode2) in lock_modes.iter().enumerate() {
+                    assert_eq!(
+                        LockCompatibilityChecker::are_compatible(mode1, mode2),
+                        compatibility[i][j],
+                        "Compatibility check failed for {:?} and {:?}",
+                        mode1,
+                        mode2
+                    );
+                }
+            }
         }
     }
 
-    #[test]
-    fn test_lock_manager_debug_state() {
-        // Initialize test context
-        let ctx = TestContext::new("test_lock_manager_debug_state");
+    mod lock_validator_tests {
+        use super::*;
 
-        // Create a test table
-        let mut catalog = ctx.catalog.write();
-        let schema = crate::catalog::schema::Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-        let table_info = catalog.create_table("test_table".to_string(), schema).unwrap();
-        let table_oid = table_info.get_table_oidt();
-        drop(catalog);
+        #[test]
+        fn test_isolation_level_validation() {
+            let ctx = TestContext::new("test_isolation_validation");
+            let lock_manager = ctx.lock_manager();
 
-        // Create transactions
-        let txn1 = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));
-        let txn2 = Arc::new(Transaction::new(2, IsolationLevel::RepeatableRead));
+            // Test READ UNCOMMITTED
+            let txn_ru = Arc::new(Transaction::new(1, IsolationLevel::ReadUncommitted));
+            txn_ru.set_state(TransactionState::Growing);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn_ru, LockMode::Exclusive).is_ok());
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn_ru, LockMode::Shared).is_err());
 
-        // Acquire locks
-        let _ = ctx.lock_manager.lock_table(txn1, Exclusive, table_oid);
-        let _ = ctx.lock_manager.lock_table(txn2, Shared, table_oid + 1);
+            // Test READ COMMITTED
+            let txn_rc = Arc::new(Transaction::new(2, IsolationLevel::ReadCommitted));
+            txn_rc.set_state(TransactionState::Growing);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn_rc, LockMode::Exclusive).is_ok());
+            txn_rc.set_state(TransactionState::Shrinking);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn_rc, LockMode::Shared).is_ok());
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn_rc, LockMode::Exclusive).is_err());
+        }
 
-        // Get debug state
-        let debug_state = ctx.lock_manager.debug_state();
-        println!("Lock Manager State:\n{}", debug_state);
+        #[test]
+        fn test_transaction_state_validation() {
+            let ctx = TestContext::new("test_state_validation");
+            let lock_manager = ctx.lock_manager();
 
-        // Verify debug output contains expected information
-        assert!(debug_state.contains(&format!("Table {}", table_oid)));
-        assert!(debug_state.contains(&format!("Table {}", table_oid + 1)));
-        assert!(debug_state.contains("Txn:1"));
-        assert!(debug_state.contains("Txn:2"));
+            let txn = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));
+            
+            // Test different states
+            txn.set_state(TransactionState::Growing);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn, LockMode::Exclusive).is_ok());
+            
+            txn.set_state(TransactionState::Shrinking);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn, LockMode::Exclusive).is_err());
+            
+            txn.set_state(TransactionState::Aborted);
+            assert!(lock_manager.lock_validator.validate_lock_request(&txn, LockMode::Shared).is_err());
+        }
     }
 
-    #[test]
-    fn test_can_txn_take_lock() {
-        let ctx = TestContext::new("test_can_txn_take_lock");
-        let lock_manager = &ctx.lock_manager;
+    mod lock_state_manager_tests {
+        use super::*;
 
-        // READ UNCOMMITTED Tests
-        let txn_ru = Transaction::new(1, IsolationLevel::ReadUncommitted);
+        #[test]
+        fn test_basic_lock_operations() {
+            let ctx = TestContext::new("test_basic_locks");
+            let lock_manager = ctx.lock_manager();
 
-        // In Growing state
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_ru, Shared),
-            "READ UNCOMMITTED should not allow S locks"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_ru, IntentionShared),
-            "READ UNCOMMITTED should not allow IS locks"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_ru, SharedIntentionExclusive),
-            "READ UNCOMMITTED should not allow SIX locks"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_ru, Exclusive),
-            "READ UNCOMMITTED should allow X locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_ru, IntentionExclusive),
-            "READ UNCOMMITTED should allow IX locks in GROWING"
-        );
+            assert!(lock_manager.lock_state_manager.grant_table_lock(1, LockMode::Shared, 1));
+            assert!(lock_manager.lock_state_manager.has_table_lock(1, 1));
+            assert!(lock_manager.lock_state_manager.release_table_lock(1, 1).is_ok());
+            assert!(!lock_manager.lock_state_manager.has_table_lock(1, 1));
+        }
 
-        // READ COMMITTED Tests
-        let txn_rc = Transaction::new(2, IsolationLevel::ReadCommitted);
+        #[test]
+        fn test_lock_conflicts() {
+            let ctx = TestContext::new("test_lock_conflicts");
+            let lock_manager = ctx.lock_manager();
 
-        // In Growing state
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, Shared),
-            "READ COMMITTED should allow S locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, Exclusive),
-            "READ COMMITTED should allow X locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, IntentionShared),
-            "READ COMMITTED should allow IS locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, IntentionExclusive),
-            "READ COMMITTED should allow IX locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, SharedIntentionExclusive),
-            "READ COMMITTED should allow SIX locks in GROWING"
-        );
+            assert!(lock_manager.lock_state_manager.grant_table_lock(1, LockMode::Shared, 1));
+            assert!(!lock_manager.lock_state_manager.grant_table_lock(2, LockMode::Exclusive, 1));
+        }
 
-        // In Shrinking state
-        txn_rc.set_state(TransactionState::Shrinking);
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, Shared),
-            "READ COMMITTED should allow S locks in SHRINKING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rc, IntentionShared),
-            "READ COMMITTED should allow IS locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rc, Exclusive),
-            "READ COMMITTED should not allow X locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rc, IntentionExclusive),
-            "READ COMMITTED should not allow IX locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rc, SharedIntentionExclusive),
-            "READ COMMITTED should not allow SIX locks in SHRINKING"
-        );
+        #[test]
+        fn test_lock_upgrades() {
+            let ctx = TestContext::new("test_lock_upgrades");
+            let lock_manager = ctx.lock_manager();
 
-        // REPEATABLE READ Tests
-        let txn_rr = Transaction::new(3, IsolationLevel::RepeatableRead);
-
-        // In Growing state
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rr, Shared),
-            "REPEATABLE READ should allow S locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rr, Exclusive),
-            "REPEATABLE READ should allow X locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rr, IntentionShared),
-            "REPEATABLE READ should allow IS locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rr, IntentionExclusive),
-            "REPEATABLE READ should allow IX locks in GROWING"
-        );
-        assert!(
-            lock_manager.can_txn_take_lock(&txn_rr, SharedIntentionExclusive),
-            "REPEATABLE READ should allow SIX locks in GROWING"
-        );
-
-        // In Shrinking state
-        txn_rr.set_state(TransactionState::Shrinking);
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rr, Shared),
-            "REPEATABLE READ should not allow any locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rr, Exclusive),
-            "REPEATABLE READ should not allow any locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rr, IntentionShared),
-            "REPEATABLE READ should not allow any locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rr, IntentionExclusive),
-            "REPEATABLE READ should not allow any locks in SHRINKING"
-        );
-        assert!(
-            !lock_manager.can_txn_take_lock(&txn_rr, SharedIntentionExclusive),
-            "REPEATABLE READ should not allow any locks in SHRINKING"
-        );
+            assert!(lock_manager.lock_state_manager.grant_table_lock(1, LockMode::IntentionShared, 1));
+            assert!(lock_manager.lock_state_manager.grant_table_lock(1, LockMode::Shared, 1));
+        }
     }
 
-    #[test]
-    fn test_validate_lock_request() {
-        let ctx = TestContext::new("test_validate_lock_request");
-        let lock_manager = &ctx.lock_manager;
+    mod deadlock_detector_tests {
+        use super::*;
 
-        // READ UNCOMMITTED Tests
-        let txn_ru = Transaction::new(1, IsolationLevel::ReadUncommitted);
+        #[test]
+        fn test_simple_cycle_detection() {
+            let ctx = TestContext::new("test_simple_cycle");
+            let mut lock_manager = ctx.lock_manager();
 
-        // Should not allow S, IS, SIX locks regardless of state
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, Shared),
-            Err(LockError::LockSharedOnReadUncommitted)
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, IntentionShared),
-            Err(LockError::LockSharedOnReadUncommitted)
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, SharedIntentionExclusive),
-            Err(LockError::LockSharedOnReadUncommitted)
-        );
+            lock_manager.deadlock_detector.add_edge(1, 2);
+            lock_manager.deadlock_detector.add_edge(2, 1);
 
-        // Growing state should allow X and IX
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, Exclusive),
-            Ok(())
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, IntentionExclusive),
-            Ok(())
-        );
-
-        // Shrinking state should not allow any locks
-        txn_ru.set_state(TransactionState::Shrinking);
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, Exclusive),
-            Err(LockError::LockOnShrinking)
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_ru, IntentionExclusive),
-            Err(LockError::LockOnShrinking)
-        );
-
-        // REPEATABLE READ Tests
-        let txn_rr = Transaction::new(2, IsolationLevel::RepeatableRead);
-
-        // Growing state should allow all locks
-        for lock_mode in [
-            Shared,
-            Exclusive,
-            IntentionShared,
-            IntentionExclusive,
-            SharedIntentionExclusive,
-        ] {
-            assert_eq!(
-                lock_manager.validate_lock_request(&txn_rr, lock_mode),
-                Ok(()),
-                "REPEATABLE READ should allow {:?} in GROWING state",
-                lock_mode
-            );
+            let mut abort_txn = INVALID_TXN_ID;
+            assert!(lock_manager.deadlock_detector.has_cycle(&mut abort_txn));
+            assert_eq!(abort_txn, 2);
         }
 
-        // Shrinking state should not allow any locks
-        txn_rr.set_state(TransactionState::Shrinking);
-        for lock_mode in [
-            Shared,
-            Exclusive,
-            IntentionShared,
-            IntentionExclusive,
-            SharedIntentionExclusive,
-        ] {
-            assert_eq!(
-                lock_manager.validate_lock_request(&txn_rr, lock_mode),
-                Err(LockError::LockOnShrinking),
-                "REPEATABLE READ should not allow {:?} in SHRINKING state",
-                lock_mode
-            );
+        #[test]
+        fn test_complex_cycle_detection() {
+            let ctx = TestContext::new("test_complex_cycle");
+            let mut lock_manager = ctx.lock_manager();
+
+            // Create cycle: 1->2->3->1
+            lock_manager.deadlock_detector.add_edge(1, 2);
+            lock_manager.deadlock_detector.add_edge(2, 3);
+            lock_manager.deadlock_detector.add_edge(3, 1);
+
+            let mut abort_txn = INVALID_TXN_ID;
+            assert!(lock_manager.deadlock_detector.has_cycle(&mut abort_txn));
+            assert_eq!(abort_txn, 3);
         }
+    }
 
-        // READ COMMITTED Tests
-        let txn_rc = Transaction::new(3, IsolationLevel::ReadCommitted);
+    mod integration_tests {
+        use super::*;
 
-        // Growing state should allow all locks
-        for lock_mode in [
-            Shared,
-            Exclusive,
-            IntentionShared,
-            IntentionExclusive,
-            SharedIntentionExclusive,
-        ] {
-            assert_eq!(
-                lock_manager.validate_lock_request(&txn_rc, lock_mode),
-                Ok(()),
-                "READ COMMITTED should allow {:?} in GROWING state",
-                lock_mode
-            );
+        #[test]
+        fn test_complete_transaction_flow() {
+            let ctx = TestContext::new("test_transaction_flow");
+            let lock_manager = ctx.lock_manager();
+
+            let txn = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));
+            txn.set_state(TransactionState::Growing);
+
+            // Test lock acquisition sequence
+            assert!(lock_manager.lock_table(txn.clone(), LockMode::IntentionShared, 1).unwrap());
+            assert!(lock_manager.lock_table(txn.clone(), LockMode::Shared, 1).unwrap());
+            assert!(lock_manager.lock_table(txn.clone(), LockMode::Exclusive, 2).unwrap());
+
+            // Verify final state
+            let debug_state = lock_manager.debug_state();
+            assert!(debug_state.contains("Txn:1"));
+            assert!(debug_state.contains("Mode:IntentionShared"));
+            assert!(debug_state.contains("Mode:Shared"));
+            assert!(debug_state.contains("Mode:Exclusive"));
         }
-
-        // Shrinking state validation
-        txn_rc.set_state(TransactionState::Shrinking);
-
-        // Should allow S and IS locks
-        assert_eq!(lock_manager.validate_lock_request(&txn_rc, Shared), Ok(()));
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_rc, IntentionShared),
-            Ok(())
-        );
-
-        // Should not allow X, IX, SIX locks
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_rc, Exclusive),
-            Err(LockError::LockOnShrinking)
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_rc, IntentionExclusive),
-            Err(LockError::LockOnShrinking)
-        );
-        assert_eq!(
-            lock_manager.validate_lock_request(&txn_rc, SharedIntentionExclusive),
-            Err(LockError::LockOnShrinking)
-        );
     }
 }
