@@ -34,6 +34,12 @@ pub enum LockError {
 
     #[error("Attempted to unlock table before unlocking rows")]
     TableUnlockedBeforeRows,
+
+    #[error("Failed to abort transaction")]
+    TransactionAborted,
+
+    #[error("Failed to commit transaction")]
+    TransactionCommitted,
 }
 
 #[derive(Error, Debug)]
