@@ -1,14 +1,12 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
-use crate::common::config::TxnId;
+use crate::common::config::{PageId, TxnId, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
 };
 use crate::concurrency::watermark::Watermark;
-use crate::recovery::log_manager::LogManager;
-use crate::recovery::wal_manager::WALManager;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
@@ -17,7 +15,6 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::thread;
 
 #[derive(Debug)]
 pub struct PageVersionInfo {
@@ -30,7 +27,7 @@ pub struct PageVersionInfo {
 struct TransactionManagerState {
     txn_map: RwLock<HashMap<TxnId, Arc<Transaction>>>,
     running_txns: RwLock<Watermark>,
-    version_info: RwLock<HashMap<u64, Arc<PageVersionInfo>>>,
+    version_info: RwLock<HashMap<PageId, Arc<PageVersionInfo>>>,
     is_shutdown: AtomicBool,
 }
 
@@ -38,12 +35,12 @@ struct TransactionManagerState {
 pub struct TransactionManager {
     next_txn_id: Arc<AtomicU64>,
     state: Arc<TransactionManagerState>,
-    wal_manager: Arc<WALManager>,
 }
 
 impl TransactionManager {
-    pub fn new(log_manager: Arc<RwLock<LogManager>>) -> Self {
-        TransactionManager {
+    pub fn new() -> Self {
+        // First create the transaction manager without a lock manager
+        let tm = Self {
             next_txn_id: Arc::new(AtomicU64::new(0)),
             state: Arc::new(TransactionManagerState {
                 txn_map: RwLock::new(HashMap::new()),
@@ -51,34 +48,16 @@ impl TransactionManager {
                 version_info: RwLock::new(HashMap::new()),
                 is_shutdown: AtomicBool::new(false),
             }),
-            wal_manager: Arc::new(WALManager::new(log_manager)),
+        };
+
+        // Create an Arc of the transaction manager
+        let tm_arc = Arc::new(tm);
+
+        // Create the final transaction manager with the initialized lock manager
+        Self {
+            next_txn_id: tm_arc.next_txn_id.clone(),
+            state: tm_arc.state.clone(),
         }
-    }
-
-    /// Begins a new transaction with proper state checks
-    pub fn begin(&self, isolation_level: IsolationLevel) -> Result<Arc<Transaction>, String> {
-        // Check if transaction manager is shutdown
-        if self.state.is_shutdown.load(Ordering::SeqCst) {
-            return Err("Transaction manager is shutdown".to_string());
-        }
-
-        let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
-        let txn = Arc::new(Transaction::new(txn_id, isolation_level));
-
-        // Write begin log record using WALManager
-        let lsn = self.wal_manager.write_begin_record(&txn);
-        txn.set_prev_lsn(lsn);
-
-        // Update transaction map and running transactions atomically
-        {
-            let mut txn_map = self.state.txn_map.write();
-            let mut running_txns = self.state.running_txns.write();
-
-            txn_map.insert(txn_id, Arc::clone(&txn));
-            running_txns.add_txn(txn.read_ts());
-        }
-
-        Ok(txn)
     }
 
     /// Shuts down the transaction manager
@@ -103,9 +82,29 @@ impl TransactionManager {
         Ok(())
     }
 
-    /// Gets the current state of the transaction manager
-    pub fn get_state(&self) -> Arc<TransactionManagerState> {
-        self.state.clone()
+    /// Begins a new transaction with proper state checks
+    pub fn begin(&self, isolation_level: IsolationLevel) -> Result<Arc<Transaction>, String> {
+        // Check if transaction manager is shutdown
+        if self.state.is_shutdown.load(Ordering::SeqCst) {
+            return Err("Transaction manager is shutdown".to_string());
+        }
+
+        let txn_id = self.next_txn_id.fetch_add(1, Ordering::SeqCst);
+        let txn = Arc::new(Transaction::new(txn_id, isolation_level));
+
+        // Explicitly set state to Running
+        txn.set_state(TransactionState::Running);
+
+        // Update transaction map and running transactions atomically
+        {
+            let mut txn_map = self.state.txn_map.write();
+            let mut running_txns = self.state.running_txns.write();
+
+            txn_map.insert(txn_id, Arc::clone(&txn));
+            running_txns.add_txn(txn.read_ts());
+        }
+
+        Ok(txn)
     }
 
     /// Commits the specified transaction.
@@ -141,19 +140,24 @@ impl TransactionManager {
             return false;
         }
 
-        // Write commit log record using WALManager
-        let lsn = self.wal_manager.write_commit_record(&txn);
-        txn.set_prev_lsn(lsn);
-
-        // 3. Update transaction state and metadata in a single critical section
+        // 3. Update transaction state and metadata atomically
         {
             let mut txn_map = self.state.txn_map.write();
             let mut running_txns = self.state.running_txns.write();
 
+            // Set commit timestamp before changing state
+            let commit_ts = running_txns.get_next_ts();
+            txn.set_commit_ts(commit_ts);
+
+            // Update transaction state
             txn.set_state(TransactionState::Committed);
+
+            // Update watermark
             let read_ts = txn.read_ts();
             running_txns.update_commit_ts(read_ts);
             running_txns.remove_txn(read_ts);
+
+            // Update transaction map
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
 
@@ -171,16 +175,17 @@ impl TransactionManager {
             panic!("txn not in running / tainted state");
         }
 
-        // Write abort log record using WALManager
-        let lsn = self.wal_manager.write_abort_record(&txn);
-        txn.set_prev_lsn(lsn);
-
         {
             let mut txn_map = self.state.txn_map.write();
             txn.set_state(TransactionState::Aborted);
             self.state.running_txns.write().remove_txn(txn.read_ts());
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
+    }
+
+    /// Gets the current state of the transaction manager
+    pub fn get_state(&self) -> Arc<TransactionManagerState> {
+        self.state.clone()
     }
 
     /// Performs garbage collection.
@@ -259,6 +264,88 @@ impl TransactionManager {
             .and_then(|page_info| page_info.prev_link.read().get(&rid).cloned())
     }
 
+    pub fn update_tuple_and_undo_link(
+        &self,
+        rid: RID,
+        undo_link: Option<UndoLink>,
+        table_heap: &mut TableHeap,
+        txn: &Transaction,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+        lock_manager: Arc<LockManager>,
+        check: Option<Box<dyn Fn(&TupleMeta, &Tuple, RID, Option<UndoLink>) -> bool>>,
+    ) -> bool {
+        // Create transaction context for this operation
+        let txn_ctx = Arc::new(TransactionContext::new(
+            Arc::new(txn.clone()),
+            lock_manager,
+            Arc::new(self.clone()),
+        ));
+
+        // Proceed with update with transaction context
+        let update_result = match table_heap.update_tuple(meta, tuple, rid, Some(txn_ctx.clone())) {
+            Ok(new_rid) => {
+                if new_rid != rid {
+                    if !self.update_undo_link(
+                        new_rid,
+                        undo_link.clone(),
+                        Some(Box::new(move |_| true)),
+                    ) {
+                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
+                        let _ = table_heap.update_tuple_meta(&rollback_meta, new_rid);
+                        return false;
+                    }
+                    new_rid
+                } else {
+                    if !self.update_undo_link(rid, undo_link.clone(), Some(Box::new(|_| true))) {
+                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
+                        let _ = table_heap.update_tuple_meta(&rollback_meta, rid);
+                        return false;
+                    }
+                    rid
+                }
+            }
+            Err(_) => return false,
+        };
+
+        // Verify update if check function provided
+        if let Some(check_fn) = check {
+            if !check_fn(meta, tuple, update_result, undo_link.clone()) {
+                let rollback_meta = TupleMeta::new(txn.get_transaction_id());
+                let _ = table_heap.update_tuple_meta(&rollback_meta, update_result);
+                self.update_undo_link(update_result, None, Some(Box::new(|_| true)));
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn get_tuple_and_undo_link(
+        &self,
+        table_heap: &TableHeap,
+        rid: RID,
+        lock_manager: Arc<LockManager>,
+    ) -> (TupleMeta, Tuple, Option<UndoLink>) {
+        // Create transaction context
+        let txn_ctx = Arc::new(TransactionContext::new(
+            Arc::new(Transaction::new(
+                INVALID_TXN_ID,
+                IsolationLevel::ReadUncommitted,
+            )),
+            lock_manager,
+            Arc::new(self.clone()),
+        ));
+
+        // Get the tuple from table heap with transaction context
+        let (meta, tuple) = table_heap.get_tuple(rid, Some(txn_ctx)).unwrap();
+
+        // Get the undo link using self reference
+        let undo_link = self.get_undo_link(rid);
+
+        (meta, tuple, undo_link)
+    }
+
     /// Accesses the transaction undo log buffer and gets the undo log.
     ///
     /// # Parameters
@@ -310,11 +397,7 @@ impl TransactionManager {
         self.get_transactions().len()
     }
 
-    pub fn get_next_transaction_id(&self) -> u64 {
-        self.state.txn_map.read().keys().next().map_or(0, |k| *k)
-    }
-
-    pub fn verify_transaction(&self, txn: &Transaction, catalog: Option<&Catalog>) -> bool {
+    fn verify_transaction(&self, txn: &Transaction, catalog: Option<&Catalog>) -> bool {
         if txn.get_isolation_level() != IsolationLevel::Serializable {
             return true;
         }
@@ -339,8 +422,9 @@ impl TransactionManager {
             for (table_id, predicates) in scan_predicates {
                 if let Some(table_info) = catalog.get_table_by_oid(table_id.into()) {
                     let table_heap = table_info.get_table_heap();
+                    let table_heap_guard = table_heap.read();
                     let schema = table_info.get_table_schema();
-                    let mut iter = table_heap.make_iterator();
+                    let mut iter = table_heap_guard.make_iterator(None);
 
                     while let Some((_, tuple)) = iter.next() {
                         if let Some(link) = self.get_undo_link(tuple.get_rid()) {
@@ -361,76 +445,6 @@ impl TransactionManager {
 
         true
     }
-
-    pub fn update_tuple_and_undo_link(
-        &self,
-        rid: RID,
-        undo_link: Option<UndoLink>,
-        table_heap: &TableHeap,
-        txn: &Transaction,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
-        check: Option<Box<dyn Fn(&TupleMeta, &Tuple, RID, Option<UndoLink>) -> bool>>,
-    ) -> bool {
-        // Write update log record using WALManager
-        let old_tuple = table_heap.get_tuple(rid).unwrap().1;
-        let lsn = self
-            .wal_manager
-            .write_update_record(txn, rid, old_tuple, tuple.clone());
-        txn.set_prev_lsn(lsn);
-
-        // Proceed with update without transaction context
-        let update_result = match table_heap.update_tuple(meta, tuple, rid, None) {
-            Ok(new_rid) => {
-                if new_rid != rid {
-                    if !self.update_undo_link(
-                        new_rid,
-                        undo_link.clone(),
-                        Some(Box::new(move |_| true)),
-                    ) {
-                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                        let _ = table_heap.update_tuple_meta(&rollback_meta, new_rid);
-                        return false;
-                    }
-                    new_rid
-                } else {
-                    if !self.update_undo_link(rid, undo_link.clone(), Some(Box::new(|_| true))) {
-                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                        let _ = table_heap.update_tuple_meta(&rollback_meta, rid);
-                        return false;
-                    }
-                    rid
-                }
-            }
-            Err(_) => return false,
-        };
-
-        // Verify update if check function provided
-        if let Some(check_fn) = check {
-            if !check_fn(meta, tuple, update_result, undo_link.clone()) {
-                let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                let _ = table_heap.update_tuple_meta(&rollback_meta, update_result);
-                self.update_undo_link(update_result, None, Some(Box::new(|_| true)));
-                return false;
-            }
-        }
-
-        true
-    }
-
-    pub fn get_tuple_and_undo_link(
-        &self,
-        table_heap: &TableHeap,
-        rid: RID,
-    ) -> (TupleMeta, Tuple, Option<UndoLink>) {
-        // Get the tuple from table heap
-        let (meta, tuple) = table_heap.get_tuple(rid).unwrap();
-
-        // Get the undo link using self reference
-        let undo_link = self.get_undo_link(rid);
-
-        (meta, tuple, undo_link)
-    }
 }
 
 #[cfg(test)]
@@ -445,14 +459,15 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
+    use std::thread;
     use tempfile::TempDir;
 
     /// Test context that holds shared components
     struct TestContext {
         txn_manager: Arc<TransactionManager>,
+        lock_manager: Arc<LockManager>,
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
-        lock_manager: Arc<LockManager>,
         _temp_dir: TempDir, // Keep temp dir alive
     }
 
@@ -486,10 +501,12 @@ mod tests {
                 replacer,
             ));
 
-            // Create log manager
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            // Create transaction manager with its own lock manager
+            let txn_manager = Arc::new(TransactionManager::new());
 
-            // Create catalog
+            let lock_manager = Arc::new(LockManager::new());
+
+            // Create catalog using the transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool.clone(),
                 0,
@@ -498,22 +515,19 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                txn_manager.clone(),
             )));
-
-            // Create transaction manager without catalog
-            let txn_manager = Arc::new(TransactionManager::new(log_manager));
-            let lock_manager = Arc::new(LockManager::new(txn_manager.clone()));
 
             Self {
                 txn_manager,
+                lock_manager,
                 catalog,
                 buffer_pool,
-                lock_manager,
                 _temp_dir: temp_dir,
             }
         }
 
-        fn create_test_table(&self) -> (TableOidT, Arc<TableHeap>) {
+        fn create_test_table(&self) -> (TableOidT, TableHeap) {
             let schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
                 Column::new("value", TypeId::Integer),
@@ -525,7 +539,13 @@ mod tests {
                 .create_table("test_table".to_string(), schema)
                 .unwrap();
 
-            (table_info.get_table_oidt(), table_info.get_table_heap())
+            let table_heap = TableHeap::new(
+                self.buffer_pool.clone(),
+                table_info.get_table_oidt(),
+                self.txn_manager.clone(),
+            );
+
+            (table_info.get_table_oidt(), table_heap)
         }
 
         fn create_test_tuple() -> Tuple {
@@ -543,16 +563,16 @@ mod tests {
             self.txn_manager.begin(isolation_level)
         }
 
-        fn lock_manager(&self) -> Arc<LockManager> {
-            self.lock_manager.clone()
-        }
-
         fn buffer_pool_manager(&self) -> Arc<BufferPoolManager> {
             self.buffer_pool.clone()
         }
 
-        fn transaction_manager(&self) -> Arc<TransactionManager> {
+        fn txn_manager(&self) -> Arc<TransactionManager> {
             self.txn_manager.clone()
+        }
+
+        fn lock_manager(&self) -> Arc<LockManager> {
+            self.lock_manager.clone()
         }
     }
 
@@ -560,7 +580,7 @@ mod tests {
     fn test_begin_transaction() {
         let ctx = TestContext::new("test_begin_transaction");
 
-        // Begin transaction - the ID will be 0 since it's the first transaction
+        // Begin transaction
         let txn = ctx
             .begin_transaction(IsolationLevel::ReadCommitted)
             .unwrap();
@@ -569,27 +589,21 @@ mod tests {
         // Verify transaction state
         assert_eq!(txn.get_isolation_level(), IsolationLevel::ReadCommitted);
         assert_eq!(txn.get_state(), TransactionState::Running);
-        assert_eq!(txn_id, 0); // First transaction should have ID 0
+        assert_eq!(txn_id, 0);
 
-        // Verify transaction is tracked - use separate scope for locks
+        // Verify transaction is tracked
         {
-            let txn_manager = ctx.txn_manager.clone();
-            let contains_key = {
-                let txn_map = txn_manager.state.txn_map.read();
-                txn_map.contains_key(&txn_id)
-            };
-            assert!(
-                contains_key,
-                "Transaction map should contain txn_id {}",
-                txn_id
-            );
+            let txn_manager = ctx.txn_manager();
+            assert!(txn_manager.get_transaction(&txn_id).is_some());
+            assert_eq!(txn_manager.get_active_transaction_count(), 1);
         }
 
-        // Start another transaction - should have ID 1
+        // Start another transaction
         let txn2 = ctx
             .begin_transaction(IsolationLevel::ReadCommitted)
             .unwrap();
         assert_eq!(txn2.get_transaction_id(), 1);
+        assert_eq!(ctx.txn_manager().get_active_transaction_count(), 2);
     }
 
     #[test]
@@ -597,53 +611,65 @@ mod tests {
         let ctx = TestContext::new("test_commit_transaction");
 
         // Begin transaction
-        let txn = {
-            let txn = ctx
-                .begin_transaction(IsolationLevel::ReadCommitted)
-                .unwrap();
-            txn
-        };
+        let txn = ctx
+            .begin_transaction(IsolationLevel::ReadCommitted)
+            .unwrap();
+        let txn_id = txn.get_transaction_id();
 
-        // Create test table and insert tuple - do this in a separate scope
-        let (table_oid, table_heap, rid) = {
-            let (table_oid, table_heap) = ctx.create_test_table();
-            let mut tuple = TestContext::create_test_tuple();
+        // Create test table and insert tuple
+        let (table_oid, mut table_heap) = ctx.create_test_table();
+        let mut tuple = TestContext::create_test_tuple();
 
-            // Create transaction context
-            let txn_ctx = Arc::new(TransactionContext::new(
-                txn.clone(),
-                ctx.lock_manager.clone(),
-                ctx.txn_manager.clone(),
-            ));
+        // Create transaction context
+        let txn_ctx = Arc::new(TransactionContext::new(
+            txn.clone(),
+            ctx.lock_manager(),
+            ctx.txn_manager(),
+        ));
 
-            // Insert tuple
-            let rid = table_heap
-                .insert_tuple(
-                    &TupleMeta::new(txn.get_transaction_id()),
-                    &mut tuple,
-                    Some(txn_ctx),
-                )
-                .unwrap();
-
-            (table_oid, table_heap, rid)
-        };
+        // Insert tuple
+        let rid = table_heap
+            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple, Some(txn_ctx.clone()))
+            .unwrap();
 
         // Append to write set
         txn.append_write_set(table_oid, rid);
 
         // Commit transaction
-        let commit_success = ctx.txn_manager.commit(txn.clone(), ctx.buffer_pool.clone());
-        assert!(commit_success, "Transaction commit failed");
-
-        // Verify state after commit
+        assert!(ctx
+            .txn_manager()
+            .commit(txn.clone(), ctx.buffer_pool_manager()));
         assert_eq!(txn.get_state(), TransactionState::Committed);
 
-        // Verify tuple exists and is visible - do this in a separate scope
-        let (meta, committed_tuple) = table_heap.get_tuple(rid).unwrap();
-        assert_eq!(meta.get_creator_txn_id(), txn.get_transaction_id());
+        // Verify tuple with a new transaction using ReadCommitted isolation
+        let verify_txn = ctx
+            .begin_transaction(IsolationLevel::ReadCommitted)
+            .unwrap();
 
-        let expected_tuple = TestContext::create_test_tuple();
-        assert_eq!(committed_tuple.get_values(), expected_tuple.get_values());
+        // Ensure verify_txn has a higher timestamp than the commit
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        let verify_ctx = Arc::new(TransactionContext::new(
+            verify_txn.clone(),
+            ctx.lock_manager(),
+            ctx.txn_manager(),
+        ));
+
+        // Get tuple with verification transaction
+        let result = table_heap.get_tuple(rid, Some(verify_ctx.clone()));
+        assert!(
+            result.is_ok(),
+            "Failed to read committed tuple: {:?}",
+            result.err()
+        );
+
+        let (meta, committed_tuple) = result.unwrap();
+        assert_eq!(meta.get_creator_txn_id(), txn_id);
+        assert_eq!(committed_tuple.get_values(), tuple.get_values());
+
+        // Cleanup
+        ctx.txn_manager()
+            .commit(verify_txn, ctx.buffer_pool_manager());
     }
 
     #[test]
@@ -657,104 +683,112 @@ mod tests {
         let txn_id = txn.get_transaction_id();
 
         // Create test table and insert tuple
-        let (table_oid, table_heap) = ctx.create_test_table();
+        let (table_oid, mut table_heap) = ctx.create_test_table();
         let mut tuple = TestContext::create_test_tuple();
 
         // Create transaction context
         let txn_ctx = Arc::new(TransactionContext::new(
             txn.clone(),
-            ctx.lock_manager.clone(),
-            ctx.txn_manager.clone(),
+            ctx.lock_manager(),
+            ctx.txn_manager(),
         ));
 
         // Insert tuple
         let rid = table_heap
-            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple, Some(txn_ctx))
+            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple, Some(txn_ctx.clone()))
             .unwrap();
 
         txn.append_write_set(table_oid, rid);
 
         // Abort transaction
-        ctx.txn_manager.abort(txn.clone());
-
-        // Verify transaction state
+        ctx.txn_manager().abort(txn.clone());
         assert_eq!(txn.get_state(), TransactionState::Aborted);
 
-        // Verify transaction is removed from map
-        {
-            let txn_manager = ctx.txn_manager;
-            let txn_map = txn_manager.state.txn_map.read();
-            assert!(
-                !txn_map.contains_key(&txn_id),
-                "Aborted transaction should be removed from map"
-            );
-        }
+        // Verify tuple is not visible with a new transaction
+        let verify_txn = ctx
+            .begin_transaction(IsolationLevel::ReadCommitted)
+            .unwrap();
+        let verify_ctx = Arc::new(TransactionContext::new(
+            verify_txn.clone(),
+            ctx.lock_manager(),
+            ctx.txn_manager(),
+        ));
 
-        // Verify tuple is not visible
-        match table_heap.get_tuple(rid) {
-            Ok(_) => panic!("Tuple should not be visible after abort"),
-            Err(_) => (), // Expected - tuple should not be found
-        }
+        // Get tuple should fail since transaction was aborted
+        let result = table_heap.get_tuple(rid, Some(verify_ctx.clone()));
+        assert!(
+            result.is_err(),
+            "Tuple from aborted transaction should not be visible"
+        );
+
+        // Cleanup
+        ctx.txn_manager()
+            .commit(verify_txn, ctx.buffer_pool_manager());
     }
 
     #[test]
     fn test_transaction_isolation() {
-        // Setup test context
         let ctx = TestContext::new("test_transaction_isolation");
-        let mut txn_manager = ctx.txn_manager.clone();
-        let catalog = ctx.catalog.clone();
 
-        let (table_oid, table_heap) = ctx.create_test_table();
-        // Create two transactions with different isolation levels
-        let txn1 = txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
-        let txn2 = txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let (table_oid, mut table_heap) = ctx.create_test_table();
+
+        // Start two transactions
+        let txn1 = ctx
+            .begin_transaction(IsolationLevel::ReadCommitted)
+            .unwrap();
+        let txn2 = ctx
+            .begin_transaction(IsolationLevel::ReadCommitted)
+            .unwrap();
+
         let txn_ctx1 = Arc::new(TransactionContext::new(
             txn1.clone(),
             ctx.lock_manager(),
-            ctx.transaction_manager()
+            ctx.txn_manager(),
         ));
         let txn_ctx2 = Arc::new(TransactionContext::new(
             txn2.clone(),
             ctx.lock_manager(),
-            ctx.transaction_manager()
+            ctx.txn_manager(),
         ));
 
-        // Insert a tuple with txn1
+        // Insert with txn1
         let mut tuple = TestContext::create_test_tuple();
+        let rid = table_heap
+            .insert_tuple(
+                &TupleMeta::new(txn1.get_transaction_id()),
+                &mut tuple,
+                Some(txn_ctx1.clone()),
+            )
+            .unwrap();
 
-         // Insert tuple
-        let rid = table_heap.insert_tuple(
-                    &TupleMeta::new(txn1.get_transaction_id()),
-                    &mut tuple,
-                    Some(txn_ctx1),
-                ).unwrap();
+        txn1.append_write_set(table_oid, rid);
 
-
-        // Attempt to update the same tuple with txn2 before txn1 commits
+        // Try to update with txn2 before txn1 commits - should fail
         let mut modified_tuple = tuple.clone();
-        modified_tuple.set_values(vec![Value::new(200)]);
+        modified_tuple.get_values_mut()[1] = Value::new(200);
 
-        // This should fail because txn1 hasn't committed yet
-        assert!(table_heap.update_tuple(
+        let update_result = table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
             &mut modified_tuple,
             rid,
-            Some(txn_ctx2.clone())
-        ).is_err(), "Update should fail due to uncommitted write from txn1");
+            Some(txn_ctx2.clone()),
+        );
+        assert!(update_result.is_err(), "Update should fail before commit");
 
         // Commit txn1
-        txn_manager.commit(txn1, ctx.buffer_pool.clone());
+        assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()));
 
-        // Now txn2 should be able to update the tuple
-        assert!(table_heap.update_tuple(
+        // Now txn2 should succeed in updating
+        let update_result = table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
             &mut modified_tuple,
             rid,
-            Some(txn_ctx2)
-        ).is_ok(), "Update should succeed after txn1 commits");
+            Some(txn_ctx2.clone()),
+        );
+        assert!(update_result.is_ok(), "Update should succeed after commit");
 
         // Cleanup
-        txn_manager.commit(txn2, ctx.buffer_pool);
+        ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
     }
 
     #[test]
