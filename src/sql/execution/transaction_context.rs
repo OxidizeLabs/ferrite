@@ -3,7 +3,6 @@ use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
-use parking_lot::Mutex;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -11,7 +10,6 @@ pub struct TransactionContext {
     transaction: Arc<Transaction>,
     lock_manager: Arc<LockManager>,
     transaction_manager: Arc<TransactionManager>,
-    write_set: Mutex<Vec<(TableOidT, RID)>>, // Make write_set thread-safe
 }
 
 impl TransactionContext {
@@ -24,7 +22,6 @@ impl TransactionContext {
             transaction,
             lock_manager,
             transaction_manager,
-            write_set: Mutex::new(Vec::new()),
         }
     }
 
@@ -46,72 +43,36 @@ impl TransactionContext {
 
     /// Thread-safe method to append to write set
     pub fn append_write_set_atomic(&self, table_oid: TableOidT, rid: RID) {
-        let mut write_set = self.write_set.lock();
-        if !write_set.contains(&(table_oid, rid)) {
-            write_set.push((table_oid, rid));
-        }
+        self.get_transaction().append_write_set(table_oid,rid);
     }
 
     /// Get all write operations performed in this transaction
     pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
-        self.write_set.lock().clone()
+        self.transaction.get_write_set()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::concurrency::transaction::IsolationLevel;
-    use crate::recovery::log_manager::LogManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
+    use crate::concurrency::transaction::{IsolationLevel, TransactionState};
 
     struct TestContext {
         txn_manager: Arc<TransactionManager>,
         lock_manager: Arc<LockManager>,
-        _temp_dir: TempDir, // Keep temp dir alive
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
-            // Create temporary directory
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir
-                .path()
-                .join(format!("{name}.db"))
-                .to_str()
-                .unwrap()
-                .to_string();
-            let log_path = temp_dir
-                .path()
-                .join(format!("{name}.log"))
-                .to_str()
-                .unwrap()
-                .to_string();
-
-            // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-
-            // Create buffer pool
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
-
-            // Create log manager
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
-
+        fn new() -> Self {
             // Create transaction manager
-            let txn_manager = Arc::new(TransactionManager::new(log_manager));
+            let txn_manager = Arc::new(TransactionManager::new());
 
             // Create lock manager
-            let lock_manager = Arc::new(LockManager::new(txn_manager.clone()));
+            let lock_manager = Arc::new(LockManager::new());
 
             Self {
                 txn_manager,
                 lock_manager,
-                _temp_dir: temp_dir,
             }
         }
 
@@ -129,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_new_transaction_context() {
-        let ctx = TestContext::new("test_new_transaction_context");
+        let ctx = TestContext::new();
         let txn_context = ctx.create_transaction_context();
 
         assert_eq!(txn_context.get_transaction_id(), 0); // First transaction has ID 0
@@ -146,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_write_set_operations() {
-        let ctx = TestContext::new("test_write_set_operations");
+        let ctx = TestContext::new();
         let txn_context = ctx.create_transaction_context();
 
         // Test appending to write set
@@ -161,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_write_set_duplicate_prevention() {
-        let ctx = TestContext::new("test_write_set_duplicate_prevention");
+        let ctx = TestContext::new();
         let txn_context = ctx.create_transaction_context();
 
         // Add same entry twice
@@ -177,7 +138,7 @@ mod tests {
     fn test_concurrent_write_set_access() {
         use std::thread;
 
-        let ctx = TestContext::new("test_concurrent_write_set_access");
+        let ctx = TestContext::new();
         let txn_context = Arc::new(ctx.create_transaction_context());
         let mut handles = vec![];
 
@@ -196,5 +157,62 @@ mod tests {
 
         let write_set = txn_context.get_write_set();
         assert_eq!(write_set.len(), 5);
+    }
+
+    #[test]
+    fn test_transaction_state_handling() {
+        let ctx = TestContext::new();
+        let txn_context = ctx.create_transaction_context();
+        let txn = txn_context.get_transaction();
+
+        // Test initial state
+        assert_eq!(txn.get_state(), TransactionState::Running);
+
+        // Test write set operations in different states
+        txn_context.append_write_set_atomic(1, RID::new(1, 1));
+        assert_eq!(txn_context.get_write_set().len(), 1);
+
+        // Test after abort
+        txn.set_state(TransactionState::Aborted);
+        txn_context.append_write_set_atomic(2, RID::new(2, 1));
+        // Write set should still work even with aborted transaction
+        assert_eq!(txn_context.get_write_set().len(), 2);
+
+        // Test after commit
+        txn.set_state(TransactionState::Committed);
+        txn_context.append_write_set_atomic(3, RID::new(3, 1));
+        assert_eq!(txn_context.get_write_set().len(), 3);
+    }
+
+    #[test]
+    fn test_isolation_levels() {
+        let ctx = TestContext::new();
+        
+        // Test with different isolation levels
+        let txn = ctx.txn_manager
+            .begin(IsolationLevel::ReadUncommitted)
+            .unwrap();
+        let txn_context = TransactionContext::new(
+            txn,
+            ctx.lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        );
+        
+        // Operations should work regardless of isolation level
+        txn_context.append_write_set_atomic(1, RID::new(1, 1));
+        assert_eq!(txn_context.get_write_set().len(), 1);
+        
+        // Test with Serializable
+        let txn = ctx.txn_manager
+            .begin(IsolationLevel::Serializable)
+            .unwrap();
+        let txn_context = TransactionContext::new(
+            txn,
+            ctx.lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        );
+        
+        txn_context.append_write_set_atomic(1, RID::new(1, 1));
+        assert_eq!(txn_context.get_write_set().len(), 1);
     }
 }

@@ -22,7 +22,7 @@ impl TupleMeta {
     pub fn new(txn_id: TxnId) -> Self {
         Self {
             creator_txn_id: txn_id,
-            commit_ts: TimeStamp::MAX,
+            commit_ts: TimeStamp::MAX, // Uncommitted initially
             deleted: false,
         }
     }

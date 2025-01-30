@@ -1,65 +1,69 @@
 use crate::common::config::Timestamp;
-use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Tracks all read timestamps.
 #[derive(Debug)]
 pub struct Watermark {
-    commit_ts: Timestamp,
+    /// Set of active transaction timestamps
+    active_txns: HashSet<Timestamp>,
+    /// Current watermark value
     watermark: Timestamp,
-    current_reads: HashMap<Timestamp, i64>,
+    /// Next timestamp to assign
+    next_ts: AtomicU64,
 }
 
 impl Watermark {
     /// Creates a new Watermark with the given commit timestamp.
-    pub fn new(commit_ts: Timestamp) -> Self {
+    pub fn new() -> Self {
+        let next_ts = AtomicU64::new(1); // Start from 1
         Self {
-            commit_ts,
-            watermark: commit_ts,
-            current_reads: HashMap::new(),
+            active_txns: HashSet::new(),
+            watermark: 1, // Initialize watermark to 1 since that's our first available timestamp
+            next_ts,
         }
     }
 
-    /// Adds a transaction with the given read timestamp.
-    pub fn add_txn(&mut self, read_ts: Timestamp) {
-        *self.current_reads.entry(read_ts).or_insert(0) += 1;
-        self.watermark = read_ts.min(self.watermark);
+    /// Gets the next available timestamp
+    pub fn get_next_ts(&self) -> Timestamp {
+        self.next_ts.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Removes a transaction with the given read timestamp.
-    pub fn remove_txn(&mut self, read_ts: Timestamp) {
-        if let Some(count) = self.current_reads.get_mut(&read_ts) {
-            *count -= 1;
-            if *count <= 0 {
-                self.current_reads.remove(&read_ts);
-                // Recalculate watermark if necessary
-                if !self.current_reads.is_empty() {
-                    self.watermark = *self.current_reads.keys().min().unwrap();
-                }
-            }
-        }
+    /// Adds a transaction timestamp to the active set
+    pub fn add_txn(&mut self, ts: Timestamp) {
+        self.active_txns.insert(ts);
+        self.update_watermark();
     }
 
-    /// Updates the commit timestamp.
-    ///
-    /// The caller should update commit timestamp before removing the transaction
-    /// from the watermark to track watermark correctly.
-    pub fn update_commit_ts(&mut self, commit_ts: Timestamp) {
-        self.commit_ts = commit_ts;
+    /// Removes a transaction timestamp from the active set
+    pub fn remove_txn(&mut self, ts: Timestamp) {
+        self.active_txns.remove(&ts);
+        self.update_watermark();
     }
 
-    /// Gets the current watermark.
+    /// Updates the commit timestamp for a transaction
+    pub fn update_commit_ts(&mut self, ts: Timestamp) {
+        // No-op for now, but could be used to track commit order
+    }
+
+    /// Gets the current watermark value
     pub fn get_watermark(&self) -> Timestamp {
-        if self.current_reads.is_empty() {
-            self.commit_ts
+        self.watermark
+    }
+
+    /// Updates the watermark based on active transactions
+    fn update_watermark(&mut self) {
+        if self.active_txns.is_empty() {
+            self.watermark = self.next_ts.load(Ordering::SeqCst);
         } else {
-            self.watermark
+            self.watermark = *self.active_txns.iter().min().unwrap();
         }
     }
 }
 
 impl Default for Watermark {
     fn default() -> Self {
-        Watermark::new(Timestamp::default())
+        Watermark::new()
     }
 }
 
@@ -69,34 +73,73 @@ mod tests {
 
     #[test]
     fn test_watermark_basic() {
-        let mut wm = Watermark::new(100);
-        assert_eq!(wm.get_watermark(), 100);
+        let mut watermark = Watermark::new();
 
-        wm.add_txn(90);
-        assert_eq!(wm.get_watermark(), 90);
+        // Test timestamp generation is sequential starting from 1
+        let ts1 = watermark.get_next_ts();
+        let ts2 = watermark.get_next_ts();
+        assert_eq!(ts1, 1);
+        assert_eq!(ts2, 2);
 
-        wm.add_txn(95);
-        assert_eq!(wm.get_watermark(), 90);
+        // Test transaction tracking
+        watermark.add_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts1);
 
-        wm.remove_txn(90);
-        assert_eq!(wm.get_watermark(), 95);
+        watermark.add_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts1); // Should be minimum active ts
 
-        wm.remove_txn(95);
-        assert_eq!(wm.get_watermark(), 100);
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts2);
+
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), 3); // Next available ts when no active txns
     }
 
     #[test]
-    fn test_watermark_multiple_same_timestamp() {
-        let mut wm = Watermark::new(100);
+    fn test_watermark_empty() {
+        let mut watermark = Watermark::new();
 
-        wm.add_txn(90);
-        wm.add_txn(90);
-        assert_eq!(wm.get_watermark(), 90);
+        // Initially, with no transactions, watermark should be next available ts
+        assert_eq!(watermark.get_watermark(), 1);
 
-        wm.remove_txn(90);
-        assert_eq!(wm.get_watermark(), 90);
+        let ts = watermark.get_next_ts(); // Should be 1
+        assert_eq!(ts, 1);
 
-        wm.remove_txn(90);
-        assert_eq!(wm.get_watermark(), 100);
+        watermark.add_txn(ts);
+        assert_eq!(watermark.get_watermark(), ts);
+
+        watermark.remove_txn(ts);
+        assert_eq!(watermark.get_watermark(), 2); // Next available ts
+    }
+
+    #[test]
+    fn test_watermark_multiple_transactions() {
+        let mut watermark = Watermark::new();
+
+        // Get sequential timestamps
+        let ts1 = watermark.get_next_ts(); // 1
+        let ts2 = watermark.get_next_ts(); // 2
+        let ts3 = watermark.get_next_ts(); // 3
+
+        assert_eq!(ts1, 1);
+        assert_eq!(ts2, 2);
+        assert_eq!(ts3, 3);
+
+        // Add transactions in different order than timestamp sequence
+        watermark.add_txn(ts2);
+        watermark.add_txn(ts3);
+        watermark.add_txn(ts1);
+
+        // Watermark should always be the minimum active timestamp
+        assert_eq!(watermark.get_watermark(), ts1);
+
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts2);
+
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts3);
+
+        watermark.remove_txn(ts3);
+        assert_eq!(watermark.get_watermark(), 4); // Next available ts
     }
 }
