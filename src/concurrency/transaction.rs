@@ -2,6 +2,7 @@ use crate::common::config::{
     Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
 };
 use crate::common::rid::RID;
+use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
@@ -280,11 +281,57 @@ impl Transaction {
     pub fn get_prev_lsn(&self) -> Lsn {
         *self.prev_lsn.read()
     }
+
+    /// Checks if a tuple is visible to this transaction based on isolation level
+    pub fn is_tuple_visible(&self, creator_txn_id: TxnId, txn_manager: &TransactionManager) -> bool {
+        // If this is the creator transaction, tuple is visible
+        if creator_txn_id == self.get_transaction_id() {
+            return true;
+        }
+
+        // Get the creator transaction
+        if let Some(creator_txn) = txn_manager.get_transaction(&creator_txn_id) {
+            match self.get_isolation_level() {
+                IsolationLevel::ReadUncommitted => true, // Can see all tuples
+                IsolationLevel::ReadCommitted => {
+                    // Can only see committed tuples
+                    creator_txn.get_state() == TransactionState::Committed
+                }
+                IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
+                    // Can only see tuples committed before this transaction's read timestamp
+                    creator_txn.get_state() == TransactionState::Committed
+                        && creator_txn.commit_ts() < self.read_ts()
+                }
+            }
+        } else {
+            // If creator transaction not found, assume it's committed
+            // (might have been garbage collected)
+            true
+        }
+    }
 }
 
 impl Default for Transaction {
     fn default() -> Self {
         Transaction::new(0, IsolationLevel::ReadUncommitted)
+    }
+}
+
+// Manually implement Clone for Transaction
+impl Clone for Transaction {
+    fn clone(&self) -> Self {
+        Self {
+            txn_id: self.txn_id,
+            isolation_level: self.isolation_level,
+            thread_id: self.thread_id,
+            state: RwLock::new(*self.state.read()),
+            read_ts: RwLock::new(*self.read_ts.read()),
+            commit_ts: RwLock::new(*self.commit_ts.read()),
+            undo_logs: Mutex::new(self.undo_logs.lock().unwrap().clone()),
+            write_set: Mutex::new(self.write_set.lock().unwrap().clone()),
+            scan_predicates: Mutex::new(self.scan_predicates.lock().unwrap().clone()),
+            prev_lsn: RwLock::new(*self.prev_lsn.read()),
+        }
     }
 }
 
@@ -439,7 +486,7 @@ mod tests {
         // Test get write sets
         let write_sets = txn.get_write_set();
         assert_eq!(write_sets.len(), 3); // Total number of write records
-        
+
         // Check each write record
         let mut found_table1_rid1 = false;
         let mut found_table1_rid2 = false;
