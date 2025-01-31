@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
+use chrono::Utc;
 
 /// Represents a link to a previous version of this tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,12 +109,15 @@ impl Transaction {
     /// # Returns
     /// A new `Transaction` instance.
     pub fn new(txn_id: TxnId, isolation_level: IsolationLevel) -> Self {
+        // Get current timestamp for read_ts
+        let current_ts = Utc::now().timestamp();
+        
         Self {
             txn_id,
             isolation_level,
             thread_id: thread::current().id(),
             state: RwLock::new(TransactionState::Running),
-            read_ts: RwLock::new(0),
+            read_ts: RwLock::new(current_ts as Timestamp), // Initialize with current timestamp
             commit_ts: RwLock::new(INVALID_TS),
             undo_logs: Mutex::new(Vec::new()),
             write_set: Mutex::new(HashMap::with_capacity(8)),
