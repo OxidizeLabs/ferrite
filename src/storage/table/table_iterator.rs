@@ -1,10 +1,17 @@
 use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
+use crate::common::time::TimeStamp;
+use crate::concurrency::lock_manager::LockMode;
+use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
+use parking_lot::RwLock;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::common::logger::initialize_logger;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -12,6 +19,7 @@ pub struct TableIterator {
     table_heap: Arc<TableHeap>,
     rid: RID,
     stop_at_rid: RID,
+    txn_ctx: Option<Arc<TransactionContext>>,
 }
 
 pub struct TableScanIterator {
@@ -22,39 +30,21 @@ pub struct TableScanIterator {
 }
 
 impl TableIterator {
-    pub fn new(table_heap: Arc<TableHeap>, rid: RID, stop_at_rid: RID) -> Self {
+    pub fn new(
+        table_heap: Arc<TableHeap>,
+        rid: RID,
+        stop_at_rid: RID,
+        txn_ctx: Option<Arc<TransactionContext>>,
+    ) -> Self {
+        initialize_logger();
         let mut iterator = Self {
             table_heap,
             rid,
             stop_at_rid,
+            txn_ctx,
         };
-        debug!("New iterator created: {:?}", iterator);
         iterator.initialize();
         iterator
-    }
-
-    fn initialize(&mut self) {
-        if self.rid.get_page_id() == INVALID_PAGE_ID {
-            self.rid = RID::new(INVALID_PAGE_ID, 0);
-        } else {
-            let bpm = self.table_heap.get_bpm();
-            if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
-                if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                    table_page.access(|page| {
-                        if self.rid.get_slot_num() >= page.get_num_tuples() as u32 {
-                            self.rid = RID::new(INVALID_PAGE_ID, 0);
-                        }
-                    });
-                } else {
-                    error!("Failed to convert to TablePage");
-                    self.rid = RID::new(INVALID_PAGE_ID, 0);
-                }
-            } else {
-                error!("Failed to fetch page");
-                self.rid = RID::new(INVALID_PAGE_ID, 0);
-            }
-        }
-        debug!("Iterator initialized: {:?}", self);
     }
 
     pub fn get_rid(&self) -> RID {
@@ -62,90 +52,218 @@ impl TableIterator {
     }
 
     pub fn is_end(&self) -> bool {
-        self.rid.get_page_id() == self.stop_at_rid.get_page_id()
-            && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()
-            || self.rid.get_page_id() == INVALID_PAGE_ID
+        // Check if we've hit an invalid page
+        if self.rid.get_page_id() == INVALID_PAGE_ID {
+            return true;
+        }
+
+        // Check if we've hit the stop point
+        if self.stop_at_rid.get_page_id() != INVALID_PAGE_ID {
+            if self.rid.get_page_id() > self.stop_at_rid.get_page_id() {
+                return true;
+            }
+            if self.rid.get_page_id() == self.stop_at_rid.get_page_id()
+                && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
-    /// Checks if we need to move to the next page based on tuple position
-    fn should_move_to_next_page(&self, page: &TablePage, next_tuple_id: u32) -> bool {
-        next_tuple_id >= page.get_num_tuples() as u32
-    }
+    fn initialize(&mut self) {
+        debug!("Initializing iterator with starting RID: {:?}, stop_at_rid: {:?}",
+               self.rid, self.stop_at_rid);
 
-    /// Gets the next RID when moving within the same page
-    fn get_next_rid_same_page(&self, next_tuple_id: u32) -> RID {
-        RID::new(self.rid.get_page_id(), next_tuple_id)
-    }
+        // Acquire table lock if needed
+        if !self.acquire_table_lock() {
+            debug!("Failed to acquire table lock");
+            self.rid = RID::new(INVALID_PAGE_ID, 0);
+            return;
+        }
 
-    /// Gets the next RID when moving to a new page
-    fn get_next_rid_new_page(&self, next_page_id: u32) -> RID {
-        if next_page_id == INVALID_PAGE_ID as u32 {
-            RID::new(INVALID_PAGE_ID, 0)
+        // Get initial page info
+        let _guard = self.table_heap.latch.read(); // Hold read latch during initialization
+
+        let first_page_id = self.table_heap.get_first_page_id();
+        debug!("First page ID from table heap: {}", first_page_id);
+
+        if first_page_id == INVALID_PAGE_ID {
+            debug!("No valid pages exist in table heap");
+            self.rid = RID::new(INVALID_PAGE_ID, 0);
+            return;
+        }
+
+        let bpm = self.table_heap.get_bpm();
+        debug!("Got buffer pool manager reference");
+
+        // Check if starting page exists and has valid tuples
+        if self.rid.get_page_id() != INVALID_PAGE_ID {
+            debug!("Checking validity of starting page {} (slot {})",
+                   self.rid.get_page_id(), self.rid.get_slot_num());
+
+            match self.check_page_validity(&bpm, self.rid.get_page_id()) {
+                Some(num_tuples) => {
+                    debug!("Starting page {} exists with {} tuples", self.rid.get_page_id(), num_tuples);
+                    if num_tuples > 0 {
+                        if self.rid.get_slot_num() >= num_tuples as u32 {
+                            debug!("Slot number {} too high for {} tuples, resetting to 0",
+                                   self.rid.get_slot_num(), num_tuples);
+                            self.rid = RID::new(self.rid.get_page_id(), 0);
+                        }
+                        debug!("Using valid starting position: {:?}", self.rid);
+                        return;
+                    } else {
+                        debug!("Starting page has no tuples");
+                    }
+                }
+                None => debug!("Starting page {} does not exist", self.rid.get_page_id()),
+            }
         } else {
-            RID::new(next_page_id as PageId, 0)
-        }
-    }
-
-    /// Checks if we've reached or passed the stop condition
-    fn is_past_stop_point(&self, current_rid: RID) -> bool {
-        if self.stop_at_rid.get_page_id() == INVALID_PAGE_ID {
-            return false;
+            debug!("Starting RID has invalid page ID");
         }
 
-        current_rid.get_page_id() > self.stop_at_rid.get_page_id()
-            || (current_rid.get_page_id() == self.stop_at_rid.get_page_id()
-            && current_rid.get_slot_num() >= self.stop_at_rid.get_slot_num())
+        // If starting position is invalid or the page doesn't exist, try first page
+        debug!("Trying first page (ID: {})", first_page_id);
+        match self.check_page_validity(&bpm, first_page_id) {
+            Some(num_tuples) => {
+                debug!("First page has {} tuples", num_tuples);
+                if num_tuples > 0 {
+                    debug!("Using first page as starting position");
+                    self.rid = RID::new(first_page_id, 0);
+                    return;
+                } else {
+                    debug!("First page has no tuples");
+                }
+            }
+            None => debug!("Failed to validate first page"),
+        }
+
+        // If we get here, no valid starting position found
+        debug!("No valid starting position found, marking iterator as invalid");
+        self.rid = RID::new(INVALID_PAGE_ID, 0);
     }
 
     /// Advances the iterator to the next position.
     fn advance(&mut self) {
+        // If we're already at an invalid position, don't try to advance
+        if self.rid.get_page_id() == INVALID_PAGE_ID {
+            debug!("Cannot advance: iterator is at invalid position");
+            return;
+        }
+
+        let _guard = self.table_heap.latch.read(); // Hold read latch during advance
+        debug!("Advancing iterator from RID: {:?}", self.rid);
         let bpm = self.table_heap.get_bpm();
 
-        // Try to fetch the current page
-        let page_guard = match bpm.fetch_page_guarded(self.rid.get_page_id()) {
-            Some(guard) => guard,
-            None => {
-                error!("Failed to fetch page");
-                self.rid = RID::new(INVALID_PAGE_ID, 0);
-                return;
+        // Get current page
+        if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
+            if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
+                let next_tuple_id = self.rid.get_slot_num() + 1;
+
+                // Get both num_tuples and next_page_id in one access
+                if let Some((num_tuples, next_page_id)) = table_page.access(|page|
+                    (page.get_num_tuples(), page.get_next_page_id())
+                ) {
+                    debug!("Current page info - num_tuples: {}, next_page_id: {}", num_tuples, next_page_id);
+                    if next_tuple_id >= num_tuples as u32 {
+                        // Move to next page if it exists
+                        if next_page_id != INVALID_PAGE_ID {
+                            debug!("Moving to next page: {}", next_page_id);
+                            self.rid = RID::new(next_page_id, 0);
+                        } else {
+                            debug!("No next page exists, marking iterator as invalid");
+                            self.rid = RID::new(INVALID_PAGE_ID, 0);
+                        }
+                    } else {
+                        // Move to next tuple in current page
+                        debug!("Moving to next tuple in current page: {}", next_tuple_id);
+                        self.rid = RID::new(self.rid.get_page_id(), next_tuple_id);
+                    }
+                    return;
+                }
             }
-        };
+        }
 
-        // Try to convert to TablePage
-        let table_page = match page_guard.into_specific_type::<TablePage, 8>() {
-            Some(page) => page,
-            None => {
-                error!("Failed to convert to TablePage");
-                self.rid = RID::new(INVALID_PAGE_ID, 0);
-                return;
+        debug!("Failed to advance iterator, marking as invalid");
+        self.rid = RID::new(INVALID_PAGE_ID, 0);
+    }
+
+    fn acquire_table_lock(&self) -> bool {
+        if let Some(txn_ctx) = &self.txn_ctx {
+            let txn = txn_ctx.get_transaction();
+            let lock_manager = txn_ctx.get_lock_manager();
+
+            // Use table_heap's latch to protect the table_oid access
+            let _latch_guard = self.table_heap.latch.read();
+
+            if let Err(e) = lock_manager.lock_table(
+                txn.clone(),
+                LockMode::IntentionShared,
+                self.table_heap.get_table_oid(),
+            ) {
+                error!("Failed to acquire table lock: {}", e);
+                return false;
             }
-        };
+        }
+        true
+    }
 
-        // Process the page within the access closure
-        table_page.access(|page| {
-            let next_tuple_id = self.rid.get_slot_num() + 1;
+    fn check_page_validity(&self, bpm: &Arc<BufferPoolManager>, page_id: PageId) -> Option<u16> {
+        debug!("Checking validity of page {}", page_id);
+        match bpm.fetch_page_guarded(page_id) {
+            Some(page_guard) => {
+                debug!("Successfully fetched page {}", page_id);
+                match page_guard.into_specific_type::<TablePage, 8>() {
+                    Some(table_page) => {
+                        debug!("Successfully converted to table page {}", page_id);
+                        match table_page.access(|page| page.get_num_tuples()) {
+                            Some(num_tuples) => {
+                                debug!("Page {} has {} tuples", page_id, num_tuples);
+                                Some(num_tuples)
+                            }
+                            None => {
+                                debug!("Failed to get tuple count for page {}", page_id);
+                                None
+                            }
+                        }
+                    }
+                    None => {
+                        debug!("Failed to convert page {} to table page", page_id);
+                        None
+                    }
+                }
+            }
+            None => {
+                debug!("Failed to fetch page {}", page_id);
+                None
+            }
+        }
+    }
 
-            // Determine the next RID
-            let next_rid = if self.should_move_to_next_page(page, next_tuple_id) {
-                self.get_next_rid_new_page(page.get_next_page_id() as u32)
-            } else {
-                self.get_next_rid_same_page(next_tuple_id)
-            };
-
-            // Update the iterator's position
-            self.rid = if self.is_past_stop_point(next_rid) {
-                RID::new(INVALID_PAGE_ID, 0)
-            } else {
-                next_rid
-            };
-        });
+    fn validate_slot_number(&mut self, bpm: &Arc<BufferPoolManager>) -> bool {
+        debug!("Validating slot number for RID: {:?}", self.rid);
+        if let Some(num_tuples) = self.check_page_validity(bpm, self.rid.get_page_id()) {
+            if self.rid.get_slot_num() >= num_tuples as u32 {
+                debug!("Slot number too high, resetting to 0");
+                self.rid = RID::new(self.rid.get_page_id(), 0);
+            }
+            return true;
+        }
+        false
     }
 }
 
 impl TableScanIterator {
     pub fn new(table_info: Arc<TableInfo>) -> Self {
         let table_heap = table_info.get_table_heap();
-        let inner = TableIterator::new(table_heap, RID::new(0, 0), RID::new(INVALID_PAGE_ID, 0));
+        let inner = TableIterator::new(
+            table_heap,
+            RID::new(0, 0),
+            RID::new(INVALID_PAGE_ID, 0),
+            None,
+        );
 
         Self { inner, table_info }
     }
@@ -163,7 +281,12 @@ impl TableScanIterator {
     /// Reset the iterator to start of table
     pub fn reset(&mut self) {
         let table_heap = self.table_info.get_table_heap();
-        self.inner = TableIterator::new(table_heap, RID::new(0, 0), RID::new(INVALID_PAGE_ID, 0));
+        self.inner = TableIterator::new(
+            table_heap,
+            RID::new(0, 0),
+            RID::new(INVALID_PAGE_ID, 0),
+            None,
+        );
     }
 }
 
@@ -171,19 +294,50 @@ impl Iterator for TableIterator {
     type Item = (TupleMeta, Tuple);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.is_end() {
-            debug!("Iterator has reached the end.");
-            return None;
-        }
+        while !self.is_end() {
+            debug!("Attempting to get tuple with RID: {:?}", self.rid);
 
-        debug!("Attempting to get tuple with RID: {:?}", self.rid);
-        let result = self.table_heap.get_tuple(self.rid);
-        match &result {
-            Ok(_) => debug!("Successfully retrieved tuple"),
-            Err(e) => debug!("Failed to retrieve tuple: {:?}", e),
+            // Get the tuple with read latch
+            let result = {
+                let _guard = self.table_heap.latch.read();
+                match self.table_heap.get_tuple(self.rid, self.txn_ctx.clone()) {
+                    Ok(tuple) => {
+                        // Check if tuple is visible to transaction
+                        if let Some(txn_ctx) = &self.txn_ctx {
+                            let txn = txn_ctx.get_transaction();
+                            let is_visible = tuple.0.is_visible_to(txn.get_transaction_id());
+                            debug!(
+                                "Tuple visibility check - RID: {:?}, TxnID: {}, Visible: {}, Meta: {:?}",
+                                self.rid,
+                                txn.get_transaction_id(),
+                                is_visible,
+                                tuple.0
+                            );
+                            if is_visible {
+                                Some(tuple)
+                            } else {
+                                None
+                            }
+                        } else {
+                            Some(tuple)
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Failed to retrieve tuple: {:?}", e);
+                        None
+                    }
+                }
+            };
+
+            // Advance the iterator
+            self.advance();
+
+            // Return the result if we got one
+            if result.is_some() {
+                return result;
+            }
         }
-        self.advance();
-        Some(result.unwrap().clone())
+        None
     }
 }
 
@@ -197,50 +351,59 @@ impl Iterator for TableScanIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use chrono::Utc;
     use parking_lot::RwLock;
-    use crate::catalog::catalog::Catalog;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
-    use crate::sql::execution::transaction_context::TransactionContext;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_context: Arc<TransactionContext>,
-        db_file: String,
-        db_log_file: String,
+        transaction_manager: Arc<TransactionManager>,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
+        fn new(name: &str) -> Self {
+            // Initialize logging first
             initialize_logger();
+
             let buffer_pool_size: usize = 5;
             const K: usize = 2;
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            debug!("Creating test context with db_path: {}, log_path: {}", db_path, log_path);
+
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
@@ -249,45 +412,43 @@ mod tests {
                 replacer.clone(),
             ));
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
 
-            let catalog = Arc::new(RwLock::new(Catalog::new(bpm.clone(),0,0, HashMap::default(), HashMap::default(), HashMap::default(), HashMap::default())));
+            // Create transaction with READ_COMMITTED isolation level
+            let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadCommitted));
+            debug!("Created new transaction with ID: {}", txn.get_transaction_id());
 
-            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
-
-            let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
-
-            let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-            let transaction_context = Arc::new(TransactionContext::new(txn,lock_manager, transaction_manager));
+            let transaction_context = Arc::new(TransactionContext::new(
+                txn,
+                lock_manager,
+                transaction_manager.clone(),
+            ));
 
             Self {
                 bpm,
                 transaction_context,
-                db_file,
-                db_log_file,
+                transaction_manager,
+                _temp_dir: temp_dir,
             }
         }
 
         fn get_transaction_context(&self) -> &Arc<TransactionContext> {
             &self.transaction_context
         }
-
-        fn cleanup(&self) {
-            let _ = std::fs::remove_file(&self.db_file);
-            let _ = std::fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup()
-        }
     }
 
     fn setup_test_table(test_name: &str) -> Arc<TableHeap> {
+        debug!("Setting up test table: {}", test_name);
         let ctx = TestContext::new(test_name);
         let bpm = ctx.bpm.clone();
-        Arc::new(TableHeap::new(bpm, 0))
+        let table_heap = Arc::new(TableHeap::new(
+            bpm,
+            0,
+            ctx.transaction_manager.clone(),
+        ));
+        debug!("Created table heap for test: {}", test_name);
+        table_heap
     }
 
     fn create_test_schema() -> Schema {
@@ -310,12 +471,13 @@ mod tests {
             1, // table_oid
         )
     }
+
     #[test]
     fn test_table_iterator_create() {
         let table_heap = setup_test_table("test_table_iterator_create");
         let rid = RID::new(INVALID_PAGE_ID, 0);
 
-        let iterator = TableIterator::new(table_heap, rid, rid);
+        let iterator = TableIterator::new(table_heap, rid, rid, None);
         assert_eq!(iterator.get_rid(), rid);
     }
 
@@ -324,7 +486,7 @@ mod tests {
         let table_heap = setup_test_table("test_table_iterator_empty");
         let rid = RID::new(0, 0);
 
-        let mut iterator = TableIterator::new(table_heap, rid, rid);
+        let mut iterator = TableIterator::new(table_heap, rid, rid, None);
         assert!(iterator.is_end());
         assert_eq!(
             None,
@@ -336,9 +498,21 @@ mod tests {
     #[test]
     fn test_table_iterator_single_tuple() {
         let ctx = TestContext::new("test_table_iterator_single_tuple");
-        let transaction_context = ctx.get_transaction_context();
 
-        let table_heap = setup_test_table("test_table_iterator_single_tuple");
+        // Create transaction with READ_COMMITTED isolation level instead of READ_UNCOMMITTED
+        let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadCommitted));
+        txn.set_state(TransactionState::Growing);
+
+        let lock_manager = Arc::new(LockManager::new());
+        let transaction_context = Arc::new(TransactionContext::new(
+            txn,
+            lock_manager,
+            ctx.transaction_manager.clone(),
+        ));
+
+        let mut table_heap = setup_test_table("test_table_iterator_single_tuple");
+        let table_heap_guard = table_heap.latch.write();
+
         let schema = Schema::new(vec![
             Column::new("col_1", TypeId::Integer),
             Column::new("col_2", TypeId::Integer),
@@ -350,80 +524,175 @@ mod tests {
             schema.clone(),
             rid,
         );
-        let meta = TupleMeta::new(123);
+        let meta = TupleMeta::new(0); // Use same txn_id as the transaction
 
+        // Insert tuple with transaction context
         table_heap
             .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
             .expect("failed to insert tuple");
 
-        let mut iterator = TableIterator::new(table_heap, rid, RID::new(INVALID_PAGE_ID, 0));
-        assert!(!iterator.is_end());
+        drop(table_heap_guard); // Release write lock before creating iterator
+
+        let mut iterator = TableIterator::new(
+            table_heap,
+            rid,
+            RID::new(INVALID_PAGE_ID, 0),
+            Some(transaction_context.clone()),
+        );
+
+        assert!(
+            !iterator.is_end(),
+            "Iterator should not be at end with valid tuple"
+        );
 
         let result = iterator.next();
-        assert!(result.is_some());
-        let (result_meta, result_tuple) = result.unwrap();
-        assert_eq!(result_meta, meta);
-        assert_eq!(result_tuple, tuple);
+        assert!(
+            result.is_some(),
+            "Iterator should return the inserted tuple"
+        );
 
-        assert!(iterator.is_end());
-        assert_eq!(iterator.next(), None);
+        if let Some((result_meta, result_tuple)) = result {
+            assert_eq!(result_meta, meta, "Tuple metadata should match");
+            assert_eq!(result_tuple, tuple, "Tuple data should match");
+        }
+
+        assert!(
+            iterator.is_end(),
+            "Iterator should be at end after reading tuple"
+        );
+        assert_eq!(iterator.next(), None, "Iterator should return None at end");
+        debug!("Completed test_table_iterator_single_tuple");
     }
 
     #[test]
     fn test_table_iterator_multiple_tuples() {
         let ctx = TestContext::new("test_table_iterator_multiple_tuples");
-        let transaction_context = ctx.get_transaction_context();
 
-        let table_heap = setup_test_table("test_table_iterator_multiple_tuples");
+        // Create transaction with READ_COMMITTED isolation level
+        let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadCommitted));
+        txn.set_state(TransactionState::Growing);
+
+        let lock_manager = Arc::new(LockManager::new());
+        let transaction_context = Arc::new(TransactionContext::new(
+            txn.clone(),
+            lock_manager,
+            ctx.transaction_manager.clone(),
+        ));
+
+        let mut table_heap = setup_test_table("test_table_iterator_multiple_tuples");
+        let mut table_heap_guard = table_heap.latch.write();
+
         let schema = Schema::new(vec![
             Column::new("col_1", TypeId::Integer),
-            Column::new("col_2", TypeId::Integer),
+            Column::new("col_2", TypeId::VarChar),
             Column::new("col_3", TypeId::Integer),
         ]);
-        let rid_1 = RID::new(0, 0);
-        let rid_2 = RID::new(0, 1);
 
-        let mut tuple_1 = Tuple::new(
-            &*vec![Value::from(1), Value::from(2), Value::from(3)],
-            schema.clone(),
-            rid_1,
+        // Insert multiple tuples
+        let mut inserted_rids = Vec::new();
+        let mut metas = Vec::new();
+        for i in 0..5 {
+            let tuple_values = vec![
+                Value::new(i as i32),
+                Value::new(format!("Name{}", i)),
+                Value::new(20 + i as i32),
+            ];
+            let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, i as u32));
+            let mut meta = TupleMeta::new(0); // Use transaction's ID
+
+            // Set commit timestamp before inserting
+            let commit_ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_micros() as u64;
+            meta.set_commit_timestamp(TimeStamp::new(commit_ts));
+
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                .expect("Failed to insert tuple");
+
+            // Verify tuple was inserted correctly
+            let (stored_meta, stored_tuple) = table_heap
+                .get_tuple(rid, Some(transaction_context.clone()))
+                .expect("Failed to get inserted tuple");
+            debug!(
+                "Inserted tuple - RID: {:?}, Meta: {:?}, Tuple: {:?}",
+                rid, stored_meta, stored_tuple
+            );
+
+            inserted_rids.push(rid);
+            metas.push((rid, meta));
+        }
+
+        // Verify table state before iteration
+        debug!("Table state before iteration:");
+        for (rid, _meta) in &metas {
+            if let Ok((stored_meta, stored_tuple)) =
+                table_heap.get_tuple(*rid, Some(transaction_context.clone()))
+            {
+                debug!(
+                    "Stored tuple - RID: {:?}, Meta: {:?}, Tuple: {:?}",
+                    rid, stored_meta, stored_tuple
+                );
+            }
+        }
+
+        // Keep transaction in Growing state for reading
+        let iterator = table_heap.make_iterator(Some(transaction_context.clone()));
+
+        // Debug initial iterator state
+        debug!(
+            "Iterator initial state - RID: {:?}, Stop RID: {:?}, Is End: {}",
+            iterator.get_rid(),
+            iterator.stop_at_rid,
+            iterator.is_end()
         );
 
-        let mut tuple_2 = Tuple::new(
-            &*vec![Value::from(4), Value::from(5), Value::from(6)],
-            schema.clone(),
-            rid_2,
+        // Try getting first tuple directly
+        if let Ok((meta, tuple)) =
+            table_heap.get_tuple(RID::new(0, 0), Some(transaction_context.clone()))
+        {
+            debug!(
+                "Direct tuple fetch - RID: {:?}, Meta: {:?}, Tuple: {:?}",
+                RID::new(0, 0),
+                meta,
+                tuple
+            );
+        }
+
+        let tuples = iterator.collect::<Vec<(TupleMeta, Tuple)>>();
+
+        debug!("Collected {} tuples", tuples.len());
+        for (i, (meta, tuple)) in tuples.iter().enumerate() {
+            debug!(
+                "Retrieved tuple {}: Meta: {:?}, Tuple: {:?}",
+                i, meta, tuple
+            );
+        }
+
+        assert_eq!(
+            tuples.len(),
+            5,
+            "Expected 5 tuples, but got {}",
+            tuples.len()
         );
 
-        let meta_1 = TupleMeta::new(123);
-        let meta_2 = TupleMeta::new(124);
+        // Verify tuples and metadata
+        for (i, ((_rid, meta), (retrieved_meta, retrieved_tuple))) in
+            metas.iter().zip(tuples.iter()).enumerate()
+        {
+            assert_eq!(retrieved_meta, meta, "Tuple {} metadata should match", i);
+            assert_eq!(retrieved_tuple.get_value(0), &Value::new(i as i32));
+            assert_eq!(
+                retrieved_tuple.get_value(1),
+                &Value::new(format!("Name{}", i))
+            );
+            assert_eq!(retrieved_tuple.get_value(2), &Value::new(20 + i as i32));
+        }
 
-        table_heap
-            .insert_tuple(&meta_1, &mut tuple_1, Some(transaction_context.clone()))
-            .expect("failed to insert tuple 1");
-
-        // insert tuple twice
-        table_heap
-            .insert_tuple(&meta_2, &mut tuple_2, Some(transaction_context.clone()))
-            .expect("failed to insert tuple 2");
-
-        let mut iterator = TableIterator::new(table_heap, rid_1, RID::new(INVALID_PAGE_ID, 1));
-        assert!(!iterator.is_end());
-
-        let result = iterator.next();
-        assert!(result.is_some());
-        let (result_meta, result_tuple) = result.unwrap();
-        assert_eq!(result_meta, meta_1);
-        assert_eq!(result_tuple, tuple_1);
-
-        let result2 = iterator.next();
-        assert!(result2.is_some());
-        let (result_meta2, result_tuple2) = result2.unwrap();
-        assert_eq!(result_meta2, meta_2);
-        assert_eq!(result_tuple2, tuple_2);
-
-        assert!(iterator.is_end());
-        assert_eq!(iterator.next(), None);
+        // Now we can commit the transaction
+        txn.set_state(TransactionState::Committed);
+        debug!("Completed test_table_iterator_multiple_tuples");
     }
 
     #[test]
@@ -454,5 +723,433 @@ mod tests {
         // Reset and test again
         iterator.reset();
         assert!(iterator.next().is_none());
+    }
+
+    #[test]
+    fn test_table_iterator_with_updates() {
+        let ctx = TestContext::new("test_table_iterator_updates");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_updates");
+
+        // Use table heap's internal latch instead of RwLock
+        // let _guard = table_heap.latch.write();
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ]);
+
+        // Insert initial tuple
+        let mut tuple = Tuple::new(
+            &[Value::new(1), Value::new("original")],
+            schema.clone(),
+            RID::new(0, 0),
+        );
+        let meta = TupleMeta::new(0);
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+            .unwrap();
+
+        // Update the tuple
+        let mut new_tuple =
+            Tuple::new(&[Value::new(1), Value::new("updated")], schema.clone(), rid);
+        table_heap
+            .update_tuple(&meta, &mut new_tuple, rid, Some(txn_ctx.clone()))
+            .unwrap();
+
+        // Iterate and verify we see the updated value
+        let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+        let tuples: Vec<_> = iterator.collect();
+
+        assert_eq!(tuples.len(), 1);
+        assert_eq!(tuples[0].1.get_value(1), &Value::new("updated"));
+    }
+
+    #[test]
+    fn test_table_iterator_concurrent_modifications() {
+        let ctx = TestContext::new("test_table_iterator_concurrent_mods");
+        let txn_ctx1 = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_concurrent_mods");
+
+        // Use table heap's internal latch
+        let _guard = table_heap.latch.write();
+
+        // Create second transaction
+        let txn2 = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
+        txn2.set_state(TransactionState::Growing);
+        let txn_ctx2 = Arc::new(TransactionContext::new(
+            txn2,
+            txn_ctx1.get_lock_manager().clone(),
+            ctx.transaction_manager.clone(),
+        ));
+
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+
+        // Insert initial tuples with first transaction
+        let mut rids = Vec::new();
+        for i in 0..3 {
+            let mut tuple = Tuple::new(&[Value::new(i)], schema.clone(), RID::new(0, i as u32));
+            let meta = TupleMeta::new(0);
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, Some(txn_ctx1.clone()))
+                .unwrap();
+            rids.push(rid);
+        }
+
+        // Start iterator with first transaction
+        let iterator = table_heap.make_iterator(Some(txn_ctx1.clone()));
+
+        // Insert new tuple with second transaction
+        let mut new_tuple = Tuple::new(&[Value::new(99)], schema.clone(), RID::new(0, 3));
+        let meta = TupleMeta::new(1); // Different transaction ID
+        table_heap
+            .insert_tuple(&meta, &mut new_tuple, Some(txn_ctx2.clone()))
+            .unwrap();
+
+        // Iterator should only see original tuples
+        let tuples: Vec<_> = iterator.collect();
+        assert_eq!(tuples.len(), 3);
+        for (i, (_, tuple)) in tuples.iter().enumerate() {
+            assert_eq!(tuple.get_value(0), &Value::new(i as i32));
+        }
+    }
+
+    #[test]
+    fn test_table_iterator_with_deleted_tuples() {
+        let ctx = TestContext::new("test_table_iterator_deleted_tuples");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_deleted_tuples");
+
+        // Use table heap's internal latch
+        // let _guard = table_heap.latch.write();
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ]);
+
+        // Insert tuples
+        let mut rids = Vec::new();
+        for i in 0..3 {
+            let mut tuple = Tuple::new(
+                &[Value::new(i), Value::new(format!("value{}", i))],
+                schema.clone(),
+                RID::new(0, i as u32),
+            );
+            let meta = TupleMeta::new(0);
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+                .unwrap();
+            rids.push(rid);
+        }
+
+        let mut new_meta = TupleMeta::new(0);
+        new_meta.set_deleted(true);
+        // Delete middle tuple
+        table_heap
+            .update_tuple_meta(&new_meta, rids[1])
+            .unwrap();
+
+        // Create iterator
+        let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+        let tuples: Vec<_> = iterator.collect();
+
+        // Should only see 2 tuples (not the deleted one)
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].1.get_value(0), &Value::new(0));
+        assert_eq!(tuples[1].1.get_value(0), &Value::new(2));
+    }
+
+    #[test]
+    fn test_table_iterator_with_multiple_pages() {
+        let ctx = TestContext::new("test_table_iterator_multiple_pages");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_multiple_pages");
+        let mut table_heap_guard = table_heap.latch.write();
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            // Add a large varchar to help fill pages faster
+            Column::new("data", TypeId::VarChar),
+        ]);
+
+        // Insert many tuples with large data to force multiple pages
+        let large_string = "x".repeat(1000); // 1KB string
+        let mut count = 0;
+        let mut last_page_id = 0;
+        let mut rids = Vec::new();
+
+        // Insert until we have at least 3 pages
+        while last_page_id < 2 {
+            let mut tuple = Tuple::new(
+                &[Value::new(count), Value::new(large_string.clone())],
+                schema.clone(),
+                RID::new(0, 0),
+            );
+            let meta = TupleMeta::new(0);
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+                .unwrap();
+
+            last_page_id = rid.get_page_id();
+            rids.push(rid);
+            count += 1;
+        }
+
+        // Iterate and verify
+        let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+        let tuples: Vec<_> = iterator.collect();
+
+        assert_eq!(tuples.len(), count as usize);
+
+        // Verify tuples are in order
+        for (i, (_, tuple)) in tuples.iter().enumerate() {
+            assert_eq!(tuple.get_value(0), &Value::new(i as i32));
+        }
+    }
+
+    #[test]
+    fn test_table_iterator_with_partial_scan() {
+        let ctx = TestContext::new("test_table_iterator_partial_scan");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_partial_scan");
+
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+
+        // Insert 5 tuples
+        let mut rids = Vec::new();
+        for i in 0..5 {
+            let mut tuple = Tuple::new(&[Value::new(i)], schema.clone(), RID::new(0, i as u32));
+            let meta = TupleMeta::new(0);
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+                .unwrap();
+            rids.push(rid);
+        }
+
+        // Create iterator that stops after 3 tuples
+        let iterator = TableIterator::new(
+            table_heap.clone(),
+            rids[0],
+            rids[2], // Stop after third tuple
+            Some(txn_ctx.clone()),
+        );
+
+        let tuples: Vec<_> = iterator.collect();
+        assert_eq!(tuples.len(), 3);
+
+        // Verify we got exactly the first 3 tuples
+        for i in 0..3 {
+            assert_eq!(tuples[i].1.get_value(0), &Value::new(i as i32));
+        }
+    }
+
+    #[test]
+    fn test_table_iterator_empty_pages() {
+        let ctx = TestContext::new("test_table_iterator_empty_pages");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_empty_pages");
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("data", TypeId::VarChar),
+        ]);
+
+        // Create several pages with gaps
+        let large_string = "x".repeat(1000);
+        let mut rids = Vec::new();
+
+        // Insert tuple in first page
+        let mut tuple1 = Tuple::new(
+            &[Value::new(1), Value::new(large_string.clone())],
+            schema.clone(),
+            RID::new(0, 0),
+        );
+        let meta = TupleMeta::new(0);
+        let rid1 = table_heap
+            .insert_tuple(&meta, &mut tuple1, Some(txn_ctx.clone()))
+            .unwrap();
+        rids.push(rid1);
+
+        // Force creation of second page and leave it empty
+        let mut tuple2 = Tuple::new(
+            &[Value::new(2), Value::new(large_string.clone())],
+            schema.clone(),
+            RID::new(1, 0),
+        );
+        let rid2 = table_heap
+            .insert_tuple(&meta, &mut tuple2, Some(txn_ctx.clone()))
+            .unwrap();
+
+        // Mark second tuple as deleted to create gap
+        let mut delete_meta = TupleMeta::new(0);
+        delete_meta.set_deleted(true);
+        table_heap
+            .update_tuple_meta(&delete_meta, rid2)
+            .unwrap();
+
+        // Insert tuple in third page
+        let mut tuple3 = Tuple::new(
+            &[Value::new(3), Value::new(large_string.clone())],
+            schema.clone(),
+            RID::new(2, 0),
+        );
+        let rid3 = table_heap
+            .insert_tuple(&meta, &mut tuple3, Some(txn_ctx.clone()))
+            .unwrap();
+        rids.push(rid3);
+
+        // Iterator should skip empty middle page
+        let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+        let tuples: Vec<_> = iterator.collect();
+
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].1.get_value(0), &Value::new(1));
+        assert_eq!(tuples[1].1.get_value(0), &Value::new(3));
+    }
+
+    #[test]
+    fn test_table_iterator_invalid_start_position() {
+        let ctx = TestContext::new("test_table_iterator_invalid_start");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_invalid_start");
+
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+
+        // Insert some valid tuples
+        for i in 0..3 {
+            let mut tuple = Tuple::new(&[Value::new(i)], schema.clone(), RID::new(0, i as u32));
+            let meta = TupleMeta::new(0);
+            table_heap
+                .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+                .unwrap();
+        }
+
+        // Create iterator with invalid starting RID
+        let iterator = TableIterator::new(
+            table_heap.clone(),
+            RID::new(999, 0), // Non-existent page
+            RID::new(INVALID_PAGE_ID, 0),
+            Some(txn_ctx.clone()),
+        );
+
+        // Iterator should handle invalid start gracefully
+        let tuples: Vec<_> = iterator.collect();
+        assert_eq!(tuples.len(), 0);
+    }
+
+    #[test]
+    fn test_table_iterator_tuple_count() {
+        let ctx = TestContext::new("test_table_iterator_tuple_count");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let table_heap = setup_test_table("test_table_iterator_tuple_count");
+        let mut table_heap_guard = table_heap.latch.write();
+
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ]);
+
+        // Insert a single tuple
+        let mut tuple = Tuple::new(
+            &[Value::new(1), Value::new("test")],
+            schema.clone(),
+            RID::new(0, 0),
+        );
+        let meta = TupleMeta::new(0);
+
+        // Insert and verify the tuple
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+            .unwrap();
+
+        // Debug print the table state
+        debug!("Table state after insertion:");
+        debug!("RID: {:?}", rid);
+        debug!("Table heap: {:?}", table_heap_guard);
+
+        // Verify tuple count through different methods
+        let count_through_iterator = {
+            let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+            iterator.collect::<Vec<_>>().len()
+        };
+
+        let count_through_get = {
+            let result = table_heap.get_tuple(rid, Some(txn_ctx.clone()));
+            if result.is_ok() {
+                1
+            } else {
+                0
+            }
+        };
+
+        let direct_count = table_heap.get_num_tuples();
+
+        debug!("Count through iterator: {}", count_through_iterator);
+        debug!("Count through get: {}", count_through_get);
+        debug!("Direct count: {}", direct_count);
+
+        // All counting methods should agree
+        assert_eq!(count_through_iterator, 1, "Iterator count should be 1");
+        assert_eq!(count_through_get, 1, "Get tuple count should be 1");
+        assert_eq!(direct_count, 1, "Direct count should be 1");
+
+        // Verify the tuple content
+        let (retrieved_meta, retrieved_tuple) = table_heap
+            .get_tuple(rid, Some(txn_ctx.clone()))
+            .expect("Failed to get tuple");
+
+        assert_eq!(retrieved_meta, meta, "Tuple metadata should match");
+        assert_eq!(retrieved_tuple, tuple, "Tuple data should match");
+    }
+
+    #[test]
+    fn test_table_iterator_transaction_visibility() {
+        let ctx = TestContext::new("test_table_iterator_transaction_visibility");
+        let txn_ctx = ctx.get_transaction_context().clone();
+        let mut table_heap = setup_test_table("test_table_iterator_transaction_visibility");
+
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+
+        // Insert a tuple with transaction
+        let mut tuple = Tuple::new(&[Value::new(1)], schema.clone(), RID::new(0, 0));
+        let mut meta = TupleMeta::new(txn_ctx.get_transaction().get_transaction_id());
+
+        // Set commit timestamp
+        let commit_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        meta.set_commit_timestamp(TimeStamp::new(commit_ts));
+
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+            .unwrap();
+
+        // Update the tuple metadata to mark it as committed
+        table_heap
+            .update_tuple_meta(&meta, rid)
+            .expect("Failed to update tuple metadata");
+
+        // Verify visibility through iterator
+        let iterator = table_heap.make_iterator(Some(txn_ctx.clone()));
+        let tuples: Vec<_> = iterator.collect();
+
+        assert_eq!(tuples.len(), 1, "Should see exactly one tuple");
+
+        let (retrieved_meta, retrieved_tuple) = &tuples[0];
+        assert_eq!(
+            retrieved_meta.get_commit_timestamp(),
+            meta.get_commit_timestamp()
+        );
+        assert_eq!(retrieved_tuple.get_value(0), &Value::new(1));
+
+        // Debug visibility information
+        debug!(
+            "Tuple visibility - TxnID: {}, Commit TS: {:?}, Meta: {:?}",
+            txn_ctx.get_transaction().get_transaction_id(),
+            meta.get_commit_timestamp(),
+            meta
+        );
     }
 }
