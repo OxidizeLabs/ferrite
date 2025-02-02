@@ -372,10 +372,10 @@ mod tests {
 
         // Test addition
         assert_eq!(tinyint_type.add(&two).unwrap(), Value::new(2i8));
-        
+
         // Test division by zero
         assert!(tinyint_type.divide(&zero).is_err());
-        
+
         // Test modulo
         assert_eq!(tinyint_type.modulo(&zero), Value::new(Val::Null));
 

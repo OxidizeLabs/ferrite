@@ -105,7 +105,7 @@ mod tests {
         assert!(invalid_type.subtract(&val).is_err());
         assert!(invalid_type.multiply(&val).is_err());
         assert!(invalid_type.divide(&val).is_err());
-        
+
         // Modulo returns null
         assert_eq!(invalid_type.modulo(&val), Value::new(Val::Null));
     }

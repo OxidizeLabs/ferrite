@@ -2,7 +2,7 @@ use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::common::exception::DeletePageError;
 use crate::common::logger::initialize_logger;
-use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager};
+use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::page::page::PageType::{
     ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table,
@@ -541,7 +541,7 @@ impl BufferPoolManager {
                                 debug!("Successfully wrote page {} to disk", page_id);
                                 page.as_page_trait_mut().set_dirty(false);
                                 flush_successful = true;
-                            },
+                            }
                             Err(e) => {
                                 error!("Failed to write page {} to disk: {}", page_id, e);
                                 return None;

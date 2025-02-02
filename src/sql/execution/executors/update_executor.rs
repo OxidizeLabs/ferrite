@@ -2,19 +2,19 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::executors::filter_executor::FilterExecutor;
+use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::warn;
 use log::{debug, error};
 use parking_lot::RwLock;
-use std::sync::Arc;
-use crate::sql::execution::executors::filter_executor::FilterExecutor;
-use crate::sql::execution::plans::table_scan_plan::TableScanNode;
-use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -180,7 +180,7 @@ impl AbstractExecutor for UpdateExecutor {
             // Update the tuple in the table
             let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
             let _table_heap_guard = self.table_heap.latch.write();
-            
+
             match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, Some(txn_ctx)) {
                 Ok(_) => {
                     debug!("Successfully updated tuple: {:?}", rid);
@@ -213,8 +213,7 @@ impl AbstractExecutor for UpdateExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::types_db::types::Type;
-use super::*;
+    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
@@ -239,6 +238,7 @@ use super::*;
     use crate::storage::table::table_heap::TableHeap;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::types::Type;
     use crate::types_db::value::Value;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -525,7 +525,7 @@ use super::*;
         // Verify the updates using TableHeap's iterator
         let mut found_updates = 0;
         let iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
-        
+
         for (_meta, tuple) in iterator {
             let name = ToString::to_string(&tuple.get_value(1));
             let age = tuple.get_value(2).as_integer();
@@ -541,7 +541,7 @@ use super::*;
                 _ => {}
             }
         }
-        
+
         assert_eq!(found_updates, 2, "Not all updates were found");
     }
 }

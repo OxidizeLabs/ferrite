@@ -9,20 +9,19 @@ use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
+use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
+use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error, info};
-use parking_lot::{Mutex, RawRwLock, RwLock};
-use sqlparser::ast::Statement::{CreateIndex, CreateTable, Insert};
+use log::{debug, info};
+use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
-use crate::sql::execution::plans::insert_plan::InsertNode;
-use crate::storage::table::tuple::TupleMeta;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -75,12 +74,6 @@ impl ExecutionEngine {
             "Initial logical plan generated: \n{}",
             logical_plan.explain(0)
         );
-
-        // Get check options from context
-        let check_options = {
-            let ctx = context.read();
-            ctx.get_check_options().clone()
-        };
 
         // Optimize plan
         let physical_plan = self.optimize_plan(logical_plan)?;
@@ -250,29 +243,29 @@ impl ExecutionEngine {
 
     fn execute_insert(&self, plan: &InsertNode, txn_ctx: Arc<TransactionContext>) -> Result<(), DBError> {
         debug!("Executing insert plan");
-        
+
         let binding = self.catalog.read();
         let table_info = binding
             .get_table(plan.get_table_name())
             .ok_or_else(|| DBError::TableNotFound(plan.get_table_name().to_string()))?;
-        
+
         // Create tuple meta with just the transaction ID
         let meta = TupleMeta::new(txn_ctx.get_transaction_id());
-        
+
         // Get the first tuple from input tuples
         let input_tuples = plan.get_input_tuples();
         if input_tuples.is_empty() {
             return Err(DBError::Execution("No tuples to insert".to_string()));
         }
-        
+
         let mut tuple = input_tuples[0].clone();  // Clone the first tuple
-        
-        // Insert tuple with transaction context
-        if let Err(e) = table_info.get_table_heap().insert_tuple(&meta, &mut tuple, Some(txn_ctx)) {
-            error!("Failed to insert tuple: {}", e);
-            return Err(DBError::Execution(format!("Insert failed: {}", e)));
-        }
-        
+
+        // Get mutable table heap and insert tuple with transaction context
+        let table_heap = table_info.get_table_heap_mut();
+        let _table_heap_guard = table_heap.latch.write();
+
+        table_heap.insert_tuple(&meta, &mut tuple, Some(txn_ctx)).expect("Insert failed");
+
         debug!("Insert executed successfully");
         Ok(())
     }

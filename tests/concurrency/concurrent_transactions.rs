@@ -7,6 +7,7 @@ use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::catalog::Catalog;
 use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
+use tkdb::concurrency::transaction_manager::TransactionManager;
 use tkdb::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use tkdb::sql::execution::execution_context::ExecutionContext;
 use tkdb::sql::execution::execution_engine::ExecutionEngine;
@@ -19,7 +20,6 @@ pub struct ConcurrentTestContext {
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_factory: Arc<TransactionManagerFactory>,
     execution_engine: Arc<RwLock<ExecutionEngine>>,
-    test_name: String,
 }
 
 impl ConcurrentTestContext {
@@ -28,8 +28,8 @@ impl ConcurrentTestContext {
         
         // Initialize components
         let disk_manager = Arc::new(FileDiskManager::new(
-            format!("tests/data/{}_db.db", name),
-            format!("tests/data/{}_log.log", name),
+            format!("tests/data/{}.db", name),
+            format!("tests/data/{}.log", name),
             4096,
         ));
         
@@ -42,6 +42,10 @@ impl ConcurrentTestContext {
             Arc::new(RwLock::new(LRUKReplacer::new(32, 2))),
         ));
 
+        let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
+        let transaction_manager = Arc::new(TransactionManager::new());
+
+
         let catalog = Arc::new(RwLock::new(Catalog::new(
             buffer_pool_manager.clone(),
             0,
@@ -50,13 +54,10 @@ impl ConcurrentTestContext {
             Default::default(),
             Default::default(),
             Default::default(),
+            transaction_manager
         )));
 
-        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
-        
         let transaction_factory = Arc::new(TransactionManagerFactory::new(
-            catalog.clone(),
-            log_manager,
             buffer_pool_manager.clone(),
         ));
 
@@ -71,7 +72,6 @@ impl ConcurrentTestContext {
             buffer_pool_manager,
             transaction_factory,
             execution_engine,
-            test_name,
         }
     }
 

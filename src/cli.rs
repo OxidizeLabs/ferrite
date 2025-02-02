@@ -40,7 +40,7 @@ impl CLI {
                     "    -> "
                 }) {
                     Ok(line) => {
-                        self.rl.add_history_entry(line.as_str());
+                        let _ = self.rl.add_history_entry(line.as_str());
                         buffer.push_str(&line);
 
                         if line.trim().ends_with(';') {

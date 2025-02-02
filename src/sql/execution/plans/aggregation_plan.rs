@@ -1,14 +1,9 @@
-use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
-use log::debug;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use std::hash::Hash;
 use std::sync::Arc;
 
 /// Plan node for aggregation operations
@@ -28,7 +23,7 @@ impl AggregationPlanNode {
         aggregate_exprs: Vec<Arc<Expression>>,
     ) -> Self {
         let mut columns = Vec::new();
-        
+
         // Add group by columns with their original names
         for expr in &group_by_exprs {
             if let Expression::ColumnRef(col_ref) = expr.as_ref() {
@@ -40,22 +35,22 @@ impl AggregationPlanNode {
         // Add aggregate columns with properly formatted names
         for expr in &aggregate_exprs {
             if let Expression::Aggregate(agg) = expr.as_ref() {
-                let mut col = agg.get_return_type().clone();
+                let col = agg.get_return_type().clone();
                 // Get the actual column name from the aggregate argument
                 let arg_name = match agg.get_arg().as_ref() {
                     Expression::ColumnRef(col_ref) => col_ref.get_return_type().get_name().to_string(),
                     _ => "*".to_string(), // Use * for COUNT(*) etc.
                 };
-                
+
                 // Format name as FUNCTION(column)
                 let new_name = if *agg.get_agg_type() == AggregationType::CountStar {
                     "COUNT(*)".to_string()
                 } else {
-                    format!("{}({})", 
-                        agg.get_agg_type().to_string().to_uppercase(),
-                        arg_name)
+                    format!("{}({})",
+                            agg.get_agg_type().to_string().to_uppercase(),
+                            arg_name)
                 };
-                
+
                 columns.push(col.with_name(&new_name));
             }
         }
@@ -191,6 +186,7 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
 
     #[test]
     fn test_aggregation_plan_node_creation() {

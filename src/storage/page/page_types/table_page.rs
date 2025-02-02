@@ -1,15 +1,11 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::common::time::TimeStamp;
 use crate::storage::page::page::PageTrait;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log;
 use log::{debug, error};
 use std::mem::size_of;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 /// Represents a table page using a slotted page format.
 ///
@@ -1001,9 +997,14 @@ mod serialization_tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
+    use crate::common::time::TimeStamp;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use log::{debug, error};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
 
     fn create_test_tuple() -> (TupleMeta, Tuple) {
         let schema = Schema::new(vec![
@@ -1077,63 +1078,54 @@ mod serialization_tests {
 
         // Create a mutex-protected page
         let page = Arc::new(Mutex::new(TablePage::new(1)));
+        let rid = RID::new(1, 0);
 
         // Insert test tuple before spawning threads
         {
-            let mut page_guard = page.lock().unwrap();
+            let mut page_guard = page.lock();
             let (meta, mut tuple) = create_test_tuple();
             debug!("Original meta timestamp: {:?}", meta.get_commit_timestamp());
             page_guard.insert_tuple(&meta, &mut tuple).unwrap();
 
             // Verify initial insertion
-            let rid = RID::new(1, 0);
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid).unwrap();
             assert_eq!(initial_meta.get_commit_timestamp(), TimeStamp::new(123));
             assert_eq!(initial_tuple.get_value(0), &Value::new(42));
         }
 
         let mut handles = vec![];
-        let rid = RID::new(1, 0);
 
-        // Spawn reader threads with timeout
+        // Spawn reader threads
         for i in 0..3 {
             let page_clone = Arc::clone(&page);
             let handle = thread::spawn(move || {
-                let result = std::panic::catch_unwind(|| {
-                    // Add timeout for lock acquisition
-                    let page_guard = match page_clone.try_lock() {
-                        Ok(guard) => guard,
-                        Err(_) => {
-                            debug!("Thread {} failed to acquire lock, retrying...", i);
-                            thread::sleep(Duration::from_millis(10));
-                            page_clone.lock().unwrap()
-                        }
-                    };
-
-                    match page_guard.get_tuple(&rid) {
-                        Ok((retrieved_meta, retrieved_tuple)) => {
-                            debug!(
-                                "Thread {} - Retrieved meta timestamp: {:?}",
-                                i,
-                                retrieved_meta.get_commit_timestamp()
-                            );
-
-                            assert_eq!(retrieved_meta.get_commit_timestamp(), TimeStamp::new(123));
-                            assert_eq!(retrieved_tuple.get_value(0), &Value::new(42));
-                            Ok(())
-                        }
-                        Err(e) => {
-                            error!("Thread {} failed to retrieve tuple: {:?}", i, e);
-                            Err(e)
-                        }
+                // Add timeout for lock acquisition
+                let page_guard = match page_clone.try_lock() {
+                    Some(guard) => guard,
+                    None => {
+                        debug!("Thread {} failed to acquire lock, retrying...", i);
+                        thread::sleep(Duration::from_millis(10));
+                        page_clone.lock()
                     }
-                });
+                };
 
-                match result {
-                    Ok(inner_result) => inner_result,
+                match page_guard.get_tuple(&rid) {
+                    Ok((retrieved_meta, retrieved_tuple)) => {
+                        debug!(
+                            "Thread {} - Retrieved meta timestamp: {:?}",
+                            i,
+                            retrieved_meta.get_commit_timestamp()
+                        );
+
+                        // Return the values for verification
+                        Ok((
+                            retrieved_meta.get_commit_timestamp(),
+                            retrieved_tuple.get_value(0).clone(),
+                        ))
+                    }
                     Err(e) => {
-                        error!("Thread {} panicked: {:?}", i, e);
-                        Err(PageError::TupleInvalid)
+                        error!("Thread {} failed to retrieve tuple: {:?}", i, e);
+                        Err(e)
                     }
                 }
             });
@@ -1143,15 +1135,17 @@ mod serialization_tests {
             thread::sleep(Duration::from_millis(1));
         }
 
-        // Wait for all threads with timeout
+        // Wait for all threads and verify results
         for (i, handle) in handles.into_iter().enumerate() {
             match handle.join() {
                 Ok(result) => {
-                    result.expect(&format!("Thread {} failed to read tuple", i));
+                    let (timestamp, value) = result.expect(&format!("Thread {} failed to read tuple", i));
+                    assert_eq!(timestamp, TimeStamp::new(123));
+                    assert_eq!(value, Value::new(42));
                 }
                 Err(e) => {
                     error!("Thread {} panicked: {:?}", i, e);
-                    panic!("Thread {} failed: {:?}", i, e);
+                    panic!("Thread {} failed", i);
                 }
             }
         }

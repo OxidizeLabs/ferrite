@@ -20,11 +20,11 @@ pub struct LimitExecutor {
 impl LimitExecutor {
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
-        context: Arc<RwLock<ExecutionContext>>, 
-        plan: Arc<LimitNode>
+        context: Arc<RwLock<ExecutionContext>>,
+        plan: Arc<LimitNode>,
     ) -> Self {
         debug!("Creating LimitExecutor");
-        
+
         Self {
             context,
             plan,
@@ -200,7 +200,7 @@ mod tests {
             "test_table".to_string(),
             vec![], // empty children vector
         ).with_tuples(mock_tuples.clone());
-        
+
         // Create limit plan with limit of 2
         let limit_plan = Arc::new(LimitNode::new(2, schema.clone(), vec![PlanNode::MockScan(mock_scan_plan.clone())]));
 
@@ -263,7 +263,7 @@ mod tests {
             "test_table".to_string(),
             vec![], // empty children vector
         ).with_tuples(mock_tuples.clone());
-        
+
         // Create limit plan with limit of 0
         let limit_plan = Arc::new(LimitNode::new(0, schema.clone(), vec![PlanNode::MockScan(mock_scan_plan.clone())]));
 

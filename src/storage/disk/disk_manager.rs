@@ -3,7 +3,6 @@ use crate::common::logger::initialize_logger;
 use log::{debug, error, info, trace, warn};
 use mockall::automock;
 use spin::{Mutex, RwLock};
-use std::fs;
 use std::fs::{File, OpenOptions};
 use std::future::Future;
 use std::io::{
@@ -47,7 +46,7 @@ pub struct FileDiskManager {
     num_flushes: AtomicI32,
     num_writes: AtomicI32,
     flush_log: Arc<Mutex<bool>>,
-    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output = ()> + Send>>>>,
+    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output=()> + Send>>>>,
     metrics: DiskMetrics,
 }
 
@@ -316,7 +315,7 @@ impl FileDiskManager {
     /// # Arguments
     ///
     /// * `f` - A future to be executed when a log flush occurs.
-    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output = ()> + Send>) {
+    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output=()> + Send>) {
         let mut flush_log_f = self.flush_log_f.lock();
         *flush_log_f = Some(f);
     }
@@ -839,7 +838,6 @@ impl fmt::Debug for FileDiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use mockall::predicate::{always, eq};
     use std::io::{Error, ErrorKind};
     use tempfile::TempDir;

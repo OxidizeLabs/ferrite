@@ -5,12 +5,12 @@ use crate::common::rid::RID;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
+use chrono::Utc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use chrono::Utc;
 
 /// Represents a link to a previous version of this tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -111,7 +111,7 @@ impl Transaction {
     pub fn new(txn_id: TxnId, isolation_level: IsolationLevel) -> Self {
         // Get current timestamp for read_ts
         let current_ts = Utc::now().timestamp();
-        
+
         Self {
             txn_id,
             isolation_level,

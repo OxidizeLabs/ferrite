@@ -2,6 +2,7 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::storage::table::table_heap::TableHeap;
@@ -9,7 +10,6 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::sql::execution::executors::values_executor::ValuesExecutor;
 
 pub struct InsertExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -192,7 +192,7 @@ mod tests {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
         transaction_context: Arc<TransactionContext>,
-        _temp_dir: TempDir
+        _temp_dir: TempDir,
     }
 
     impl TestContext {

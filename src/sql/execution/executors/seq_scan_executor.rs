@@ -1,6 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
+use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -11,7 +12,6 @@ use crate::storage::table::tuple::Tuple;
 use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::concurrency::transaction::IsolationLevel;
 
 pub struct SeqScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -114,7 +114,7 @@ impl AbstractExecutor for SeqScanExecutor {
             self.table_heap.clone(),
             start_rid,
             stop_rid,
-            txn_ctx
+            txn_ctx,
         ));
         self.initialized = true;
     }
@@ -187,7 +187,7 @@ mod tests {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        _temp_dir: TempDir
+        _temp_dir: TempDir,
     }
 
     impl TestContext {

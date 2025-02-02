@@ -177,7 +177,7 @@ impl ExpressionOps for Expression {
                     )));
                 }
                 Ok(())
-            },
+            }
             // Other expression types validate their children
             _ => {
                 for child in self.get_children() {

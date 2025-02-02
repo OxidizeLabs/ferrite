@@ -3,39 +3,17 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
-use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
+use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool;
 use crate::types_db::types::Type;
-use crate::types_db::value::Val::BigInt;
 use crate::types_db::value::{Val, Value};
+use log::{debug, error};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use log::error;
-use sqlparser::ast::GroupByExpr;
-use sqlparser::keywords::Keyword::NULL;
-use log::debug;
-use chrono::Utc;
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::buffer::lru_k_replacer::LRUKReplacer;
-use crate::catalog::catalog::Catalog;
-use crate::catalog::column::Column;
-use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
-use crate::concurrency::transaction_manager::TransactionManager;
-use crate::recovery::log_manager::LogManager;
-use crate::sql::execution::executors::mock_executor::MockExecutor;
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::sql::execution::transaction_context::TransactionContext;
-use crate::common::logger::initialize_logger;
 
 #[derive(Hash, Eq, PartialEq, Clone)]
 #[derive(Debug)]
@@ -134,7 +112,7 @@ impl AggregationExecutor {
                                     agg_value.values[i] = agg_value.values[i].add(&arg_val)?;
                                 }
                             }
-                        },
+                        }
                         AggregationType::Count | AggregationType::CountStar => {
                             let count = if agg_value.values[i].is_null() {
                                 Value::new(1i64)
@@ -142,7 +120,7 @@ impl AggregationExecutor {
                                 agg_value.values[i].add(&Value::new(1i64))?
                             };
                             agg_value.values[i] = count;
-                        },
+                        }
                         AggregationType::Min => {
                             let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
                             if !arg_val.is_null() {
@@ -155,7 +133,7 @@ impl AggregationExecutor {
                                     }
                                 }
                             }
-                        },
+                        }
                         AggregationType::Max => {
                             let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
                             if !arg_val.is_null() {
@@ -168,17 +146,17 @@ impl AggregationExecutor {
                                     }
                                 }
                             }
-                        },
+                        }
                         _ => return Err(format!("Unsupported aggregate type: {:?}", agg.get_agg_type())),
                     }
-                },
+                }
                 Expression::ColumnRef(_) => {
                     debug!("Column reference found in values");
                     // For group by columns, store the value only on first occurrence
                     if agg_value.values[i].is_null() {
                         agg_value.values[i] = agg_expr.evaluate(tuple, schema).unwrap();
                     }
-                },
+                }
                 _ => {
                     debug!("Other expression type found in aggregates");
                     // For other expressions, evaluate each time
@@ -196,10 +174,10 @@ impl AbstractExecutor for AggregationExecutor {
         if !self.initialized {
             self.child.init();
             self.groups.clear();
-            
+
             // For empty input with no group by, create a single group with default values
             let mut has_rows = false;
-            
+
             // Process all input tuples
             while let Some((tuple, _)) = self.child.next() {
                 has_rows = true;
@@ -230,7 +208,7 @@ impl AbstractExecutor for AggregationExecutor {
             if !has_rows && self.group_by_exprs.is_empty() {
                 // Create empty group key for no group by
                 let key = GroupKey { values: vec![] };
-                
+
                 // Create default aggregate values
                 let mut agg_values = AggregateValues {
                     values: vec![Value::from(TypeId::Invalid); self.aggregate_exprs.len()],
@@ -253,10 +231,10 @@ impl AbstractExecutor for AggregationExecutor {
                         }
                     }
                 }
-                
+
                 self.groups.insert(key, agg_values);
             }
-            
+
             // Store all groups in the Vec for iteration and sort them by group key
             self.groups_to_return = self.groups.drain().collect();
             self.groups_to_return.sort_by(|(key1, _), (key2, _)| {
@@ -310,15 +288,31 @@ impl AbstractExecutor for AggregationExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
-    use crate::types_db::value::Val::Integer;
     use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::executors::mock_executor::MockExecutor;
+    use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::value::Val::{BigInt, Integer};
+    use chrono::Utc;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         catalog: Arc<RwLock<Catalog>>,
         transaction_context: Arc<TransactionContext>,
-        lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
     }
@@ -350,41 +344,36 @@ mod tests {
                 replacer.clone(),
             ));
 
-            // Create fresh catalog
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 0,
                 0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                transaction_manager.clone(),
             )));
-
-            // Create fresh transaction manager and lock manager
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(
-                TransactionManager::new(log_manager)
-            );
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager)));
 
             // Create fresh transaction with unique ID
             let transaction = Arc::new(Transaction::new(
                 timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
-                IsolationLevel::ReadUncommitted
+                IsolationLevel::ReadUncommitted,
             ));
 
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
-                transaction_manager,
+                transaction_manager.clone(),
             ));
 
             Self {
                 bpm,
                 catalog,
                 transaction_context,
-                lock_manager,
                 db_file,
                 db_log_file,
             }
@@ -406,30 +395,12 @@ mod tests {
     // Helper function to create a fresh executor context for each test
     fn create_test_executor_context(
         test_context: &TestContext,
-        catalog: Arc<RwLock<Catalog>>,
     ) -> Arc<RwLock<ExecutionContext>> {
-        let transaction = Arc::new(Transaction::new(
-            Utc::now().timestamp_nanos() as u64, // Unique transaction ID
-            IsolationLevel::ReadUncommitted
-        ));
-        
         Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&test_context.bpm),
             Arc::clone(&test_context.catalog),
             Arc::clone(&test_context.transaction_context),
         )))
-    }
-
-    fn create_catalog(ctx: &TestContext) -> Catalog {
-        Catalog::new(
-            Arc::clone(&ctx.bpm),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        )
     }
 
     #[test]
@@ -440,8 +411,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(1), Value::new(10)], RID::new(1, 1)),
@@ -495,8 +465,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(1), Value::new(10)], RID::new(1, 1)),
@@ -573,8 +542,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(1), Value::new(30)], RID::new(1, 1)),
@@ -657,8 +625,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(30)], RID::new(1, 1)),
@@ -722,8 +689,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(1), Value::new(10)], RID::new(1, 1)),
@@ -744,7 +710,7 @@ mod tests {
 
         // Create group by expression
         let group_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, 
+            0, 0,
             Column::new("group_id", TypeId::Integer),
             vec![],
         )));
@@ -810,8 +776,7 @@ mod tests {
         let test_context = TestContext::new("test_empty_input");
         let input_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_scan_plan = MockScanNode::new(input_schema.clone(), "test_empty_input".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
@@ -860,8 +825,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         let mock_tuples = vec![
             (vec![Value::new(1), Value::new(10)], RID::new(1, 1)),
@@ -921,8 +885,7 @@ mod tests {
             Column::new("big_val", TypeId::BigInt),    // BigInt values
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         // Create test data with different numeric types
         let mock_tuples = vec![
@@ -1057,8 +1020,7 @@ mod tests {
             Column::new("age", TypeId::Integer),   // Age column
         ]);
 
-        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let exec_ctx = create_test_executor_context(&test_context, catalog.clone());
+        let exec_ctx = create_test_executor_context(&test_context);
 
         // Create test data
         let mock_tuples = vec![
@@ -1140,10 +1102,10 @@ mod tests {
 
         // Check output schema column names
         let output_schema = executor.get_output_schema();
-        assert_eq!(output_schema.get_columns()[0].get_name(), "name", 
-            "First column should be named 'name'");
-        assert_eq!(output_schema.get_columns()[1].get_name(), "SUM(age)", 
-            "Second column should be named 'SUM(age)'");
+        assert_eq!(output_schema.get_columns()[0].get_name(), "name",
+                   "First column should be named 'name'");
+        assert_eq!(output_schema.get_columns()[1].get_name(), "SUM(age)",
+                   "Second column should be named 'SUM(age)'");
 
         // Check first group (Jane Smith)
         assert_eq!(ToString::to_string(&results[0].get_value(0)), "Jane Smith");

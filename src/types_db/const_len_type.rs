@@ -1,8 +1,7 @@
-use std::fmt;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use crate::types_db::value::Val::ConstLen;
+use std::fmt;
 
 /// Default length for CHAR type when used in disk storage
 pub const DEFAULT_CHAR_LENGTH: usize = 255;
@@ -230,7 +229,7 @@ mod tests {
         // Test addition (should maintain padding)
         let result = char_type.add(&hello).unwrap();
         assert_eq!(Type::to_string(&char_type, &result), "hello");
-        
+
         // Test invalid operations
         assert!(char_type.subtract(&hello).is_err());
         assert!(char_type.multiply(&hello).is_err());

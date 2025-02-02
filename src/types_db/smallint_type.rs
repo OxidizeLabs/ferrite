@@ -322,10 +322,10 @@ mod tests {
 
         // Test addition
         assert_eq!(smallint_type.add(&two).unwrap(), Value::new(2i16));
-        
+
         // Test division by zero
         assert!(smallint_type.divide(&zero).is_err());
-        
+
         // Test modulo
         assert_eq!(smallint_type.modulo(&zero), Value::new(Val::Null));
 

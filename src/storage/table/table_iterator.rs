@@ -1,17 +1,14 @@
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::common::logger::initialize_logger;
 use crate::common::rid::RID;
-use crate::common::time::TimeStamp;
 use crate::concurrency::lock_manager::LockMode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
-use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::logger::initialize_logger;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -63,7 +60,7 @@ impl TableIterator {
                 return true;
             }
             if self.rid.get_page_id() == self.stop_at_rid.get_page_id()
-                && self.rid.get_slot_num() >= self.stop_at_rid.get_slot_num()
+                && self.rid.get_slot_num() > self.stop_at_rid.get_slot_num()
             {
                 return true;
             }
@@ -95,98 +92,54 @@ impl TableIterator {
             return;
         }
 
-        let bpm = self.table_heap.get_bpm();
-        debug!("Got buffer pool manager reference");
-
-        // Check if starting page exists and has valid tuples
-        if self.rid.get_page_id() != INVALID_PAGE_ID {
-            debug!("Checking validity of starting page {} (slot {})",
-                   self.rid.get_page_id(), self.rid.get_slot_num());
-
-            match self.check_page_validity(&bpm, self.rid.get_page_id()) {
-                Some(num_tuples) => {
-                    debug!("Starting page {} exists with {} tuples", self.rid.get_page_id(), num_tuples);
-                    if num_tuples > 0 {
-                        if self.rid.get_slot_num() >= num_tuples as u32 {
-                            debug!("Slot number {} too high for {} tuples, resetting to 0",
-                                   self.rid.get_slot_num(), num_tuples);
-                            self.rid = RID::new(self.rid.get_page_id(), 0);
-                        }
-                        debug!("Using valid starting position: {:?}", self.rid);
-                        return;
-                    } else {
-                        debug!("Starting page has no tuples");
-                    }
-                }
-                None => debug!("Starting page {} does not exist", self.rid.get_page_id()),
-            }
-        } else {
-            debug!("Starting RID has invalid page ID");
+        // If starting RID is invalid or points to non-existent page, start from first page
+        if self.rid.get_page_id() == INVALID_PAGE_ID ||
+            self.check_page_validity(&self.table_heap.get_bpm(), self.rid.get_page_id()).is_none() {
+            debug!("Starting from first page");
+            self.rid = RID::new(first_page_id, 0);
+            return;
         }
 
-        // If starting position is invalid or the page doesn't exist, try first page
-        debug!("Trying first page (ID: {})", first_page_id);
-        match self.check_page_validity(&bpm, first_page_id) {
-            Some(num_tuples) => {
-                debug!("First page has {} tuples", num_tuples);
-                if num_tuples > 0 {
-                    debug!("Using first page as starting position");
-                    self.rid = RID::new(first_page_id, 0);
-                    return;
-                } else {
-                    debug!("First page has no tuples");
-                }
+        // Validate slot number for starting page
+        if let Some(num_tuples) = self.check_page_validity(&self.table_heap.get_bpm(), self.rid.get_page_id()) {
+            if self.rid.get_slot_num() >= num_tuples as u32 {
+                debug!("Invalid slot number, resetting to 0");
+                self.rid = RID::new(self.rid.get_page_id(), 0);
             }
-            None => debug!("Failed to validate first page"),
         }
-
-        // If we get here, no valid starting position found
-        debug!("No valid starting position found, marking iterator as invalid");
-        self.rid = RID::new(INVALID_PAGE_ID, 0);
     }
 
     /// Advances the iterator to the next position.
     fn advance(&mut self) {
-        // If we're already at an invalid position, don't try to advance
         if self.rid.get_page_id() == INVALID_PAGE_ID {
-            debug!("Cannot advance: iterator is at invalid position");
             return;
         }
 
-        let _guard = self.table_heap.latch.read(); // Hold read latch during advance
-        debug!("Advancing iterator from RID: {:?}", self.rid);
+        let _guard = self.table_heap.latch.read();
         let bpm = self.table_heap.get_bpm();
 
-        // Get current page
         if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
             if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                let next_tuple_id = self.rid.get_slot_num() + 1;
-
-                // Get both num_tuples and next_page_id in one access
-                if let Some((num_tuples, next_page_id)) = table_page.access(|page|
+                if let Some((num_tuples, next_page_id)) = table_page.access(|page| {
                     (page.get_num_tuples(), page.get_next_page_id())
-                ) {
-                    debug!("Current page info - num_tuples: {}, next_page_id: {}", num_tuples, next_page_id);
-                    if next_tuple_id >= num_tuples as u32 {
-                        // Move to next page if it exists
+                }) {
+                    let next_slot = self.rid.get_slot_num() + 1;
+
+                    if next_slot >= num_tuples as u32 {
                         if next_page_id != INVALID_PAGE_ID {
-                            debug!("Moving to next page: {}", next_page_id);
                             self.rid = RID::new(next_page_id, 0);
                         } else {
-                            debug!("No next page exists, marking iterator as invalid");
                             self.rid = RID::new(INVALID_PAGE_ID, 0);
                         }
                     } else {
-                        // Move to next tuple in current page
-                        debug!("Moving to next tuple in current page: {}", next_tuple_id);
-                        self.rid = RID::new(self.rid.get_page_id(), next_tuple_id);
+                        self.rid = RID::new(self.rid.get_page_id(), next_slot);
                     }
                     return;
                 }
             }
         }
 
-        debug!("Failed to advance iterator, marking as invalid");
+        // If we get here, something went wrong
         self.rid = RID::new(INVALID_PAGE_ID, 0);
     }
 
@@ -240,18 +193,6 @@ impl TableIterator {
                 None
             }
         }
-    }
-
-    fn validate_slot_number(&mut self, bpm: &Arc<BufferPoolManager>) -> bool {
-        debug!("Validating slot number for RID: {:?}", self.rid);
-        if let Some(num_tuples) = self.check_page_validity(bpm, self.rid.get_page_id()) {
-            if self.rid.get_slot_num() >= num_tuples as u32 {
-                debug!("Slot number too high, resetting to 0");
-                self.rid = RID::new(self.rid.get_page_id(), 0);
-            }
-            return true;
-        }
-        false
     }
 }
 
@@ -356,6 +297,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::time::TimeStamp;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -367,6 +309,7 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::TempDir;
 
     struct TestContext {
@@ -510,7 +453,7 @@ mod tests {
             ctx.transaction_manager.clone(),
         ));
 
-        let mut table_heap = setup_test_table("test_table_iterator_single_tuple");
+        let table_heap = setup_test_table("test_table_iterator_single_tuple");
         let table_heap_guard = table_heap.latch.write();
 
         let schema = Schema::new(vec![
@@ -579,8 +522,8 @@ mod tests {
             ctx.transaction_manager.clone(),
         ));
 
-        let mut table_heap = setup_test_table("test_table_iterator_multiple_tuples");
-        let mut table_heap_guard = table_heap.latch.write();
+        let table_heap = setup_test_table("test_table_iterator_multiple_tuples");
+        let _table_heap_guard = table_heap.latch.write();
 
         let schema = Schema::new(vec![
             Column::new("col_1", TypeId::Integer),
@@ -865,7 +808,7 @@ mod tests {
         let ctx = TestContext::new("test_table_iterator_multiple_pages");
         let txn_ctx = ctx.get_transaction_context().clone();
         let table_heap = setup_test_table("test_table_iterator_multiple_pages");
-        let mut table_heap_guard = table_heap.latch.write();
+        let _table_heap_guard = table_heap.latch.write();
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -1043,7 +986,7 @@ mod tests {
         let ctx = TestContext::new("test_table_iterator_tuple_count");
         let txn_ctx = ctx.get_transaction_context().clone();
         let table_heap = setup_test_table("test_table_iterator_tuple_count");
-        let mut table_heap_guard = table_heap.latch.write();
+        let table_heap_guard = table_heap.latch.write();
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -1107,7 +1050,7 @@ mod tests {
     fn test_table_iterator_transaction_visibility() {
         let ctx = TestContext::new("test_table_iterator_transaction_visibility");
         let txn_ctx = ctx.get_transaction_context().clone();
-        let mut table_heap = setup_test_table("test_table_iterator_transaction_visibility");
+        let table_heap = setup_test_table("test_table_iterator_transaction_visibility");
 
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 

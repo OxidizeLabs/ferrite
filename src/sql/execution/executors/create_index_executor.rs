@@ -59,48 +59,38 @@ impl AbstractExecutor for CreateIndexExecutor {
 
         debug!("Acquiring executor context lock for index '{}'", index_name);
         let catalog = {
-            let context_guard = match self.context.try_read() {
-                Some(guard) => {
-                    debug!("Successfully acquired context read lock");
-                    guard
-                }
-                None => {
-                    warn!("Failed to acquire context read lock - lock contention detected");
-                    return None;
-                }
-            };
+            let context_guard = self.context.read();
+            debug!("Successfully acquired context read lock");
             context_guard.get_catalog().clone()
         };
         debug!("Released executor context lock");
 
         debug!("Acquiring catalog write lock for index '{}'", index_name);
         {
-            let mut catalog_guard = match catalog.try_write() {
-                Some(guard) => {
-                    debug!("Successfully acquired catalog write lock");
-                    guard
-                }
-                None => {
-                    warn!("Failed to acquire catalog write lock - lock contention detected");
-                    return None;
-                }
-            };
+            let mut catalog_guard = catalog.write();
+            debug!("Successfully acquired catalog write lock");
+
+            // First check if the table exists
+            if catalog_guard.get_table(table_name).is_none() {
+                warn!("Cannot create index '{}' - table '{}' does not exist", index_name, table_name);
+                self.executed = true; // Mark as executed since we can't retry this
+                return None;
+            }
 
             // Check if index already exists
             let existing_indexes = catalog_guard.get_table_indexes(table_name);
             let index_exists = existing_indexes.iter().any(|idx| idx.get_index_name() == index_name);
 
             if index_exists {
+                self.executed = true; // Mark as executed since we found the index
                 return if self.plan.if_not_exists() {
                     info!(
                         "Index '{}' already exists, skipping creation (IF NOT EXISTS)",
                         index_name
                     );
-                    self.executed = true;
                     None
                 } else {
                     warn!("Index '{}' already exists", index_name);
-                    self.executed = true;
                     None
                 };
             }
@@ -122,20 +112,19 @@ impl AbstractExecutor for CreateIndexExecutor {
                         index_name,
                         index_info.0.get_index_oid()
                     );
+                    self.executed = true;
+                    None
                 }
                 None => {
                     warn!(
                         "Failed to create index '{}' - catalog creation failed",
                         index_name
                     );
+                    // Don't mark as executed so we can retry
+                    None
                 }
             }
         }
-        debug!("Released catalog write lock");
-
-        self.executed = true;
-        debug!("CreateIndexExecutor execution completed");
-        None
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -166,67 +155,58 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::IndexType;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use std::fs;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        lock_manager: Arc<LockManager>,
-        db_file: String,
-        db_log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
-            // initialize_logger();
+        pub fn new(name: &str) -> Self {
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
                 disk_manager.clone(),
-                replacer.clone(),
+                replacer,
             ));
 
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )));
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -237,29 +217,12 @@ mod tests {
                 bpm,
                 transaction_manager,
                 transaction_context,
-                lock_manager,
-                db_file,
-                db_log_file,
+                _temp_dir: temp_dir,
             }
         }
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.bpm)
-        }
-
-        pub fn lock_manager(&self) -> Arc<LockManager> {
-            Arc::clone(&self.lock_manager)
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -273,25 +236,22 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm.clone(),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
+            0,              // next_index_oid
+            0,              // next_table_oid
+            HashMap::new(), // tables
+            HashMap::new(), // indexes
+            HashMap::new(), // table_names
+            HashMap::new(), // index_names
+            ctx.transaction_manager.clone(), // Add transaction manager
         )
     }
 
     fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
         let ctx = TestContext::new("projection_test");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
-        let transaction_manager = ctx.transaction_manager.clone();
         let transaction_context = ctx.transaction_context.clone();
 
-
-        let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             bpm,
             catalog,
@@ -308,12 +268,18 @@ mod tests {
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
+        // Create execution context with the same catalog instance
+        let exec_context = Arc::new(RwLock::new(ExecutionContext::new(
+            test_context.bpm(),
+            catalog.clone(), // Use the same catalog instance
+            test_context.transaction_context.clone(),
+        )));
+
         {
             let mut catalog_guard = catalog.write();
             catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
-        let exec_context = create_test_executor_context();
         let key_attrs = vec![0];
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
@@ -339,18 +305,25 @@ mod tests {
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
+        // Create table first
         {
             let mut catalog_guard = catalog.write();
             catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
-        let columns = vec![0, 1];
+        // Create execution context with the same catalog instance
+        let exec_context = Arc::new(RwLock::new(ExecutionContext::new(
+            test_context.bpm(),
+            catalog.clone(),
+            test_context.transaction_context.clone(),
+        )));
 
-        let exec_context = create_test_executor_context();
+        let columns = vec![0, 1];  // Using both columns for the index
+
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),
-            "test_index".to_string(),
+            "test_table".to_string(),     // Fix: table name should be first
+            "test_index".to_string(),     // Fix: index name should be second
             columns,
             false,
         ));
@@ -359,8 +332,11 @@ mod tests {
         executor.init();
         assert!(executor.next().is_none());
 
+        // Verify the index was created with correct schema
         let catalog_guard = catalog.read();
-        let index = catalog_guard.get_table_indexes("test_table")[0];
+        let indexes = catalog_guard.get_table_indexes("test_table");
+        assert_eq!(indexes.len(), 1);
+        let index = &indexes[0];
         assert_eq!(index.get_key_schema().get_column_count(), 2);
     }
 
@@ -442,7 +418,12 @@ mod tests {
             catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
-        let exec_context = create_test_executor_context();
+        // Create execution context with the same catalog instance
+        let exec_context = Arc::new(RwLock::new(ExecutionContext::new(
+            test_context.bpm(),
+            catalog.clone(),
+            test_context.transaction_context.clone(),
+        )));
 
         // Create multiple index executors
         let mut executors = vec![];
@@ -451,8 +432,8 @@ mod tests {
         for i in 0..3 {
             let plan = Arc::new(CreateIndexPlanNode::new(
                 schema.clone(),
-                "test_table".to_string(),
-                format!("test_index_{}", i),
+                "test_table".to_string(),     // Fix: table name should be first
+                format!("test_index_{}", i),  // Fix: index name should be second
                 columns.clone(),
                 false,
             ));
@@ -483,14 +464,20 @@ mod tests {
             catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
-        let exec_context = create_test_executor_context();
+        // Create execution context with the same catalog instance
+        let exec_context = Arc::new(RwLock::new(ExecutionContext::new(
+            test_context.bpm(),
+            catalog.clone(),
+            test_context.transaction_context.clone(),
+        )));
+
         let key_attrs = vec![0];
 
         // Create first index
         let plan1 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),
-            "test_index".to_string(),
+            "test_table".to_string(),     // Fix: table name should be first
+            "test_index".to_string(),     // Fix: index name should be second
             key_attrs.clone(),
             false,
         ));
@@ -510,8 +497,8 @@ mod tests {
         // Try to create duplicate index without IF NOT EXISTS
         let plan2 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),
-            "test_index".to_string(),
+            "test_table".to_string(),     // Fix: table name should be first
+            "test_index".to_string(),     // Fix: index name should be second
             key_attrs.clone(),
             false,
         ));
@@ -530,8 +517,8 @@ mod tests {
         // Try to create duplicate index with IF NOT EXISTS
         let plan3 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),
-            "test_index".to_string(),
+            "test_table".to_string(),     // Fix: table name should be first
+            "test_index".to_string(),     // Fix: index name should be second
             key_attrs,
             true,
         ));

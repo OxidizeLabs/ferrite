@@ -1,7 +1,7 @@
-use std::fmt;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
+use std::fmt;
 
 // Implementation for VarCharType
 #[derive(Debug, Clone, PartialEq)]
@@ -165,7 +165,7 @@ mod tests {
 
         // Test addition (concatenation)
         assert_eq!(varchar_type.add(&hello).unwrap(), Value::new("hello"));
-        
+
         // Test invalid operations
         assert!(varchar_type.subtract(&hello).is_err());
         assert!(varchar_type.multiply(&hello).is_err());
@@ -195,7 +195,6 @@ mod tests {
 
     #[test]
     fn test_varchar_to_string() {
-        let varchar_type = VarCharType::new();
         let hello = Value::new("hello");
         let empty = Value::new("");
         let null = Value::new(Val::Null);

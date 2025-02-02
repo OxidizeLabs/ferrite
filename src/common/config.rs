@@ -1,9 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-const DISABLE_LOCK_MANAGER: bool = true;
-const DISABLE_CHECKPOINT_MANAGER: bool = true;
-
 /** Cycle detection is performed every CYCLE_DETECTION_INTERVAL milliseconds. */
 pub static CYCLE_DETECTION_INTERVAL: Duration = Duration::from_millis(100);
 

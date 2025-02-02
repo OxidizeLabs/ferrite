@@ -2,20 +2,17 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction_manager::TransactionManager;
-use crate::recovery::log_manager::LogManager;
 use crate::sql::execution::transaction_context::TransactionContext;
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct TransactionManagerFactory {
     transaction_manager: Arc<TransactionManager>,
     lock_manager: Arc<LockManager>,
-    log_manager: Arc<RwLock<LogManager>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
 }
 
 impl TransactionManagerFactory {
-    pub fn new(log_manager: Arc<RwLock<LogManager>>, buffer_pool_manager: Arc<BufferPoolManager>) -> Self {
+    pub fn new(buffer_pool_manager: Arc<BufferPoolManager>) -> Self {
         let transaction_manager = Arc::new(TransactionManager::new());
 
         let lock_manager = Arc::new(LockManager::new());
@@ -23,7 +20,6 @@ impl TransactionManagerFactory {
         Self {
             transaction_manager,
             lock_manager,
-            log_manager,
             buffer_pool_manager,
         }
     }

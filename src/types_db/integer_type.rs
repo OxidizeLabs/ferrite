@@ -164,7 +164,7 @@ impl Type for IntegerType {
                     .map(Value::new)
                     .ok_or_else(|| "Integer overflow in multiplication".to_string())
             }
-            Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) | 
+            Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) |
             Val::Decimal(_) => Ok(Value::new(0)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Integer by non-numeric type".to_string()),
@@ -275,10 +275,10 @@ mod tests {
 
         // Test addition
         assert_eq!(int_type.add(&two).unwrap(), Value::new(2i32));
-        
+
         // Test division by zero
         assert!(int_type.divide(&zero).is_err());
-        
+
         // Test modulo
         assert_eq!(int_type.modulo(&zero), Value::new(Val::Null));
 
