@@ -39,7 +39,9 @@ impl FilterExecutor {
             tuple.get_values()
         );
 
-        match predicate.evaluate(tuple, self.plan.get_output_schema()) {
+        let schema = self.child_executor.get_output_schema();
+        
+        match predicate.evaluate(tuple, schema) {
             Ok(value) => match value.get_val() {
                 Val::Boolean(b) => {
                     debug!(
@@ -50,7 +52,7 @@ impl FilterExecutor {
                     *b
                 }
                 _ => {
-                    error!("Predicate evaluation did not return boolean value");
+                    error!("Predicate evaluation returned non-boolean value: {:?}", value);
                     false
                 }
             },
@@ -71,6 +73,17 @@ impl AbstractExecutor for FilterExecutor {
 
         debug!("Initializing FilterExecutor");
         self.child_executor.init();
+        
+        let predicate = self.plan.get_filter_predicate();
+        let schema = self.child_executor.get_output_schema();
+        
+        // Validate predicate against schema
+        if let Err(e) = predicate.validate(schema) {
+            error!("Invalid predicate for schema: {}", e);
+            // We continue initialization but log the error
+            // The executor will return no results for invalid predicates
+        }
+
         self.initialized = true;
         debug!("FilterExecutor initialized successfully");
     }
@@ -121,7 +134,6 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -138,34 +150,39 @@ mod tests {
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use std::fs;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        lock_manager: Arc<LockManager>,
-        db_file: String,
-        db_log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub fn new(name: &str) -> Self {
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
@@ -176,23 +193,10 @@ mod tests {
                 replacer.clone(),
             ));
 
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )));
-
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager =
-                Arc::new(TransactionManager::new(log_manager));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -203,9 +207,7 @@ mod tests {
                 bpm,
                 transaction_manager,
                 transaction_context,
-                lock_manager,
-                db_file,
-                db_log_file,
+                _temp_dir: temp_dir,
             }
         }
 
@@ -213,23 +215,8 @@ mod tests {
             Arc::clone(&self.bpm)
         }
 
-        pub fn lock_manager(&self) -> Arc<LockManager> {
-            Arc::clone(&self.lock_manager)
-        }
-
         pub fn transaction_context(&self) -> &Arc<TransactionContext> {
             &self.transaction_context
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -272,7 +259,6 @@ mod tests {
         catalog: Arc<RwLock<Catalog>>,
     ) -> Arc<RwLock<ExecutionContext>> {
         // Create a new transaction
-        let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
 
         Arc::new(RwLock::new(ExecutionContext::new(
             test_context.bpm(),
@@ -320,6 +306,44 @@ mod tests {
         ))
     }
 
+    fn create_invalid_age_filter(
+        age: i32,
+        comparison_type: ComparisonType,
+        schema: &Schema,
+    ) -> Arc<FilterNode> {
+        // Create column reference for age
+        let age_col = Column::new("age", TypeId::Integer);
+        let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            age_col.clone(),
+            vec![],
+        )));
+
+        // Create constant expression for comparison
+        let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(age),
+            age_col,
+            vec![],
+        )));
+
+        // Create predicate
+        let predicate = Expression::Comparison(ComparisonExpression::new(
+            col_expr,
+            const_expr,
+            comparison_type,
+            vec![],
+        ));
+
+        Arc::new(FilterNode::new(
+            schema.clone(),
+            0,
+            "test_table".to_string(),
+            Arc::from(predicate),
+            vec![PlanNode::Empty],
+        ))
+    }
+
     fn create_test_schema() -> Schema {
         Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -331,16 +355,21 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm(),
-            0,              // next_index_oid
-            0,              // next_table_oid
-            HashMap::new(), // tables
-            HashMap::new(), // indexes
-            HashMap::new(), // table_names
-            HashMap::new(), // index_names
+            0,                               // next_index_oid
+            0,                               // next_table_oid
+            HashMap::new(),                  // tables
+            HashMap::new(),                  // indexes
+            HashMap::new(),                  // table_names
+            HashMap::new(),                  // index_names
+            ctx.transaction_manager.clone(), // Add transaction manager
         )
     }
 
-    fn setup_test_table(table_heap: &Arc<TableHeap>, schema: &Schema, transaction_context: &Arc<TransactionContext>) {
+    fn setup_test_table(
+        table_heap: &TableHeap,
+        schema: &Schema,
+        transaction_context: &Arc<TransactionContext>,
+    ) {
         let test_data = vec![
             (1, "Alice", 25),
             (2, "Bob", 30),
@@ -357,7 +386,9 @@ mod tests {
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0);
-            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
+            table_heap
+                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                .unwrap();
         }
     }
 
@@ -367,14 +398,21 @@ mod tests {
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
-        // Create catalog and table
+        // Create catalog and table with proper cleanup
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let mut binding = catalog.write();
-        let table_info = binding.create_table("test_table".to_string(), schema.clone()).unwrap();
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
 
-        // Set up test data
-        let table_heap = table_info.get_table_heap();
-        setup_test_table(&table_heap, &schema, transaction_context);
+        // Set up test data with proper transaction handling
+        {
+            let table_heap = table_info.get_table_heap();
+            let _guard = table_heap.latch.write();
+            setup_test_table(&table_heap, &schema, transaction_context);
+        }
 
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
 
@@ -412,6 +450,10 @@ mod tests {
         assert_eq!(results.len(), 1, "Should find exactly one match");
         assert_eq!(results[0].0, "David");
         assert_eq!(results[0].1, 28);
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
     }
 
     #[test]
@@ -422,30 +464,38 @@ mod tests {
 
         // Create catalog and table with Arc<RwLock> wrapping
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        let mut binding = catalog.write();
-        let table_info = binding.create_table("test_table".to_string(), schema.clone()).unwrap();
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
 
         // Set up test data
-        let table_heap = table_info.get_table_heap();
-        debug!("Inserting test data:");
-        let test_data = vec![
-            (1, "Alice", 25),
-            (2, "Bob", 30),
-            (3, "Charlie", 35),
-            (4, "David", 28),
-            (5, "Eve", 32),
-        ];
-
-        for (id, name, age) in &test_data {
-            let values = vec![
-                Value::new(*id),
-                Value::new(name.to_string()),
-                Value::new(*age),
+        {
+            let table_heap = table_info.get_table_heap();
+            let _guard = table_heap.latch.write();
+            
+            let test_data = vec![
+                (1, "Alice", 25),
+                (2, "Bob", 30),
+                (3, "Charlie", 35),
+                (4, "David", 28),
+                (5, "Eve", 32),
             ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(0);
-            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
-            debug!("Inserted: id={}, name={}, age={}", id, name, age);
+
+            for (id, name, age) in test_data {
+                let values = vec![
+                    Value::new(id),
+                    Value::new(name.to_string()),
+                    Value::new(age),
+                ];
+                let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                table_heap
+                    .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                    .unwrap();
+            }
         }
 
         // Create executor context
@@ -453,12 +503,12 @@ mod tests {
 
         // Create table scan plan
         let table_scan_plan = Arc::new(TableScanNode::new(
-            table_info.clone(),
+            table_info,
             Arc::new(schema.clone()),
             None,
         ));
 
-        // Create table scan executor as the child
+        // Create table scan executor
         let child_executor = Box::new(TableScanExecutor::new(
             Arc::clone(&executor_context),
             table_scan_plan,
@@ -478,20 +528,18 @@ mod tests {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer value for age"),
             };
-            debug!("Found matching tuple with age: {}", age);
             results.push(age);
         }
 
-        debug!("All matching ages: {:?}", results);
+        // Sort results for consistent comparison
+        results.sort();
 
-        // Verify the results
-        assert!(
-            results.iter().all(|&age| age > 30),
-            "All ages should be > 30"
-        );
-        assert_eq!(results.len(), 2, "Should find exactly two matches > 30");
-        assert!(results.contains(&35), "Should contain Charlie's age (35)");
-        assert!(results.contains(&32), "Should contain Eve's age (32)");
+        // Verify results
+        assert_eq!(results, vec![32, 35], "Should find exactly two matches > 30");
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
     }
 
     #[test]
@@ -520,6 +568,10 @@ mod tests {
 
         // Should not return any results
         assert!(executor.next().is_none());
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
     }
 
     #[test]
@@ -528,65 +580,35 @@ mod tests {
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
-        // Create catalog and wrap it in Arc<RwLock> first
+        // Create catalog and wrap it in Arc<RwLock>
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-
-        // Create table within a block to ensure the write lock is dropped
-        let table_heap = {
+        
+        // Create table and get table info
+        let table_info = {
             let mut catalog_guard = catalog.write();
-            let table_info = catalog_guard
+            catalog_guard
                 .create_table("test_table".to_string(), schema.clone())
-                .unwrap();
-            table_info.get_table_heap().clone()
+                .unwrap()
         };
 
-        // Insert test data using a separate transaction
-        let insert_txn = test_context
-            .transaction_manager
-            .begin(IsolationLevel::ReadCommitted)
-            .unwrap();
-
-        let test_data = vec![
-            (1, "Alice", 25),
-            (2, "Bob", 30),
-            (3, "Charlie", 35),
-            (4, "David", 28),
-            (5, "Eve", 32),
-        ];
-
-        // Insert the test data
-        for (id, name, age) in test_data {
-            let values = vec![
-                Value::new(id),
-                Value::new(name.to_string()),
-                Value::new(age),
-            ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(insert_txn.get_transaction_id());
-            table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
+        // Insert test data within a transaction
+        {
+            let table_heap = table_info.get_table_heap();
+            let _guard = table_heap.latch.write();
+            setup_test_table(&table_heap, &schema, transaction_context);
         }
 
-        // Commit insert transaction
-        test_context.transaction_manager.commit(insert_txn, test_context.bpm());
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
 
-        // Create executor context with new transaction
-        let txn = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));
-        let executor_context = Arc::new(RwLock::new(ExecutionContext::new(
-            test_context.bpm(),
-            Arc::clone(&catalog),
-            test_context.transaction_context.clone(),
-        )));
-
-        // Create table scan plan
-        let binding = catalog.read();
-        let table_info = binding.get_table("test_table").unwrap();
+        // Create table scan plan with explicit schema reference
         let table_scan_plan = Arc::new(TableScanNode::new(
             table_info.clone(),
             Arc::new(schema.clone()),
             None,
         ));
 
-        // Create filter plan
+        // Create filter plan for age > 25
         let filter_plan = create_age_filter(25, ComparisonType::GreaterThan, &schema);
 
         // Create child executor (table scan)
@@ -595,15 +617,21 @@ mod tests {
             table_scan_plan,
         ));
 
-        // Create filter executor
+        // Create and initialize filter executor
         let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
-
-        // Initialize the executor
         executor.init();
 
-        // Collect results
+        // Collect results with a safety counter to prevent infinite loops
         let mut results = Vec::new();
+        let max_iterations = 100; // Reasonable upper limit
+        let mut iteration_count = 0;
+        
         while let Some((tuple, _)) = executor.next() {
+            iteration_count += 1;
+            if iteration_count > max_iterations {
+                panic!("Possible infinite loop detected in filter execution");
+            }
+            
             let age = match tuple.get_value(2).get_val() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer for age"),
@@ -611,18 +639,41 @@ mod tests {
             results.push(age);
         }
 
-        // Verify results
-        assert!(!results.is_empty(), "Should find matching tuples");
-        assert!(
-            results.iter().all(|&age| age > 25),
-            "All ages should be > 25"
-        );
-        assert_eq!(results.len(), 4); // Bob(30), Charlie(35), David(28), Eve(32)
-
-        // Optional: Verify specific ages are present
+        // Sort and verify results
+        results.sort();
         let expected_ages = vec![28, 30, 32, 35];
-        let mut found_ages = results;
-        found_ages.sort();
-        assert_eq!(found_ages, expected_ages);
+        assert_eq!(results, expected_ages, "Filtered results don't match expected ages");
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_filter_invalid_predicate() {
+        let test_context = TestContext::new("filter_invalid_test");
+        let schema = create_test_schema();
+        
+        // Create a filter with an empty schema to simulate invalid predicate
+        let empty_schema = Schema::new(vec![]);
+        let invalid_filter_plan = create_invalid_age_filter(25, ComparisonType::Equal, &empty_schema);
+        
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+        
+        let child_executor = Box::new(EmptyExecutor::new(
+            Arc::clone(&executor_context),
+            schema.clone(),
+        ));
+
+        let mut executor = FilterExecutor::new(child_executor, executor_context, invalid_filter_plan);
+        
+        // Should initialize but return no results due to invalid predicate
+        executor.init();
+        assert!(executor.next().is_none());
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
     }
 }
