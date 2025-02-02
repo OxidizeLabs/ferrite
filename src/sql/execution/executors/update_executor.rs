@@ -152,41 +152,39 @@ impl AbstractExecutor for UpdateExecutor {
 
             let txn_ctx = {
                 let context = self.context.read();
-                context.get_transaction_context().clone()
+                context.get_transaction_context()
             };
 
             // Get the target expressions before applying updates
-            let target_expressions = self.plan.get_target_expressions().clone();
+            let target_expressions = self.plan.get_target_expressions();
             let output_schema = self.plan.get_output_schema();
 
             // Apply the updates to the tuple
             for (i, expr) in target_expressions.iter().step_by(2).enumerate() {
-                // Get the target column index from the first expression (ColumnRef)
                 let col_idx = match expr.as_ref() {
                     Expression::ColumnRef(col_ref) => col_ref.get_column_index(),
                     _ => panic!("Expected ColumnRef as target expression"),
                 };
 
-                // Get the new value from the second expression (Arithmetic)
                 let value_expr = &target_expressions[i * 2 + 1];
                 let new_value = value_expr.evaluate(&tuple, output_schema)
                     .expect("Failed to evaluate expression");
 
-                // Update the tuple
                 let values = tuple.get_values_mut();
                 values[col_idx] = new_value;
             }
 
-            // Update the tuple in the table
+            // Create tuple meta
             let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
-            let _table_heap_guard = self.table_heap.latch.write();
 
+            // Update the tuple in the table - no need to explicitly acquire the latch
+            // as table_heap.update_tuple handles locking internally
             match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, Some(txn_ctx)) {
-                Ok(_) => {
-                    debug!("Successfully updated tuple: {:?}", rid);
+                Ok(new_rid) => {
+                    debug!("Successfully updated tuple: {:?}", new_rid);
                     // Add the RID to our set of updated tuples
                     self.updated_rids.insert(rid);
-                    return Some((tuple, rid));
+                    return Some((tuple, new_rid));
                 }
                 Err(e) => {
                     error!(
@@ -194,7 +192,6 @@ impl AbstractExecutor for UpdateExecutor {
                         self.plan.get_table_name(),
                         e
                     );
-                    continue;
                 }
             }
         }
@@ -271,10 +268,10 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
