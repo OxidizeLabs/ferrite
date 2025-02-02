@@ -48,44 +48,48 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
-    use std::collections::HashMap;
 
     use crate::concurrency::lock_manager::LockManager;
 
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
 
-    use chrono::Utc;
-
-    use std::fs;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
-        lock_manager: Arc<LockManager>,
-        db_file: String,
-        db_log_file: String,
+        transaction_context: Arc<TransactionContext>,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 5;
+        pub fn new(name: &str) -> Self {
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
@@ -94,39 +98,26 @@ mod tests {
             ));
 
             // Create transaction manager and lock manager first
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
 
-            // Create catalog with transaction manager
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                transaction_manager.clone(), // Pass transaction manager
-            )));
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             Self {
                 bpm,
                 transaction_manager,
-                lock_manager,
-                db_file,
-                db_log_file,
+                transaction_context,
+                _temp_dir: temp_dir,
             }
         }
 
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
         }
     }
 

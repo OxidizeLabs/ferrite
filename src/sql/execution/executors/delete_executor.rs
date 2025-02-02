@@ -208,7 +208,7 @@ mod tests {
 
     impl TestContext {
         pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
             // Create temporary directory

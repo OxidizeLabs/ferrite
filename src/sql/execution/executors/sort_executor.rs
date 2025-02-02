@@ -153,7 +153,7 @@ mod tests {
 
     impl TestContext {
         pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
             // Create temporary directory
@@ -172,10 +172,10 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,

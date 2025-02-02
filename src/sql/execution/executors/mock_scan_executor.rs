@@ -135,7 +135,7 @@ mod tests {
 
     impl TestContext {
         pub fn new(test_name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
@@ -145,10 +145,10 @@ mod tests {
             let disk_manager = Arc::new(FileDiskManager::new(
                 db_file.clone(),
                 db_log_file.clone(),
-                100,
+                10,
             ));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,

@@ -381,7 +381,7 @@ mod index_scan_executor_tests {
 
     impl TestContext {
         fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 10;
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
             // Create temporary directory
@@ -400,11 +400,11 @@ mod index_scan_executor_tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-                10,
+                BUFFER_POOL_SIZE,
                 disk_scheduler,
                 disk_manager.clone(),
                 replacer,

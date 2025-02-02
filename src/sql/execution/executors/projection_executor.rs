@@ -63,7 +63,10 @@ impl ProjectionExecutor {
         }
     }
 
-    fn evaluate_projection_expressions(&self, tuple: &Tuple) -> Result<Vec<Value>, ExpressionError> {
+    fn evaluate_projection_expressions(
+        &self,
+        tuple: &Tuple,
+    ) -> Result<Vec<Value>, ExpressionError> {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
         let input_schema = self.child_executor.get_output_schema();
 
@@ -170,41 +173,53 @@ mod tests {
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
+    use crate::common::logger::initialize_logger;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use chrono::Utc;
     use parking_lot::RwLock;
     use std::collections::HashMap;
-    use std::fs;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         transaction_context: Arc<TransactionContext>,
-        db_file: String,
-        log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            let timestamp = Utc::now().timestamp();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+        fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 100;
+            const K: usize = 2;
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-                10,
+                BUFFER_POOL_SIZE,
                 disk_scheduler,
                 disk_manager.clone(),
                 replacer,
@@ -237,8 +252,7 @@ mod tests {
                 catalog,
                 buffer_pool_manager,
                 transaction_context,
-                db_file,
-                log_file,
+                _temp_dir: temp_dir,
             }
         }
 
@@ -248,17 +262,6 @@ mod tests {
 
         pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
             self.catalog.clone()
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -289,20 +292,12 @@ mod tests {
         // Create test data in the format expected by MockExecutor
         let tuples: Vec<(Vec<Value>, RID)> = vec![
             (
-                vec![
-                    Value::new(1),
-                    Value::new("Alice"),
-                    Value::new(25),
-                ],
-                RID::new(0, 0)
+                vec![Value::new(1), Value::new("Alice"), Value::new(25)],
+                RID::new(0, 0),
             ),
             (
-                vec![
-                    Value::new(2),
-                    Value::new("Bob"),
-                    Value::new(30),
-                ],
-                RID::new(0, 1)
+                vec![Value::new(2), Value::new("Bob"), Value::new(30)],
+                RID::new(0, 1),
             ),
         ];
 
@@ -315,23 +310,24 @@ mod tests {
         // Create column reference expressions
         let expressions = vec![
             Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,  // tuple index
-                0,  // column index for id
+                0, // tuple index
+                0, // column index for id
                 Column::new("id", TypeId::Integer),
-                vec![]
+                vec![],
             ))),
             Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,  // tuple index
-                1,  // column index for name
+                0, // tuple index
+                1, // column index for name
                 Column::new("name", TypeId::VarChar),
-                vec![]
+                vec![],
             ))),
         ];
 
         // Create executor context with test context
         let (_, context) = create_test_executor_context();
 
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let mock_scan_plan =
+            MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
 
         // Create child executor with correct parameters
         let child_executor = Box::new(MockExecutor::new(
@@ -380,16 +376,16 @@ mod tests {
             (
                 vec![
                     Value::new("Alice"),
-                    Value::new(75),  // Sum of ages for Alice
+                    Value::new(75), // Sum of ages for Alice
                 ],
-                RID::new(0, 0)
+                RID::new(0, 0),
             ),
             (
                 vec![
                     Value::new("Bob"),
-                    Value::new(45),  // Sum of ages for Bob
+                    Value::new(45), // Sum of ages for Bob
                 ],
-                RID::new(0, 1)
+                RID::new(0, 1),
             ),
         ];
 
@@ -421,7 +417,8 @@ mod tests {
         let (_, context) = create_test_executor_context();
 
         // Create mock scan plan to simulate aggregation output
-        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_agg".to_string(), vec![]);
+        let mock_scan_plan =
+            MockScanNode::new(input_schema.clone(), "mock_agg".to_string(), vec![]);
 
         // Create child executor (simulating aggregation executor)
         let child_executor = Box::new(MockExecutor::new(
