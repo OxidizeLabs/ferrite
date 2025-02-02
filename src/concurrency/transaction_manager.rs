@@ -1,5 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::config::{PageId, TxnId, INVALID_TXN_ID};
+use crate::common::config::{PageId, Timestamp, TxnId, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{
@@ -98,8 +98,11 @@ impl TransactionManager {
             let mut txn_map = self.state.txn_map.write();
             let mut running_txns = self.state.running_txns.write();
 
+            // Get and set read timestamp using watermark
+            let read_ts = running_txns.get_next_ts_and_register();
+            txn.set_read_ts(read_ts);
+
             txn_map.insert(txn_id, Arc::clone(&txn));
-            running_txns.add_txn(txn.read_ts());
         }
 
         Ok(txn)
@@ -143,17 +146,16 @@ impl TransactionManager {
             let mut txn_map = self.state.txn_map.write();
             let mut running_txns = self.state.running_txns.write();
 
-            // Set commit timestamp before changing state
+            // Get new commit timestamp and update watermark
             let commit_ts = running_txns.get_next_ts();
             txn.set_commit_ts(commit_ts);
+            running_txns.update_commit_ts_and_get_watermark(commit_ts);
+
+            // Remove transaction's read timestamp from active set
+            running_txns.unregister_txn(txn.read_ts());
 
             // Update transaction state
             txn.set_state(TransactionState::Committed);
-
-            // Update watermark
-            let read_ts = txn.read_ts();
-            running_txns.update_commit_ts(read_ts);
-            running_txns.remove_txn(read_ts);
 
             // Update transaction map
             txn_map.insert(txn.get_transaction_id(), txn.clone());
@@ -175,8 +177,12 @@ impl TransactionManager {
 
         {
             let mut txn_map = self.state.txn_map.write();
+            let mut running_txns = self.state.running_txns.write();
+
+            // Remove transaction's read timestamp from active set
+            running_txns.unregister_txn(txn.read_ts());
+
             txn.set_state(TransactionState::Aborted);
-            self.state.running_txns.write().remove_txn(txn.read_ts());
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
     }
@@ -374,7 +380,7 @@ impl TransactionManager {
     ///
     /// # Returns
     /// The watermark.
-    pub fn get_watermark(&self) -> u64 {
+    pub fn get_watermark(&self) -> Timestamp {
         self.state.running_txns.read().get_watermark()
     }
 

@@ -1,10 +1,10 @@
-use crate::concurrency::transaction::Transaction;
-use crate::concurrency::transaction::UndoLink;
 use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
 use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::{LockManager, LockMode};
+use crate::concurrency::transaction::Transaction;
+use crate::concurrency::transaction::UndoLink;
 use crate::concurrency::transaction::{IsolationLevel, TransactionState, UndoLog};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
@@ -540,7 +540,7 @@ impl TableHeap {
         let result = table_page_guard.access(|table_page| {
             table_page.get_tuple(&rid)
         });
-        
+
         let (meta, tuple) = match result {
             Some(Ok((meta, tuple))) => (meta, tuple),
             Some(Err(e)) => return Err(format!("Page error while getting tuple: {}", e)),
@@ -579,19 +579,19 @@ impl TableHeap {
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 debug!("Checking version chain for txn {} with read_ts {}", txn.get_transaction_id(), txn.read_ts());
-                
+
                 // Start with the current version
                 let mut current_meta = meta;
                 let mut current_tuple = tuple.clone();
-                
+
                 // If this version is too new, traverse the version chain
                 if current_meta.get_commit_timestamp() > txn.read_ts() {
                     debug!("Current version too new (commit_ts: {}), traversing version chain", 
                            current_meta.get_commit_timestamp());
-                    
+
                     let mut current_undo_link = self.txn_manager.transaction_manager.get_undo_link(rid);
                     let mut seen_txns = std::collections::HashSet::new();
-                    
+
                     // Follow the version chain
                     while let Some(undo_link) = current_undo_link {
                         debug!("Found undo link: prev_txn={}, prev_log_idx={}", 
@@ -655,7 +655,7 @@ impl TableHeap {
                         debug!("Using original version (no version chain or visible original)");
                         return Ok((meta, tuple));
                     }
-                    
+
                     debug!("No visible version found in chain");
                     Err("No visible version found for transaction".to_string())
                 } else {
@@ -1568,7 +1568,7 @@ mod tests {
     fn test_update_with_isolation_levels() {
         initialize_logger();
         debug!("Starting isolation level test");
-        
+
         let ctx = TestContext::new("test_update_with_isolation_levels");
         let table_heap = setup_test_table(&ctx);
         let schema = create_test_schema();
@@ -1577,7 +1577,7 @@ mod tests {
         // Create first transaction with REPEATABLE_READ
         let txn1 = ctx.txn_manager.begin(IsolationLevel::RepeatableRead).unwrap();
         debug!("Created txn1 with ID: {}", txn1.get_transaction_id());
-        
+
         let txn_ctx1 = Arc::new(TransactionContext::new(
             txn1.clone(),
             lock_manager.clone(),
@@ -1673,7 +1673,7 @@ mod tests {
     fn test_concurrent_update_same_tuple() {
         initialize_logger();
         debug!("Starting concurrent update test");
-        
+
         let ctx = TestContext::new("test_concurrent_update_same_tuple");
         let table_heap = setup_test_table(&ctx);
         let schema = create_test_schema();
@@ -1682,7 +1682,7 @@ mod tests {
         // Create initial transaction
         let txn1 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
         debug!("Created txn1 with ID: {}", txn1.get_transaction_id());
-        
+
         let txn_ctx1 = Arc::new(TransactionContext::new(
             txn1.clone(),
             lock_manager.clone(),
@@ -1707,7 +1707,7 @@ mod tests {
         // Create two concurrent transactions
         let txn2 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
         debug!("Created txn2 with ID: {}", txn2.get_transaction_id());
-        
+
         let txn_ctx2 = Arc::new(TransactionContext::new(
             txn2.clone(),
             lock_manager.clone(),
@@ -1716,7 +1716,7 @@ mod tests {
 
         let txn3 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
         debug!("Created txn3 with ID: {}", txn3.get_transaction_id());
-        
+
         let txn_ctx3 = Arc::new(TransactionContext::new(
             txn3.clone(),
             lock_manager,
@@ -1728,7 +1728,7 @@ mod tests {
         let values2 = vec![Value::new(1), Value::new("update2"), Value::new(26)];
         let mut tuple2 = Tuple::new(&values2, schema.clone(), rid);
         let meta2 = TupleMeta::new(txn2.get_transaction_id());
-        
+
         let result2 = table_heap.update_tuple(&meta2, &mut tuple2, rid, Some(txn_ctx2.clone()));
         match &result2 {
             Ok(new_rid) => debug!("First update succeeded with RID: {:?}", new_rid),
@@ -1741,7 +1741,7 @@ mod tests {
         let values3 = vec![Value::new(1), Value::new("update3"), Value::new(27)];
         let mut tuple3 = Tuple::new(&values3, schema.clone(), rid);
         let meta3 = TupleMeta::new(txn3.get_transaction_id());
-        
+
         let result3 = table_heap.update_tuple(&meta3, &mut tuple3, rid, Some(txn_ctx3.clone()));
         match &result3 {
             Ok(new_rid) => debug!("Second update succeeded with RID: {:?}", new_rid),

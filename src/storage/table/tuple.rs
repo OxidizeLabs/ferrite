@@ -3,11 +3,11 @@ use crate::catalog::schema::Schema;
 use crate::common::config::{Timestamp, TxnId};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
+use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use crate::concurrency::watermark::Watermark;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
