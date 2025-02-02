@@ -120,7 +120,7 @@ impl AbstractExecutor for DeleteExecutor {
             // Get the next tuple to delete from the values executor
             if let Some((tuple_to_delete, _)) = child.next() {
                 debug!("Processing delete for tuple: {:?}", tuple_to_delete);
-                
+
                 let txn_ctx = {
                     let context = self.context.read();
                     context.get_transaction_context().clone()
@@ -132,17 +132,17 @@ impl AbstractExecutor for DeleteExecutor {
 
                 // Scan the table to find the matching tuple
                 let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
-                
+
                 while let Some((mut tuple_meta, mut tuple)) = table_iter.next() {
                     // Store the current ID before any mutable borrows
                     let current_id = tuple.get_value(0).get_val().clone();
-                    
+
                     if current_id == *id_to_delete {
                         debug!("Found matching tuple with ID: {:?}", current_id);
-                        
+
                         // Mark the tuple as deleted
                         tuple_meta.set_deleted(true);
-                        
+
                         let rid = tuple.get_rid();
                         match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, Some(txn_ctx.clone())) {
                             Ok(_) => {
@@ -156,7 +156,7 @@ impl AbstractExecutor for DeleteExecutor {
                         }
                     }
                 }
-                
+
                 warn!("No matching tuple found for ID: {:?}", id_to_delete);
                 self.next() // Try next value from values executor
             } else {

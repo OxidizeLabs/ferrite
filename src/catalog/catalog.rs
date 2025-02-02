@@ -63,14 +63,17 @@ impl Catalog {
     /// Creates a new table and returns its metadata.
     ///
     /// # Parameters
-    /// - `txn`: The transaction in which the table is being created.
-    /// - `table_name`: The name of the new table. Note that all tables beginning with `__` are reserved for the system.
+    /// - `name`: The name of the new table. Note that all tables beginning with `__` are reserved for the system.
     /// - `schema`: The schema of the new table.
-    /// - `create_table_heap`: Whether to create a table heap for the new table.
     ///
     /// # Returns
-    /// A (non-owning) pointer to the metadata for the table.
+    /// Some(TableInfo) if table creation succeeds, None if table with same name already exists
     pub fn create_table(&mut self, name: String, schema: Schema) -> Option<TableInfo> {
+        // Check if table with this name already exists
+        if self.table_names.contains_key(&name) {
+            return None;
+        }
+
         let table_oid = self.next_table_oid;
         let table_heap = Arc::new(TableHeap::new(
             self.bpm.clone(),
@@ -78,7 +81,7 @@ impl Catalog {
             self.txn_manager.clone(),
         ));
 
-        // Increment table OID (note: this was .add(1) before, which might be incorrect)
+        // Increment table OID
         self.next_table_oid += 1;
 
         // Create table info
@@ -175,7 +178,7 @@ impl Catalog {
         // Now populate the index using the stored version
         if let Some(table_info) = self.get_table(table_name) {
             let table_heap = table_info.get_table_heap();
-            let table_heap_guard = table_heap.latch.read();
+            let _table_heap_guard = table_heap.latch.read();
 
             // Create a transaction for populating the index
             let txn = self
@@ -263,12 +266,6 @@ impl Catalog {
             .map(|info| Arc::new(info.clone()))
     }
 
-    fn get_table_info_by_oid(&self, table_oid: &TableOidT) -> Option<Arc<TableInfo>> {
-        self.tables
-            .get(table_oid)
-            .map(|info| Arc::new(info.clone()))
-    }
-
     pub fn get_table_heap(&self, table_name: &str) -> Option<Arc<TableHeap>> {
         let table_info = self.get_table_info_by_name(table_name)?;
         Some(table_info.get_table_heap())
@@ -335,36 +332,42 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::Tuple;
+    use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use chrono::Utc;
     use parking_lot::RwLock;
-    use std::fs;
+    use tempfile::TempDir;
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
         txn_manager: Arc<TransactionManager>,
         lock_manager: Arc<LockManager>,
-        db_file: String,
-        db_log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                BUFFER_POOL_SIZE,
-            ));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
@@ -383,8 +386,7 @@ mod tests {
                 bpm,
                 txn_manager,
                 lock_manager,
-                db_file,
-                db_log_file,
+                _temp_dir: temp_dir,
             }
         }
 
@@ -398,17 +400,6 @@ mod tests {
 
         pub fn lock_manager(&self) -> Arc<LockManager> {
             Arc::clone(&self.lock_manager)
-        }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -434,15 +425,20 @@ mod tests {
         let bpm = ctx.bpm();
         let txn_manager = ctx.txn_manager();
 
-        let catalog = create_catalog(bpm, txn_manager);
+        let mut catalog = create_catalog(bpm, txn_manager);
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
 
+        // First create the table
+        let table_info = catalog.create_table("test_table".to_string(), schema.clone());
+        assert!(table_info.is_some(), "Failed to create table");
+
+        // Then retrieve and verify the table info
         let retrieved_info = catalog.get_table("test_table");
-        assert!(retrieved_info.is_some());
+        assert!(retrieved_info.is_some(), "Failed to retrieve table");
         assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
         assert_eq!(retrieved_info.unwrap().get_table_schema(), schema);
     }
@@ -648,18 +644,21 @@ mod tests {
         ]);
 
         // First creation should succeed
-        let table_info_1 = catalog
+        let _first_table = catalog
             .create_table("duplicate_table".to_string(), schema.clone())
-            .unwrap();
-        let table_oid_1 = table_info_1.get_table_oidt();
-        assert!(table_oid_1 != 0);
+            .expect("First table creation should succeed");
 
-        // Second creation with same name should fail
-        let table_info_2 = catalog
-            .create_table("duplicate_table".to_string(), schema.clone())
-            .unwrap();
-        let table_oid_2 = table_info_2.get_table_oidt();
-        assert!(table_oid_2 == 0);
+        // Verify first table was created successfully
+        assert!(catalog.get_table("duplicate_table").is_some());
+
+        // Second creation with same name should fail (return None)
+        let second_table = catalog.create_table("duplicate_table".to_string(), schema.clone());
+        assert!(second_table.is_none(), "Second table creation should fail");
+
+        // Verify only one table exists
+        let tables = catalog.get_table_names();
+        assert_eq!(tables.len(), 1, "Should only have one table");
+        assert!(tables.contains(&"duplicate_table".to_string()));
     }
 
     #[test]
@@ -704,33 +703,48 @@ mod tests {
 
         let mut catalog = create_catalog(bpm, txn_manager);
 
-        // Test creating an index
+        // First create a table
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let table_create_result = catalog.create_table("test_table".to_string(), table_schema.clone());
+        assert!(table_create_result.is_some(), "Failed to create table");
+
+        // Create an index on the 'id' column
         let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let index_res = catalog.create_index(
             "test_index",
             "test_table",
-            key_schema,
-            vec![0],
-            4,
-            false,
+            key_schema.clone(),
+            vec![0],  // index on first column (id)
+            4,        // size of integer
+            false,    // not unique
             IndexType::BPlusTreeIndex,
         );
-        assert!(index_res.is_some());
-        let (info, _) = index_res.unwrap();
-        assert_eq!(info.get_index_name(), "test_index");
+        assert!(index_res.is_some(), "Failed to create index");
 
-        // Test creating duplicate index (should fail)
-        let key_schema2 = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let (index_info, _) = index_res.unwrap();
+        assert_eq!(index_info.get_index_name(), "test_index");
+        assert_eq!(index_info.get_table_name(), "test_table");
+
+        // Try to create duplicate index (should fail)
         let duplicate_index = catalog.create_index(
             "test_index",
             "test_table",
-            key_schema2,
+            key_schema.clone(),
             vec![0],
             4,
             false,
             IndexType::BPlusTreeIndex,
         );
-        assert!(duplicate_index.is_none());
+        assert!(duplicate_index.is_none(), "Should not be able to create duplicate index");
+
+        // Verify index exists in table's index list
+        let table_indexes = catalog.get_table_indexes("test_table");
+        assert_eq!(table_indexes.len(), 1, "Table should have exactly one index");
+        assert_eq!(table_indexes[0].get_index_name(), "test_index");
     }
 
     #[test]
@@ -741,30 +755,41 @@ mod tests {
 
         let mut catalog = create_catalog(bpm, txn_manager);
 
-        // Create an index
+        // First create a table
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let table_create_result = catalog.create_table("lookup_test".to_string(), table_schema.clone());
+        assert!(table_create_result.is_some(), "Failed to create table");
+
+        // Create an index on the 'id' column
         let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let index_res = catalog.create_index(
             "id_index",
             "lookup_test",
             key_schema,
-            vec![0],
-            4,
-            true,
+            vec![0],  // index on first column (id)
+            4,        // size of integer
+            true,     // unique
             IndexType::BPlusTreeIndex,
         );
-        assert!(index_res.is_some());
+        assert!(index_res.is_some(), "Failed to create index");
+
         let (info, _) = index_res.unwrap();
         let index_oid = info.get_index_oid();
 
         // Test index lookup by OID
         let retrieved_index = catalog.get_index_by_index_oid(index_oid);
-        assert!(retrieved_index.is_some());
+        assert!(retrieved_index.is_some(), "Failed to retrieve index by OID");
         let (retrieved_info, _) = retrieved_index.unwrap();
         assert_eq!(retrieved_info.get_index_name(), "id_index");
+        assert_eq!(retrieved_info.get_table_name(), "lookup_test");
 
         // Test lookup with invalid OID
         let invalid_index = catalog.get_index_by_index_oid(999);
-        assert!(invalid_index.is_none());
+        assert!(invalid_index.is_none(), "Should not find non-existent index");
     }
 
     #[test]
@@ -792,22 +817,32 @@ mod tests {
             .create_table("test_table".to_string(), schema.clone())
             .unwrap();
         let table_heap = table_info.get_table_heap();
-        let table_heap_guard = table_heap.latch.read();
+        let _table_heap_guard = table_heap.latch.read();
 
         // Create and insert a test tuple
-        let tuple = Tuple::new(
-            &[Value::new(1), Value::new("test")],
-            schema.clone(),
+        let mut tuple = Tuple::new(
+            &[Value::new(1), Value::new("test".to_string())],
+            schema,
             RID::new(0, 0),
         );
+
+        let tuple_meta = TupleMeta::new(0);
+
+        // Insert the tuple into the table heap
+        let rid = table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx.clone())).unwrap();
+        tuple.set_rid(rid); // Update the tuple's RID with the actual insertion location
 
         // Test iterator
         let mut iter = table_heap.make_iterator(Some(txn_ctx.clone()));
 
         // Verify the tuple is visible through the iterator
-        let (meta, retrieved_tuple) = iter.next().unwrap();
+        let next_result = iter.next();
+        assert!(next_result.is_some(), "Iterator should return a tuple");
+
+        let (meta, retrieved_tuple) = next_result.unwrap();
         assert_eq!(meta.get_creator_txn_id(), txn.get_transaction_id());
-        assert_eq!(retrieved_tuple, tuple);
+        assert_eq!(retrieved_tuple.get_rid(), rid);
+        assert_eq!(retrieved_tuple.get_values(), tuple.get_values());
 
         // Verify no more tuples
         assert!(iter.next().is_none());

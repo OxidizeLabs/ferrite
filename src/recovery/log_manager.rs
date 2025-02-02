@@ -1,14 +1,14 @@
 use crate::common::config::{Lsn, INVALID_LSN, LOG_BUFFER_SIZE};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use log::{debug, error, info, trace, warn};
-use parking_lot::{Mutex, RwLock};
+use crossbeam_channel::{bounded, Receiver, Sender};
+use log::{debug, error, trace};
+use parking_lot::RwLock;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use crossbeam_channel::{bounded, Receiver, Sender};
-use std::sync::atomic::AtomicBool;
 
 /// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
@@ -55,10 +55,6 @@ impl LogBuffer {
         self.write_pos == 0
     }
 
-    fn used_size(&self) -> usize {
-        self.write_pos
-    }
-
     fn get_data(&self) -> &[u8] {
         &self.data[..self.write_pos]
     }
@@ -74,7 +70,7 @@ impl LogManager {
     /// A new `LogManager` instance.
     pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
         let (sender, receiver) = bounded(1000); // Bounded channel for backpressure
-        
+
         Self {
             next_lsn: AtomicU64::new(0),
             persistent_lsn: AtomicU64::new(INVALID_LSN),
@@ -88,14 +84,13 @@ impl LogManager {
 
     /// Runs the flush thread which writes the log buffer's content to the disk.
     pub fn run_flush_thread(&mut self) {
-        let log_buffer = Arc::clone(&self.log_buffer);
         let disk_manager = Arc::clone(&self.disk_manager);
         let stop_flag = Arc::clone(&self.stop_flag);
         let receiver = self.log_queue.1.clone();
 
         self.flush_thread = Some(thread::spawn(move || {
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-            
+
             while !stop_flag.load(Ordering::SeqCst) {
                 // Process queued log records
                 while let Ok(record) = receiver.try_recv() {
@@ -144,7 +139,7 @@ impl LogManager {
     /// The log sequence number (LSN) of the appended log record.
     pub fn append_log_record(&mut self, log_record: &LogRecord) -> Lsn {
         let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
-        
+
         // Clone the record before sending
         if let Err(e) = self.log_queue.0.send(log_record.clone()) {
             error!("Failed to queue log record: {}", e);
@@ -185,12 +180,6 @@ impl LogManager {
         self.persistent_lsn.store(lsn, Ordering::SeqCst);
     }
 
-    /// Returns a reference to the log buffer.
-    pub fn get_log_buffer(&self) -> &Arc<RwLock<LogBuffer>> {
-        trace!("Accessing log buffer");
-        &self.log_buffer
-    }
-
     pub fn get_log_buffer_size(&self) -> usize {
         let size = self.log_buffer.read().data.len();
         trace!("Retrieved log buffer size: {}", size);
@@ -203,6 +192,7 @@ mod tests {
     use super::*;
     use crate::common::config::TxnId;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
+    use log::{info, warn};
     use std::fs;
     use std::path::Path;
     use std::thread::sleep;
@@ -390,8 +380,8 @@ mod tests {
 
         // Final verification
         let final_lsn = ctx.log_manager.get_next_lsn();
-        assert_eq!(final_lsn, next_lsn, 
-            "Expected LSN {} but got {}", next_lsn, final_lsn);
+        assert_eq!(final_lsn, next_lsn,
+                   "Expected LSN {} but got {}", next_lsn, final_lsn);
     }
 
     #[test]
@@ -471,7 +461,7 @@ mod tests {
     #[test]
     fn test_log_level_transitions() {
         let mut ctx = TestContext::new("log_level_test");
-        
+
         // Create log record once and reuse
         let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
 
@@ -502,7 +492,7 @@ mod tests {
                     let record = LogRecord::new_transaction_record(
                         (chunk * 100 + i) as TxnId,
                         INVALID_LSN,
-                        LogRecordType::Begin
+                        LogRecordType::Begin,
                     );
                     ctx.log_manager.append_log_record(&record);
                 }

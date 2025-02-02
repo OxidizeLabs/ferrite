@@ -34,6 +34,14 @@ impl UpdateNode {
     pub fn get_table_name(&self) -> &str {
         &self.table_name
     }
+
+    pub fn get_table_id(&self) -> TableOidT {
+        self.table_id
+    }
+
+    pub fn get_target_expressions(&self) -> &Vec<Arc<Expression>> {
+        &self.target_expressions
+    }
 }
 
 impl AbstractPlanNode for UpdateNode {

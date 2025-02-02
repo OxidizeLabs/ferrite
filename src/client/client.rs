@@ -4,7 +4,7 @@ use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error, info};
+use log::{debug, error};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;

@@ -245,11 +245,11 @@ impl LockRequestQueue {
         }
 
         // Check existing locks by this transaction
-        let mut has_lock = false;
+        let has_lock = false;
         for existing_req in &self.request_queue {
             let existing = existing_req.lock();
             if existing.granted && existing.txn_id == txn_id {
-                has_lock = true;
+                //has_lock = true;
                 // Check if this is a valid lock upgrade
                 match (existing.lock_mode, new_mode) {
                     // IS -> [S, X, IX, SIX]
@@ -652,7 +652,7 @@ impl LockCompatibilityChecker {
             (LockMode::Exclusive, _) => false,
 
             // Handle symmetric cases
-            (a, b) => Self::are_compatible(b, a),
+            //(a, b) => Self::are_compatible(b, a),
         }
     }
 }

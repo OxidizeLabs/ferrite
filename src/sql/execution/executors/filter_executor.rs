@@ -40,7 +40,7 @@ impl FilterExecutor {
         );
 
         let schema = self.child_executor.get_output_schema();
-        
+
         match predicate.evaluate(tuple, schema) {
             Ok(value) => match value.get_val() {
                 Val::Boolean(b) => {
@@ -73,10 +73,10 @@ impl AbstractExecutor for FilterExecutor {
 
         debug!("Initializing FilterExecutor");
         self.child_executor.init();
-        
+
         let predicate = self.plan.get_filter_predicate();
         let schema = self.child_executor.get_output_schema();
-        
+
         // Validate predicate against schema
         if let Err(e) = predicate.validate(schema) {
             error!("Invalid predicate for schema: {}", e);
@@ -475,7 +475,7 @@ mod tests {
         {
             let table_heap = table_info.get_table_heap();
             let _guard = table_heap.latch.write();
-            
+
             let test_data = vec![
                 (1, "Alice", 25),
                 (2, "Bob", 30),
@@ -582,7 +582,7 @@ mod tests {
 
         // Create catalog and wrap it in Arc<RwLock>
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-        
+
         // Create table and get table info
         let table_info = {
             let mut catalog_guard = catalog.write();
@@ -625,13 +625,13 @@ mod tests {
         let mut results = Vec::new();
         let max_iterations = 100; // Reasonable upper limit
         let mut iteration_count = 0;
-        
+
         while let Some((tuple, _)) = executor.next() {
             iteration_count += 1;
             if iteration_count > max_iterations {
                 panic!("Possible infinite loop detected in filter execution");
             }
-            
+
             let age = match tuple.get_value(2).get_val() {
                 Val::Integer(a) => *a,
                 _ => panic!("Expected integer for age"),
@@ -653,21 +653,21 @@ mod tests {
     fn test_filter_invalid_predicate() {
         let test_context = TestContext::new("filter_invalid_test");
         let schema = create_test_schema();
-        
+
         // Create a filter with an empty schema to simulate invalid predicate
         let empty_schema = Schema::new(vec![]);
         let invalid_filter_plan = create_invalid_age_filter(25, ComparisonType::Equal, &empty_schema);
-        
+
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
-        
+
         let child_executor = Box::new(EmptyExecutor::new(
             Arc::clone(&executor_context),
             schema.clone(),
         ));
 
         let mut executor = FilterExecutor::new(child_executor, executor_context, invalid_filter_plan);
-        
+
         // Should initialize but return no results due to invalid predicate
         executor.init();
         assert!(executor.next().is_none());

@@ -393,6 +393,7 @@ mod basic_behaviour {
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -432,18 +433,23 @@ mod basic_behaviour {
             let buffer_pool = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
-                disk_manager,
+                disk_manager.clone(),
                 replacer,
             ));
 
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+
+            // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool,
+                buffer_pool.clone(),
                 0,
                 0,
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                transaction_manager.clone(), // Pass transaction manager
             )));
 
             let planner = QueryPlanner::new(Arc::clone(&catalog));
@@ -627,6 +633,7 @@ mod complex_behaviour {
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -666,18 +673,23 @@ mod complex_behaviour {
             let buffer_pool = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
-                disk_manager,
+                disk_manager.clone(),
                 replacer,
             ));
 
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+
+            // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool,
+                buffer_pool.clone(),
                 0,
                 0,
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                transaction_manager.clone(), // Pass transaction manager
             )));
 
             let planner = QueryPlanner::new(Arc::clone(&catalog));

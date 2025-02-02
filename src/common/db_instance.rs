@@ -10,23 +10,19 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
-use crate::server::ServerHandle;
 use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
-use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use log::error;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
@@ -111,6 +107,13 @@ impl DBInstance {
             ))),
         ));
 
+        // Initialize recovery components
+        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+        log_manager.write().run_flush_thread();
+
+        let transaction_manager =
+            Arc::new(TransactionManager::new());
+
         // Initialize catalog with default values
         let catalog = Arc::new(RwLock::new(Catalog::new(
             buffer_pool_manager.clone(), // Buffer pool manager
@@ -120,15 +123,12 @@ impl DBInstance {
             HashMap::new(),              // indexes
             HashMap::new(),              // table_names
             HashMap::new(),              // index_names
+            transaction_manager,
         )));
-
-        // Initialize recovery components
-        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
-        log_manager.write().run_flush_thread();
 
         // Initialize transaction components
         let transaction_factory =
-            Arc::new(TransactionManagerFactory::new(catalog.clone(), log_manager.clone(), buffer_pool_manager.clone()));
+            Arc::new(TransactionManagerFactory::new(buffer_pool_manager.clone()));
 
         // Initialize execution engine
         let execution_engine = Arc::new(Mutex::new(ExecutionEngine::new(
@@ -252,6 +252,8 @@ impl DBInstance {
 
         for name in table_names {
             if let Some(table_info) = catalog.get_table(&name) {
+                let table_heap = table_info.get_table_heap();
+                let _table_heap_guard = table_heap.latch.read();
                 let schema = table_info.get_table_schema();
                 let schema_str = schema
                     .get_columns()
@@ -264,7 +266,7 @@ impl DBInstance {
                     Value::new(table_info.get_table_oidt() as i32),
                     Value::new(table_info.get_table_name()),
                     Value::new(format!("({})", schema_str)),
-                    Value::new(table_info.get_table_heap().get_num_tuples() as i32),
+                    Value::new(table_heap.get_num_tuples() as i32),
                 ]);
             }
         }
@@ -551,23 +553,18 @@ impl DBInstance {
         Ok(Some(Arc::new(bpm)))
     }
 
-    fn create_lock_manager(
-        transaction_manager: &Arc<TransactionManager>,
-    ) -> Result<Option<Arc<LockManager>>, DBError> {
+    fn create_lock_manager() -> Result<Option<Arc<LockManager>>, DBError> {
         Ok(if cfg!(not(feature = "disable-lock-manager")) {
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(transaction_manager)));
+            let lock_manager = Arc::new(LockManager::new());
             Some(lock_manager)
         } else {
             None
         })
     }
 
-    fn create_transaction_manager(
-        log_manager: Arc<RwLock<LogManager>>,
-    ) -> Result<Option<Arc<RwLock<TransactionManager>>>, DBError> {
+    fn create_transaction_manager() -> Result<Option<Arc<TransactionManager>>, DBError> {
         Ok(if cfg!(not(feature = "disable-transaction-manager")) {
-            let transaction_manager =
-                Arc::new(RwLock::new(TransactionManager::new(log_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new());
             Some(transaction_manager)
         } else {
             None

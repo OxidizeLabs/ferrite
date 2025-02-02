@@ -95,7 +95,7 @@ impl ExpressionOps for ColumnRefExpression {
         // Get the column from schema and verify type matches
         let schema_column = schema.get_column(self.column_index)
             .ok_or_else(|| ExpressionError::InvalidColumnIndex(self.column_index))?;
-        
+
         if schema_column.get_type() != self.ret_type.get_type() {
             return Err(ExpressionError::TypeMismatch {
                 expected: self.ret_type.get_type(),

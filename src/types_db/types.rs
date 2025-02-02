@@ -1,27 +1,17 @@
 use crate::types_db::bigint_type;
-use crate::types_db::bigint_type::BigIntType;
 use crate::types_db::boolean_type;
-use crate::types_db::boolean_type::BooleanType;
 use crate::types_db::const_len_type;
 use crate::types_db::decimal_type;
-use crate::types_db::decimal_type::DecimalType;
 use crate::types_db::integer_type;
-use crate::types_db::integer_type::IntegerType;
 use crate::types_db::invalid_type;
-use crate::types_db::invalid_type::InvalidType;
 use crate::types_db::smallint_type;
-use crate::types_db::smallint_type::SmallIntType;
 use crate::types_db::timestamp_type;
-use crate::types_db::timestamp_type::TimestampType;
 use crate::types_db::tinyint_type;
-use crate::types_db::tinyint_type::TinyIntType;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type;
-use crate::types_db::varlen_type::VarCharType;
 use crate::types_db::vector_type;
-use std::format;
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -296,6 +286,15 @@ mod unit_tests {
 #[cfg(test)]
 mod type_behavior_tests {
     use super::*;
+    use crate::types_db::bigint_type::BigIntType;
+    use crate::types_db::boolean_type::BooleanType;
+    use crate::types_db::decimal_type::DecimalType;
+    use crate::types_db::integer_type::IntegerType;
+    use crate::types_db::invalid_type::InvalidType;
+    use crate::types_db::smallint_type::SmallIntType;
+    use crate::types_db::timestamp_type::TimestampType;
+    use crate::types_db::tinyint_type::TinyIntType;
+    use crate::types_db::varlen_type::VarCharType;
 
     #[test]
     fn test_min_values() {
@@ -500,6 +499,7 @@ mod type_coercion_tests {
 #[cfg(test)]
 mod edge_cases {
     use super::*;
+    use crate::types_db::boolean_type::BooleanType;
 
     #[test]
     #[should_panic(expected = "Invalid type for min value")]

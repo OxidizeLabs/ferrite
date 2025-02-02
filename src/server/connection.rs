@@ -1,6 +1,6 @@
 use crate::common::db_instance::DBInstance;
 use crate::common::exception::DBError;
-use crate::server::{DatabaseRequest, DatabaseResponse};
+use crate::server::DatabaseResponse;
 use log::{debug, error, info, warn};
 use std::error::Error as StdError;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -1,6 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
-use crate::concurrency::lock_manager::LockManager;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::transaction_context::TransactionContext;
@@ -52,8 +51,8 @@ impl ExecutionContext {
         &self.catalog
     }
 
-    pub fn get_buffer_pool_manager(&self) -> &BufferPoolManager {
-        &self.buffer_pool_manager
+    pub fn get_buffer_pool_manager(&self) -> Arc<BufferPoolManager> {
+        self.buffer_pool_manager.clone()
     }
 
     pub fn get_nlj_check_exec_set(

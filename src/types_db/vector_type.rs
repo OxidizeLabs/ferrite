@@ -1,8 +1,8 @@
-use std::cmp::PartialEq;
-use std::fmt;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
+use std::cmp::PartialEq;
+use std::fmt;
 
 /// Represents a vector of integers in the database type system.
 #[derive(Debug, Clone, PartialEq)]
@@ -165,7 +165,7 @@ impl Type for VectorType {
                         _ => None,
                     })
                     .min();
-                
+
                 if let Some(val) = min_val {
                     Value::new(val)
                 } else {
@@ -186,7 +186,7 @@ impl Type for VectorType {
                         _ => None,
                     })
                     .max();
-                
+
                 if let Some(val) = max_val {
                     Value::new(val)
                 } else {
@@ -311,7 +311,6 @@ mod tests {
 
     #[test]
     fn test_vector_to_string() {
-        let vector_type = VectorType::new();
         let vec = Value::new(vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)]);
         let empty = Value::new(Vec::<Value>::new());
         let null = Value::new(Val::Null);

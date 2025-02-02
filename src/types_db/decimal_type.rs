@@ -22,7 +22,7 @@ impl Type for DecimalType {
                 if r.is_nan() {
                     CmpBool::CmpFalse
                 } else {
-                    CmpBool::from((0.0 == *r))
+                    CmpBool::from(0.0 == *r)
                 }
             }
             Val::BigInt(r) => CmpBool::from(0.0 == *r as f64),
@@ -254,10 +254,10 @@ mod tests {
 
         // Test addition
         assert_eq!(decimal_type.add(&two).unwrap(), Value::new(2.0f64));
-        
+
         // Test division by zero
         assert!(decimal_type.divide(&zero).is_err());
-        
+
         // Test modulo
         assert_eq!(decimal_type.modulo(&zero), Value::new(Val::Null));
 

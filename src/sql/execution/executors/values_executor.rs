@@ -106,7 +106,6 @@ mod tests {
     mod helpers {
         use super::*;
         use crate::catalog::catalog::Catalog;
-        use crate::recovery::log_manager::LogManager;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
 
@@ -153,7 +152,6 @@ mod tests {
             catalog: Arc<RwLock<Catalog>>,
             transaction_manager: Arc<TransactionManager>,
             transaction_context: Arc<TransactionContext>,
-            lock_manager: Arc<LockManager>,
             buffer_pool_manager: Arc<BufferPoolManager>,
         }
 
@@ -168,8 +166,7 @@ mod tests {
                     log_path.to_str().unwrap().to_string(),
                     100,
                 ));
-                let disk_scheduler =
-                    Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+                let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 
                 const BUFFER_POOL_SIZE: usize = 10;
                 const K: usize = 2;
@@ -182,6 +179,11 @@ mod tests {
                     replacer,
                 ));
 
+                // Create transaction manager and lock manager first
+                let transaction_manager = Arc::new(TransactionManager::new());
+                let lock_manager = Arc::new(LockManager::new());
+
+                // Create catalog with transaction manager
                 let catalog = Arc::new(RwLock::new(Catalog::new(
                     buffer_pool_manager.clone(),
                     0,
@@ -190,15 +192,10 @@ mod tests {
                     HashMap::new(),
                     HashMap::new(),
                     HashMap::new(),
+                    transaction_manager.clone(), // Pass transaction manager
                 )));
 
-                let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-                let transaction_manager =
-                    Arc::new(TransactionManager::new(log_manager));
-                let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
-
                 let transaction = transaction_manager.begin(IsolationLevel::Serializable).unwrap();
-
                 let transaction_context = Arc::new(TransactionContext::new(
                     transaction,
                     lock_manager.clone(),
@@ -209,7 +206,6 @@ mod tests {
                     catalog,
                     transaction_manager,
                     transaction_context,
-                    lock_manager,
                     buffer_pool_manager,
                 }
             }

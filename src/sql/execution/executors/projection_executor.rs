@@ -12,7 +12,6 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -67,7 +66,7 @@ impl ProjectionExecutor {
     fn evaluate_projection_expressions(&self, tuple: &Tuple) -> Result<Vec<Value>, ExpressionError> {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
         let input_schema = self.child_executor.get_output_schema();
-        
+
         for expr in self.plan.get_expressions() {
             match expr.as_ref() {
                 Expression::Aggregate(_) => {
@@ -99,7 +98,7 @@ impl ProjectionExecutor {
                 }
             }
         }
-        
+
         Ok(values)
     }
 }
@@ -171,7 +170,6 @@ mod tests {
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
-    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -187,9 +185,7 @@ mod tests {
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        lock_manager: Arc<LockManager>,
         db_file: String,
         log_file: String,
     }
@@ -214,7 +210,11 @@ mod tests {
                 replacer,
             ));
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool_manager.clone(),
                 0,
@@ -223,15 +223,10 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                transaction_manager.clone(), // Pass transaction manager
             )));
-            let transaction_manager = Arc::new(TransactionManager::new(
-                log_manager,
-            ));
-
-            let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -241,9 +236,7 @@ mod tests {
             Self {
                 catalog,
                 buffer_pool_manager,
-                transaction_manager,
                 transaction_context,
-                lock_manager,
                 db_file,
                 log_file,
             }
@@ -251,10 +244,6 @@ mod tests {
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.buffer_pool_manager)
-        }
-
-        pub fn lock_manager(&self) -> Arc<LockManager> {
-            Arc::clone(&self.lock_manager)
         }
 
         pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
@@ -276,13 +265,9 @@ mod tests {
     fn create_test_executor_context() -> (TestContext, Arc<RwLock<ExecutionContext>>) {
         let ctx = TestContext::new("projection_test");
         let bpm = ctx.bpm();
-        let lock_manager = ctx.lock_manager();
         let catalog = ctx.catalog();
-        let transaction_manager = ctx.transaction_manager.clone();
         let transaction_context = ctx.transaction_context.clone();
 
-
-        let transaction = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             Arc::clone(&bpm),
             catalog,

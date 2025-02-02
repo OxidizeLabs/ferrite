@@ -40,6 +40,12 @@ pub enum LockError {
 
     #[error("Failed to commit transaction")]
     TransactionCommitted,
+
+    #[error("Timeout Error")]
+    Timeout,
+
+    #[error("Intention Lock on Row Error")]
+    IntentionLockOnRow,
 }
 
 #[derive(Error, Debug)]
@@ -162,6 +168,12 @@ pub enum ExpressionError {
     PageGuardError(PageGuardError),
     #[error("Invalid Operation error: {0}")]
     InvalidOperation(String),
+    #[error("Invalid Column Index error: {0}")]
+    InvalidColumnIndex(usize),
+    #[error("Invalid Column Reference error: {0}")]
+    InvalidColumnReference(String),
+    #[error("Type mismatch error")]
+    TypeMismatch { expected: TypeId, actual: TypeId },
 }
 
 #[derive(Debug, Error)]

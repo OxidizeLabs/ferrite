@@ -148,40 +148,40 @@ impl Value {
         match (&self.value_, &other.value_) {
             (Val::Integer(a), Val::Integer(b)) => {
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (Val::BigInt(a), Val::BigInt(b)) => {
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            },
+            }
             (Val::Integer(a), Val::BigInt(b)) => {
                 Ok(Value::new_with_type(Val::BigInt(*a as i64 + b), TypeId::BigInt))
-            },
+            }
             (Val::BigInt(a), Val::Integer(b)) => {
                 Ok(Value::new_with_type(Val::BigInt(a + *b as i64), TypeId::BigInt))
-            },
+            }
             (Val::Decimal(a), Val::Decimal(b)) => {
                 Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
-            },
+            }
             (Val::SmallInt(a), Val::SmallInt(b)) => {
                 Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            },
+            }
             (Val::TinyInt(a), Val::TinyInt(b)) => {
                 Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            },
+            }
             // Promote smaller types to larger ones
             (Val::TinyInt(a), Val::Integer(b)) => {
                 Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
-            },
+            }
             (Val::Integer(a), Val::TinyInt(b)) => {
                 Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
-            },
+            }
             (Val::SmallInt(a), Val::Integer(b)) => {
                 Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
-            },
+            }
             (Val::Integer(a), Val::SmallInt(b)) => {
                 Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
-            },
-            _ => Err(format!("Cannot add values of types {:?} and {:?}", 
-                self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!("Cannot add values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
         }
     }
 }
@@ -265,45 +265,45 @@ impl Type for Value {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::BigInt, TypeId::BigInt) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            },
+            }
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 let a = self.as_smallint()?;
                 let b = other.as_smallint()?;
                 Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            },
+            }
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 let a = self.as_tinyint()?;
                 let b = other.as_tinyint()?;
                 Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            },
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
                 let a = self.as_decimal()?;
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
-            },
+            }
             // Handle type promotions
             (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            },
+            }
             (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            },
-            _ => Err(format!("Cannot add values of types {:?} and {:?}", 
-                self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!("Cannot add values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
         }
     }
 
@@ -313,29 +313,29 @@ impl Type for Value {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a - b), TypeId::Integer))
-            },
+            }
             (TypeId::BigInt, TypeId::BigInt) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a - b), TypeId::BigInt))
-            },
+            }
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 let a = self.as_smallint()?;
                 let b = other.as_smallint()?;
                 Ok(Value::new_with_type(Val::SmallInt(a - b), TypeId::SmallInt))
-            },
+            }
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 let a = self.as_tinyint()?;
                 let b = other.as_tinyint()?;
                 Ok(Value::new_with_type(Val::TinyInt(a - b), TypeId::TinyInt))
-            },
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
                 let a = self.as_decimal()?;
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a - b), TypeId::Decimal))
-            },
-            _ => Err(format!("Cannot subtract values of types {:?} and {:?}", 
-                self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!("Cannot subtract values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
         }
     }
 
@@ -345,29 +345,29 @@ impl Type for Value {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a * b), TypeId::Integer))
-            },
+            }
             (TypeId::BigInt, TypeId::BigInt) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a * b), TypeId::BigInt))
-            },
+            }
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 let a = self.as_smallint()?;
                 let b = other.as_smallint()?;
                 Ok(Value::new_with_type(Val::SmallInt(a * b), TypeId::SmallInt))
-            },
+            }
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 let a = self.as_tinyint()?;
                 let b = other.as_tinyint()?;
                 Ok(Value::new_with_type(Val::TinyInt(a * b), TypeId::TinyInt))
-            },
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
                 let a = self.as_decimal()?;
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a * b), TypeId::Decimal))
-            },
-            _ => Err(format!("Cannot multiply values of types {:?} and {:?}", 
-                self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!("Cannot multiply values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
         }
     }
 
@@ -380,29 +380,29 @@ impl Type for Value {
                 let a = self.as_integer()?;
                 let b = other.as_integer()?;
                 Ok(Value::new_with_type(Val::Integer(a / b), TypeId::Integer))
-            },
+            }
             (TypeId::BigInt, TypeId::BigInt) => {
                 let a = self.as_bigint()?;
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a / b), TypeId::BigInt))
-            },
+            }
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 let a = self.as_smallint()?;
                 let b = other.as_smallint()?;
                 Ok(Value::new_with_type(Val::SmallInt(a / b), TypeId::SmallInt))
-            },
+            }
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 let a = self.as_tinyint()?;
                 let b = other.as_tinyint()?;
                 Ok(Value::new_with_type(Val::TinyInt(a / b), TypeId::TinyInt))
-            },
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
                 let a = self.as_decimal()?;
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a / b), TypeId::Decimal))
-            },
-            _ => Err(format!("Cannot divide values of types {:?} and {:?}", 
-                self.get_type_id(), other.get_type_id()))
+            }
+            _ => Err(format!("Cannot divide values of types {:?} and {:?}",
+                             self.get_type_id(), other.get_type_id()))
         }
     }
 
@@ -417,7 +417,7 @@ impl Type for Value {
                 } else {
                     Value::new(Val::Null)
                 }
-            },
+            }
             _ => Value::new(Val::Null)
         }
     }
@@ -629,8 +629,8 @@ impl Display for Value {
 // Add Debug implementation to show full type information
 impl Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?} }}", 
-            self.value_, self.size_, self.manage_data_, self.type_id_)
+        write!(f, "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?} }}",
+               self.value_, self.size_, self.manage_data_, self.type_id_)
     }
 }
 
@@ -662,7 +662,6 @@ impl Eq for Value {}
 mod unit_tests {
     use crate::container::hash_function::HashFunction;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::types::Type;
     use crate::types_db::value::{Size, Val, Value};
     use std::hash::{DefaultHasher, Hash, Hasher};
 

@@ -83,6 +83,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -95,34 +96,39 @@ mod tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
+        transaction_manager: Arc<TransactionManager>,
         db_file: String,
         db_log_file: String,
     }
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            // initialize_logger();
             let buffer_pool_size: usize = 5;
             const K: usize = 2;
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
             let disk_manager = Arc::new(FileDiskManager::new(
                 db_file.clone(),
                 db_log_file.clone(),
                 100,
             ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 buffer_pool_size,
                 disk_scheduler,
                 disk_manager.clone(),
-                replacer.clone(),
+                replacer,
             ));
+
+            // Create transaction manager
+            let transaction_manager = Arc::new(TransactionManager::new());
+
             Self {
                 bpm,
+                transaction_manager,
                 db_file,
                 db_log_file,
             }
@@ -141,7 +147,11 @@ mod tests {
     }
 
     fn create_mock_table_scan(ctx: &TestContext, name: &str, schema: Schema) -> PlanNode {
-        let table_heap = Arc::new(TableHeap::new(ctx.bpm.clone(), 0));
+        let table_heap = Arc::new(TableHeap::new(
+            ctx.bpm.clone(),
+            0,
+            ctx.transaction_manager.clone(),
+        ));
         let table_info = TableInfo::new(
             schema.clone(),
             name.to_string(),

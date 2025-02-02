@@ -1,14 +1,12 @@
 use crate::common::config::PageId;
-use crate::common::logger::initialize_logger;
-use crate::storage::disk::disk_manager::{DiskIO, FileDiskManager, MockDiskIO};
-use chrono::Utc;
+use crate::storage::disk::disk_manager::FileDiskManager;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{error, info};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::{fs, thread};
+use std::thread;
 
 // Define DiskRequest struct
 #[derive(Debug)]
@@ -187,8 +185,10 @@ impl DiskScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::disk_manager::MockDiskIO;
     use mockall::predicate::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::TempDir;
 
     pub struct TestContext {
         disk_manager: Arc<FileDiskManager>,
@@ -196,13 +196,25 @@ mod tests {
     }
 
     impl TestContext {
-        fn new() -> Self {
+        fn new(name: &str) -> Self {
+            initialize_logger();
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
             // Create disk manager with mock disk IO
-            let disk_manager = Arc::new(FileDiskManager::new(
-                "mock_db.db".to_string(),
-                "mock_log.db".to_string(),
-                10,
-            ));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             Self {
                 disk_manager,
@@ -213,10 +225,6 @@ mod tests {
         fn set_mock_disk_io(&self, mock: MockDiskIO) {
             self.disk_manager.set_disk_io(Box::new(mock));
         }
-
-        fn disk_scheduler(&self) -> Arc<RwLock<DiskScheduler>> {
-            Arc::clone(&self.disk_scheduler)
-        }
     }
 
     #[cfg(test)]
@@ -225,7 +233,7 @@ mod tests {
 
         #[test]
         fn disk_scheduler_initialization() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("disk_scheduler_initialization");
             let disk_scheduler = ctx.disk_scheduler.read();
             assert!(disk_scheduler.worker_thread.is_some());
             assert!(disk_scheduler.is_request_queue_empty());
@@ -234,17 +242,17 @@ mod tests {
 
     #[cfg(test)]
     mod basic_behaviour {
-        use crate::common::config::DB_PAGE_SIZE;
         use super::*;
+        use crate::common::config::DB_PAGE_SIZE;
 
         #[test]
         fn schedule_write_and_read_operations() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("schedule_write_and_read_operations");
             let disk_scheduler = ctx.disk_scheduler.clone();
-            
+
             // Create mock disk IO
             let mut mock_disk_io = MockDiskIO::new();
-            
+
             // Setup write expectation
             mock_disk_io
                 .expect_write_page()
@@ -295,7 +303,7 @@ mod tests {
 
         #[test]
         fn scheduler_shutdown() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("scheduler_shutdown");
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             let mut mock_disk_io = MockDiskIO::new();
@@ -320,14 +328,14 @@ mod tests {
 
     #[cfg(test)]
     mod concurrency {
-        use crate::common::config::DB_PAGE_SIZE;
         use super::*;
+        use crate::common::config::DB_PAGE_SIZE;
 
         #[test]
         fn write_and_read_operations() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("write_and_read_operations");
             let disk_scheduler = ctx.disk_scheduler.clone();
-            
+
             let mut mock_disk_io = MockDiskIO::new();
             mock_disk_io
                 .expect_write_page()
@@ -340,7 +348,7 @@ mod tests {
                     Ok(())
                 })
                 .times(10);
-            
+
             ctx.set_mock_disk_io(mock_disk_io);
 
             let mut threads = vec![];
@@ -372,7 +380,7 @@ mod tests {
 
         #[test]
         fn high_concurrency_load() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("high_concurrency_load");
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             let mut mock_disk_io = MockDiskIO::new();
@@ -380,7 +388,7 @@ mod tests {
                 .expect_write_page()
                 .returning(|_, _| Ok(()))
                 .times(100);
-            
+
             ctx.set_mock_disk_io(mock_disk_io);
 
             let mut handles = vec![];
@@ -406,13 +414,13 @@ mod tests {
 
     #[cfg(test)]
     mod edge_cases {
-        use std::io::{Error, ErrorKind};
-        use crate::common::config::DB_PAGE_SIZE;
         use super::*;
+        use crate::common::config::DB_PAGE_SIZE;
+        use std::io::{Error, ErrorKind};
 
         #[test]
         fn empty_queue_handling() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("empty_queue_handling");
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             // Directly trigger the worker thread notification without any scheduled task
@@ -424,7 +432,7 @@ mod tests {
 
         #[test]
         fn shutdown_while_processing() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("shutdown_while_processing");
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             let mut mock_disk_io = MockDiskIO::new();
@@ -432,11 +440,11 @@ mod tests {
                 .expect_write_page()
                 .returning(|_, _| Ok(()))
                 .times(5);
-            
+
             ctx.set_mock_disk_io(mock_disk_io);
 
             let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
-            let (tx, rx) = mpsc::channel();
+            let (tx, _rx) = mpsc::channel();
 
             for i in 0..5 {
                 disk_scheduler
@@ -453,14 +461,14 @@ mod tests {
 
         #[test]
         fn disk_error_handling() {
-            let ctx = TestContext::new();
+            let ctx = TestContext::new("disk_error_handling");
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             let mut mock_disk_io = MockDiskIO::new();
             mock_disk_io
                 .expect_write_page()
                 .returning(|_, _| Err(Error::new(ErrorKind::Other, "Simulated disk error")));
-            
+
             ctx.set_mock_disk_io(mock_disk_io);
 
             let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));

@@ -43,7 +43,7 @@ impl Watermark {
 
     /// Updates the commit timestamp for a transaction
     pub fn update_commit_ts(&mut self, ts: Timestamp) {
-        // No-op for now, but could be used to track commit order
+        self.watermark = self.next_ts.swap(ts, Ordering::SeqCst);
     }
 
     /// Gets the current watermark value

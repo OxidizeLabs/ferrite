@@ -44,7 +44,7 @@ pub struct TableHeap {
     page_manager: Arc<TablePageManager>,
     tuple_storage: Arc<TupleStorage>,
     txn_manager: Arc<TableTransactionManager>,
-    latch: RwLock<()>,
+    pub latch: RwLock<()>,
 }
 
 /// The TableInfo struct maintains metadata about a table.
@@ -55,7 +55,7 @@ pub struct TableInfo {
     /// The table name
     name: String,
     /// An owning pointer to the table heap
-    table: Arc<RwLock<TableHeap>>,
+    table: Arc<TableHeap>,
     /// The table OID
     oid: TableOidT,
 }
@@ -110,17 +110,16 @@ impl TableHeap {
     ///
     /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
     pub fn insert_tuple(
-        &mut self,
+        &self,
         meta: &TupleMeta,
         tuple: &mut Tuple,
         txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<RID, String> {
-        let _write_guard = self.latch.write();
         self.tuple_storage.insert_tuple(meta, tuple, txn_ctx)
     }
 
     pub fn update_tuple(
-        &mut self,
+        &self,
         meta: &TupleMeta,
         tuple: &mut Tuple,
         rid: RID,
@@ -309,7 +308,7 @@ impl TableHeap {
             // Get the creator transaction
             let creator_txn_id = meta.get_creator_txn_id();
             let txn_manager = txn_ctx.get_transaction_manager();
-            
+
             match txn.get_isolation_level() {
                 IsolationLevel::ReadUncommitted => {
                     // Can see all tuples
@@ -326,7 +325,7 @@ impl TableHeap {
                         }
                         Ok((meta, tuple))
                     } else {
-                        // If creator transaction not found and it's not INVALID_TXN_ID, 
+                        // If creator transaction not found and it's not INVALID_TXN_ID,
                         // treat as uncommitted for safety
                         Err("Tuple is not visible - creator transaction not found".to_string())
                     }
@@ -336,7 +335,7 @@ impl TableHeap {
                     if creator_txn_id == INVALID_TXN_ID {
                         Ok((meta, tuple))
                     } else if let Some(creator_txn) = txn_manager.get_transaction(&creator_txn_id) {
-                        if creator_txn.get_state() != TransactionState::Committed 
+                        if creator_txn.get_state() != TransactionState::Committed
                             || creator_txn.commit_ts() >= txn.read_ts() {
                             return Err("Tuple is not visible due to isolation level constraints".to_string());
                         }
@@ -391,7 +390,7 @@ impl TableHeap {
         if first_page_id == INVALID_PAGE_ID {
             debug!("No valid pages found, creating empty iterator");
             return TableIterator::new(
-                Arc::new(RwLock::new(self.clone())),
+                Arc::new(self.clone()),
                 RID::new(INVALID_PAGE_ID, 0),
                 RID::new(INVALID_PAGE_ID, 0),
                 txn_ctx,
@@ -400,7 +399,7 @@ impl TableHeap {
 
         // Create iterator starting from first tuple (first_page_id,0)
         let iterator = TableIterator::new(
-            Arc::new(RwLock::new(self.clone())),
+            Arc::new(self.clone()),
             RID::new(first_page_id, 0),
             RID::new(INVALID_PAGE_ID, 0),
             txn_ctx,
@@ -528,7 +527,7 @@ impl TableHeap {
     }
 
     /// Helper method to get the number of pages
-    fn get_num_pages(&self) -> usize {
+    pub fn get_num_pages(&self) -> usize {
         let mut count = 0;
         let mut current_page_id = *self.tuple_storage.first_page_id.read();
         while current_page_id != INVALID_PAGE_ID {
@@ -592,7 +591,7 @@ impl TableInfo {
     pub fn new(
         schema: Schema,
         name: String,
-        table: Arc<RwLock<TableHeap>>,
+        table: Arc<TableHeap>,
         oid: TableOidT,
     ) -> Self {
         TableInfo {
@@ -612,12 +611,12 @@ impl TableInfo {
     }
 
     /// Gets a mutable reference to the table heap
-    pub fn get_table_heap_mut(&self) -> Arc<RwLock<TableHeap>> {
+    pub fn get_table_heap_mut(&self) -> Arc<TableHeap> {
         self.table.clone()
     }
 
     /// Gets an immutable reference to the table heap
-    pub fn get_table_heap(&self) -> Arc<RwLock<TableHeap>> {
+    pub fn get_table_heap(&self) -> Arc<TableHeap> {
         self.table.clone()
     }
 
@@ -642,6 +641,10 @@ impl TupleStorage {
         tuple: &mut Tuple,
         txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<RID, String> {
+        // Acquire write lock at the beginning of the method
+        let _write_guard = RwLock::new(());
+        let _guard = _write_guard.write();
+
         // Handle transaction context first
         if let Some(txn_ctx) = &txn_ctx {
             let txn = txn_ctx.get_transaction().clone();
@@ -998,7 +1001,7 @@ mod tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let ctx = TestContext::new("test_insert_and_get_tuple");
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
 
         let lock_manager = Arc::new(LockManager::new());
 
@@ -1061,7 +1064,7 @@ mod tests {
         let ctx = TestContext::new("test_update_tuple_meta");
         let bpm = ctx.bpm.clone();
         let table_oid = 1;
-        let mut table_heap = TableHeap::new(bpm, table_oid, ctx.txn_manager.clone());
+        let table_heap = TableHeap::new(bpm, table_oid, ctx.txn_manager.clone());
         let schema = create_test_schema();
 
         let tuple_values = vec![Value::new(1), Value::new("Bob"), Value::new(25)];
@@ -1098,7 +1101,7 @@ mod tests {
             ctx.txn_manager.clone(),
         ));
 
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
         debug!("Initial table heap state: {:?}", table_heap);
 
         let schema = Schema::new(vec![
@@ -1207,7 +1210,7 @@ mod tests {
     #[test]
     fn test_concurrent_transactions() {
         let ctx = TestContext::new("test_concurrent_transactions");
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
         let schema = create_test_schema();
 
         let lock_manager = Arc::new(LockManager::new());
@@ -1252,17 +1255,11 @@ mod tests {
 
         // Now commit transaction 1
         txn1.set_state(TransactionState::Committed);
-        let commit_ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros() as u64;
-        txn1.set_commit_ts(commit_ts);
-
-        // Update the tuple's metadata to reflect the commit
-        let mut committed_meta = meta1;
-        committed_meta.set_commit_timestamp(TimeStamp::new(commit_ts));
+        let commit_ts1 = txn1.commit_ts();
+        let mut committed_meta1 = meta1;
+        committed_meta1.set_commit_timestamp(TimeStamp::new(commit_ts1));
         table_heap
-            .update_tuple_meta(&committed_meta, rid1)
+            .update_tuple_meta(&committed_meta1, rid1)
             .expect("Failed to update tuple metadata");
 
         // Now transaction 2 should be able to read the tuple
@@ -1276,7 +1273,7 @@ mod tests {
     #[test]
     fn test_write_write_conflict() {
         let ctx = TestContext::new("test_write_write_conflict");
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
         let schema = create_test_schema();
 
         let lock_manager = Arc::new(LockManager::new());
@@ -1301,13 +1298,10 @@ mod tests {
             .expect("Failed to insert tuple with txn1");
 
         // Commit transaction 1 and update tuple metadata
-        let commit_ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros() as u64;
-        txn1.set_commit_ts(commit_ts);
+        let commit_txn1 = ctx.txn_manager.commit(txn1.clone(), ctx.bpm.clone());
+        let commit_ts1 = txn1.commit_ts();
         let mut committed_meta1 = meta1;
-        committed_meta1.set_commit_timestamp(TimeStamp::new(commit_ts));
+        committed_meta1.set_commit_timestamp(TimeStamp::new(commit_ts1));
         txn1.set_state(TransactionState::Committed);
         table_heap
             .update_tuple_meta(&committed_meta1, rid)
@@ -1322,12 +1316,16 @@ mod tests {
             ctx.txn_manager.clone(),
         ));
 
-        // Create third transaction through the transaction manager
-        let txn3 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
-        txn3.set_state(TransactionState::Growing);
+        // Create third transaction with REPEATABLE_READ before committing txn1
+        let txn3 = ctx.txn_manager
+            .begin(IsolationLevel::RepeatableRead)
+            .unwrap();
+        txn3.set_state(TransactionState::Running);
+        // Set read timestamp to be after txn1's commit
+        txn3.set_read_ts(commit_ts1 + 1);
         let txn_ctx3 = Arc::new(TransactionContext::new(
             txn3.clone(),
-            lock_manager,
+            lock_manager.clone(),
             ctx.txn_manager.clone(),
         ));
 
@@ -1352,14 +1350,14 @@ mod tests {
         );
 
         // Clean up
-        txn2.set_state(TransactionState::Committed);
-        txn3.set_state(TransactionState::Aborted);
+        let commit_txn2 = ctx.txn_manager.commit(txn2.clone(), ctx.bpm.clone());
+        let commit_txn3 = ctx.txn_manager.commit(txn3.clone(), ctx.bpm);
     }
 
     #[test]
     fn test_large_tuple_handling() {
         let ctx = TestContext::new("test_large_tuple_handling");
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
 
         // Create a schema with a large varchar column
         let schema = Schema::new(vec![
@@ -1384,7 +1382,7 @@ mod tests {
     #[test]
     fn test_delete_and_reinsert() {
         let ctx = TestContext::new("test_delete_and_reinsert");
-        let mut table_heap = setup_test_table(&ctx);
+        let table_heap = setup_test_table(&ctx);
         let schema = create_test_schema();
 
         // Create transaction
@@ -1428,5 +1426,212 @@ mod tests {
         // Verify the new tuple is visible
         let result = table_heap.get_tuple(new_rid, Some(txn_ctx.clone()));
         assert!(result.is_ok(), "New tuple should be visible");
+    }
+
+    #[test]
+    fn test_update_with_different_sizes() {
+        let ctx = TestContext::new("test_update_with_different_sizes");
+        let table_heap = setup_test_table(&ctx);
+        let schema = create_test_schema();
+        let lock_manager = Arc::new(LockManager::new());
+
+        // Create transaction
+        let txn = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let txn_ctx = Arc::new(TransactionContext::new(
+            txn.clone(),
+            lock_manager,
+            ctx.txn_manager.clone(),
+        ));
+
+        // Insert initial tuple
+        let tuple_values = vec![Value::new(1), Value::new("short"), Value::new(25)];
+        let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0));
+        let meta = TupleMeta::new(txn.get_transaction_id());
+
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))
+            .expect("Failed to insert initial tuple");
+
+        // Update with a larger value
+        let larger_values = vec![
+            Value::new(1),
+            Value::new("this is a much longer string"),
+            Value::new(25),
+        ];
+        let mut larger_tuple = Tuple::new(&larger_values, schema.clone(), rid);
+        let result = table_heap.update_tuple(&meta, &mut larger_tuple, rid, Some(txn_ctx.clone()));
+        assert!(result.is_ok(), "Update with larger value should succeed");
+
+        // Update with a smaller value
+        let smaller_values = vec![Value::new(1), Value::new("tiny"), Value::new(25)];
+        let mut smaller_tuple = Tuple::new(&smaller_values, schema.clone(), rid);
+        let result = table_heap.update_tuple(&meta, &mut smaller_tuple, rid, Some(txn_ctx.clone()));
+        assert!(result.is_ok(), "Update with smaller value should succeed");
+
+        // Verify final state
+        let (_, final_tuple) = table_heap
+            .get_tuple(rid, Some(txn_ctx.clone()))
+            .expect("Failed to get final tuple");
+        assert_eq!(
+            final_tuple.get_value(1),
+            &Value::new("tiny"),
+            "Final tuple should contain the last update"
+        );
+    }
+
+    #[test]
+    fn test_update_with_isolation_levels() {
+        let ctx = TestContext::new("test_update_with_isolation_levels");
+        let table_heap = setup_test_table(&ctx);
+        let schema = create_test_schema();
+        let lock_manager = Arc::new(LockManager::new());
+
+        // Create first transaction with REPEATABLE_READ
+        let txn1 = ctx.txn_manager
+            .begin(IsolationLevel::RepeatableRead)
+            .unwrap();
+        txn1.set_state(TransactionState::Running);
+        let txn_ctx1 = Arc::new(TransactionContext::new(
+            txn1.clone(),
+            lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        ));
+
+        // Insert initial tuple
+        let tuple_values = vec![Value::new(1), Value::new("initial"), Value::new(25)];
+        let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0));
+        let mut meta1 = TupleMeta::new(txn1.get_transaction_id());
+
+        let rid = table_heap
+            .insert_tuple(&meta1, &mut tuple, Some(txn_ctx1.clone()))
+            .expect("Failed to insert tuple");
+
+        // Commit first transaction
+        let commit_txn1 = ctx.txn_manager.commit(txn1.clone(), ctx.bpm.clone());
+
+        // Get commit timestamp from txn1 and update tuple metadata
+        let commit_ts1 = txn1.commit_ts();
+        meta1.set_commit_timestamp(TimeStamp::new(commit_ts1));
+        table_heap
+            .update_tuple_meta(&meta1, rid)
+            .expect("Failed to update tuple metadata");
+
+        // Create third transaction with REPEATABLE_READ after txn1's commit
+        let txn3 = ctx.txn_manager
+            .begin(IsolationLevel::RepeatableRead)
+            .unwrap();
+        txn3.set_state(TransactionState::Running);
+        // Set read timestamp to be after txn1's commit
+        txn3.set_read_ts(commit_ts1 + 1);
+        let txn_ctx3 = Arc::new(TransactionContext::new(
+            txn3.clone(),
+            lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        ));
+
+        // Create second transaction with READ_COMMITTED
+        let txn2 = ctx.txn_manager
+            .begin(IsolationLevel::ReadCommitted)
+            .unwrap();
+        txn2.set_state(TransactionState::Running);
+        let txn_ctx2 = Arc::new(TransactionContext::new(
+            txn2.clone(),
+            lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        ));
+
+        // Update tuple with second transaction
+        let new_values = vec![Value::new(1), Value::new("updated"), Value::new(26)];
+        let mut new_tuple = Tuple::new(&new_values, schema.clone(), rid);
+        let mut meta2 = TupleMeta::new(txn2.get_transaction_id());
+
+        let result = table_heap.update_tuple(&meta2, &mut new_tuple, rid, Some(txn_ctx2.clone()));
+        assert!(result.is_ok(), "Update with READ_COMMITTED should succeed");
+
+        // Commit second transaction and update its metadata
+        let commit_txn2 = ctx.txn_manager.commit(txn2.clone(), ctx.bpm.clone());
+        let commit_ts2 = txn2.commit_ts();
+        meta2.set_commit_timestamp(TimeStamp::new(commit_ts2));
+        table_heap
+            .update_tuple_meta(&meta2, result.unwrap())
+            .expect("Failed to update tuple metadata");
+
+        // Try to read tuple with REPEATABLE_READ transaction (txn3)
+        // txn3 should see the original version since it started before txn2's update
+        let result = table_heap.get_tuple(rid, Some(txn_ctx3.clone()));
+        assert!(
+            result.is_ok(),
+            "REPEATABLE_READ transaction should see original version"
+        );
+        let (_, read_tuple) = result.unwrap();
+        assert_eq!(
+            read_tuple.get_value(1),
+            &Value::new("initial"),
+            "REPEATABLE_READ transaction should see original value"
+        );
+
+        // Clean up
+        let commit_txn3 = ctx.txn_manager.commit(txn3.clone(), ctx.bpm);
+    }
+
+    #[test]
+    fn test_concurrent_update_same_tuple() {
+        let ctx = TestContext::new("test_concurrent_update_same_tuple");
+        let table_heap = setup_test_table(&ctx);
+        let schema = create_test_schema();
+        let lock_manager = Arc::new(LockManager::new());
+
+        // Create initial transaction
+        let txn1 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let txn_ctx1 = Arc::new(TransactionContext::new(
+            txn1.clone(),
+            lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        ));
+
+        // Insert initial tuple
+        let tuple_values = vec![Value::new(1), Value::new("initial"), Value::new(25)];
+        let mut tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0));
+        let meta1 = TupleMeta::new(txn1.get_transaction_id());
+
+        let rid = table_heap
+            .insert_tuple(&meta1, &mut tuple, Some(txn_ctx1.clone()))
+            .expect("Failed to insert tuple");
+
+        // Create two concurrent transactions
+        let txn2 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let txn_ctx2 = Arc::new(TransactionContext::new(
+            txn2.clone(),
+            lock_manager.clone(),
+            ctx.txn_manager.clone(),
+        ));
+
+        let txn3 = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+        let txn_ctx3 = Arc::new(TransactionContext::new(
+            txn3.clone(),
+            lock_manager,
+            ctx.txn_manager.clone(),
+        ));
+
+        // First update should succeed
+        let values2 = vec![Value::new(1), Value::new("update2"), Value::new(26)];
+        let mut tuple2 = Tuple::new(&values2, schema.clone(), rid);
+        let meta2 = TupleMeta::new(txn2.get_transaction_id());
+        let result2 = table_heap.update_tuple(&meta2, &mut tuple2, rid, Some(txn_ctx2.clone()));
+        assert!(result2.is_ok(), "First concurrent update should succeed");
+
+        // Second update should fail due to write-write conflict
+        let values3 = vec![Value::new(1), Value::new("update3"), Value::new(27)];
+        let mut tuple3 = Tuple::new(&values3, schema.clone(), rid);
+        let meta3 = TupleMeta::new(txn3.get_transaction_id());
+        let result3 = table_heap.update_tuple(&meta3, &mut tuple3, rid, Some(txn_ctx3.clone()));
+        assert!(
+            result3.is_err(),
+            "Second concurrent update should fail due to write-write conflict"
+        );
+        assert!(
+            result3.unwrap_err().contains("Write-write conflict"),
+            "Error should indicate write-write conflict"
+        );
     }
 }

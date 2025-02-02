@@ -1,5 +1,4 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::catalog::catalog::Catalog;
 use crate::common::config::{PageId, TxnId, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
@@ -7,7 +6,6 @@ use crate::concurrency::transaction::{
     IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
 };
 use crate::concurrency::watermark::Watermark;
-use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
@@ -181,11 +179,6 @@ impl TransactionManager {
             self.state.running_txns.write().remove_txn(txn.read_ts());
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
-    }
-
-    /// Gets the current state of the transaction manager
-    pub fn get_state(&self) -> Arc<TransactionManagerState> {
-        self.state.clone()
     }
 
     /// Performs garbage collection.
@@ -396,55 +389,6 @@ impl TransactionManager {
     pub fn get_active_transaction_count(&self) -> usize {
         self.get_transactions().len()
     }
-
-    fn verify_transaction(&self, txn: &Transaction, catalog: Option<&Catalog>) -> bool {
-        if txn.get_isolation_level() != IsolationLevel::Serializable {
-            return true;
-        }
-
-        let read_ts = txn.read_ts();
-        let write_set = txn.get_write_set();
-
-        // Check write-write conflicts
-        for (_table_id, rid) in write_set {
-            if let Some(link) = self.get_undo_link(rid) {
-                if let Some(undo_txn) = self.state.txn_map.read().get(&link.prev_txn) {
-                    if undo_txn.commit_ts() > read_ts {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        // Check predicate-based conflicts
-        let scan_predicates = txn.get_scan_predicates();
-        if let Some(catalog) = catalog {
-            for (table_id, predicates) in scan_predicates {
-                if let Some(table_info) = catalog.get_table_by_oid(table_id.into()) {
-                    let table_heap = table_info.get_table_heap();
-                    let table_heap_guard = table_heap.read();
-                    let schema = table_info.get_table_schema();
-                    let mut iter = table_heap_guard.make_iterator(None);
-
-                    while let Some((_, tuple)) = iter.next() {
-                        if let Some(link) = self.get_undo_link(tuple.get_rid()) {
-                            if let Some(undo_txn) = self.state.txn_map.read().get(&link.prev_txn) {
-                                if undo_txn.commit_ts() > read_ts {
-                                    for predicate in &predicates {
-                                        if let Ok(_) = predicate.evaluate(&tuple, &schema) {
-                                            return false;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        true
-    }
 }
 
 #[cfg(test)]
@@ -452,6 +396,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::config::TableOidT;
@@ -617,7 +562,7 @@ mod tests {
         let txn_id = txn.get_transaction_id();
 
         // Create test table and insert tuple
-        let (table_oid, mut table_heap) = ctx.create_test_table();
+        let (table_oid, table_heap) = ctx.create_test_table();
         let mut tuple = TestContext::create_test_tuple();
 
         // Create transaction context
@@ -683,7 +628,7 @@ mod tests {
         let txn_id = txn.get_transaction_id();
 
         // Create test table and insert tuple
-        let (table_oid, mut table_heap) = ctx.create_test_table();
+        let (table_oid, table_heap) = ctx.create_test_table();
         let mut tuple = TestContext::create_test_tuple();
 
         // Create transaction context
@@ -730,7 +675,7 @@ mod tests {
     fn test_transaction_isolation() {
         let ctx = TestContext::new("test_transaction_isolation");
 
-        let (table_oid, mut table_heap) = ctx.create_test_table();
+        let (table_oid, table_heap) = ctx.create_test_table();
 
         // Start two transactions
         let txn1 = ctx

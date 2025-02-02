@@ -49,6 +49,7 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
+    use std::collections::HashMap;
 
     use crate::concurrency::lock_manager::LockManager;
 
@@ -92,20 +93,22 @@ mod tests {
                 replacer.clone(),
             ));
 
+            // Create transaction manager and lock manager first
+            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 0,
                 0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                transaction_manager.clone(), // Pass transaction manager
             )));
-
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
-
             Self {
                 bpm,
                 transaction_manager,

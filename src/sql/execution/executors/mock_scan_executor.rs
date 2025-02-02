@@ -117,7 +117,6 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -130,7 +129,6 @@ mod tests {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        lock_manager: Arc<LockManager>,
         db_file: String,
         db_log_file: String,
     }
@@ -149,31 +147,20 @@ mod tests {
                 db_log_file.clone(),
                 100,
             ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
                 disk_manager.clone(),
-                replacer.clone(),
+                replacer,
             ));
 
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )));
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(TransactionManager::new(log_manager));
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -184,7 +171,6 @@ mod tests {
                 bpm,
                 transaction_manager,
                 transaction_context,
-                lock_manager,
                 db_file,
                 db_log_file,
             }
@@ -192,10 +178,6 @@ mod tests {
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.bpm)
-        }
-
-        pub fn lock_manager(&self) -> Arc<LockManager> {
-            Arc::clone(&self.lock_manager)
         }
 
         pub fn transaction_context(&self) -> Arc<TransactionContext> {
@@ -214,6 +196,19 @@ mod tests {
         }
     }
 
+    fn create_catalog(ctx: &TestContext) -> Catalog {
+        Catalog::new(
+            ctx.bpm.clone(),
+            0,              // next_index_oid
+            0,              // next_table_oid
+            HashMap::new(), // tables
+            HashMap::new(), // indexes
+            HashMap::new(), // table_names
+            HashMap::new(), // index_names
+            ctx.transaction_manager.clone(), // Add transaction manager
+        )
+    }
+
     #[test]
     fn test_mock_scan_executor() {
         let ctx = TestContext::new("test_mock_scan_executor");
@@ -225,18 +220,7 @@ mod tests {
         ]);
 
         // Create catalog
-        let catalog = Arc::new(RwLock::new(Catalog::new(
-            ctx.bpm.clone(),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        )));
-
-        // Create transaction
-        let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
+        let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
 
         // Create mock scan plan
         let plan = Arc::new(MockScanNode::new(
@@ -277,19 +261,8 @@ mod tests {
         // Create schema
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 
-        // Create catalog
-        let catalog = Arc::new(RwLock::new(Catalog::new(
-            ctx.bpm.clone(),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        )));
-
-        // Create transaction
-        let txn = Arc::new(Transaction::new(0, IsolationLevel::Serializable));
+        // Create catalog using helper function
+        let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
 
         // Create mock scan plan
         let plan = Arc::new(MockScanNode::new(

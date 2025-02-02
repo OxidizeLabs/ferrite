@@ -22,6 +22,7 @@ pub struct IndexScanExecutor {
     table_heap: Arc<TableHeap>,
     initialized: bool,
     iterator: Option<IndexIterator>,
+    child_executor: Option<Box<dyn AbstractExecutor>>,
 }
 
 impl IndexScanExecutor {
@@ -75,6 +76,7 @@ impl IndexScanExecutor {
             table_heap,
             iterator: None,
             initialized: false,
+            child_executor: None,
         }
     }
 
@@ -279,63 +281,62 @@ impl AbstractExecutor for IndexScanExecutor {
         let output_schema = self.get_output_schema().clone();
         let predicate_keys = self.plan.get_predicate_keys();
 
+        // Get transaction context from execution context
+        let txn_ctx = {
+            let context = self.context.read();
+            context.get_transaction_context().clone()
+        };
+
         // Get iterator reference
         let iter = self.iterator.as_mut()?;
+        let _table_heap_guard = self.table_heap.latch.read();
 
         // Keep trying until we find a valid tuple or reach the end
-        loop {
-            match iter.next() {
-                Some(rid) => {
-                    debug!("Found RID {:?} in index", rid);
+        while let Some(rid) = iter.next() {
+            debug!("Found RID {:?} in index", rid);
 
-                    // Use RID to fetch tuple from table heap
-                    match self.table_heap.get_tuple(rid) {
-                        Ok((meta, tuple)) => {
-                            // Skip deleted tuples
-                            if meta.is_deleted() {
-                                debug!("Skipping deleted tuple with RID {:?}", rid);
-                                continue;
-                            }
+            // Use RID to fetch tuple from table heap with transaction context
+            if let Ok((meta, tuple)) = self.table_heap.get_tuple(rid, Some(txn_ctx.clone())) {
+                // Skip deleted tuples
+                if meta.is_deleted() {
+                    debug!("Skipping deleted tuple with RID {:?}", rid);
+                    continue;
+                }
 
-                            // Additional check against predicates
-                            let mut predicates_match = true;
-                            for predicate in predicate_keys {
-                                if let Ok(result) = predicate.evaluate(&tuple, &output_schema) {
-                                    match result.get_val() {
-                                        Val::Boolean(b) => {
-                                            if !b {
-                                                predicates_match = false;
-                                                break;
-                                            }
-                                        }
-                                        _ => {
-                                            predicates_match = false;
-                                            break;
-                                        }
-                                    }
+                // Additional check against predicates
+                let mut predicates_match = true;
+                for predicate in predicate_keys {
+                    if let Ok(result) = predicate.evaluate(&tuple, &output_schema) {
+                        match result.get_val() {
+                            Val::Boolean(b) => {
+                                if !b {
+                                    predicates_match = false;
+                                    break;
                                 }
                             }
-
-                            if !predicates_match {
-                                debug!("Tuple does not match all predicates, skipping");
-                                continue;
+                            _ => {
+                                predicates_match = false;
+                                break;
                             }
-
-                            debug!("Successfully fetched tuple for RID {:?}", rid);
-                            return Some((tuple, rid));
-                        }
-                        Err(e) => {
-                            error!("Failed to fetch tuple for RID {:?}: {:?}", rid, e);
-                            continue;
                         }
                     }
                 }
-                None => {
-                    info!("Reached end of index scan");
-                    return None;
+
+                if !predicates_match {
+                    debug!("Tuple does not match all predicates, skipping");
+                    continue;
                 }
+
+                debug!("Successfully fetched tuple for RID {:?}", rid);
+                return Some((tuple, rid));
+            } else {
+                debug!("Failed to fetch tuple for RID {:?}, skipping", rid);
+                continue;
             }
         }
+
+        info!("Reached end of index scan");
+        None
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -359,7 +360,6 @@ mod index_scan_executor_tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
@@ -371,28 +371,38 @@ mod index_scan_executor_tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use std::collections::HashMap;
-    use std::fs;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,
-        db_file: String,
-        log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            // Initialize logger first using the common module
-            // initialize_logger();
-            let timestamp = chrono::Utc::now().timestamp();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+        fn new(name: &str) -> Self {
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, K)));
             let buffer_pool_manager = Arc::new(BufferPoolManager::new(
                 10,
                 disk_scheduler,
@@ -400,7 +410,9 @@ mod index_scan_executor_tests {
                 replacer,
             ));
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool_manager.clone(),
                 0,
@@ -409,20 +421,13 @@ mod index_scan_executor_tests {
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                transaction_manager.clone(),
             )));
-            let transaction_manager = Arc::new(TransactionManager::new(
-                log_manager,
-            ));
-
-            let lock_manager = Arc::new(LockManager::new(transaction_manager.clone()));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
-                lock_manager.clone(),
+                lock_manager,
                 transaction_manager.clone(),
             ));
 
@@ -434,25 +439,34 @@ mod index_scan_executor_tests {
 
             Self {
                 execution_context,
-                db_file,
-                log_file,
+                _temp_dir: temp_dir,
             }
+        }
+
+        fn transaction_context(&self) -> Arc<TransactionContext> {
+            self.execution_context.read().get_transaction_context().clone()
         }
 
         pub fn execution_context(&self) -> Arc<RwLock<ExecutionContext>> {
             self.execution_context.clone()
         }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.log_file);
-        }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
+    fn create_catalog(ctx: &TestContext) -> Catalog {
+        let exec_ctx = ctx.execution_context.read();
+        let bpm = Arc::clone(&ctx.execution_context.read().get_buffer_pool_manager());  // Access the Arc directly
+        let txn_mgr = exec_ctx.get_transaction_context().get_transaction_manager();
+
+        Catalog::new(
+            bpm,                // Already an Arc<BufferPoolManager>
+            0,                 // next_index_oid
+            0,                 // next_table_oid
+            HashMap::new(),    // tables
+            HashMap::new(),    // indexes
+            HashMap::new(),    // table_names
+            HashMap::new(),    // index_names
+            txn_mgr.clone(),   // Clone the Arc<TransactionManager>
+        )
     }
 
     fn create_test_schema() -> Schema {
@@ -478,59 +492,54 @@ mod index_scan_executor_tests {
             .unwrap();
         let table_id = table_info.get_table_oidt();
 
-        // Get table info to confirm index
-        let table_info = catalog_guard.get_table(&table_name).unwrap();
-        let table_heap = table_info.get_table_heap();
-
-        // Insert test data
-        for i in 1..=10 {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(i as i32), Value::new(i as i32 * 10)],
-                schema.clone(),
-                RID::new(0, i),
-            );
-            let tuple_meta = TupleMeta::new(i as u64);
-            table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone())).unwrap();
-        }
-
-        // Create index on id column
+        // Create index first
         let index_name = "test_index".to_string();
         let key_schema = Schema::new(vec![schema.get_column(0).unwrap().clone()]);
 
-        catalog_guard.create_index(
-            &index_name,
-            &table_name,
-            key_schema,
-            vec![0],
-            4, // key size
-            false,
-            IndexType::BPlusTreeIndex,
-        );
-        let index_id = catalog_guard.get_table_indexes(&table_name)[0].get_index_oid();
+        let index_info = catalog_guard
+            .create_index(
+                &index_name,
+                &table_name,
+                key_schema,
+                vec![0],
+                4, // key size
+                false,
+                IndexType::BPlusTreeIndex,
+            )
+            .expect("Failed to create index");
+
+        let index_id = index_info.0.get_index_oid();
+
+        // Get table info and insert data
+        let table_info = catalog_guard.get_table(&table_name).unwrap();
+        let table_heap = table_info.get_table_heap();
+
+        // Get index info
+        let (_, btree) = catalog_guard.get_index_by_index_oid(index_id).unwrap();
+
+        // Insert test data within a single write lock scope
+        {
+            let _table_heap_guard = table_heap.latch.write();
+            let mut btree_guard = btree.write();
+
+            // Insert test data
+            for i in 1..=10 {
+                let mut tuple = Tuple::new(
+                    &vec![Value::new(i as i32), Value::new(i as i32 * 10)],
+                    schema.clone(),
+                    RID::new(0, i),
+                );
+                let tuple_meta = TupleMeta::new(i as u64);
+                let rid = table_heap
+                    .insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone()))
+                    .unwrap();
+
+                // Insert into index - use the actual value as the key
+                btree_guard.insert(Value::new(i as i32), rid);
+            }
+        }
 
         (table_name, index_name, table_id, index_id)
-    }
-
-    fn insert_test_data(context: &Arc<RwLock<ExecutionContext>>, table_name: &str) {
-        let context_guard = context.read();
-        let catalog = context_guard.get_catalog();
-        let catalog_guard = catalog.read();
-        let transaction_context = context_guard.get_transaction_context();
-
-        let table_info = catalog_guard.get_table(table_name).unwrap();
-        let table_heap = table_info.get_table_heap();
-        let schema = table_info.get_table_schema();
-
-        // Insert test data
-        for i in 1..=10 {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(i), Value::new(i * 10)],
-                schema.clone(),
-                RID::new(0, 0),
-            );
-            let tuple_meta = TupleMeta::new(i);
-            table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone())).unwrap();
-        }
     }
 
     fn create_predicate_expression(op: ComparisonType, value: i32) -> Arc<Expression> {
@@ -555,6 +564,14 @@ mod index_scan_executor_tests {
         )))
     }
 
+    fn create_test_tuple(schema: &Schema, id: i32) -> Tuple {
+        let values = vec![
+            Value::new(id),                // id column
+            Value::new(id * 10),          // value column
+        ];
+        Tuple::new(&values, schema.clone(), RID::new(0, 0))
+    }
+
     #[test]
     fn test_index_scan_full() {
         let schema = create_test_schema();
@@ -562,7 +579,6 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
-        insert_test_data(&context, &table_name);
 
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -588,8 +604,9 @@ mod index_scan_executor_tests {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_equality");
         let context = ctx.execution_context();
+
+        // Setup table and index - data is inserted here
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
-        insert_test_data(&context, &table_name);
 
         // id = 5
         let predicate = create_predicate_expression(ComparisonType::Equal, 5);
@@ -610,10 +627,8 @@ mod index_scan_executor_tests {
             count += 1;
             let val0 = tuple.get_value(0);
             let val1 = tuple.get_value(1);
-            let count_value = Value::new(5);
-            let count_value_10x = Value::new(50);
-            assert_eq!(val0.compare_equals(&count_value), CmpBool::CmpTrue);
-            assert_eq!(val1.compare_equals(&count_value_10x), CmpBool::CmpTrue);
+            assert_eq!(val0.compare_equals(&Value::new(5)), CmpBool::CmpTrue);
+            assert_eq!(val1.compare_equals(&Value::new(50)), CmpBool::CmpTrue);
         }
         assert_eq!(count, 1);
     }
@@ -625,7 +640,6 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
-        insert_test_data(&context, &table_name);
 
         // 3 <= id <= 7
         let pred_low = create_predicate_expression(ComparisonType::GreaterThanOrEqual, 3);
@@ -665,7 +679,6 @@ mod index_scan_executor_tests {
         let ctx = TestContext::new("test_index_scan_with_deletion");
         let context = ctx.execution_context();
         let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
-        insert_test_data(&context, &table_name);
 
         // Delete tuples with id = 3 and id = 7
         let context_guard = context.read();
@@ -676,11 +689,11 @@ mod index_scan_executor_tests {
 
         // Mark tuples as deleted
         for i in &[3, 7] {
-            let mut iterator = table_heap.make_iterator();
+            let mut iterator = table_heap.make_iterator(None);
             while let Some((mut meta, tuple)) = iterator.next() {
                 if tuple.get_value(0).compare_equals(&Value::new(*i)) == CmpBool::CmpTrue {
-                    meta.is_deleted();
-                    table_heap.update_tuple_meta(&meta, tuple.get_rid());
+                    meta.set_deleted(true);
+                    let _ = table_heap.update_tuple_meta(&meta, tuple.get_rid());
                     break;
                 }
             }
@@ -698,24 +711,58 @@ mod index_scan_executor_tests {
 
         let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
-        // Should only see non-deleted tuples
         let mut count = 0;
         let mut seen_ids = Vec::new();
         while let Some((tuple, _)) = executor.next() {
             count += 1;
             let id = tuple.get_value(0);
             seen_ids.push(id.clone());
-            assert_eq!(id.compare_not_equals(&Value::new(3)), CmpBool::CmpTrue);
-            assert_eq!(id.compare_not_equals(&Value::new(7)), CmpBool::CmpTrue);
+
+            // Check if the ID is not 3 or 7
+            let not_three = id.compare_not_equals(&Value::new(3));
+            let not_seven = id.compare_not_equals(&Value::new(7));
+
+            assert_eq!(not_three, CmpBool::CmpTrue, "Found deleted tuple with ID {id}");
+            assert_eq!(not_seven, CmpBool::CmpTrue, "Found deleted tuple with ID 7");
         }
         assert_eq!(count, 8, "Should see 8 non-deleted tuples");
-        assert!(
-            !seen_ids.contains(&Value::new(3)),
-            "Should not contain deleted ID 3"
-        );
-        assert!(
-            !seen_ids.contains(&Value::new(7)),
-            "Should not contain deleted ID 7"
-        );
+        assert!(!seen_ids.iter().any(|id| id.compare_equals(&Value::new(3)) == CmpBool::CmpTrue),
+                "Should not contain deleted ID 3");
+        assert!(!seen_ids.iter().any(|id| id.compare_equals(&Value::new(7)) == CmpBool::CmpTrue),
+                "Should not contain deleted ID 7");
+    }
+
+    #[test]
+    fn test_index_scan_with_deleted_tuples() {
+        let test_context = TestContext::new("index_scan_deleted");
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create table and insert data
+        {
+            let mut catalog_guard = catalog.write();
+            let table_info = catalog_guard.create_table("test_table".to_string(), schema.clone()).unwrap();
+            let table_heap = table_info.get_table_heap();
+            let _table_heap_guard = table_heap.latch.write();
+
+
+            // Insert test data
+            for i in 1..=10 {
+                let mut tuple = create_test_tuple(&schema, i);
+                let meta = TupleMeta::new(0);
+                table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
+            }
+
+            // Delete tuples with IDs 3 and 7
+            let mut iterator = table_heap.make_iterator(Some(transaction_context.clone()));
+            while let Some((mut meta, tuple)) = iterator.next() {
+                let id = tuple.get_value(0).as_integer().unwrap();
+                if id == 3 || id == 7 {
+                    meta.set_deleted(true);  // Mark the tuple as deleted
+                    table_heap.update_tuple_meta(&meta, tuple.get_rid()).unwrap();
+                }
+            }
+        }
     }
 }

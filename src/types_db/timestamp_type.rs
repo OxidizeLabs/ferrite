@@ -187,7 +187,7 @@ mod tests {
             .as_secs();
         let future = now + 100;
         let past = now - 100;
-        
+
         let current = Value::new(now);
         let future_val = Value::new(future);
         let past_val = Value::new(past);
@@ -233,7 +233,7 @@ mod tests {
             .as_secs();
         let future = now + 100;
         let past = now - 100;
-        
+
         let future_val = Value::new(future);
         let past_val = Value::new(past);
         let null = Value::new(Val::Null);

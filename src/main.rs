@@ -1,17 +1,17 @@
-use colored::Colorize;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use env_logger::{Builder, Env};
 use log::{error, info};
 use rustyline::DefaultEditor;
 use std::error;
 use std::sync::Arc;
+use tkdb::cli::CLI;
 use tkdb::client::client::DatabaseClient;
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
-use tkdb::server::ServerHandle;
-use tkdb::cli::CLI;
-use tokio::signal;
 use tkdb::common::logger::initialize_logger;
+use tkdb::server::ServerHandle;
+use tokio::signal;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -34,7 +34,7 @@ enum Commands {
         #[arg(short = 'P', long, default_value = "5432")]
         port: u16,
     },
-    Cli
+    Cli,
 }
 
 #[tokio::main]
@@ -153,12 +153,12 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 
                 // Create and format table if there are columns/rows
                 if !results.column_names.is_empty() {
-                    use prettytable::{Table, Row, Cell, format};
+                    use prettytable::{format, Cell, Row, Table};
                     let mut table = Table::new();
-                    
+
                     // Set table format with clean borders and proper alignment
                     table.set_format(*format::consts::FORMAT_BOX_CHARS);
-                    
+
                     // Add header row with bold and centered headers
                     table.set_titles(Row::new(
                         results.column_names

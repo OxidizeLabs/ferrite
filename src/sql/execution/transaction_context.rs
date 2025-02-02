@@ -43,7 +43,7 @@ impl TransactionContext {
 
     /// Thread-safe method to append to write set
     pub fn append_write_set_atomic(&self, table_oid: TableOidT, rid: RID) {
-        self.get_transaction().append_write_set(table_oid,rid);
+        self.get_transaction().append_write_set(table_oid, rid);
     }
 
     /// Get all write operations performed in this transaction
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_isolation_levels() {
         let ctx = TestContext::new();
-        
+
         // Test with different isolation levels
         let txn = ctx.txn_manager
             .begin(IsolationLevel::ReadUncommitted)
@@ -197,11 +197,11 @@ mod tests {
             ctx.lock_manager.clone(),
             ctx.txn_manager.clone(),
         );
-        
+
         // Operations should work regardless of isolation level
         txn_context.append_write_set_atomic(1, RID::new(1, 1));
         assert_eq!(txn_context.get_write_set().len(), 1);
-        
+
         // Test with Serializable
         let txn = ctx.txn_manager
             .begin(IsolationLevel::Serializable)
@@ -211,7 +211,7 @@ mod tests {
             ctx.lock_manager.clone(),
             ctx.txn_manager.clone(),
         );
-        
+
         txn_context.append_write_set_atomic(1, RID::new(1, 1));
         assert_eq!(txn_context.get_write_set().len(), 1);
     }

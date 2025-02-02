@@ -3,7 +3,6 @@ use crate::common::exception::ValuesError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::types::Type;
 use crate::types_db::value::{Size, Val, Value};
 use log::debug;
 use std::fmt;

@@ -209,10 +209,10 @@ mod tests {
 
         // Test addition
         assert_eq!(bigint_type.add(&two).unwrap(), Value::new(2i64));
-        
+
         // Test division by zero
         assert!(bigint_type.divide(&zero).is_err());
-        
+
         // Test modulo
         assert_eq!(bigint_type.modulo(&zero), Value::new(Val::Null));
 

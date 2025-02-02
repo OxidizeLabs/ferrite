@@ -92,29 +92,29 @@ impl AbstractExecutor for TableScanExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::catalog::Catalog;
-    use crate::catalog::column::Column;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
-    use std::collections::HashMap;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::tuple::{Tuple, TupleMeta};
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        _temp_dir: TempDir
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
@@ -159,7 +159,7 @@ mod tests {
                 bpm,
                 transaction_manager,
                 transaction_context,
-                _temp_dir: temp_dir
+                _temp_dir: temp_dir,
             }
         }
     }
@@ -217,7 +217,7 @@ mod tests {
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm,
             Arc::new(RwLock::new(catalog)),
-            ctx.transaction_context
+            ctx.transaction_context,
         )));
 
         let mut executor = TableScanExecutor::new(context, plan);
@@ -247,7 +247,7 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
-            ctx.transaction_manager
+            ctx.transaction_manager,
         );
 
         let table_name = "empty_table".to_string();
@@ -263,7 +263,7 @@ mod tests {
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm,
             Arc::new(RwLock::new(catalog)),
-            ctx.transaction_context
+            ctx.transaction_context,
         )));
 
         let mut executor = TableScanExecutor::new(context, plan);
