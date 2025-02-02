@@ -44,6 +44,7 @@ pub trait ExpressionOps {
     fn get_children(&self) -> &Vec<Arc<Expression>>;
     fn get_return_type(&self) -> &Column;
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression>;
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError>;
 }
 
 impl ExpressionOps for Expression {
@@ -159,6 +160,31 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.clone_with_children(children),
             Self::Aggregate(expr) => expr.clone_with_children(children),
             Self::Window(expr) => expr.clone_with_children(children),
+        }
+    }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        match self {
+            Self::Constant(_) => Ok(()), // Constants are always valid
+            Self::ColumnRef(expr) => {
+                // Validate column reference exists in schema
+                let col_idx = expr.get_column_index();
+                if col_idx >= schema.get_column_count() as usize {
+                    return Err(ExpressionError::InvalidColumnReference(format!(
+                        "Column index {} out of bounds for schema with {} columns",
+                        col_idx,
+                        schema.get_column_count()
+                    )));
+                }
+                Ok(())
+            },
+            // Other expression types validate their children
+            _ => {
+                for child in self.get_children() {
+                    child.validate(schema)?;
+                }
+                Ok(())
+            }
         }
     }
 }
