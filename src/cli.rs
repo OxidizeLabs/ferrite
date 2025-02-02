@@ -119,31 +119,36 @@ impl CLI {
 
     fn commit_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            if self.db.get_transaction_factory().commit_transaction(txn_ctx) {
-                println!("Transaction committed.");
-            } else {
-                println!("Transaction commit failed.");
+            match self.db.commit_transaction(txn_ctx.get_transaction_id()) {
+                Ok(_) => {
+                    println!("Transaction committed successfully.");
+                }
+                Err(e) => {
+                    println!("Error during commit: {}. Rolling back changes.", e);
+                    // Attempt rollback on error
+                    self.db.get_transaction_factory().abort_transaction(txn_ctx);
+                }
             }
         } else {
-            println!("No transaction in progress.");
+            println!("No active transaction to commit.");
         }
         Ok(())
     }
 
     fn rollback_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.get_transaction_factory().abort_transaction(txn_ctx);
-            println!("Transaction rolled back.");
+            self.db.get_transaction_factory().abort_transaction(txn_ctx.clone());
+            println!("Transaction {} rolled back successfully.", txn_ctx.get_transaction_id());
         } else {
-            println!("No transaction in progress.");
+            println!("No active transaction to roll back.");
         }
         Ok(())
     }
 
     fn cleanup_transaction(&mut self) {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.get_transaction_factory().abort_transaction(txn_ctx);
-            println!("Active transaction rolled back.");
+            self.db.get_transaction_factory().abort_transaction(txn_ctx.clone());
+            println!("Active transaction {} rolled back during cleanup.", txn_ctx.get_transaction_id());
         }
     }
 
