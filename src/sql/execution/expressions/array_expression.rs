@@ -87,6 +87,21 @@ impl ExpressionOps for ArrayExpression {
             children,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate all child expressions
+        for child in &self.children {
+            child.validate(schema)?;
+
+            // Check that each child returns a decimal type since we're converting to integers
+            let child_type = child.get_return_type().get_type();
+            if child_type != TypeId::Decimal {
+                return Err(ExpressionError::Array(ArrayExpressionError::NonDecimalType));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for ArrayExpression {
@@ -108,7 +123,6 @@ mod tests {
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::types_db::types::Type;
 
     #[test]
     fn array_expression() {

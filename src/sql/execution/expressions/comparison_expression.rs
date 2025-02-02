@@ -133,6 +133,36 @@ impl ExpressionOps for ComparisonExpression {
             comp_type: ComparisonType::Equal,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate left and right expressions
+        self.left.validate(schema)?;
+        self.right.validate(schema)?;
+
+        // Check if the types are comparable
+        let left_type = self.left.get_return_type().get_type();
+        let right_type = self.right.get_return_type().get_type();
+
+        // For now, we'll allow comparison between same types and numeric types
+        match (left_type, right_type) {
+            (TypeId::Integer, TypeId::Integer)
+            | (TypeId::Decimal, TypeId::Decimal)
+            | (TypeId::VarChar, TypeId::VarChar)
+            | (TypeId::Char, TypeId::Char)
+            | (TypeId::Boolean, TypeId::Boolean)
+            | (TypeId::Integer, TypeId::Decimal)
+            | (TypeId::Decimal, TypeId::Integer)
+            | (TypeId::BigInt, TypeId::BigInt)
+            | (TypeId::BigInt, TypeId::Integer)
+            | (TypeId::Integer, TypeId::BigInt)
+            | (TypeId::BigInt, TypeId::Decimal)
+            | (TypeId::Decimal, TypeId::BigInt) => Ok(()),
+            _ => Err(ExpressionError::TypeMismatch {
+                expected: left_type,
+                actual: right_type,
+            }),
+        }
+    }
 }
 
 impl Display for ComparisonExpression {

@@ -85,6 +85,26 @@ impl ExpressionOps for ColumnRefExpression {
             children,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Check if the column index is within bounds of the schema
+        if self.column_index >= schema.get_column_count() as usize {
+            return Err(ExpressionError::InvalidColumnIndex(self.column_index));
+        }
+
+        // Get the column from schema and verify type matches
+        let schema_column = schema.get_column(self.column_index)
+            .ok_or_else(|| ExpressionError::InvalidColumnIndex(self.column_index))?;
+        
+        if schema_column.get_type() != self.ret_type.get_type() {
+            return Err(ExpressionError::TypeMismatch {
+                expected: self.ret_type.get_type(),
+                actual: schema_column.get_type(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for ColumnRefExpression {

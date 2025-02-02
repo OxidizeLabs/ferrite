@@ -124,6 +124,11 @@ impl ExpressionOps for MockExpression {
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         Arc::new(Expression::Mock(self.clone().with_children(children)))
     }
+
+    fn validate(&self, _schema: &Schema) -> Result<(), ExpressionError> {
+        // Mock expressions are always valid for testing purposes
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -146,7 +151,7 @@ mod tests {
             (TypeId::Integer, "42"),
             (TypeId::BigInt, "42"),
             (TypeId::Decimal, "42"),
-            (TypeId::Timestamp, "42"),
+            (TypeId::Timestamp, "0 days 0:0:42 UTC"),
             (TypeId::VarChar, "test"),
             (TypeId::Vector, "[1, 2, 3]"),
         ];

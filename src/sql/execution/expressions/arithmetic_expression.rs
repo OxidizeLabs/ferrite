@@ -274,6 +274,27 @@ impl ExpressionOps for ArithmeticExpression {
             children,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate left and right child expressions
+        self.left.validate(schema)?;
+        self.right.validate(schema)?;
+
+        // Check if the types are compatible for arithmetic operations
+        let left_type = self.left.get_return_type().get_type();
+        let right_type = self.right.get_return_type().get_type();
+
+        match (left_type, right_type) {
+            (TypeId::Integer, TypeId::Integer)
+            | (TypeId::Decimal, TypeId::Decimal)
+            | (TypeId::Integer, TypeId::Decimal)
+            | (TypeId::Decimal, TypeId::Integer)
+            | (TypeId::BigInt, TypeId::BigInt)
+            | (TypeId::BigInt, TypeId::Decimal)
+            | (TypeId::Decimal, TypeId::BigInt) => Ok(()),
+            _ => Err(ExpressionError::ArithmeticError(Unknown)),
+        }
+    }
 }
 
 impl Display for ArithmeticOp {
