@@ -351,7 +351,9 @@ impl PlanNode {
                 )))
             }
             PlanNode::Aggregation(node) => {
-                let child_executor = node.get_children()[0].create_executor(context.clone())?;
+                let child_plan = node.get_children().first()
+                    .ok_or_else(|| "Aggregation node must have a child".to_string())?;
+                let child_executor = child_plan.create_executor(context.clone())?;
 
                 Ok(Box::new(AggregationExecutor::new(
                     context,
