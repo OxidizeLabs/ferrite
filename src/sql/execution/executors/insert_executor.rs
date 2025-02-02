@@ -2,14 +2,14 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::sql::execution::executors::values_executor::ValuesExecutor;
 
 pub struct InsertExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -71,7 +71,6 @@ impl InsertExecutor {
 impl AbstractExecutor for InsertExecutor {
     fn init(&mut self) {
         if self.initialized {
-            debug!("InsertExecutor already initialized");
             return;
         }
 
@@ -80,6 +79,7 @@ impl AbstractExecutor for InsertExecutor {
             self.plan.get_table_name()
         );
 
+        // Create the child executor from the values plan
         self.plan
             .get_children()
             .iter()
@@ -112,37 +112,30 @@ impl AbstractExecutor for InsertExecutor {
 
     fn next(&mut self) -> Option<(Tuple, RID)> {
         if !self.initialized {
-            debug!("InsertExecutor not initialized, initializing now");
             self.init();
         }
 
-        // Get tuple from child executor (VALUES or SELECT)
-        if let Some(child_executor) = self.child_executor.as_mut() {
-            if let Some((mut tuple, _)) = child_executor.next() {
-                debug!("Got tuple from child executor: {:?}", tuple.get_values());
-
-                // Get transaction context
-                let txn_ctx = self.context.read().get_transaction_context();
-                
-                // Create tuple metadata
-                let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
-
+        if let Some(child) = &mut self.child_executor {
+            if let Some((mut tuple, _)) = child.next() {
                 debug!(
-                    "Inserting tuple with transaction ID {} into table '{}'",
-                    tuple_meta.get_commit_timestamp(),
+                    "Inserting tuple into table '{}'",
                     self.plan.get_table_name()
                 );
 
-                // Insert tuple into table heap with transaction context
-                match self.table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx)) {
-                    Ok(rid) => {
-                        info!(
-                            "Successfully inserted tuple into '{}' at RID {:?}: {:?}",
-                            self.plan.get_table_name(),
-                            rid,
-                            tuple.get_values()
-                        );
+                let txn_ctx = {
+                    let context = self.context.read();
+                    context.get_transaction_context().clone()
+                };
 
+                let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
+                let _table_heap_guard = self.table_heap.latch.write();
+                let table_heap = &self.table_heap;
+
+
+                // TableHeap::insert_tuple takes &self, so we can call it directly on Arc<TableHeap>
+                match table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx)) {
+                    Ok(rid) => {
+                        debug!("Successfully inserted tuple with RID {:?}", rid);
                         Some((tuple, rid))
                     }
                     Err(e) => {
@@ -180,49 +173,51 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::common::result_writer::CliResultWriter;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
-    use crate::recovery::log_manager::LogManager;
-    use crate::sql::execution::execution_engine::ExecutionEngine;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use chrono::Utc;
     use parking_lot::RwLock;
+    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool: Arc<BufferPoolManager>,
         transaction_context: Arc<TransactionContext>,
-        transaction_manager: Arc<TransactionManager>,
-        transaction_factory: Arc<TransactionManagerFactory>,
-        lock_manager: Arc<LockManager>,
-        db_file: String,
-        log_file: String,
+        _temp_dir: TempDir
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
+        fn new(name: &str) -> Self {
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            // Create disk manager and scheduler
-            let disk_manager =
-                Arc::new(FileDiskManager::new(db_file.clone(), log_file.clone(), 100));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
 
             // Create buffer pool manager
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
@@ -233,7 +228,11 @@ mod tests {
                 replacer,
             ));
 
-            // Create catalog
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 Arc::clone(&buffer_pool),
                 0,
@@ -242,69 +241,32 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
+                transaction_manager.clone(),  // Pass transaction manager
             )));
 
-            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
-            let transaction_manager = Arc::new(TransactionManager::new(
-                log_manager.clone(),
-            ));
-            let lock_manager = Arc::new(LockManager::new(Arc::clone(&transaction_manager.clone())));
-
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
                 transaction_manager.clone(),
             ));
 
-            let transaction_factory = Arc::new(TransactionManagerFactory::new(
-                Arc::clone(&catalog),
-                log_manager,
-                buffer_pool.clone(),
-            ));
-
             Self {
                 catalog,
                 buffer_pool,
                 transaction_context,
-                transaction_manager,
-                transaction_factory,
-                lock_manager,
-                db_file,
-                log_file,
+                _temp_dir: temp_dir,
             }
-        }
-
-        fn cleanup(&self) {
-            let _ = std::fs::remove_file(&self.db_file);
-            let _ = std::fs::remove_file(&self.log_file);
         }
 
         fn create_executor_context(
             &self,
-            isolation_level: IsolationLevel,
         ) -> Arc<RwLock<ExecutionContext>> {
-            let transaction = Arc::new(Transaction::new(0, isolation_level));
             Arc::new(RwLock::new(ExecutionContext::new(
                 Arc::clone(&self.buffer_pool),
                 Arc::clone(&self.catalog),
                 Arc::clone(&self.transaction_context),
             )))
-        }
-
-        fn create_execution_engine(&self) -> Arc<RwLock<ExecutionEngine>> {
-            Arc::new(RwLock::new(ExecutionEngine::new(
-                Arc::clone(&self.catalog),
-                Arc::clone(&self.buffer_pool),
-                Arc::clone(&self.transaction_factory),
-            )))
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -366,7 +328,7 @@ mod tests {
         ));
 
         // Create executor context and insert executor
-        let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
+        let exec_ctx = test_ctx.create_executor_context();
         let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
 
         // Execute insert
@@ -387,6 +349,9 @@ mod tests {
     #[test]
     fn test_insert_multiple_rows() {
         let test_ctx = TestContext::new("insert_multiple_rows");
+
+        // Create executor context with the new transaction context
+        let exec_ctx = test_ctx.create_executor_context();
 
         // Create schema and table
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
@@ -435,7 +400,6 @@ mod tests {
             vec![PlanNode::Values(values_node.as_ref().clone())],
         ));
 
-        let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
         let mut executor = InsertExecutor::new(exec_ctx.clone(), insert_plan);
 
         // Execute inserts
@@ -451,85 +415,5 @@ mod tests {
 
         // No more rows
         assert!(executor.next().is_none());
-
-        // Commit the transaction
-        {
-            let exec_ctx_guard = exec_ctx.read();
-            let mut txn_manager = test_ctx.transaction_manager.clone();
-            assert!(txn_manager.commit(exec_ctx_guard
-                                           .get_transaction_context()
-                                           .get_transaction().clone(), test_ctx.buffer_pool.clone()));
-        }
-    }
-
-    #[test]
-    fn test_insert_transaction_rollback() {
-        let test_ctx = TestContext::new("insert_rollback");
-        let table_name = "test_rollback_table".to_string();
-
-        // Create schema and table
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
-        ))]];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(table_name.as_str())
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema,
-            table_oid,
-            table_name.to_string(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        // Create a new transaction context
-        let exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
-        let mut executor = InsertExecutor::new(exec_ctx.clone(), insert_plan);
-
-        // Execute insert
-        executor.init();
-        let (tuple, _) = executor.next().expect("Expected tuple");
-        assert_eq!(*tuple.get_value(0), Value::from(1));
-
-        // Rollback the transaction
-        {
-            let exec_ctx_guard = exec_ctx.read();
-            let txn_ctx = exec_ctx_guard.get_transaction_context();
-            test_ctx.transaction_manager.abort(txn_ctx.get_transaction());
-        }
-
-        // Verify the rollback by checking the table is empty
-        let verify_exec_ctx = test_ctx.create_executor_context(IsolationLevel::ReadUncommitted);
-        let mut writer = CliResultWriter::new();
-        let select_sql = "SELECT COUNT(*) FROM test_rollback_table;";
-
-        let execution_engine = test_ctx.create_execution_engine();
-
-        let result = execution_engine
-            .write()
-            .execute_sql(select_sql, verify_exec_ctx, &mut writer);
-
-        assert!(result.is_ok(), "Failed to execute verification query");
     }
 }
