@@ -146,6 +146,29 @@ impl ExpressionOps for LogicExpression {
             logic_type: self.logic_type,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate left and right expressions
+        self.left.validate(schema)?;
+        self.right.validate(schema)?;
+
+        // Check if both operands are boolean
+        let left_type = self.left.get_return_type().get_type();
+        let right_type = self.right.get_return_type().get_type();
+
+        if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
+            return Err(ExpressionError::TypeMismatch {
+                expected: TypeId::Boolean,
+                actual: if left_type != TypeId::Boolean {
+                    left_type
+                } else {
+                    right_type
+                },
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for LogicType {

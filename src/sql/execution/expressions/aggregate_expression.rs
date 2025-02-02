@@ -120,7 +120,7 @@ impl ExpressionOps for AggregateExpression {
         &self.children
     }
 
-    fn  get_return_type(&self) -> &Column {
+    fn get_return_type(&self) -> &Column {
         &self.ret_type
     }
 
@@ -134,6 +134,23 @@ impl ExpressionOps for AggregateExpression {
             children[0].clone(),
             children,
         )))
+    }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // For COUNT(*), no need to validate the argument
+        if matches!(self.agg_type, AggregationType::CountStar) {
+            return Ok(());
+        }
+
+        // Validate the argument expression
+        self.arg.validate(schema)?;
+
+        // Validate all child expressions
+        for child in &self.children {
+            child.validate(schema)?;
+        }
+
+        Ok(())
     }
 }
 

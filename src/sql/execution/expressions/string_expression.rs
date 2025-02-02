@@ -108,6 +108,18 @@ impl ExpressionOps for StringExpression {
             expr_type: self.expr_type,
         }))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate the argument expression
+        self.arg.validate(schema)?;
+
+        // Check if argument returns a string type
+        let arg_type = self.arg.get_return_type().get_type();
+        match arg_type {
+            TypeId::VarChar | TypeId::Char => Ok(()),
+            _ => Err(ExpressionError::InvalidStringExpressionType),
+        }
+    }
 }
 
 impl Display for StringExpressionType {

@@ -128,6 +128,23 @@ impl ExpressionOps for WindowExpression {
             self.return_type.clone(),
         )))
     }
+
+    fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
+        // Validate the function expression
+        self.function_expr.validate(schema)?;
+
+        // Validate partition by expressions
+        for expr in &self.partition_by {
+            expr.validate(schema)?;
+        }
+
+        // Validate order by expressions
+        for expr in &self.order_by {
+            expr.validate(schema)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for WindowExpression {

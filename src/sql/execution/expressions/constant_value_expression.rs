@@ -69,6 +69,18 @@ impl ExpressionOps for ConstantExpression {
             children,
         )))
     }
+
+    fn validate(&self, _schema: &Schema) -> Result<(), ExpressionError> {
+        // Constant expressions are always valid as they don't depend on the schema
+        // Just verify that the value type matches the return type
+        if self.value.get_type_id() != self.ret_type.get_type() {
+            return Err(ExpressionError::TypeMismatch {
+                expected: self.ret_type.get_type(),
+                actual: self.value.get_type_id(),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl Display for ConstantExpression {
