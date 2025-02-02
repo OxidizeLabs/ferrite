@@ -6,8 +6,7 @@ use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::delete_plan::DeleteNode;
 use crate::storage::table::table_heap::TableHeap;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::types_db::value::Value;
+use crate::storage::table::tuple::Tuple;
 use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -194,8 +193,9 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Val;
+    use crate::types_db::value::{Val, Value};
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -227,10 +227,10 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,

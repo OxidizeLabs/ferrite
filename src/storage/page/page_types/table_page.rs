@@ -997,7 +997,6 @@ mod serialization_tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
-    use crate::common::time::TimeStamp;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use log::{debug, error};
@@ -1015,7 +1014,7 @@ mod serialization_tests {
         let rid = RID::new(1, 0);
         let tuple = Tuple::new(&values, schema, rid);
         let mut meta = TupleMeta::new(123);
-        meta.set_commit_timestamp(TimeStamp::new(123));
+        meta.set_commit_timestamp(123);
         (meta, tuple)
     }
 
@@ -1035,7 +1034,7 @@ mod serialization_tests {
 
         // Verify original insertion
         let (orig_meta, orig_tuple) = original_page.get_tuple(&rid).unwrap();
-        assert_eq!(orig_meta.get_commit_timestamp(), TimeStamp::new(123));
+        assert_eq!(orig_meta.get_commit_timestamp(), 123);
         assert_eq!(orig_tuple.get_value(0), &Value::new(42));
 
         // Serialize
@@ -1089,7 +1088,7 @@ mod serialization_tests {
 
             // Verify initial insertion
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid).unwrap();
-            assert_eq!(initial_meta.get_commit_timestamp(), TimeStamp::new(123));
+            assert_eq!(initial_meta.get_commit_timestamp(), 123);
             assert_eq!(initial_tuple.get_value(0), &Value::new(42));
         }
 
@@ -1140,7 +1139,7 @@ mod serialization_tests {
             match handle.join() {
                 Ok(result) => {
                     let (timestamp, value) = result.expect(&format!("Thread {} failed to read tuple", i));
-                    assert_eq!(timestamp, TimeStamp::new(123));
+                    assert_eq!(timestamp, 123);
                     assert_eq!(value, Value::new(42));
                 }
                 Err(e) => {

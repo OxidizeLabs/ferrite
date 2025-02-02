@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use env_logger::{Builder, Env};
-use log::{error, info};
+use env_logger::Builder;
+use log::info;
 use rustyline::DefaultEditor;
 use std::error;
 use std::sync::Arc;

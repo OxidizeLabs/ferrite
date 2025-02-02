@@ -1,47 +1,16 @@
 use crate::common::config::{
-    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TS, INVALID_TXN_ID,
+    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID,
 };
 use crate::common::rid::RID;
-use crate::concurrency::transaction_manager::TransactionManager;
+use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
-use chrono::Utc;
+use crate::storage::table::tuple::TupleMeta;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-
-/// Represents a link to a previous version of this tuple.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UndoLink {
-    /// Previous version can be found in which txn.
-    pub prev_txn: TxnId,
-    /// The log index of the previous version in `prev_txn`.
-    pub prev_log_idx: usize,
-}
-
-impl UndoLink {
-    /// Checks if the undo link points to something.
-    pub fn is_valid(&self) -> bool {
-        self.prev_txn != INVALID_TXN_ID
-    }
-}
-
-/// Represents an undo log entry.
-#[derive(Debug, Clone)]
-pub struct UndoLog {
-    /// Whether this log is a deletion marker.
-    pub is_deleted: bool,
-    /// The fields modified by this undo log.
-    pub modified_fields: Vec<bool>,
-    /// The modified fields.
-    pub tuple: Tuple,
-    /// Timestamp of this undo log.
-    pub ts: TimeStampOidT,
-    /// Undo log previous version.
-    pub prev_version: UndoLink,
-}
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,22 +32,28 @@ pub enum IsolationLevel {
     Serializable,
 }
 
-impl Default for IsolationLevel {
-    fn default() -> Self {
-        IsolationLevel::ReadCommitted
-    }
+/// Represents a link to a previous version of this tuple.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UndoLink {
+    /// Previous version can be found in which txn.
+    pub prev_txn: TxnId,
+    /// The log index of the previous version in `prev_txn`.
+    pub prev_log_idx: usize,
 }
 
-impl IsolationLevel {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "read uncommitted" => Some(IsolationLevel::ReadUncommitted),
-            "read committed" => Some(IsolationLevel::ReadCommitted),
-            "repeatable read" => Some(IsolationLevel::RepeatableRead),
-            "serializable" => Some(IsolationLevel::Serializable),
-            _ => None,
-        }
-    }
+/// Represents an undo log entry.
+#[derive(Debug, Clone)]
+pub struct UndoLog {
+    /// Whether this log is a deletion marker.
+    pub is_deleted: bool,
+    /// The fields modified by this undo log.
+    pub modified_fields: Vec<bool>,
+    /// The modified fields.
+    pub tuple: Tuple,
+    /// Timestamp of this undo log.
+    pub ts: TimeStampOidT,
+    /// Undo log previous version.
+    pub prev_version: UndoLink,
 }
 
 /// Represents a transaction.
@@ -99,6 +74,25 @@ pub struct Transaction {
     prev_lsn: RwLock<Lsn>,
 }
 
+impl UndoLink {
+    /// Checks if the undo link points to something.
+    pub fn is_valid(&self) -> bool {
+        self.prev_txn != INVALID_TXN_ID
+    }
+}
+
+impl IsolationLevel {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "read uncommitted" => Some(IsolationLevel::ReadUncommitted),
+            "read committed" => Some(IsolationLevel::ReadCommitted),
+            "repeatable read" => Some(IsolationLevel::RepeatableRead),
+            "serializable" => Some(IsolationLevel::Serializable),
+            _ => None,
+        }
+    }
+}
+
 impl Transaction {
     /// Creates a new transaction.
     ///
@@ -109,16 +103,13 @@ impl Transaction {
     /// # Returns
     /// A new `Transaction` instance.
     pub fn new(txn_id: TxnId, isolation_level: IsolationLevel) -> Self {
-        // Get current timestamp for read_ts
-        let current_ts = Utc::now().timestamp();
-
         Self {
             txn_id,
             isolation_level,
             thread_id: thread::current().id(),
             state: RwLock::new(TransactionState::Running),
-            read_ts: RwLock::new(current_ts as Timestamp), // Initialize with current timestamp
-            commit_ts: RwLock::new(INVALID_TS),
+            read_ts: RwLock::new(0), // Initialize with 0, will be set by transaction manager
+            commit_ts: RwLock::new(0),
             undo_logs: Mutex::new(Vec::new()),
             write_set: Mutex::new(HashMap::with_capacity(8)),
             scan_predicates: Mutex::new(HashMap::new()),
@@ -162,20 +153,20 @@ impl Transaction {
     }
 
     /// Returns the read timestamp.
-    pub fn read_ts(&self) -> TimeStampOidT {
+    pub fn read_ts(&self) -> Timestamp {
         *self.read_ts.read()
     }
 
-    pub fn set_read_ts(&self, ts: TimeStampOidT) {
+    pub fn set_read_ts(&self, ts: Timestamp) {
         *self.read_ts.write() = ts;
     }
 
     /// Returns the commit timestamp.
-    pub fn commit_ts(&self) -> TimeStampOidT {
+    pub fn commit_ts(&self) -> Timestamp {
         *self.commit_ts.read()
     }
 
-    pub fn set_commit_ts(&self, ts: TimeStampOidT) {
+    pub fn set_commit_ts(&self, ts: Timestamp) {
         *self.commit_ts.write() = ts;
     }
 
@@ -286,31 +277,53 @@ impl Transaction {
         *self.prev_lsn.read()
     }
 
-    /// Checks if a tuple is visible to this transaction based on isolation level
-    pub fn is_tuple_visible(&self, creator_txn_id: TxnId, txn_manager: &TransactionManager) -> bool {
-        // If this is the creator transaction, tuple is visible
-        if creator_txn_id == self.get_transaction_id() {
-            return true;
-        }
+    /// Commits the transaction and updates watermark
+    pub fn commit(&self, watermark: &mut Watermark) -> Timestamp {
+        let commit_ts = watermark.get_next_ts();
+        self.set_commit_ts(commit_ts);
 
-        // Get the creator transaction
-        if let Some(creator_txn) = txn_manager.get_transaction(&creator_txn_id) {
-            match self.get_isolation_level() {
-                IsolationLevel::ReadUncommitted => true, // Can see all tuples
-                IsolationLevel::ReadCommitted => {
-                    // Can only see committed tuples
-                    creator_txn.get_state() == TransactionState::Committed
-                }
-                IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                    // Can only see tuples committed before this transaction's read timestamp
-                    creator_txn.get_state() == TransactionState::Committed
-                        && creator_txn.commit_ts() < self.read_ts()
-                }
+        // Update the watermark with our commit timestamp
+        watermark.update_commit_ts(commit_ts);
+
+        // Remove this transaction from active transactions
+        watermark.remove_txn(self.read_ts());
+
+        self.set_state(TransactionState::Committed);
+        commit_ts
+    }
+
+    /// Begins the transaction and registers with watermark
+    pub fn begin(&mut self, watermark: &mut Watermark) {
+        // Get read timestamp and register with watermark
+        let read_ts = watermark.get_next_ts_and_register();
+        self.set_read_ts(read_ts);
+        self.set_state(TransactionState::Running);
+    }
+
+    /// Aborts the transaction and updates watermark
+    pub fn abort(&self, watermark: &mut Watermark) {
+        // Remove this transaction from active transactions
+        watermark.remove_txn(self.read_ts());
+        self.set_state(TransactionState::Aborted);
+    }
+
+    /// Enhanced tuple visibility check that considers watermark
+    pub fn is_tuple_visible(&self, tuple_meta: &TupleMeta, watermark: &Watermark) -> bool {
+        match self.get_isolation_level() {
+            IsolationLevel::ReadUncommitted => {
+                // Can see all non-deleted tuples, even uncommitted ones
+                !tuple_meta.is_deleted()
             }
-        } else {
-            // If creator transaction not found, assume it's committed
-            // (might have been garbage collected)
-            true
+            IsolationLevel::ReadCommitted => {
+                // Can only see committed tuples up to current watermark
+                tuple_meta.is_visible_to(self.get_transaction_id(), watermark)
+            }
+            IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
+                // Can only see tuples committed before this transaction's read timestamp
+                tuple_meta.is_committed()
+                    && tuple_meta.get_commit_timestamp() <= self.read_ts()
+                    && !tuple_meta.is_deleted()
+            }
         }
     }
 }
@@ -318,6 +331,12 @@ impl Transaction {
 impl Default for Transaction {
     fn default() -> Self {
         Transaction::new(0, IsolationLevel::ReadUncommitted)
+    }
+}
+
+impl Default for IsolationLevel {
+    fn default() -> Self {
+        IsolationLevel::ReadCommitted
     }
 }
 

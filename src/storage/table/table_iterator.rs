@@ -3,6 +3,7 @@ use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::logger::initialize_logger;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
+use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
@@ -246,7 +247,9 @@ impl Iterator for TableIterator {
                         // Check if tuple is visible to transaction
                         if let Some(txn_ctx) = &self.txn_ctx {
                             let txn = txn_ctx.get_transaction();
-                            let is_visible = tuple.0.is_visible_to(txn.get_transaction_id());
+                            // Create a new watermark
+                            let watermark = Watermark::new();
+                            let is_visible = tuple.0.is_visible_to(txn.get_transaction_id(), &watermark);
                             debug!(
                                 "Tuple visibility check - RID: {:?}, TxnID: {}, Visible: {}, Meta: {:?}",
                                 self.rid,
@@ -297,7 +300,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::common::time::TimeStamp;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -548,7 +550,7 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_micros() as u64;
-            meta.set_commit_timestamp(TimeStamp::new(commit_ts));
+            meta.set_commit_timestamp(commit_ts);
 
             let rid = table_heap
                 .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
@@ -1063,7 +1065,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
-        meta.set_commit_timestamp(TimeStamp::new(commit_ts));
+        meta.set_commit_timestamp(commit_ts);
 
         let rid = table_heap
             .insert_tuple(&meta, &mut tuple, Some(txn_ctx.clone()))

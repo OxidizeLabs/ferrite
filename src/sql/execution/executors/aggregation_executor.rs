@@ -308,33 +308,38 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::value::Val::{BigInt, Integer};
     use chrono::Utc;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         catalog: Arc<RwLock<Catalog>>,
         transaction_context: Arc<TransactionContext>,
-        db_file: String,
-        db_log_file: String,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
 
-            // Add process ID to make filenames unique even if tests run in parallel
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let pid = std::process::id();
-            let db_file = format!("tests/data/{}_{}_{}.db", test_name, timestamp, pid);
-            let db_log_file = format!("tests/data/{}_{}_{}.log", test_name, timestamp, pid);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            // Create fresh instances for each test
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
@@ -359,6 +364,7 @@ mod tests {
             )));
 
             // Create fresh transaction with unique ID
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
             let transaction = Arc::new(Transaction::new(
                 timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
                 IsolationLevel::ReadUncommitted,
@@ -374,21 +380,8 @@ mod tests {
                 bpm,
                 catalog,
                 transaction_context,
-                db_file,
-                db_log_file,
+                _temp_dir: temp_dir,
             }
-        }
-
-        pub fn cleanup(&self) {
-            // Ensure all resources are dropped before removing files
-            let _ = std::fs::remove_file(&self.db_file);
-            let _ = std::fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
