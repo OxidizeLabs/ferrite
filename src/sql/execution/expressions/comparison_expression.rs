@@ -88,7 +88,13 @@ impl ExpressionOps for ComparisonExpression {
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        Ok(Value::new(comparison_result))
+        
+        let bool_result = match comparison_result {
+            CmpBool::CmpTrue => true,
+            CmpBool::CmpFalse | CmpBool::CmpNull => false,
+        };
+        
+        Ok(Value::new(bool_result))
     }
 
     fn evaluate_join(
@@ -98,14 +104,16 @@ impl ExpressionOps for ComparisonExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let lhs = self
-            .left
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let rhs = self
-            .right
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        Ok(Value::new(comparison_result))
+        
+        let bool_result = match comparison_result {
+            CmpBool::CmpTrue => true,
+            CmpBool::CmpFalse | CmpBool::CmpNull => false,
+        };
+        
+        Ok(Value::new(bool_result))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -130,7 +138,7 @@ impl ExpressionOps for ComparisonExpression {
             right: children[1].clone(),
             ret_type: self.ret_type.clone(),
             children,
-            comp_type: ComparisonType::Equal,
+            comp_type: self.comp_type,
         }))
     }
 
@@ -239,5 +247,36 @@ mod unit_tests {
 
         assert_eq!(format!("{:#}", less_than_expr), "(Col#0.0 < Col#1.1)");
         assert_eq!(format!("{:#}", equal_expr), "(Col#0.0 = Col#1.1)");
+    }
+
+    #[test]
+    fn test_comparison_expression_indices() {
+        let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, // column index
+            0, // tuple index for left table
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )));
+        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, // column index
+            1, // tuple index for right table
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )));
+
+        let comp = ComparisonExpression::new(
+            left_col.clone(),
+            right_col.clone(),
+            ComparisonType::Equal,
+            vec![],
+        );
+
+        // Verify the tuple indices are preserved
+        if let Expression::ColumnRef(left_expr) = comp.get_left().as_ref() {
+            assert_eq!(left_expr.get_tuple_index(), 0);
+        }
+        if let Expression::ColumnRef(right_expr) = comp.get_right().as_ref() {
+            assert_eq!(right_expr.get_tuple_index(), 1);
+        }
     }
 }
