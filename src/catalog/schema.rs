@@ -92,6 +92,12 @@ impl Schema {
     pub fn is_inlined(&self) -> bool {
         self.tuple_is_inlined
     }
+
+    pub fn merge(left: &Schema, right: &Schema) -> Schema {
+        let mut merged_columns = left.get_columns().clone();
+        merged_columns.extend(right.get_columns().iter().cloned());
+        Schema::new(merged_columns)
+    }
 }
 
 impl PartialEq for Schema {
