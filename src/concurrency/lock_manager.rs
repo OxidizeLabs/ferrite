@@ -50,12 +50,13 @@ use std::{fmt, thread};
 ///
 /// ## Lock Compatibility Matrix
 ///
-///     IS  IX  S   SIX X
-/// IS  Y   Y   Y   Y   N
-/// IX  Y   Y   N   N   N
-/// S   Y   N   Y   N   N
-/// SIX Y   N   N   N   N
-/// X   N   N   N   N   N
+/// |     | IS  | IX  | S   | SIX | X   |
+/// |-----|-----|-----|-----|-----|-----|
+/// | IS  | Y   | Y   | Y   | Y   | N   |
+/// | IX  | Y   | Y   | N   | N   | N   |
+/// | S   | Y   | N   | Y   | N   | N   |
+/// | SIX | Y   | N   | N   | N   | N   |
+/// | X   | N   | N   | N   | N   | N   |
 ///
 /// # Multilevel Locking
 /// While locking rows, `lock` should ensure that the transaction has an appropriate lock on the table which the row belongs to. For instance, if an exclusive lock is attempted on a row, the transaction must hold either X, IX, or SIX on the table. If such a lock does not exist on the table, `lock` should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `TABLE_LOCK_NOT_PRESENT`.
