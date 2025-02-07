@@ -168,6 +168,8 @@ pub enum ExpressionError {
     PageGuardError(PageGuardError),
     #[error("Invalid Operation error: {0}")]
     InvalidOperation(String),
+    #[error("Invalid Tuple Index error: {0}")]
+    InvalidTupleIndex(usize),
     #[error("Invalid Column Index error: {0}")]
     InvalidColumnIndex(usize),
     #[error("Invalid Column Reference error: {0}")]

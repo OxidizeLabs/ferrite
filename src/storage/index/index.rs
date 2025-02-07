@@ -121,7 +121,6 @@ impl IndexInfo {
     pub fn create_iterator(
         &self,
         tree: Arc<RwLock<BPlusTree>>,
-        batch_size: usize,
         start_key: Option<Tuple>,
         end_key: Option<Tuple>,
     ) -> IndexIterator {

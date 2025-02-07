@@ -88,12 +88,12 @@ impl ExpressionOps for ComparisonExpression {
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        
+
         let bool_result = match comparison_result {
             CmpBool::CmpTrue => true,
             CmpBool::CmpFalse | CmpBool::CmpNull => false,
         };
-        
+
         Ok(Value::new(bool_result))
     }
 
@@ -107,12 +107,12 @@ impl ExpressionOps for ComparisonExpression {
         let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
-        
+
         let bool_result = match comparison_result {
             CmpBool::CmpTrue => true,
             CmpBool::CmpFalse | CmpBool::CmpNull => false,
         };
-        
+
         Ok(Value::new(bool_result))
     }
 
@@ -258,8 +258,8 @@ mod unit_tests {
             vec![],
         )));
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, // column index
-            1, // tuple index for right table
+            1, // column index
+            0, // tuple index for right table
             Column::new("id", TypeId::Integer),
             vec![],
         )));

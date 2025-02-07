@@ -1,5 +1,5 @@
 use crate::common::config::FrameId;
-use log::{debug, error, warn};
+use log::{debug, error, trace, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -157,7 +157,7 @@ impl LRUKReplacer {
                 }
             });
 
-        debug!("Recorded access for frame {} at {}", frame_id, now);
+        trace!("Recorded access for frame {} at {}", frame_id, now);
     }
 
     /// Sets whether a frame is eligible for eviction.
@@ -170,7 +170,7 @@ impl LRUKReplacer {
         let mut frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
         if let Some(frame) = frame_store.get_mut(&frame_id) {
             frame.is_evictable = set_evictable;
-            debug!("Set frame {} evictable: {}", frame_id, set_evictable);
+            trace!("Set frame {} evictable: {}", frame_id, set_evictable);
         } else {
             debug!(
                 "Frame {} not found in frame_store, adding with evictable status {}",

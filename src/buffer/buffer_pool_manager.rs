@@ -16,7 +16,7 @@ use crate::storage::page::page_types::extendable_hash_table_directory_page::Exte
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
-use log::{debug, error, info, trace, warn};
+use log::{error, info, trace, warn};
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -33,7 +33,7 @@ pub enum NewPageType {
     ExtendedHashTableBucket,
 }
 
-/// The `BufferPoolManager` is responsible for managing the buffer pool,
+/// The `BufferPoolManager` is responsible for managing the buffer poolUnpinning page,
 /// including fetching and unpinning pages, and handling page replacement.
 #[derive(Debug)]
 pub struct BufferPoolManager {
@@ -100,14 +100,14 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional new page.
     pub fn new_page(&self, new_page_type: NewPageType) -> Option<Arc<RwLock<PageType>>> {
-        debug!(
+        trace!(
             "Attempting to create a new page of type: {:?}",
             new_page_type
         );
 
         // Step 1: Acquire a frame ID
         let frame_id = self.get_available_frame()?;
-        debug!("Selected frame ID: {}", frame_id);
+        trace!("Selected frame ID: {}", frame_id);
 
         // Step 2: Evict old page if necessary
         self.evict_page_if_necessary(frame_id);
@@ -115,7 +115,7 @@ impl BufferPoolManager {
         // Step 3: Create a new page
         let new_page_id = self.allocate_page_id();
         let new_page = self.create_page_of_type(new_page_type, new_page_id);
-        debug!("Created new page with ID: {}", new_page_id);
+        trace!("Created new page with ID: {}", new_page_id);
 
         // Step 4: Update internal data structures
         self.update_page_metadata(frame_id, new_page_id, &new_page);
@@ -128,11 +128,11 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional new `BasicPageGuard`.
     pub fn new_page_guarded(self: &Arc<Self>, new_page_type: NewPageType) -> Option<PageGuard> {
-        debug!("Creating new page of type: {:?}", new_page_type);
+        trace!("Creating new page of type: {:?}", new_page_type);
 
         // Step 1: Acquire a frame ID
         let frame_id = self.get_available_frame()?;
-        debug!("Selected frame ID: {}", frame_id);
+        trace!("Selected frame ID: {}", frame_id);
 
         // Step 2: Evict old page if necessary
         self.evict_page_if_necessary(frame_id);
@@ -140,7 +140,7 @@ impl BufferPoolManager {
         // Step 3: Create a new page
         let new_page_id = self.allocate_page_id();
         let new_page = self.create_page_of_type(new_page_type, new_page_id);
-        debug!("Created new page with ID: {}", new_page_id);
+        trace!("Created new page with ID: {}", new_page_id);
 
         // Step 4: Update internal data structures
         self.update_page_metadata(frame_id, new_page_id, &new_page);
@@ -154,7 +154,7 @@ impl BufferPoolManager {
     /// - `page_id`: The ID of the page to write to.
     /// - `data`: The data to write to the page.
     pub fn write_page(&self, page_id: PageId, data: [u8; DB_PAGE_SIZE as usize]) {
-        debug!("Writing to page with ID: {}", page_id);
+        trace!("Writing to page with ID: {}", page_id);
 
         // Acquire read lock on the page collection
         let pages = self.pages.read();
@@ -182,7 +182,7 @@ impl BufferPoolManager {
             let _ = page_data.as_page_trait_mut().set_data(0, &data);
             page_data.as_page_trait_mut().set_dirty(true);
 
-            debug!("Page {} written and marked dirty", page_id);
+            trace!("Page {} written and marked dirty", page_id);
         } else {
             // Optionally log if the page was not found
             warn!("Page with ID {} not found for writing", page_id);
@@ -197,7 +197,7 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional `Arc<RwLock<Page>>`.
     pub fn fetch_page(&self, page_id: PageId) -> Option<Arc<RwLock<PageType>>> {
-        debug!("Fetching page with ID: {}", page_id);
+        trace!("Fetching page with ID: {}", page_id);
 
         // Step 1: Check if the page is already in memory
         let frame_id = {
@@ -206,7 +206,7 @@ impl BufferPoolManager {
         };
 
         if let Some(frame_id) = frame_id {
-            debug!("Page {} found in memory, frame ID: {}", page_id, frame_id);
+            trace!("Page {} found in memory, frame ID: {}", page_id, frame_id);
 
             let pages = self.pages.read(); // Acquire read lock
             if let Some(page) = pages.get(frame_id as usize).and_then(Option::as_ref) {
@@ -248,13 +248,13 @@ impl BufferPoolManager {
                 .iter()
                 .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
-            debug!("Evicting old page with ID: {}", old_page_id);
+            trace!("Evicting old page with ID: {}", old_page_id);
 
             let mut pages = self.pages.write(); // Acquire write lock
             if let Some(page_arc) = pages[frame_id as usize].as_mut() {
                 let mut page = page_arc.write(); // Acquire write lock on the page
                 if page.as_page_trait_mut().is_dirty() {
-                    debug!("Page {} is dirty, scheduling a write-back", old_page_id);
+                    trace!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
@@ -298,7 +298,7 @@ impl BufferPoolManager {
 
         let mut page_table = self.page_table.write(); // Acquire write lock
         page_table.insert(page_id, frame_id);
-        debug!(
+        trace!(
             "Loaded page {} from disk into frame ID: {}",
             page_id, frame_id
         );
@@ -321,7 +321,7 @@ impl BufferPoolManager {
     /// # Returns
     /// An optional `Arc<RwLock<BasicPageGuard>>`.
     pub fn fetch_page_guarded(self: &Arc<Self>, page_id: PageId) -> Option<PageGuard> {
-        debug!("Fetching basic page guard for page ID: {}", page_id);
+        trace!("Fetching basic page guard for page ID: {}", page_id);
 
         let frame_id = {
             let page_table = self.page_table.read(); // Acquire read lock
@@ -329,7 +329,7 @@ impl BufferPoolManager {
         };
 
         if let Some(frame_id) = frame_id {
-            debug!("Page {} found in memory, frame ID: {}", page_id, frame_id);
+            trace!("Page {} found in memory, frame ID: {}", page_id, frame_id);
 
             let pages = self.pages.read(); // Acquire read lock
             let page_arc = pages[frame_id as usize].as_ref()?.clone(); // Clone the Arc<RwLock<Page>>
@@ -368,13 +368,13 @@ impl BufferPoolManager {
                 .iter()
                 .find_map(|(&pid, &fid)| if fid == frame_id { Some(pid) } else { None })
         } {
-            debug!("Evicting old page with ID: {}", old_page_id);
+            trace!("Evicting old page with ID: {}", old_page_id);
 
             let mut pages = self.pages.write(); // Acquire write lock
             if let Some(page_rwlock) = pages[frame_id as usize].as_mut() {
                 let mut page = page_rwlock.write(); // Acquire write lock on the page
                 if page.as_page_trait_mut().is_dirty() {
-                    debug!("Page {} is dirty, scheduling a write-back", old_page_id);
+                    trace!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                     // Create a synchronous channel for communication
                     let (tx, rx) = mpsc::channel();
@@ -416,7 +416,7 @@ impl BufferPoolManager {
 
         let mut page_table = self.page_table.write(); // Acquire write lock
         page_table.insert(page_id, frame_id);
-        debug!(
+        trace!(
             "Loaded page {} from disk into frame ID: {}",
             page_id, frame_id
         );
@@ -440,7 +440,7 @@ impl BufferPoolManager {
     /// # Returns
     /// `true` if the page was successfully unpinned, `false` otherwise.
     pub fn unpin_page(&self, page_id: PageId, is_dirty: bool, access_type: AccessType) -> bool {
-        debug!("Unpinning page with ID: {}", page_id);
+        trace!("Unpinning page with ID: {}", page_id);
 
         // Step 1: Determine the frame ID without holding any lock too long
         let frame_id = {
@@ -478,14 +478,14 @@ impl BufferPoolManager {
 
                     // If the pin count reaches 0, the page should become evictable
                     if page.as_page_trait().get_pin_count() == 0 {
-                        debug!("Page {} is now evictable", page_id);
+                        trace!("Page {} is now evictable", page_id);
                         true
                     } else {
-                        debug!("Page {} unpinned but still in use", page_id);
+                        trace!("Page {} unpinned but still in use", page_id);
                         false
                     }
                 } else {
-                    warn!("Page {} has pin count 0, cannot unpin further", page_id);
+                    trace!("Page {} has pin count 0, cannot unpin further", page_id);
                     return false;
                 }
             } else {
@@ -520,7 +520,7 @@ impl BufferPoolManager {
         };
 
         if let Some(frame_id) = frame_id {
-            debug!("Attempting to flush page {} from frame {}", page_id, frame_id);
+            trace!("Attempting to flush page {} from frame {}", page_id, frame_id);
 
             let page_to_flush = {
                 let pages = self.pages.read();
@@ -534,11 +534,11 @@ impl BufferPoolManager {
 
                     if page.as_page_trait_mut().is_dirty() {
                         let data = page.as_page_trait().get_data();
-                        debug!("Flushing dirty page {}, first 64 bytes: {:?}", page_id, &data[..64]);
+                        trace!("Flushing dirty page {}, first 64 bytes: {:?}", page_id, &data[..64]);
 
                         match self.disk_manager.write_page(page_id, &data) {
                             Ok(_) => {
-                                debug!("Successfully wrote page {} to disk", page_id);
+                                trace!("Successfully wrote page {} to disk", page_id);
                                 page.as_page_trait_mut().set_dirty(false);
                                 flush_successful = true;
                             }
@@ -548,12 +548,12 @@ impl BufferPoolManager {
                             }
                         }
                     } else {
-                        debug!("Page {} is not dirty, skipping flush", page_id);
+                        trace!("Page {} is not dirty, skipping flush", page_id);
                     }
                 }
 
                 if flush_successful {
-                    debug!("Page {} flushed successfully", page_id);
+                    trace!("Page {} flushed successfully", page_id);
                     Some(true)
                 } else {
                     Some(false)
@@ -563,7 +563,7 @@ impl BufferPoolManager {
                 None
             }
         } else {
-            debug!("Page {} not found in buffer pool", page_id);
+            trace!("Page {} not found in buffer pool", page_id);
             None
         }
     }
@@ -591,12 +591,12 @@ impl BufferPoolManager {
                         .expect("Failed to write page");
 
                     page.as_page_trait_mut().set_dirty(false); // Reset the dirty flag after successful write
-                    debug!("Flushed page {} from frame {}", page_id, frame_id);
+                    trace!("Flushed page {} from frame {}", page_id, frame_id);
                 } else {
-                    debug!("Page {} is not dirty, no need to flush", page_id);
+                    trace!("Page {} is not dirty, no need to flush", page_id);
                 }
             } else {
-                debug!("Page with frame ID {} not found in pages", frame_id);
+                trace!("Page with frame ID {} not found in pages", frame_id);
             }
         }
     }
@@ -607,7 +607,7 @@ impl BufferPoolManager {
     /// A new page ID.
     pub fn allocate_page(&self) -> PageId {
         let page_id = self.next_page_id.fetch_add(1, Ordering::SeqCst).into();
-        debug!("Allocated new page with ID: {}", page_id);
+        trace!("Allocated new page with ID: {}", page_id);
         page_id
     }
 
@@ -616,7 +616,7 @@ impl BufferPoolManager {
     /// # Parameters
     /// - `page_id`: The ID of the page to deallocate.
     pub fn deallocate_page(&mut self, page_id: PageId) {
-        debug!("Deallocating page with ID: {}", page_id);
+        trace!("Deallocating page with ID: {}", page_id);
 
         // Acquire a write lock on the page table
         let frame_id = {
@@ -659,7 +659,7 @@ impl BufferPoolManager {
         // Add the frame ID to the free list
         self.free_list.write().push(frame_id);
 
-        debug!("Page ID {} deallocated", page_id);
+        trace!("Page ID {} deallocated", page_id);
     }
 
     /// Deletes a page with the given page ID.
@@ -670,13 +670,13 @@ impl BufferPoolManager {
     /// # Returns
     /// `true` if the page was successfully deleted, `false` otherwise.
     pub fn delete_page(&self, page_id: PageId) -> Result<(), DeletePageError> {
-        debug!("Attempting to delete page with ID: {}", page_id);
+        trace!("Attempting to delete page with ID: {}", page_id);
 
         let frame_id = self.get_frame_id(page_id)?;
         self.remove_page_from_table(page_id);
         self.reset_frame(frame_id)?;
 
-        debug!(
+        trace!(
             "Successfully deleted page {} from frame {}",
             page_id, frame_id
         );
@@ -737,7 +737,7 @@ impl BufferPoolManager {
         if let Some(page_rwlock) = page_to_evict {
             let mut page = page_rwlock.write(); // Acquire a write lock on the individual page
             if page.as_page_trait_mut().is_dirty() {
-                debug!("Page {} is dirty, scheduling a write-back", old_page_id);
+                trace!("Page {} is dirty, scheduling a write-back", old_page_id);
 
                 // Perform disk write operation outside the main locks
                 self.flush_page(old_page_id); // Perform the flush without holding any locks
@@ -763,7 +763,7 @@ impl BufferPoolManager {
 
     fn evict_page_if_necessary(&self, frame_id: FrameId) {
         if let Some(old_page_id) = self.get_page_id_for_frame(frame_id) {
-            debug!("Evicting old page with ID: {}", old_page_id);
+            trace!("Evicting old page with ID: {}", old_page_id);
             self.evict_old_page(frame_id, old_page_id);
         }
     }
