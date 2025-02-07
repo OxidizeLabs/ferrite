@@ -1,16 +1,13 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
-use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
-use crate::common::rid::RID;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
-use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
@@ -180,21 +177,6 @@ impl ExecutionEngine {
         debug!("Post-execution cleanup complete");
     }
 
-    fn create_mock_scan(
-        &self,
-        input_schema: Schema,
-        mock_tuples: Vec<(Vec<Value>, RID)>,
-    ) -> PlanNode {
-        PlanNode::MockScan(
-            MockScanNode::new(
-                input_schema.clone(),
-                "mock_table".to_string(),
-                vec![], // No children initially
-            )
-                .with_tuples(mock_tuples),
-        )
-    }
-
     /// Prepare a SQL statement and validate syntax
     /// Returns empty parameter types for now since we don't support parameters yet
     pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
@@ -257,10 +239,10 @@ impl ExecutionEngine {
 
     pub fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Committing transaction {}", txn_ctx.get_transaction_id());
-        
+
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        
+
         // Attempt to commit
         match txn_manager.commit(txn_ctx.get_transaction(), self.buffer_pool_manager.clone()) {
             true => {
@@ -277,25 +259,27 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use super::*;
-    use crate::catalog::column::Column;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::table::table_heap::TableInfo;
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
-    use std::sync::Arc;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
-    use crate::storage::table::tuple::Tuple;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
+    use crate::common::rid::RID;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::table_heap::TableInfo;
+    use crate::storage::table::tuple::Tuple;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     struct TestContext {
         engine: ExecutionEngine,
@@ -354,7 +338,7 @@ mod tests {
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
-                txn_manager.clone()
+                txn_manager.clone(),
             )));
 
             let lock_manager = Arc::new(LockManager::new());
@@ -363,7 +347,7 @@ mod tests {
             let transaction_context = Arc::new(TransactionContext::new(
                 txn,
                 lock_manager,
-                txn_manager
+                txn_manager,
             ));
 
             let transaction_factory = Arc::new(TransactionManagerFactory::new(bpm.clone()));
@@ -377,7 +361,7 @@ mod tests {
             let engine = ExecutionEngine::new(
                 catalog.clone(),
                 bpm.clone(),
-                transaction_factory
+                transaction_factory,
             );
 
             let planner = QueryPlanner::new(catalog.clone());
@@ -393,7 +377,7 @@ mod tests {
             }
         }
 
-        fn create_test_table(&self, table_name: &str, schema: Schema) -> Result<(TableInfo), String> {
+        fn create_test_table(&self, table_name: &str, schema: Schema) -> Result<TableInfo, String> {
             let mut catalog = self.catalog.write();
             Ok(catalog.create_table(table_name.to_string(), schema.clone()).unwrap())
         }

@@ -9,7 +9,7 @@ use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, info, trace};
+use log::{debug, error, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ impl SeqScanExecutor {
             // Use table OID to get the table info
             let table_oid = plan.get_table_oid();
             debug!("Looking up table with OID: {}", table_oid);
-            
+
             match catalog_guard.get_table_by_oid(table_oid) {
                 Some(table_info) => {
                     trace!("Found table with OID {} in catalog", table_oid);
@@ -64,7 +64,7 @@ impl AbstractExecutor for SeqScanExecutor {
     fn init(&mut self) {
         // Reset initialized flag first
         self.initialized = false;
-        
+
         trace!(
             "Initializing SeqScanExecutor for table '{}'",
             self.plan.get_table_name()
@@ -83,8 +83,12 @@ impl AbstractExecutor for SeqScanExecutor {
             }
         };
 
-        // Create iterator from start to end of table
-        let start_rid = RID::new(0, 0);
+        // Get the table's first page ID
+        let first_page_id = self.table_heap.get_first_page_id();
+        trace!("Table '{}' first page ID: {}", self.plan.get_table_name(), first_page_id);
+
+        // Create iterator from first page to end of table
+        let start_rid = RID::new(first_page_id, 0);
         let stop_rid = RID::new(u32::MAX as PageId, u32::MAX);
         trace!(
             "Creating table iterator with range: {:?} to {:?}",
@@ -146,6 +150,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -159,7 +164,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -374,10 +378,6 @@ mod tests {
         let ctx = TestContext::new("test_seq_scan_reinit");
         let bpm = ctx.bpm();
         let transaction_context = ctx.transaction_context.clone();
-
-        // Create catalog and schema
-        let catalog = create_catalog(&ctx);
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 
         // Create catalog and schema
         let mut catalog = create_catalog(&ctx);

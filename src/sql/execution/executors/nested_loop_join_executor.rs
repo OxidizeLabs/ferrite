@@ -1,18 +1,14 @@
-use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
 use log::{debug, trace};
 use parking_lot::RwLock;
-use sqlparser::ast::JoinOperator;
 use std::sync::Arc;
 
 pub struct NestedLoopJoinExecutor {
@@ -248,7 +244,7 @@ mod tests {
     use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::ComparisonType;
+    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -257,9 +253,11 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::JoinConstraint;
+    use sqlparser::ast::{JoinConstraint, JoinOperator};
     use std::collections::HashMap;
-    use std::sync::Once;
+
+    use crate::catalog::column::Column;
+    use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -450,7 +448,7 @@ mod tests {
                 left_tuples.push((tuple, rid));
             }
             assert_eq!(left_tuples.len(), 3, "Left table should have 3 tuples");
-            
+
             // Verify the values match what we inserted
             for (tuple, _) in left_tuples {
                 let values = tuple.get_values();
@@ -480,7 +478,7 @@ mod tests {
                 right_tuples.push((tuple, rid));
             }
             assert_eq!(right_tuples.len(), 3, "Right table should have 3 tuples");
-            
+
             // Verify the values match what we inserted
             for (tuple, _) in right_tuples {
                 let values = tuple.get_values();

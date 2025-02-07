@@ -4,10 +4,10 @@ use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
+use log::trace;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use log::trace;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnRefExpression {
@@ -63,7 +63,7 @@ impl ExpressionOps for ColumnRefExpression {
             left_tuple.get_values(), right_tuple.get_values());
 
         // Get the appropriate tuple and schema based on tuple_index
-        let (tuple, schema) = match self.tuple_index {
+        let (tuple, _schema) = match self.tuple_index {
             0 => (left_tuple, left_schema),
             1 => (right_tuple, right_schema),
             idx => return Err(ExpressionError::InvalidTupleIndex(idx)),
@@ -136,8 +136,8 @@ impl Display for ColumnRefExpression {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
 
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
@@ -166,7 +166,7 @@ mod tests {
             Value::new(true),
             Value::new(3.14),
         ], Schema::new(columns),
-           RID::new(0,0)
+                   RID::new(0, 0),
         )
     }
 

@@ -4,10 +4,16 @@ use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
-use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
+use crate::sql::execution::expressions::aggregate_expression::{
+    AggregateExpression, AggregationType,
+};
+use crate::sql::execution::expressions::arithmetic_expression::{
+    ArithmeticExpression, ArithmeticOp,
+};
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+use crate::sql::execution::expressions::comparison_expression::{
+    ComparisonExpression, ComparisonType,
+};
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
 use crate::sql::execution::plans::abstract_plan::PlanNode;
@@ -38,12 +44,12 @@ use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateIndex, CreateTable, DataType, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, Insert, JoinOperator, ObjectName, Query,
-    Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, Insert, JoinConstraint, JoinOperator,
+    ObjectName, Query, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use std::env;
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
@@ -159,1132 +165,33 @@ pub enum LogicalPlanType {
     },
 }
 
+pub trait LogicalToPhysical {
+    fn to_physical_plan(&self) -> Result<PlanNode, String>;
+}
+
 #[derive(Debug, Clone)]
 pub struct LogicalPlan {
     pub plan_type: LogicalPlanType,
     pub children: Vec<Box<LogicalPlan>>,
 }
 
-pub struct QueryPlanner {
+/// 1. Responsible for parsing SQL expressions into our internal expression types
+pub struct ExpressionParser {
     catalog: Arc<RwLock<Catalog>>,
-    log_detailed: bool,
 }
 
-pub trait LogicalToPhysical {
-    fn to_physical_plan(&self) -> Result<PlanNode, String>;
+/// 2. Responsible for schema-related operations
+pub struct SchemaManager {}
+
+/// 3. Responsible for building specific types of logical plans
+pub struct LogicalPlanBuilder {
+    expression_parser: ExpressionParser,
+    schema_manager: SchemaManager,
 }
 
-impl QueryPlanner {
-    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
-        Self {
-            catalog,
-            log_detailed: env::var("RUST_TEST").is_ok(),
-        }
-    }
-
-    pub fn with_detailed_logging(catalog: Arc<RwLock<Catalog>>, detailed: bool) -> Self {
-        Self {
-            catalog,
-            log_detailed: detailed || env::var("RUST_TEST").is_ok(),
-        }
-    }
-
-    pub fn set_detailed_logging(&mut self, detailed: bool) {
-        self.log_detailed = detailed || env::var("RUST_TEST").is_ok();
-    }
-
-    pub fn explain(&mut self, sql: &str) -> Result<String, String> {
-        let plan = self.create_logical_plan(sql)?;
-        Ok(format!("Query Plan:\n{}\n", plan.explain(0)))
-    }
-
-    pub fn create_logical_plan_from_statement(
-        &mut self,
-        stmt: &Statement,
-    ) -> Result<Box<LogicalPlan>, String> {
-        match stmt {
-            Statement::Query(query) => self.plan_query_logical(query),
-            Statement::Insert(stmt) => self.plan_insert_logical(stmt),
-            Statement::CreateTable(stmt) => self.plan_create_table_logical(stmt),
-            Statement::CreateIndex(stmt) => self.plan_create_index_logical(stmt),
-            _ => Err(format!("Unsupported statement type: {:?}", stmt)),
-        }
-    }
-
-    pub fn create_logical_plan(&mut self, sql: &str) -> Result<Box<LogicalPlan>, String> {
-        let dialect = GenericDialect {};
-        let ast = Parser::parse_sql(&dialect, sql).map_err(|e| e.to_string())?;
-
-        if ast.len() != 1 {
-            return Err("Only single SQL statement is supported".to_string());
-        }
-
-        self.create_logical_plan_from_statement(&ast[0])
-    }
-
-    fn plan_create_table_logical(
-        &mut self,
-        create_table: &CreateTable,
-    ) -> Result<Box<LogicalPlan>, String> {
-        let table_name = create_table.name.to_string();
-
-        // Check if table already exists
-        {
-            let catalog = self.catalog.read();
-            if catalog.get_table(&table_name).is_some() {
-                // If table exists and IF NOT EXISTS flag is set, return success
-                if create_table.if_not_exists {
-                    // Create a dummy plan that will effectively be a no-op
-                    let columns = self.convert_column_defs(&create_table.columns)?;
-                    let schema = Schema::new(columns);
-                    return Ok(LogicalPlan::create_table(schema, table_name, true));
-                }
-                // Otherwise return error
-                return Err(format!("Table '{}' already exists", table_name));
-            }
-        }
-
-        // If we get here, table doesn't exist, proceed with normal creation
-        let columns = self.convert_column_defs(&create_table.columns)?;
-        let schema = Schema::new(columns);
-
-        Ok(LogicalPlan::create_table(
-            schema,
-            table_name,
-            create_table.if_not_exists,
-        ))
-    }
-
-    fn plan_create_index_logical(
-        &mut self,
-        create_index: &CreateIndex,
-    ) -> Result<Box<LogicalPlan>, String> {
-        let index_name = create_index
-            .clone()
-            .name
-            .expect("Index Name not available")
-            .to_string();
-        let table_name = match &create_index.table_name {
-            ObjectName(parts) if parts.len() == 1 => parts[0].value.clone(),
-            _ => return Err("Only single table indices are supported".to_string()),
-        };
-
-        let catalog_guard = self.catalog.read();
-        let table_schema = catalog_guard
-            .get_table_schema(&table_name)
-            .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
-
-        let mut key_attrs = Vec::new();
-        let mut columns = Vec::new();
-
-        for col_name in &create_index.columns {
-            let idx = table_schema
-                .get_column_index(&col_name.to_string())
-                .ok_or_else(|| format!("Column {} not found in table", col_name))?;
-            key_attrs.push(idx);
-            columns.push(table_schema.get_column(idx).unwrap().clone());
-        }
-
-        let schema = Schema::new(columns.clone());
-        drop(catalog_guard);
-        {
-            Ok(LogicalPlan::create_index(
-                schema,
-                table_name,
-                index_name,
-                key_attrs,
-                create_index.if_not_exists,
-            ))
-        }
-    }
-
-    fn plan_query_logical(&self, query: &Query) -> Result<Box<LogicalPlan>, String> {
-        match &*query.body {
-            SetExpr::Select(select) => self.plan_select_logical(select),
-            SetExpr::Query(nested_query) => self.plan_query_logical(nested_query),
-            _ => Err("Only simple SELECT statements are supported".to_string()),
-        }
-    }
-
-    fn plan_select_logical(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
-        // Get base table scan
-        let (table_name, schema, table_oid) = self.prepare_table_scan(select)?;
-        let mut current_plan = LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
-
-        // Add filter if WHERE clause exists
-        if let Some(where_clause) = &select.selection {
-            let predicate = Arc::new(self.parse_expression(where_clause, &schema)?);
-            current_plan = LogicalPlan::filter(
-                schema.clone(),
-                table_name,
-                table_oid,
-                predicate,
-                current_plan,
-            );
-        }
-
-        // Handle aggregation if needed
-        let has_group_by = match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
-            GroupByExpr::All(_) => true,
-        };
-        let has_aggregates = self.has_aggregate_functions(&select.projection);
-
-        if has_group_by || has_aggregates {
-            // Parse group by expressions
-            let group_by_exprs: Vec<_> = self.determine_group_by_expressions(select, &schema, has_group_by)?
-                .into_iter()
-                .map(Arc::new)
-                .collect();
-
-            // Parse aggregates
-            let (agg_exprs, _) = self.parse_aggregates(&select.projection, &schema)?;
-
-            // Create output schema for aggregation
-            let agg_schema = self.create_aggregation_output_schema(
-                &group_by_exprs.iter().map(|e| e.as_ref()).collect::<Vec<_>>(),
-                &agg_exprs,
-                has_group_by,
-            );
-
-            current_plan = LogicalPlan::aggregate(
-                group_by_exprs,
-                agg_exprs,
-                agg_schema,
-                current_plan,
-            );
-        }
-
-        // Add final projection
-        self.add_projection_logical(select, current_plan, &schema)
-    }
-
-    fn plan_insert_logical(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
-        let table_name = self.extract_table_name(&insert.table_name)?;
-
-        // Get table info from catalog
-        let catalog_guard = self.catalog.read();
-        let table_info = catalog_guard
-            .get_table(&table_name)
-            .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
-
-        let schema = table_info.get_table_schema();
-        let table_oid = table_info.get_table_oidt();
-
-        // Plan the source (VALUES or SELECT)
-        let source_plan = match &insert.source {
-            Some(query) => match &*query.body {
-                SetExpr::Values(values) => self.plan_values_logical(&values.rows, &schema)?,
-                SetExpr::Select(select) => {
-                    let select_plan = self.plan_select_logical(select)?;
-                    if !self.schemas_compatible(&select_plan.get_schema(), &schema) {
-                        return Err("SELECT schema doesn't match INSERT target".to_string());
-                    }
-                    select_plan
-                }
-                _ => return Err("Only VALUES and SELECT supported in INSERT".to_string()),
-            },
-            None => return Err("INSERT statement must have a source".to_string()),
-        };
-
-        Ok(LogicalPlan::insert(
-            table_name,
-            schema,
-            table_oid,
-            source_plan,
-        ))
-    }
-
-    fn plan_values_logical(
-        &self,
-        rows: &[Vec<Expr>],
-        schema: &Schema,
-    ) -> Result<Box<LogicalPlan>, String> {
-        let mut value_rows = Vec::new();
-
-        for row in rows {
-            if row.len() != schema.get_column_count() as usize {
-                return Err(format!(
-                    "VALUES has {} columns but schema expects {}",
-                    row.len(),
-                    schema.get_column_count()
-                ));
-            }
-
-            let mut value_exprs = Vec::new();
-            for (_, expr) in row.iter().enumerate() {
-                let value_expr = Arc::new(self.parse_expression(expr, schema)?);
-                value_exprs.push(value_expr);
-            }
-            value_rows.push(value_exprs);
-        }
-
-        Ok(LogicalPlan::values(value_rows, schema.clone()))
-    }
-
-    fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
-        match expr {
-            Expr::Identifier(ident) => {
-                // Look up column in the provided schema
-                let column_idx = schema
-                    .get_column_index(&ident.value)
-                    .ok_or_else(|| format!("Column {} not found in schema", ident.value))?;
-
-                let column = schema
-                    .get_column(column_idx)
-                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
-
-                Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                    0, // table index (for single table, it's always 0)
-                    column_idx,
-                    column.clone(),
-                    vec![],
-                )))
-            }
-
-            Expr::CompoundIdentifier(parts) => {
-                if parts.len() != 2 {
-                    return Err("Only table.column compound identifiers are supported".to_string());
-                }
-
-                let table_name = &parts[0].value;
-                let column_name = &parts[1].value;
-
-                // Look up column in the provided schema
-                let column_idx = schema
-                    .get_column_index(&format!("{}.{}", table_name, column_name))
-                    .ok_or_else(|| {
-                        format!("Column {}.{} not found in schema", table_name, column_name)
-                    })?;
-
-                let column = schema
-                    .get_column(column_idx)
-                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
-
-                Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                    0,
-                    column_idx,
-                    column.clone(),
-                    vec![],
-                )))
-            }
-
-            Expr::Value(value) => {
-                let (val, type_id) = match value {
-                    sqlparser::ast::Value::Number(n, _) => (
-                        Value::from(n.parse::<i32>().map_err(|e| e.to_string())?),
-                        TypeId::Integer,
-                    ),
-                    sqlparser::ast::Value::SingleQuotedString(s)
-                    | sqlparser::ast::Value::DoubleQuotedString(s) => {
-                        (Value::from(s.as_str()), TypeId::VarChar)
-                    }
-                    sqlparser::ast::Value::Boolean(b) => (Value::from(*b), TypeId::Boolean),
-                    sqlparser::ast::Value::Null => (Value::new(Val::Null), TypeId::Invalid),
-                    _ => return Err(format!("Unsupported value type: {:?}", value)),
-                };
-
-                Ok(Expression::Constant(ConstantExpression::new(
-                    val,
-                    Column::new("const", type_id),
-                    vec![],
-                )))
-            }
-
-            Expr::BinaryOp { left, op, right } => {
-                let left_expr = self.parse_expression(left, schema)?;
-                let right_expr = self.parse_expression(right, schema)?;
-
-                match op {
-                    BinaryOperator::Eq
-                    | BinaryOperator::NotEq
-                    | BinaryOperator::Gt
-                    | BinaryOperator::Lt
-                    | BinaryOperator::GtEq
-                    | BinaryOperator::LtEq => {
-                        let comparison_type = match op {
-                            BinaryOperator::Eq => ComparisonType::Equal,
-                            BinaryOperator::NotEq => ComparisonType::NotEqual,
-                            BinaryOperator::Gt => ComparisonType::GreaterThan,
-                            BinaryOperator::Lt => ComparisonType::LessThan,
-                            BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
-                            BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
-                            _ => unreachable!(),
-                        };
-
-                        Ok(Expression::Comparison(ComparisonExpression::new(
-                            Arc::new(left_expr),
-                            Arc::new(right_expr),
-                            comparison_type,
-                            vec![],
-                        )))
-                    }
-
-                    BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide => {
-                        let op = match op {
-                            BinaryOperator::Plus => ArithmeticOp::Add,
-                            BinaryOperator::Minus => ArithmeticOp::Subtract,
-                            BinaryOperator::Multiply => ArithmeticOp::Multiply,
-                            BinaryOperator::Divide => ArithmeticOp::Divide,
-                            _ => unreachable!(),
-                        };
-
-                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                            Arc::new(left_expr.clone()),
-                            Arc::new(right_expr.clone()),
-                            op,
-                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
-                        )))
-                    }
-
-                    BinaryOperator::And | BinaryOperator::Or => {
-                        let logic_type = match op {
-                            BinaryOperator::And => LogicType::And,
-                            BinaryOperator::Or => LogicType::Or,
-                            _ => unreachable!(),
-                        };
-
-                        Ok(Expression::Logic(LogicExpression::new(
-                            Arc::new(left_expr.clone()),
-                            Arc::new(right_expr.clone()),
-                            logic_type,
-                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
-                        )))
-                    }
-
-                    _ => Err("Unsupported binary operator".to_string()),
-                }
-            }
-
-            Expr::UnaryOp { op, expr } => {
-                let inner_expr = self.parse_expression(expr, schema)?;
-                match op {
-                    UnaryOperator::Not => Ok(Expression::Logic(LogicExpression::new(
-                        Arc::new(inner_expr),
-                        Arc::new(Expression::Constant(ConstantExpression::new(
-                            Value::new(true),
-                            Column::new("const", TypeId::Boolean),
-                            vec![],
-                        ))),
-                        LogicType::And,
-                        vec![],
-                    ))),
-                    UnaryOperator::Plus => Ok(inner_expr),
-                    UnaryOperator::Minus => {
-                        let zero = Expression::Constant(ConstantExpression::new(
-                            Value::new(0),
-                            Column::new("const", TypeId::Integer),
-                            vec![],
-                        ));
-                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                            Arc::new(zero),
-                            Arc::new(inner_expr),
-                            ArithmeticOp::Subtract,
-                            vec![],
-                        )))
-                    }
-                    _ => Err("Unsupported unary operator".to_string()),
-                }
-            }
-
-            Expr::IsNull(expr) => {
-                let inner_expr = self.parse_expression(expr, schema)?;
-                Ok(Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(inner_expr),
-                    Arc::new(Expression::Constant(ConstantExpression::new(
-                        Value::new(Val::Null),
-                        Column::new("const", TypeId::Invalid),
-                        vec![],
-                    ))),
-                    ComparisonType::Equal,
-                    vec![],
-                )))
-            }
-
-            Expr::IsNotNull(expr) => {
-                let inner_expr = self.parse_expression(expr, schema)?;
-                Ok(Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(inner_expr),
-                    Arc::new(Expression::Constant(ConstantExpression::new(
-                        Value::new(Val::Null),
-                        Column::new("const", TypeId::Invalid),
-                        vec![],
-                    ))),
-                    ComparisonType::NotEqual,
-                    vec![],
-                )))
-            }
-
-            Expr::Between {
-                expr,
-                negated,
-                low,
-                high,
-            } => {
-                let expr = self.parse_expression(expr, schema)?;
-                let low = self.parse_expression(low, schema)?;
-                let high = self.parse_expression(high, schema)?;
-
-                let low_compare = Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(expr.clone()),
-                    Arc::new(low),
-                    ComparisonType::GreaterThanOrEqual,
-                    vec![],
-                ));
-
-                let high_compare = Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(expr),
-                    Arc::new(high),
-                    ComparisonType::LessThanOrEqual,
-                    vec![],
-                ));
-
-                let mut result = Expression::Logic(LogicExpression::new(
-                    Arc::new(low_compare),
-                    Arc::new(high_compare),
-                    LogicType::And,
-                    vec![],
-                ));
-
-                if *negated {
-                    result = Expression::Logic(LogicExpression::new(
-                        Arc::new(result),
-                        Arc::new(Expression::Constant(ConstantExpression::new(
-                            Value::new(true),
-                            Column::new("const", TypeId::Boolean),
-                            vec![],
-                        ))),
-                        LogicType::And, // Using AND with true is effectively NOT
-                        vec![],
-                    ));
-                }
-
-                Ok(result)
-            }
-
-            Expr::Function(func) => match self.parse_aggregate_function(&func, schema) {
-                Ok(aggregate_function) => Ok(aggregate_function.0),
-                _ => Err(format!("Unsupported function: {}", func)),
-            },
-
-            _ => Err(format!("Unsupported expression type: {:?}", expr)),
-        }
-    }
-
-    fn parse_aggregate_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<(Expression, AggregationType), String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        let (agg_type, arg_expr) = match func_name.as_str() {
-            "COUNT" => {
-                match &func.args {
-                    FunctionArguments::None => (
-                        AggregationType::CountStar,
-                        Expression::Constant(ConstantExpression::new(
-                            Value::new(1),
-                            Column::new("count", TypeId::BigInt), // Changed to BigInt
-                            vec![],
-                        )),
-                    ),
-                    FunctionArguments::List(list) => {
-                        if list.args.is_empty() {
-                            (
-                                AggregationType::CountStar,
-                                Expression::Constant(ConstantExpression::new(
-                                    Value::new(1),
-                                    Column::new("count", TypeId::BigInt), // Changed to BigInt
-                                    vec![],
-                                )),
-                            )
-                        } else {
-                            match &list.args[0] {
-                                FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => (
-                                    AggregationType::CountStar,
-                                    Expression::Constant(ConstantExpression::new(
-                                        Value::new(1),
-                                        Column::new("count", TypeId::BigInt), // Changed to BigInt
-                                        vec![],
-                                    )),
-                                ),
-                                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                    let inner_expr = self.parse_expression(expr, schema)?;
-                                    (AggregationType::Count, inner_expr)
-                                }
-                                _ => return Err("Unsupported COUNT argument".to_string()),
-                            }
-                        }
-                    }
-                    _ => return Err("Invalid COUNT function arguments".to_string()),
-                }
-            }
-            "SUM" | "MIN" | "MAX" | "AVG" => {
-                let agg_type = match func_name.as_str() {
-                    "SUM" => AggregationType::Sum,
-                    "MIN" => AggregationType::Min,
-                    "MAX" => AggregationType::Max,
-                    "AVG" => AggregationType::Avg,
-                    _ => unreachable!(),
-                };
-
-                match &func.args {
-                    FunctionArguments::None => {
-                        return Err(format!("{}() requires an argument", func_name));
-                    }
-                    FunctionArguments::List(list) => {
-                        if list.args.is_empty() {
-                            return Err(format!("{}() requires an argument", func_name));
-                        }
-
-                        match &list.args[0] {
-                            FunctionArg::Named { .. } => {
-                                return Err("Named arguments not supported in aggregate functions"
-                                    .to_string());
-                            }
-                            FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                                FunctionArgExpr::Expr(expr) => {
-                                    (agg_type, self.parse_expression(expr, schema)?)
-                                }
-                                FunctionArgExpr::Wildcard
-                                | FunctionArgExpr::QualifiedWildcard(_) => {
-                                    return Err(format!("{}(*) is not valid", func_name));
-                                }
-                            },
-                            FunctionArg::ExprNamed { .. } => {
-                                return Err(
-                                    "ExprNamed arguments not supported in aggregate functions"
-                                        .to_string(),
-                                );
-                            }
-                        }
-                    }
-                    FunctionArguments::Subquery(_) => {
-                        return Err("Subqueries not supported in aggregate functions".to_string());
-                    }
-                }
-            }
-            _ => return Err(format!("Unsupported aggregate function: {}", func_name)),
-        };
-
-        Ok((
-            Expression::Aggregate(AggregateExpression::new(
-                agg_type.clone(),
-                Arc::new(arg_expr),
-                vec![],
-            )),
-            agg_type,
-        ))
-    }
-
-    fn parse_aggregates(
-        &self,
-        projection: &[SelectItem],
-        schema: &Schema,
-    ) -> Result<(Vec<Arc<Expression>>, Vec<AggregationType>), String> {
-        let mut agg_exprs = Vec::new();
-        let mut agg_types = Vec::new();
-
-        for item in projection {
-            match item {
-                SelectItem::UnnamedExpr(expr) => {
-                    if let Expr::Function(func) = expr {
-                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_types.push(agg_type);
-                    }
-                }
-                SelectItem::ExprWithAlias { expr, alias } => {
-                    if let Expr::Function(func) = expr {
-                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
-                        let mut agg = AggregateExpression::new(
-                            agg_type.clone(),
-                            Arc::from(agg_expr),
-                            vec![],
-                        );
-
-                        // Create a new column with the alias name but keep the original type
-                        let ret_type = Column::new(&alias.value, agg.get_return_type().get_type());
-                        agg = agg.with_return_type(ret_type);
-
-                        agg_exprs.push(Arc::new(Expression::Aggregate(agg)));
-                        agg_types.push(agg_type);
-                    }
-                }
-                SelectItem::QualifiedWildcard(_, _) => {}
-                SelectItem::Wildcard(_) => {}
-            }
-        }
-
-        Ok((agg_exprs, agg_types))
-    }
-
-    fn parse_projection_expressions(
-        &self,
-        projection: &[SelectItem],
-        schema: &Schema,
-    ) -> Result<Vec<Expression>, String> {
-        let mut expressions = Vec::new();
-
-        for item in projection {
-            match item {
-                SelectItem::UnnamedExpr(expr) => {
-                    match expr {
-                        _ => expressions.push(self.parse_expression(expr, schema)?),
-                    }
-                }
-                SelectItem::ExprWithAlias { expr, alias } => match expr {
-                    _ => {
-                        let expr = self.parse_expression(expr, schema)?;
-                        if let Expression::ColumnRef(col_ref) = expr {
-                            expressions.push(Expression::ColumnRef(ColumnRefExpression::new(
-                                col_ref.get_column_index(),
-                                col_ref.get_column_index(),
-                                col_ref.get_return_type().with_name(&alias.value),
-                                col_ref.get_children().clone(),
-                            )));
-                        } else {
-                            expressions.push(expr);
-                        }
-                    }
-                },
-                SelectItem::Wildcard(_) => {
-                    // Add all columns from the schema
-                    for i in 0..schema.get_column_count() {
-                        let column = schema.get_column(i as usize).unwrap();
-                        expressions.push(Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            i as usize,
-                            column.clone(),
-                            vec![],
-                        )));
-                    }
-                }
-                _ => return Err("Unsupported projection type".to_string()),
-            }
-        }
-
-        Ok(expressions)
-    }
-
-    fn validate_aggregation_plan(
-        &self,
-        plan: &Box<LogicalPlan>,
-        group_by: &[Arc<Expression>],
-        aggregates: &[Arc<Expression>],
-    ) -> Result<(), String> {
-        match &plan.plan_type {
-            LogicalPlanType::Aggregate { schema, .. } => {
-                // Count unique columns - don't double count columns that appear in both group by and aggregates
-                let mut unique_cols = std::collections::HashSet::new();
-
-                // Add group by columns
-                for expr in group_by {
-                    let _ = unique_cols.insert(expr.get_return_type().get_name().to_string());
-                }
-
-                // Add aggregate columns
-                for expr in aggregates {
-                    match expr.as_ref() {
-                        Expression::Aggregate(agg) => {
-                            let name = format!(
-                                "{}({})",
-                                agg.get_agg_type().to_string(),
-                                agg.get_arg().get_return_type().get_name()
-                            );
-                            let _ = unique_cols.insert(name);
-                        }
-                        Expression::ColumnRef(col_ref) => {
-                            // Only add if not already in group by
-                            if !group_by.iter().any(|g| {
-                                matches!(g.as_ref(), Expression::ColumnRef(g_ref) if g_ref.get_column_index() == col_ref.get_column_index())
-                            }) {
-                                let _ = unique_cols.insert(col_ref.get_return_type().get_name().to_string());
-                            }
-                        }
-                        _ => {
-                            let _ = unique_cols.insert(expr.get_return_type().get_name().to_string());
-                        }
-                    }
-                }
-
-                // Validate schema column count matches unique columns
-                let expected_cols = unique_cols.len();
-                if schema.get_column_count() as usize != expected_cols {
-                    return Err(format!(
-                        "Schema column count mismatch: expected {}, got {}\nExpected columns: {:?}\nActual columns: {:?}",
-                        expected_cols,
-                        schema.get_column_count(),
-                        unique_cols,
-                        schema.get_columns().iter().map(|c| c.get_name()).collect::<Vec<_>>()
-                    ));
-                }
-
-                // Validate all expected columns are present in schema
-                for col_name in unique_cols {
-                    if schema.get_column_index(&col_name).is_none() {
-                        return Err(format!("Column '{}' missing from schema", col_name));
-                    }
-                }
-
-                Ok(())
-            }
-            _ => Err("Expected Aggregate plan type".to_string()),
-        }
-    }
-
-    fn create_aggregation_output_schema(
-        &self,
-        group_bys: &[&Expression],
-        aggregates: &[Arc<Expression>],
-        has_group_by: bool,
-    ) -> Schema {
-        let mut columns = Vec::new();
-        let mut seen_columns = std::collections::HashSet::new();
-
-        // Add group by columns first if we have them
-        if has_group_by {
-            for expr in group_bys {
-                let col_name = expr.get_return_type().get_name().to_string();
-                if seen_columns.insert(col_name.clone()) {
-                    columns.push(expr.get_return_type().clone());
-                }
-            }
-        }
-
-        // Add aggregate columns
-        for agg_expr in aggregates {
-            match agg_expr.as_ref() {
-                Expression::Aggregate(agg) => {
-                    let col_name = match agg.get_agg_type() {
-                        AggregationType::CountStar => "COUNT(*)".to_string(),
-                        _ => format!(
-                            "{}({})",
-                            agg.get_agg_type().to_string(),
-                            agg.get_arg().get_return_type().get_name()
-                        ),
-                    };
-
-                    if seen_columns.insert(col_name.clone()) {
-                        let col_type = match agg.get_agg_type() {
-                            AggregationType::Count | AggregationType::CountStar => TypeId::BigInt,
-                            AggregationType::Sum => agg.get_arg().get_return_type().get_type(),
-                            AggregationType::Avg => TypeId::Decimal,
-                            AggregationType::Min | AggregationType::Max => {
-                                agg.get_arg().get_return_type().get_type()
-                            }
-                        };
-                        columns.push(Column::new(&col_name, col_type));
-                    }
-                }
-                _ => {
-                    let col_name = agg_expr.get_return_type().get_name().to_string();
-                    if seen_columns.insert(col_name.clone()) {
-                        columns.push(agg_expr.get_return_type().clone());
-                    }
-                }
-            }
-        }
-
-        if self.log_detailed {
-            println!(
-                "Created aggregation schema with columns: {:?}",
-                columns.iter().map(|c| c.get_name()).collect::<Vec<_>>()
-            );
-        }
-
-        Schema::new(columns)
-    }
-
-    fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
-        projection.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.is_aggregate_function(expr)
-            }
-            _ => false,
-        })
-    }
-
-    fn is_aggregate_function(&self, expr: &Expr) -> bool {
-        if let Expr::Function(func) = expr {
-            let name = func.name.to_string().to_uppercase();
-            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
-        } else {
-            false
-        }
-    }
-
-    fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
-        let mut columns = Vec::new();
-
-        for col_def in column_defs {
-            let column_name = col_def.name.to_string();
-            let type_id = self.convert_sql_type(&col_def.data_type)?;
-
-            // Handle VARCHAR/STRING types specifically with length
-            let column = match &col_def.data_type {
-                DataType::Varchar(_) | DataType::String(_) => {
-                    // Default length for variable length types
-                    Column::new_varlen(&column_name, type_id, 255)
-                }
-                _ => Column::new(&column_name, type_id),
-            };
-
-            columns.push(column);
-        }
-
-        Ok(columns)
-    }
-
-    fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
-        match sql_type {
-            DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
-            DataType::TinyInt(_) => Ok(TypeId::TinyInt),
-            DataType::SmallInt(_) => Ok(TypeId::SmallInt),
-            DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
-            DataType::BigInt(_) => Ok(TypeId::BigInt),
-            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
-            DataType::Varchar(_) | DataType::String(_) | DataType::Text => Ok(TypeId::VarChar),
-            DataType::Array(_) => Ok(TypeId::Vector),
-            DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
-            _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
-        }
-    }
-
-    fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
-        if source.get_column_count() != target.get_column_count() {
-            return false;
-        }
-
-        for i in 0..source.get_column_count() {
-            let source_col = source.get_column(i as usize).unwrap();
-            let target_col = target.get_column(i as usize).unwrap();
-
-            if !self.types_compatible(source_col.get_type(), target_col.get_type()) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn types_compatible(&self, source_type: TypeId, target_type: TypeId) -> bool {
-        // Add your type compatibility rules here
-        // For example:
-        match (source_type, target_type) {
-            // Same types are always compatible
-            (a, b) if a == b => true,
-            _ => false,
-        }
-    }
-
-    fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
-        match table_name {
-            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
-            _ => Err("Only single table INSERT statements are supported".to_string()),
-        }
-    }
-
-    fn prepare_table_scan(&self, select: &Box<Select>) -> Result<(String, Schema, u64), String> {
-        if select.from.len() != 1 {
-            return Err("Only single table queries are supported".to_string());
-        }
-
-        // Extract table name
-        let table_name = match &select.from[0].relation {
-            TableFactor::Table { name, .. } => name.to_string(),
-            _ => return Err("Only simple table scans are supported".to_string()),
-        };
-
-        // Retrieve table information from catalog
-        let catalog_guard = self.catalog.read();
-        let table_info = catalog_guard
-            .get_table(&table_name)
-            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))?;
-
-        let schema = table_info.get_table_schema();
-        let table_oid = table_info.get_table_oidt();
-
-        Ok((table_name, schema, table_oid))
-    }
-
-    fn determine_group_by_expressions(
-        &self,
-        select: &Box<Select>,
-        base_schema: &Schema,
-        has_group_by: bool,
-    ) -> Result<Vec<Expression>, String> {
-        if !has_group_by {
-            return Ok(Vec::new());
-        }
-
-        match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => exprs
-                .iter()
-                .map(|expr| self.parse_expression(expr, base_schema))
-                .collect(),
-            GroupByExpr::All(_) => {
-                // If GROUP BY ALL, use all columns from the input schema
-                (0..base_schema.get_column_count())
-                    .map(|i| {
-                        let col = base_schema.get_column(i as usize).unwrap();
-                        Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            i as usize,
-                            col.clone(),
-                            vec![],
-                        )))
-                    })
-                    .collect()
-            }
-        }
-    }
-
-    fn add_projection_logical(
-        &self,
-        select: &Select,
-        input: Box<LogicalPlan>,
-        schema: &Schema,
-    ) -> Result<Box<LogicalPlan>, String> {
-        let mut projection_exprs = Vec::new();
-        let mut output_columns = Vec::new();
-
-        for item in &select.projection {
-            match item {
-                SelectItem::UnnamedExpr(expr) => {
-                    if let Expr::Function(func) = expr {
-                        // For aggregate functions, use the formatted name
-                        let (expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
-                        let col_name = format!(
-                            "{}({})",
-                            agg_type.to_string(),
-                            expr.get_return_type().get_name()
-                        );
-                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            projection_exprs.len(),
-                            Column::new(&col_name, expr.get_return_type().get_type()),
-                            vec![],
-                        ));
-                        projection_exprs.push(Arc::new(col_ref));
-                        output_columns.push(Column::new(&col_name, expr.get_return_type().get_type()));
-                    } else {
-                        let parsed_expr = self.parse_expression(expr, schema)?;
-                        projection_exprs.push(Arc::new(parsed_expr.clone()));
-                        output_columns.push(parsed_expr.get_return_type().clone());
-                    }
-                }
-                SelectItem::ExprWithAlias { expr, alias } => {
-                    if let Expr::Function(func) = expr {
-                        // For aliased aggregate functions, use the alias name
-                        let (expr, _) = self.parse_aggregate_function(&func, schema)?;
-                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            projection_exprs.len(),
-                            Column::new(&alias.value, expr.get_return_type().get_type()),
-                            vec![],
-                        ));
-                        projection_exprs.push(Arc::new(col_ref));
-                        output_columns.push(Column::new(&alias.value, expr.get_return_type().get_type()));
-                    } else {
-                        let parsed_expr = self.parse_expression(expr, schema)?;
-                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            projection_exprs.len(),
-                            Column::new(&alias.value, parsed_expr.get_return_type().get_type()),
-                            vec![],
-                        ));
-                        projection_exprs.push(Arc::new(col_ref));
-                        output_columns.push(Column::new(&alias.value, parsed_expr.get_return_type().get_type()));
-                    }
-                }
-                SelectItem::Wildcard(_) => {
-                    // For wildcards, include all columns from input
-                    for i in 0..schema.get_column_count() {
-                        let col = schema.get_column(i as usize).unwrap();
-                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            i as usize,
-                            col.clone(),
-                            vec![],
-                        ));
-                        projection_exprs.push(Arc::new(col_ref));
-                        output_columns.push(col.clone());
-                    }
-                }
-                _ => return Err("Unsupported projection item".to_string()),
-            }
-        }
-
-        Ok(LogicalPlan::project(
-            projection_exprs,
-            Schema::new(output_columns),
-            input,
-        ))
-    }
-
-    fn create_projection_schema(&self, proj_exprs: &[Expression]) -> Result<Schema, String> {
-        let columns = proj_exprs
-            .iter()
-            .enumerate()
-            .map(|(idx, expr)| match expr {
-                Expression::ColumnRef(col_ref) => col_ref.get_return_type().clone(),
-                Expression::Constant(const_expr) => const_expr.get_return_type().clone(),
-                Expression::Comparison(comp_expr) => comp_expr.get_return_type().clone(),
-                Expression::Arithmetic(arith_expr) => arith_expr.get_return_type().clone(),
-                Expression::Logic(logic_expr) => logic_expr.get_return_type().clone(),
-                Expression::Aggregate(agg_expr) => {
-                    agg_expr.get_return_type().clone()
-                    // let input_name = agg_expr.get_return_type().get_return_type().get_name().to_string();
-                    // let input_type = agg_expr.get_return_type().get_type();
-                    // Handle aggregate function return types
-                    // match agg_expr.get_agg_type() {
-                    //     AggregationType::CountStar => {
-                    //         Column::new(&format!("count_all"), TypeId::Integer)
-                    //     }
-                    //     AggregationType::Count => {
-                    //         Column::new(&format!("count_{}", input_name), TypeId::Integer)
-                    //     }
-                    //     AggregationType::Sum => {
-                    //         // For SUM, use the same type as the input column
-                    //         Column::new(&format!("sum_{}", input_name), input_type)
-                    //     }
-                    //     AggregationType::Min => {
-                    //         // For SUM, use the same type as the input column
-                    //         Column::new(&format!("min_{}", input_name), input_type)
-                    //     }
-                    //     AggregationType::Max => {
-                    //         // For SUM, use the same type as the input column
-                    //         Column::new(&format!("max_{}", input_name), input_type)
-                    //     }
-                    //     AggregationType::Avg => {
-                    //         // For SUM, use the same type as the input column
-                    //         Column::new(&format!("avg_{}", input_name), input_type)
-                    //     }
-                    // }
-                }
-                _ => Column::new(&format!("expr_{}", idx), TypeId::Integer),
-            })
-            .collect::<Vec<Column>>();
-
-        if columns.is_empty() {
-            Err("Cannot create projection schema with no columns".to_string())
-        } else {
-            Ok(Schema::new(columns))
-        }
-    }
-}
-
-impl Display for LogicalPlan {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            _ => write!(f, "{:#?}", self),
-        }
-    }
+/// 4. Orchestrates the planning process
+pub struct QueryPlanner {
+    plan_builder: LogicalPlanBuilder,
 }
 
 impl LogicalPlan {
@@ -1501,10 +408,6 @@ impl LogicalPlan {
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::Limit { limit, schema } => {
-                result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
-                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
             LogicalPlanType::TopN {
                 k,
                 sort_expressions,
@@ -1519,12 +422,6 @@ impl LogicalPlan {
                     result.push_str(&expr.to_string());
                 }
                 result.push_str("]\n");
-                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
-            LogicalPlanType::MockScan {
-                table_name, schema, ..
-            } => {
-                result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::NestedIndexJoin {
@@ -1924,6 +821,1248 @@ impl LogicalPlan {
     }
 }
 
+impl ExpressionParser {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+        Self { catalog }
+    }
+
+    pub fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
+        match expr {
+            Expr::Identifier(ident) => {
+                // Look up column in the provided schema
+                let column_idx = schema
+                    .get_column_index(&ident.value)
+                    .ok_or_else(|| format!("Column {} not found in schema", ident.value))?;
+
+                let column = schema
+                    .get_column(column_idx)
+                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
+
+                Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                    0, // table index (for single table, it's always 0)
+                    column_idx,
+                    column.clone(),
+                    vec![],
+                )))
+            }
+
+            Expr::CompoundIdentifier(parts) => {
+                if parts.len() != 2 {
+                    return Err("Only table.column compound identifiers are supported".to_string());
+                }
+
+                let table_name = &parts[0].value;
+                let column_name = &parts[1].value;
+
+                // Look up column in the provided schema
+                let column_idx = schema
+                    .get_column_index(&format!("{}.{}", table_name, column_name))
+                    .ok_or_else(|| {
+                        format!("Column {}.{} not found in schema", table_name, column_name)
+                    })?;
+
+                let column = schema
+                    .get_column(column_idx)
+                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
+
+                Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    column_idx,
+                    column.clone(),
+                    vec![],
+                )))
+            }
+
+            Expr::Value(value) => {
+                let (val, type_id) = match value {
+                    sqlparser::ast::Value::Number(n, _) => (
+                        Value::from(n.parse::<i32>().map_err(|e| e.to_string())?),
+                        TypeId::Integer,
+                    ),
+                    sqlparser::ast::Value::SingleQuotedString(s)
+                    | sqlparser::ast::Value::DoubleQuotedString(s) => {
+                        (Value::from(s.as_str()), TypeId::VarChar)
+                    }
+                    sqlparser::ast::Value::Boolean(b) => (Value::from(*b), TypeId::Boolean),
+                    sqlparser::ast::Value::Null => (Value::new(Val::Null), TypeId::Invalid),
+                    _ => return Err(format!("Unsupported value type: {:?}", value)),
+                };
+
+                Ok(Expression::Constant(ConstantExpression::new(
+                    val,
+                    Column::new("const", type_id),
+                    vec![],
+                )))
+            }
+
+            Expr::BinaryOp { left, op, right } => {
+                let left_expr = self.parse_expression(left, schema)?;
+                let right_expr = self.parse_expression(right, schema)?;
+
+                match op {
+                    BinaryOperator::Eq
+                    | BinaryOperator::NotEq
+                    | BinaryOperator::Gt
+                    | BinaryOperator::Lt
+                    | BinaryOperator::GtEq
+                    | BinaryOperator::LtEq => {
+                        let comparison_type = match op {
+                            BinaryOperator::Eq => ComparisonType::Equal,
+                            BinaryOperator::NotEq => ComparisonType::NotEqual,
+                            BinaryOperator::Gt => ComparisonType::GreaterThan,
+                            BinaryOperator::Lt => ComparisonType::LessThan,
+                            BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
+                            BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Comparison(ComparisonExpression::new(
+                            Arc::new(left_expr),
+                            Arc::new(right_expr),
+                            comparison_type,
+                            vec![],
+                        )))
+                    }
+
+                    BinaryOperator::Plus
+                    | BinaryOperator::Minus
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide => {
+                        let op = match op {
+                            BinaryOperator::Plus => ArithmeticOp::Add,
+                            BinaryOperator::Minus => ArithmeticOp::Subtract,
+                            BinaryOperator::Multiply => ArithmeticOp::Multiply,
+                            BinaryOperator::Divide => ArithmeticOp::Divide,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            Arc::new(left_expr.clone()),
+                            Arc::new(right_expr.clone()),
+                            op,
+                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
+                        )))
+                    }
+
+                    BinaryOperator::And | BinaryOperator::Or => {
+                        let logic_type = match op {
+                            BinaryOperator::And => LogicType::And,
+                            BinaryOperator::Or => LogicType::Or,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::Logic(LogicExpression::new(
+                            Arc::new(left_expr.clone()),
+                            Arc::new(right_expr.clone()),
+                            logic_type,
+                            vec![Arc::new(left_expr.clone()), Arc::new(right_expr.clone())],
+                        )))
+                    }
+
+                    _ => Err("Unsupported binary operator".to_string()),
+                }
+            }
+
+            Expr::UnaryOp { op, expr } => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                match op {
+                    UnaryOperator::Not => Ok(Expression::Logic(LogicExpression::new(
+                        Arc::new(inner_expr),
+                        Arc::new(Expression::Constant(ConstantExpression::new(
+                            Value::new(true),
+                            Column::new("const", TypeId::Boolean),
+                            vec![],
+                        ))),
+                        LogicType::And,
+                        vec![],
+                    ))),
+                    UnaryOperator::Plus => Ok(inner_expr),
+                    UnaryOperator::Minus => {
+                        let zero = Expression::Constant(ConstantExpression::new(
+                            Value::new(0),
+                            Column::new("const", TypeId::Integer),
+                            vec![],
+                        ));
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            Arc::new(zero),
+                            Arc::new(inner_expr),
+                            ArithmeticOp::Subtract,
+                            vec![],
+                        )))
+                    }
+                    _ => Err("Unsupported unary operator".to_string()),
+                }
+            }
+
+            Expr::IsNull(expr) => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(inner_expr),
+                    Arc::new(Expression::Constant(ConstantExpression::new(
+                        Value::new(Val::Null),
+                        Column::new("const", TypeId::Invalid),
+                        vec![],
+                    ))),
+                    ComparisonType::Equal,
+                    vec![],
+                )))
+            }
+
+            Expr::IsNotNull(expr) => {
+                let inner_expr = self.parse_expression(expr, schema)?;
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(inner_expr),
+                    Arc::new(Expression::Constant(ConstantExpression::new(
+                        Value::new(Val::Null),
+                        Column::new("const", TypeId::Invalid),
+                        vec![],
+                    ))),
+                    ComparisonType::NotEqual,
+                    vec![],
+                )))
+            }
+
+            Expr::Between {
+                expr,
+                negated,
+                low,
+                high,
+            } => {
+                let expr = self.parse_expression(expr, schema)?;
+                let low = self.parse_expression(low, schema)?;
+                let high = self.parse_expression(high, schema)?;
+
+                let low_compare = Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(expr.clone()),
+                    Arc::new(low),
+                    ComparisonType::GreaterThanOrEqual,
+                    vec![],
+                ));
+
+                let high_compare = Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(expr),
+                    Arc::new(high),
+                    ComparisonType::LessThanOrEqual,
+                    vec![],
+                ));
+
+                let mut result = Expression::Logic(LogicExpression::new(
+                    Arc::new(low_compare),
+                    Arc::new(high_compare),
+                    LogicType::And,
+                    vec![],
+                ));
+
+                if *negated {
+                    result = Expression::Logic(LogicExpression::new(
+                        Arc::new(result),
+                        Arc::new(Expression::Constant(ConstantExpression::new(
+                            Value::new(true),
+                            Column::new("const", TypeId::Boolean),
+                            vec![],
+                        ))),
+                        LogicType::And, // Using AND with true is effectively NOT
+                        vec![],
+                    ));
+                }
+
+                Ok(result)
+            }
+
+            Expr::Function(func) => match self.parse_aggregate_function(&func, schema) {
+                Ok(aggregate_function) => Ok(aggregate_function.0),
+                _ => Err(format!("Unsupported function: {}", func)),
+            },
+
+            _ => Err(format!("Unsupported expression type: {:?}", expr)),
+        }
+    }
+
+    pub fn parse_aggregate_function(
+        &self,
+        func: &Function,
+        schema: &Schema,
+    ) -> Result<(Expression, AggregationType), String> {
+        let func_name = func.name.to_string().to_uppercase();
+
+        let (agg_type, arg_expr) = match func_name.as_str() {
+            "COUNT" => {
+                match &func.args {
+                    FunctionArguments::None => (
+                        AggregationType::CountStar,
+                        Expression::Constant(ConstantExpression::new(
+                            Value::new(1),
+                            Column::new("count", TypeId::BigInt), // Changed to BigInt
+                            vec![],
+                        )),
+                    ),
+                    FunctionArguments::List(list) => {
+                        if list.args.is_empty() {
+                            (
+                                AggregationType::CountStar,
+                                Expression::Constant(ConstantExpression::new(
+                                    Value::new(1),
+                                    Column::new("count", TypeId::BigInt), // Changed to BigInt
+                                    vec![],
+                                )),
+                            )
+                        } else {
+                            match &list.args[0] {
+                                FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => (
+                                    AggregationType::CountStar,
+                                    Expression::Constant(ConstantExpression::new(
+                                        Value::new(1),
+                                        Column::new("count", TypeId::BigInt), // Changed to BigInt
+                                        vec![],
+                                    )),
+                                ),
+                                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                    let inner_expr = self.parse_expression(expr, schema)?;
+                                    (AggregationType::Count, inner_expr)
+                                }
+                                _ => return Err("Unsupported COUNT argument".to_string()),
+                            }
+                        }
+                    }
+                    _ => return Err("Invalid COUNT function arguments".to_string()),
+                }
+            }
+            "SUM" | "MIN" | "MAX" | "AVG" => {
+                let agg_type = match func_name.as_str() {
+                    "SUM" => AggregationType::Sum,
+                    "MIN" => AggregationType::Min,
+                    "MAX" => AggregationType::Max,
+                    "AVG" => AggregationType::Avg,
+                    _ => unreachable!(),
+                };
+
+                match &func.args {
+                    FunctionArguments::None => {
+                        return Err(format!("{}() requires an argument", func_name));
+                    }
+                    FunctionArguments::List(list) => {
+                        if list.args.is_empty() {
+                            return Err(format!("{}() requires an argument", func_name));
+                        }
+
+                        match &list.args[0] {
+                            FunctionArg::Named { .. } => {
+                                return Err("Named arguments not supported in aggregate functions"
+                                    .to_string());
+                            }
+                            FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                                FunctionArgExpr::Expr(expr) => {
+                                    (agg_type, self.parse_expression(expr, schema)?)
+                                }
+                                FunctionArgExpr::Wildcard
+                                | FunctionArgExpr::QualifiedWildcard(_) => {
+                                    return Err(format!("{}(*) is not valid", func_name));
+                                }
+                            },
+                            FunctionArg::ExprNamed { .. } => {
+                                return Err(
+                                    "ExprNamed arguments not supported in aggregate functions"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                    FunctionArguments::Subquery(_) => {
+                        return Err("Subqueries not supported in aggregate functions".to_string());
+                    }
+                }
+            }
+            _ => return Err(format!("Unsupported aggregate function: {}", func_name)),
+        };
+
+        Ok((
+            Expression::Aggregate(AggregateExpression::new(
+                agg_type.clone(),
+                Arc::new(arg_expr),
+                vec![],
+            )),
+            agg_type,
+        ))
+    }
+
+    pub fn parse_aggregates(
+        &self,
+        projection: &[SelectItem],
+        schema: &Schema,
+    ) -> Result<(Vec<Arc<Expression>>, Vec<AggregationType>), String> {
+        let mut agg_exprs = Vec::new();
+        let mut agg_types = Vec::new();
+
+        for item in projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Expr::Function(func) = expr {
+                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_types.push(agg_type);
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Expr::Function(func) = expr {
+                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
+                        // Create new aggregate expression with aliased column
+                        if let Expression::Aggregate(agg) = agg_expr {
+                            let orig_type = agg.get_return_type().get_type();
+                            let new_col = Column::new(&alias.value, orig_type);
+                            let new_agg = AggregateExpression::new(
+                                agg.get_agg_type().clone(),
+                                agg.get_arg().clone(),
+                                vec![],
+                            )
+                                .with_return_type(new_col);
+                            agg_exprs.push(Arc::new(Expression::Aggregate(new_agg)));
+                        } else {
+                            agg_exprs.push(Arc::new(agg_expr));
+                        }
+                        agg_types.push(agg_type);
+                    }
+                }
+                SelectItem::Wildcard(_) => {
+                    // Handle COUNT(*) case
+                    if projection.len() == 1 {
+                        let count_star = Expression::Aggregate(AggregateExpression::new(
+                            AggregationType::CountStar,
+                            Arc::new(Expression::Constant(ConstantExpression::new(
+                                Value::new(1),
+                                Column::new("count", TypeId::BigInt),
+                                vec![],
+                            ))),
+                            vec![],
+                        ));
+                        agg_exprs.push(Arc::new(count_star));
+                        agg_types.push(AggregationType::CountStar);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok((agg_exprs, agg_types))
+    }
+
+    pub fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
+        projection.iter().any(|item| match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                self.is_aggregate_function(expr)
+            }
+            _ => false,
+        })
+    }
+
+    fn is_aggregate_function(&self, expr: &Expr) -> bool {
+        if let Expr::Function(func) = expr {
+            let name = func.name.to_string().to_uppercase();
+            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
+        } else {
+            false
+        }
+    }
+
+    pub fn determine_group_by_expressions(
+        &self,
+        select: &Box<Select>,
+        base_schema: &Schema,
+        has_group_by: bool,
+    ) -> Result<Vec<Expression>, String> {
+        if !has_group_by {
+            return Ok(Vec::new());
+        }
+
+        match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => exprs
+                .iter()
+                .map(|expr| self.parse_expression(expr, base_schema))
+                .collect(),
+            GroupByExpr::All(_) => {
+                // If GROUP BY ALL, use all columns from the input schema
+                (0..base_schema.get_column_count())
+                    .map(|i| {
+                        let col = base_schema.get_column(i as usize).unwrap();
+                        Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            i as usize,
+                            col.clone(),
+                            vec![],
+                        )))
+                    })
+                    .collect()
+            }
+        }
+    }
+    /// Helper function to extract join key expressions from a join predicate
+
+    pub fn prepare_table_scan(&self, select: &Box<Select>) -> Result<(String, Schema, u64), String> {
+        if select.from.len() != 1 {
+            return Err("Only single table queries are supported".to_string());
+        }
+
+        // Extract table name
+        let table_name = match &select.from[0].relation {
+            TableFactor::Table { name, .. } => name.to_string(),
+            _ => return Err("Only simple table scans are supported".to_string()),
+        };
+
+        // Retrieve table information from catalog
+        let catalog_guard = self.catalog.read();
+        let table_info = catalog_guard
+            .get_table(&table_name)
+            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))?;
+
+        let schema = table_info.get_table_schema();
+        let table_oid = table_info.get_table_oidt();
+
+        Ok((table_name, schema, table_oid))
+    }
+
+    pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
+        if select.from.len() <= 1 {
+            return self
+                .prepare_table_scan(select)
+                .map(|(name, schema, oid)| LogicalPlan::table_scan(name, schema, oid));
+        }
+
+        let mut current_plan = None;
+        let mut current_schema = None;
+
+        for (i, table_with_joins) in select.from.iter().enumerate() {
+            let table_factor = &table_with_joins.relation;
+            let table_name = match table_factor {
+                TableFactor::Table { name, .. } => name.to_string(),
+                _ => return Err("Only simple table joins are supported".to_string()),
+            };
+
+            let catalog_guard = self.catalog.read();
+            let table_info = catalog_guard
+                .get_table(&table_name)
+                .ok_or_else(|| format!("Table '{}' not found", table_name))?;
+
+            let schema = table_info.get_table_schema();
+            let table_oid = table_info.get_table_oidt();
+            let table_scan = LogicalPlan::table_scan(table_name, schema.clone(), table_oid);
+
+            if i == 0 {
+                current_plan = Some(table_scan);
+                current_schema = Some(schema);
+            } else {
+                for join in &table_with_joins.joins {
+                    let left_plan = current_plan.take().unwrap();
+                    let left_schema = current_schema.take().unwrap();
+
+                    let join_predicate = match &join.join_operator {
+                        JoinOperator::Inner(constraint) |
+                        JoinOperator::LeftOuter(constraint) |
+                        JoinOperator::RightOuter(constraint) |
+                        JoinOperator::FullOuter(constraint) => match constraint {
+                            JoinConstraint::On(expr) => {
+                                let combined_schema = Schema::merge(&left_schema, &schema);
+                                self.parse_expression(expr, &combined_schema)?
+                            }
+                            _ => return Err("Only ON join constraints supported".to_string()),
+                        },
+                        _ => return Err("Only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER joins with ON clause are supported".to_string()),
+                    };
+
+                    current_plan = Some(match &join.join_operator {
+                        JoinOperator::Inner(_) => LogicalPlan::hash_join(
+                            left_schema.clone(),
+                            schema.clone(),
+                            Arc::new(join_predicate),
+                            join.join_operator.clone(),
+                            left_plan,
+                            table_scan.clone(),
+                        ),
+                        _ => return Err("Only INNER JOIN supported".to_string()),
+                    });
+
+                    current_schema = Some(Schema::merge(&left_schema, &schema));
+                }
+            }
+        }
+
+        current_plan.ok_or_else(|| "No tables in FROM clause".to_string())
+    }
+
+    pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
+        match table_name {
+            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
+            _ => Err("Only single table INSERT statements are supported".to_string()),
+        }
+    }
+}
+
+impl SchemaManager {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn create_aggregation_output_schema(
+        &self,
+        group_bys: &[&Expression],
+        aggregates: &[Arc<Expression>],
+        has_group_by: bool,
+    ) -> Schema {
+        let mut columns = Vec::new();
+        let mut seen_columns = HashSet::new();
+
+        // Add group by columns first if we have them
+        if has_group_by {
+            for expr in group_bys {
+                let col_name = expr.get_return_type().get_name().to_string();
+                if seen_columns.insert(col_name.clone()) {
+                    columns.push(expr.get_return_type().clone());
+                }
+            }
+        }
+
+        // Add aggregate columns
+        for agg_expr in aggregates {
+            match agg_expr.as_ref() {
+                Expression::Aggregate(agg) => {
+                    let col_name = match agg.get_agg_type() {
+                        AggregationType::CountStar => "COUNT(*)".to_string(),
+                        _ => format!(
+                            "{}({})",
+                            agg.get_agg_type().to_string(),
+                            agg.get_arg().get_return_type().get_name()
+                        ),
+                    };
+
+                    if seen_columns.insert(col_name.clone()) {
+                        let col_type = match agg.get_agg_type() {
+                            AggregationType::Count | AggregationType::CountStar => TypeId::BigInt,
+                            AggregationType::Sum => agg.get_arg().get_return_type().get_type(),
+                            AggregationType::Avg => TypeId::Decimal,
+                            AggregationType::Min | AggregationType::Max => {
+                                agg.get_arg().get_return_type().get_type()
+                            }
+                        };
+                        columns.push(Column::new(&col_name, col_type));
+                    }
+                }
+                _ => {
+                    let col_name = agg_expr.get_return_type().get_name().to_string();
+                    if seen_columns.insert(col_name.clone()) {
+                        columns.push(agg_expr.get_return_type().clone());
+                    }
+                }
+            }
+        }
+
+        Schema::new(columns)
+    }
+
+    fn create_values_schema(&self, rows: &[Vec<Expr>]) -> Result<Schema, String> {
+        if rows.is_empty() {
+            return Err("VALUES clause cannot be empty".to_string());
+        }
+
+        let first_row = &rows[0];
+        let columns = first_row
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| {
+                let type_id = self.infer_expression_type(expr)?;
+                Ok(Column::new(&format!("column{}", i + 1), type_id))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        Ok(Schema::new(columns))
+    }
+
+    fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
+        let mut columns = Vec::new();
+
+        for col_def in column_defs {
+            let column_name = col_def.name.to_string();
+            let type_id = self.convert_sql_type(&col_def.data_type)?;
+
+            // Handle VARCHAR/STRING types specifically with length
+            let column = match &col_def.data_type {
+                DataType::Varchar(_) | DataType::String(_) => {
+                    // Default length for variable length types
+                    Column::new_varlen(&column_name, type_id, 255)
+                }
+                _ => Column::new(&column_name, type_id),
+            };
+
+            columns.push(column);
+        }
+
+        Ok(columns)
+    }
+
+    fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
+        if source.get_column_count() != target.get_column_count() {
+            return false;
+        }
+
+        for i in 0..source.get_column_count() {
+            let source_col = source.get_column(i as usize).unwrap();
+            let target_col = target.get_column(i as usize).unwrap();
+
+            if !self.types_compatible(source_col.get_type(), target_col.get_type()) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn types_compatible(&self, source_type: TypeId, target_type: TypeId) -> bool {
+        // Add your type compatibility rules here
+        // For example:
+        match (source_type, target_type) {
+            // Same types are always compatible
+            (a, b) if a == b => true,
+            _ => false,
+        }
+    }
+
+    fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
+        match sql_type {
+            DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
+            DataType::TinyInt(_) => Ok(TypeId::TinyInt),
+            DataType::SmallInt(_) => Ok(TypeId::SmallInt),
+            DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
+            DataType::BigInt(_) => Ok(TypeId::BigInt),
+            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
+            DataType::Varchar(_) | DataType::String(_) | DataType::Text => Ok(TypeId::VarChar),
+            DataType::Array(_) => Ok(TypeId::Vector),
+            DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
+            _ => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+        }
+    }
+
+    fn infer_expression_type(&self, expr: &Expr) -> Result<TypeId, String> {
+        match expr {
+            Expr::Value(value) => match value {
+                sqlparser::ast::Value::Number(_, _) => Ok(TypeId::Integer),
+                sqlparser::ast::Value::SingleQuotedString(_)
+                | sqlparser::ast::Value::DoubleQuotedString(_) => Ok(TypeId::VarChar),
+                sqlparser::ast::Value::Boolean(_) => Ok(TypeId::Boolean),
+                sqlparser::ast::Value::Null => Ok(TypeId::Invalid),
+                _ => Err(format!("Unsupported value type: {:?}", value)),
+            },
+            _ => Ok(TypeId::Invalid), // Default type for complex expressions
+        }
+    }
+}
+
+impl LogicalPlanBuilder {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+        Self {
+            expression_parser: ExpressionParser::new(Arc::clone(&catalog)),
+            schema_manager: SchemaManager::new(),
+        }
+    }
+
+    pub fn build_query_plan(&self, query: &Query) -> Result<Box<LogicalPlan>, String> {
+        // Start with the main query body
+        let mut current_plan = match &*query.body {
+            SetExpr::Select(select) => self.build_select_plan(select)?,
+            SetExpr::Query(nested_query) => self.build_query_plan(nested_query)?,
+            SetExpr::Values(values) => {
+                let schema = self.schema_manager.create_values_schema(&values.rows)?;
+                self.build_values_plan(&values.rows, &schema)?
+            }
+            SetExpr::Update(update) => self.build_update_plan(update)?,
+
+            _ => return Err("Only SELECT, nested queries, and VALUES are supported".to_string()),
+        };
+
+        // Handle ORDER BY if present
+        if let Some(order_by) = &query.order_by {
+            let schema = current_plan.get_schema();
+            let sort_exprs = order_by
+                .exprs
+                .iter()
+                .map(|order| {
+                    let expr = self.expression_parser.parse_expression(&order.expr, &schema)?;
+                    // TODO: Handle order.asc and order.nulls_first if needed
+                    Ok(Arc::new(expr))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
+        }
+
+        // Handle OFFSET if present
+        if let Some(offset) = &query.offset {
+            let schema = current_plan.get_schema();
+            match &offset.value {
+                Expr::Value(sqlparser::ast::Value::Number(n, _)) => {
+                    if let Ok(offset_val) = n.parse::<usize>() {
+                        // Create a limit node with offset
+                        // For now, we'll use a very large number as the limit
+                        current_plan = LogicalPlan::limit(usize::MAX, schema, current_plan);
+                        // TODO: Implement proper OFFSET support in the limit plan
+                    } else {
+                        return Err("Invalid OFFSET value".to_string());
+                    }
+                }
+                _ => return Err("OFFSET must be a number".to_string()),
+            }
+        }
+
+        // Handle LIMIT if present
+        if let Some(limit_expr) = &query.limit {
+            let schema = current_plan.get_schema();
+            match limit_expr {
+                Expr::Value(sqlparser::ast::Value::Number(n, _)) => {
+                    if let Ok(limit_val) = n.parse::<usize>() {
+                        current_plan = LogicalPlan::limit(limit_val, schema, current_plan);
+                    } else {
+                        return Err("Invalid LIMIT value".to_string());
+                    }
+                }
+                _ => return Err("LIMIT must be a number".to_string()),
+            }
+        }
+
+        // Handle FETCH if present (similar to LIMIT)
+        if let Some(fetch) = &query.fetch {
+            let schema = current_plan.get_schema();
+            match &fetch.quantity {
+                Some(Expr::Value(sqlparser::ast::Value::Number(n, _))) => {
+                    if let Ok(fetch_val) = n.parse::<usize>() {
+                        current_plan = LogicalPlan::limit(fetch_val, schema, current_plan);
+                    } else {
+                        return Err("Invalid FETCH value".to_string());
+                    }
+                }
+                _ => return Err("FETCH quantity must be a number".to_string()),
+            }
+        }
+
+        // Handle LIMIT BY if present
+        // if !query.limit_by.is_empty() {
+        //     let schema = current_plan.get_schema();
+        //     let limit_by_exprs = query.limit_by.iter()
+        //         .map(|expr| {
+        //             let parsed_expr = self.parse_expression(expr, &schema)?;
+        //             Ok(Arc::new(parsed_expr))
+        //         })
+        //         .collect::<Result<Vec<_>, String>>()?;
+        //
+        //     // For now, we'll treat LIMIT BY similar to GROUP BY with a limit
+        //     // TODO: Implement proper LIMIT BY support
+        //     current_plan = LogicalPlan::top_n(
+        //         usize::MAX, // Replace with actual limit value when available
+        //         vec![], // Sort expressions
+        //         limit_by_exprs,
+        //         schema,
+        //         current_plan,
+        //     );
+        // }
+
+        Ok(current_plan)
+    }
+
+    pub fn build_select_plan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
+        // Start with join handling
+        let mut current_plan = self.expression_parser.prepare_join_scan(select)?;
+
+        // Add filter if WHERE clause exists
+        if let Some(where_clause) = &select.selection {
+            let schema = current_plan.get_schema();
+            let predicate = Arc::new(self.expression_parser.parse_expression(where_clause, &schema)?);
+            current_plan = LogicalPlan::filter(
+                schema.clone(),
+                String::new(), // No single table name for joins
+                0,             // No single table OID for joins
+                predicate,
+                current_plan,
+            );
+        }
+
+        // Handle aggregation if needed
+        let schema = current_plan.get_schema();
+        let has_group_by = match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
+            GroupByExpr::All(_) => true,
+        };
+        let has_aggregates = self.expression_parser.has_aggregate_functions(&select.projection);
+
+        if has_group_by || has_aggregates {
+            // Parse group by expressions
+            let group_by_exprs: Vec<_> = self
+                .expression_parser
+                .determine_group_by_expressions(select, &schema, has_group_by)?
+                .into_iter()
+                .map(Arc::new)
+                .collect();
+
+            // Parse aggregates
+            let (agg_exprs, _) = self.expression_parser.parse_aggregates(&select.projection, &schema)?;
+
+            // Create output schema for aggregation
+            let agg_schema = self.schema_manager.create_aggregation_output_schema(
+                &group_by_exprs
+                    .iter()
+                    .map(|e| e.as_ref())
+                    .collect::<Vec<_>>(),
+                &agg_exprs,
+                has_group_by,
+            );
+
+            current_plan =
+                LogicalPlan::aggregate(group_by_exprs, agg_exprs, agg_schema, current_plan);
+        }
+
+        // Handle ORDER BY
+        if !select.sort_by.is_empty() {
+            let sort_exprs = select
+                .sort_by
+                .iter()
+                .map(|order| {
+                    let expr = self.expression_parser.parse_expression(&order, &schema)?;
+                    Ok(Arc::new(expr))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
+        }
+
+        // Add final projection
+        self.build_projection_plan(select, current_plan, &schema)
+    }
+
+    pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
+        let table_name = self.expression_parser.extract_table_name(&insert.table_name)?;
+
+        // Get table info from catalog
+        let catalog_guard = self.expression_parser.catalog.read();
+        let table_info = catalog_guard
+            .get_table(&table_name)
+            .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
+
+        let schema = table_info.get_table_schema();
+        let table_oid = table_info.get_table_oidt();
+
+        // Plan the source (VALUES or SELECT)
+        let source_plan = match &insert.source {
+            Some(query) => match &*query.body {
+                SetExpr::Values(values) => self.build_values_plan(&values.rows, &schema)?,
+                SetExpr::Select(select) => {
+                    let select_plan = self.build_select_plan(select)?;
+                    if !self.schema_manager.schemas_compatible(&select_plan.get_schema(), &schema) {
+                        return Err("SELECT schema doesn't match INSERT target".to_string());
+                    }
+                    select_plan
+                }
+                _ => return Err("Only VALUES and SELECT supported in INSERT".to_string()),
+            },
+            None => return Err("INSERT statement must have a source".to_string()),
+        };
+
+        Ok(LogicalPlan::insert(
+            table_name,
+            schema,
+            table_oid,
+            source_plan,
+        ))
+    }
+
+    pub fn build_update_plan(&self, update: &Statement) -> Result<Box<LogicalPlan>, String> {
+        // Get table info
+        let (table, assignments, selection) = match update {
+            Statement::Update {
+                table,
+                assignments,
+                selection,
+                ..  // Ignore other fields for now (from, returning, or)
+            } => (table, assignments, selection),
+            _ => return Err("Expected Update statement".to_string()),
+        };
+
+        let table_name = match &table.relation {
+            TableFactor::Table { name, .. } => name.to_string(),
+            _ => return Err("Only simple table updates supported".to_string()),
+        };
+
+        let catalog_guard = self.expression_parser.catalog.read();
+        let table_info = catalog_guard
+            .get_table(&table_name)
+            .ok_or_else(|| format!("Table '{}' not found", table_name))?;
+
+        let schema = table_info.get_table_schema();
+        let table_oid = table_info.get_table_oidt();
+
+        // Create base table scan
+        let mut current_plan =
+            LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
+
+        // Add filter if WHERE clause exists
+        if let Some(where_clause) = selection {
+            let predicate = Arc::new(self.expression_parser.parse_expression(where_clause, &schema)?);
+            current_plan = LogicalPlan::filter(
+                schema.clone(),
+                table_name.clone(),
+                table_oid,
+                predicate,
+                current_plan,
+            );
+        }
+
+        // Parse update assignments
+        let mut update_exprs = Vec::new();
+        for assignment in assignments {
+            let value_expr = self.expression_parser.parse_expression(&assignment.value, &schema)?;
+            update_exprs.push(Arc::new(value_expr));
+        }
+
+        // Create update plan
+        Ok(LogicalPlan::update(
+            table_name,
+            schema,
+            table_oid,
+            update_exprs,
+            current_plan,
+        ))
+    }
+
+    pub fn build_values_plan(
+        &self,
+        rows: &[Vec<Expr>],
+        schema: &Schema,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let mut value_rows = Vec::new();
+
+        for row in rows {
+            if row.len() != schema.get_column_count() as usize {
+                return Err(format!(
+                    "VALUES has {} columns but schema expects {}",
+                    row.len(),
+                    schema.get_column_count()
+                ));
+            }
+
+            let mut value_exprs = Vec::new();
+            for (_, expr) in row.iter().enumerate() {
+                let value_expr = Arc::new(self.expression_parser.parse_expression(expr, schema)?);
+                value_exprs.push(value_expr);
+            }
+            value_rows.push(value_exprs);
+        }
+
+        Ok(LogicalPlan::values(value_rows, schema.clone()))
+    }
+
+    pub fn build_projection_plan(
+        &self,
+        select: &Select,
+        input: Box<LogicalPlan>,
+        schema: &Schema,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let mut projection_exprs = Vec::new();
+        let mut output_columns = Vec::new();
+
+        for item in &select.projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Expr::Function(func) = expr {
+                        // For aggregate functions, use the formatted name
+                        let (expr, agg_type) = self.expression_parser.parse_aggregate_function(&func, schema)?;
+                        let col_name = format!(
+                            "{}({})",
+                            agg_type.to_string(),
+                            expr.get_return_type().get_name()
+                        );
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&col_name, expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns
+                            .push(Column::new(&col_name, expr.get_return_type().get_type()));
+                    } else {
+                        let parsed_expr = self.expression_parser.parse_expression(expr, schema)?;
+                        projection_exprs.push(Arc::new(parsed_expr.clone()));
+                        output_columns.push(parsed_expr.get_return_type().clone());
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Expr::Function(func) = expr {
+                        // For aliased aggregate functions, use the alias name
+                        let (expr, _) = self.expression_parser.parse_aggregate_function(&func, schema)?;
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&alias.value, expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns
+                            .push(Column::new(&alias.value, expr.get_return_type().get_type()));
+                    } else {
+                        let parsed_expr = self.expression_parser.parse_expression(expr, schema)?;
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            projection_exprs.len(),
+                            Column::new(&alias.value, parsed_expr.get_return_type().get_type()),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(Column::new(
+                            &alias.value,
+                            parsed_expr.get_return_type().get_type(),
+                        ));
+                    }
+                }
+                SelectItem::Wildcard(_) => {
+                    // For wildcards, include all columns from input
+                    for i in 0..schema.get_column_count() {
+                        let col = schema.get_column(i as usize).unwrap();
+                        let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
+                            0,
+                            i as usize,
+                            col.clone(),
+                            vec![],
+                        ));
+                        projection_exprs.push(Arc::new(col_ref));
+                        output_columns.push(col.clone());
+                    }
+                }
+                _ => return Err("Unsupported projection item".to_string()),
+            }
+        }
+
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            Schema::new(output_columns),
+            input,
+        ))
+    }
+
+    pub fn build_create_table_plan(
+        &self,
+        create_table: &CreateTable,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let table_name = create_table.name.to_string();
+
+        // Check if table already exists
+        {
+            let catalog = self.expression_parser.catalog.read();
+            if catalog.get_table(&table_name).is_some() {
+                // If table exists and IF NOT EXISTS flag is set, return success
+                if create_table.if_not_exists {
+                    // Create a dummy plan that will effectively be a no-op
+                    let columns = self.schema_manager.convert_column_defs(&create_table.columns)?;
+                    let schema = Schema::new(columns);
+                    return Ok(LogicalPlan::create_table(schema, table_name, true));
+                }
+                // Otherwise return error
+                return Err(format!("Table '{}' already exists", table_name));
+            }
+        }
+
+        // If we get here, table doesn't exist, proceed with normal creation
+        let columns = self.schema_manager.convert_column_defs(&create_table.columns)?;
+        let schema = Schema::new(columns);
+
+        Ok(LogicalPlan::create_table(
+            schema,
+            table_name,
+            create_table.if_not_exists,
+        ))
+    }
+
+    pub fn build_create_index_plan(
+        &mut self,
+        create_index: &CreateIndex,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let index_name = create_index
+            .clone()
+            .name
+            .expect("Index Name not available")
+            .to_string();
+        let table_name = match &create_index.table_name {
+            ObjectName(parts) if parts.len() == 1 => parts[0].value.clone(),
+            _ => return Err("Only single table indices are supported".to_string()),
+        };
+
+        let catalog_guard = self.expression_parser.catalog.read();
+        let table_schema = catalog_guard
+            .get_table_schema(&table_name)
+            .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
+
+        let mut key_attrs = Vec::new();
+        let mut columns = Vec::new();
+
+        for col_name in &create_index.columns {
+            let idx = table_schema
+                .get_column_index(&col_name.to_string())
+                .ok_or_else(|| format!("Column {} not found in table", col_name))?;
+            key_attrs.push(idx);
+            columns.push(table_schema.get_column(idx).unwrap().clone());
+        }
+
+        let schema = Schema::new(columns.clone());
+        drop(catalog_guard);
+        {
+            Ok(LogicalPlan::create_index(
+                schema,
+                table_name,
+                index_name,
+                key_attrs,
+                create_index.if_not_exists,
+            ))
+        }
+    }
+}
+
+impl QueryPlanner {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+        Self {
+            plan_builder: LogicalPlanBuilder::new(Arc::clone(&catalog)),
+        }
+    }
+
+    pub fn create_logical_plan(&mut self, sql: &str) -> Result<Box<LogicalPlan>, String> {
+        let dialect = GenericDialect {};
+        let ast = Parser::parse_sql(&dialect, sql).map_err(|e| e.to_string())?;
+
+        if ast.len() != 1 {
+            return Err("Only single SQL statement is supported".to_string());
+        }
+
+        self.create_logical_plan_from_statement(&ast[0])
+    }
+
+    pub fn create_logical_plan_from_statement(
+        &mut self,
+        stmt: &Statement,
+    ) -> Result<Box<LogicalPlan>, String> {
+        match stmt {
+            Statement::Query(query) => self.plan_builder.build_query_plan(query),
+            Statement::Insert(stmt) => self.plan_builder.build_insert_plan(stmt),
+            Statement::CreateTable(stmt) => self.plan_builder.build_create_table_plan(stmt),
+            Statement::CreateIndex(stmt) => self.plan_builder.build_create_index_plan(stmt),
+            Statement::Update {
+                table: _,
+                assignments: _,
+                from: _,
+                selection: _,
+                returning: _,
+                or: _,
+            } => self.plan_builder.build_update_plan(stmt),
+            _ => Err(format!("Unsupported statement type: {:?}", stmt)),
+        }
+    }
+
+    pub fn explain(&mut self, sql: &str) -> Result<String, String> {
+        let plan = self.create_logical_plan(sql)?;
+        Ok(format!("Query Plan:\n{}\n", plan.explain(0)))
+    }
+}
+
 impl LogicalToPhysical for LogicalPlan {
     fn to_physical_plan(&self) -> Result<PlanNode, String> {
         match &self.plan_type {
@@ -2083,25 +2222,30 @@ impl LogicalToPhysical for LogicalPlan {
                 )))
             }
 
-            LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
-                let children = self.children.iter()
+            LogicalPlanType::Aggregate {
+                group_by,
+                aggregates,
+                schema,
+            } => {
+                let children = self
+                    .children
+                    .iter()
                     .map(|child| child.to_physical_plan())
                     .collect::<Result<Vec<PlanNode>, String>>()?;
 
                 // Filter out duplicate expressions
-                let agg_exprs = aggregates.iter()
-                    .filter(|expr| {
-                        match expr.as_ref() {
-                            Expression::ColumnRef(col_ref) => {
-                                !group_by.iter().any(|g| match g.as_ref() {
-                                    Expression::ColumnRef(g_ref) => {
-                                        g_ref.get_column_index() == col_ref.get_column_index()
-                                    }
-                                    _ => false
-                                })
-                            }
-                            _ => true
+                let agg_exprs = aggregates
+                    .iter()
+                    .filter(|expr| match expr.as_ref() {
+                        Expression::ColumnRef(col_ref) => {
+                            !group_by.iter().any(|g| match g.as_ref() {
+                                Expression::ColumnRef(g_ref) => {
+                                    g_ref.get_column_index() == col_ref.get_column_index()
+                                }
+                                _ => false,
+                            })
                         }
+                        _ => true,
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -2313,7 +2457,14 @@ impl LogicalToPhysical for LogicalPlan {
     }
 }
 
-/// Helper function to extract join key expressions from a join predicate
+impl Display for LogicalPlan {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            _ => write!(f, "{:#?}", self),
+        }
+    }
+}
+
 fn extract_join_keys(
     predicate: &Arc<Expression>,
 ) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
@@ -2357,6 +2508,7 @@ fn extract_join_keys(
     Ok((left_keys, right_keys))
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2364,6 +2516,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::recovery::log_manager::LogManager;
     use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -2402,8 +2555,9 @@ mod tests {
                 replacer.clone(),
             ));
 
-            let transaction_manager =
-                Arc::new(TransactionManager::new());
+            let log_manager = Arc::new(RwLock::new(LogManager::new(Arc::clone(&disk_manager))));
+
+            let transaction_manager = Arc::new(TransactionManager::new());
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm,
@@ -2545,7 +2699,10 @@ mod tests {
 
             // First verify the projection node
             match &plan.plan_type {
-                LogicalPlanType::Projection { expressions, schema } => {
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
                 }
@@ -2554,7 +2711,9 @@ mod tests {
 
             // Then verify the table scan node
             match &plan.children[0].plan_type {
-                LogicalPlanType::TableScan { table_name, schema, .. } => {
+                LogicalPlanType::TableScan {
+                    table_name, schema, ..
+                } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 3);
                 }
@@ -2572,7 +2731,10 @@ mod tests {
 
             // First verify the projection node
             match &plan.plan_type {
-                LogicalPlanType::Projection { expressions, schema } => {
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
                 }
@@ -2581,7 +2743,9 @@ mod tests {
 
             // Then verify the filter node
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { schema, predicate, .. } => {
+                LogicalPlanType::Filter {
+                    schema, predicate, ..
+                } => {
                     assert_eq!(schema.get_column_count(), 3);
                     match predicate.as_ref() {
                         Expression::Comparison(comp) => {
@@ -2595,7 +2759,9 @@ mod tests {
 
             // Finally verify the table scan node
             match &plan.children[0].children[0].plan_type {
-                LogicalPlanType::TableScan { table_name, schema, .. } => {
+                LogicalPlanType::TableScan {
+                    table_name, schema, ..
+                } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 3);
                 }
@@ -2683,9 +2849,12 @@ mod tests {
             ];
 
             for (sql, expected_columns) in test_cases {
-                let plan = fixture.planner.create_logical_plan(sql).unwrap_or_else(|e| {
-                    panic!("Failed to create plan for query '{}': {}", sql, e);
-                });
+                let plan = fixture
+                    .planner
+                    .create_logical_plan(sql)
+                    .unwrap_or_else(|e| {
+                        panic!("Failed to create plan for query '{}': {}", sql, e);
+                    });
 
                 // if let Err(e) = verify_aggregation_plan(&plan, &expected_columns) {
                 //     panic!(
@@ -2729,7 +2898,10 @@ mod tests {
 
                 // First verify we have a projection node
                 match &plan.plan_type {
-                    LogicalPlanType::Projection { expressions, schema } => {
+                    LogicalPlanType::Projection {
+                        expressions,
+                        schema,
+                    } => {
                         assert_eq!(expressions.len(), expected_types.len());
                     }
                     _ => panic!("Expected Projection as root node for query: {}", sql),
@@ -2737,7 +2909,11 @@ mod tests {
 
                 // Then verify the aggregate node
                 match &plan.children[0].plan_type {
-                    LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                    LogicalPlanType::Aggregate {
+                        group_by,
+                        aggregates,
+                        schema,
+                    } => {
                         // Check aggregate types
                         assert_eq!(
                             aggregates.len(),
@@ -2749,8 +2925,8 @@ mod tests {
                         for (i, expected_type) in expected_types.iter().enumerate() {
                             if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
                                 assert_eq!(
-                                    *agg.get_agg_type(),
-                                    *expected_type,
+                                    agg.get_agg_type(), // Remove & reference
+                                    expected_type,
                                     "Aggregate type mismatch for query: {}",
                                     sql
                                 );

@@ -363,44 +363,6 @@ mod tests {
         )
     }
 
-    fn create_invalid_age_filter(
-        age: i32,
-        comparison_type: ComparisonType,
-        schema: &Schema,
-    ) -> Arc<FilterNode> {
-        // Create column reference for age
-        let age_col = Column::new("age", TypeId::Integer);
-        let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
-            0,
-            age_col.clone(),
-            vec![],
-        )));
-
-        // Create constant expression for comparison
-        let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(age),
-            age_col,
-            vec![],
-        )));
-
-        // Create predicate
-        let predicate = Expression::Comparison(ComparisonExpression::new(
-            col_expr,
-            const_expr,
-            comparison_type,
-            vec![],
-        ));
-
-        Arc::new(FilterNode::new(
-            schema.clone(),
-            0,
-            "test_table".to_string(),
-            Arc::from(predicate),
-            vec![PlanNode::Empty],
-        ))
-    }
-
     fn create_test_schema() -> Schema {
         Schema::new(vec![
             Column::new("id", TypeId::Integer),
