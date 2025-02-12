@@ -1,7 +1,7 @@
 use crate::common::config::*;
 use crate::common::exception::PageError;
 use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::TypeErasedBucketPage;
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
@@ -17,7 +17,7 @@ pub enum PageType {
     Table(TablePage),
     ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
     ExtendedHashTableHeader(ExtendableHTableHeaderPage),
-    ExtendedHashTableBucket(TypeErasedBucketPage),
+    ExtendedHashTableBucket(ExtendableHTableBucketPage),
 }
 
 /// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
@@ -196,24 +196,89 @@ impl PageTrait for Page {
 }
 
 impl PageType {
-    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
+    /// Get the type identifier byte for this page type
+    pub fn get_type_id_byte(&self) -> u8 {
         match self {
-            Basic(page) => unimplemented!(),
-            ExtendedHashTableDirectory(page) => page.serialize(),
-            ExtendedHashTableHeader(page) => unimplemented!(),
-            ExtendedHashTableBucket(page) => unimplemented!(),
-            Table(page) => page.serialize(),
+            PageType::Basic(_) => 0,
+            PageType::Table(_) => 1,
+            PageType::ExtendedHashTableDirectory(_) => 2,
+            PageType::ExtendedHashTableHeader(_) => 3,
+            PageType::ExtendedHashTableBucket(_) => 4,
         }
     }
 
-    pub fn deserialize(&mut self, buffer: &[u8; DB_PAGE_SIZE as usize]) {
-        match self {
-            Basic(page) => unimplemented!(),
-            ExtendedHashTableDirectory(page) => page.deserialize(buffer),
-            ExtendedHashTableHeader(page) => unimplemented!(),
-            ExtendedHashTableBucket(page) => unimplemented!(),
-            Table(page) => unimplemented!(),
+    /// Create a new page of the specified type from a type identifier byte
+    pub fn from_type_id_byte(type_id: u8, page_id: PageId) -> Option<Self> {
+        match type_id {
+            0 => Some(PageType::Basic(Page::new(page_id))),
+            1 => Some(PageType::Table(TablePage::new(page_id))),
+            2 => Some(PageType::ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))),
+            3 => Some(PageType::ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id))),
+            4 => Some(PageType::ExtendedHashTableBucket(ExtendableHTableBucketPage::new(page_id))),
+            _ => None,
         }
+    }
+
+    /// Serialize the page to bytes, including type information
+    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
+        let mut data = [0u8; DB_PAGE_SIZE as usize];
+        
+        // Write the type identifier as the first byte
+        data[0] = self.get_type_id_byte();
+
+        // Write the actual page data starting from index 1
+        match self {
+            PageType::Basic(page) => {
+                data[1..].copy_from_slice(&page.get_data()[1..]);
+            }
+            PageType::Table(page) => {
+                let serialized = page.get_data();
+                data[1..].copy_from_slice(&serialized[1..]);
+            }
+            PageType::ExtendedHashTableDirectory(page) => {
+                let serialized = page.get_data();
+                data[1..].copy_from_slice(&serialized[1..]);
+            }
+            PageType::ExtendedHashTableHeader(page) => {
+                let serialized = page.get_data();
+                data[1..].copy_from_slice(&serialized[1..]);
+            }
+            PageType::ExtendedHashTableBucket(page) => {
+                let serialized = page.get_data();
+                data[1..].copy_from_slice(&serialized[1..]);
+            }
+        }
+        data
+    }
+
+    /// Deserialize bytes into the appropriate page type
+    pub fn deserialize(buffer: &[u8; DB_PAGE_SIZE as usize], page_id: PageId) -> Option<Self> {
+        // Read the type identifier from the first byte
+        let type_id = buffer[0];
+        
+        // Create the appropriate page type
+        let mut page = Self::from_type_id_byte(type_id, page_id)?;
+        
+        // Deserialize the data into the page
+        match &mut page {
+            PageType::Basic(p) => {
+                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
+            }
+            PageType::Table(p) => {
+                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
+            }
+            PageType::ExtendedHashTableDirectory(p) => {
+                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
+            }
+            PageType::ExtendedHashTableHeader(p) => {
+                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
+            }
+            PageType::ExtendedHashTableBucket(p) => {
+                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
+            }
+        }
+        
+        Some(page)
     }
 
     pub fn as_page_trait(&self) -> &dyn PageTrait {
@@ -266,12 +331,6 @@ impl From<ExtendableHTableDirectoryPage> for PageType {
 impl From<ExtendableHTableHeaderPage> for PageType {
     fn from(page: ExtendableHTableHeaderPage) -> Self {
         ExtendedHashTableHeader(page)
-    }
-}
-
-impl From<TypeErasedBucketPage> for PageType {
-    fn from(page: TypeErasedBucketPage) -> Self {
-        ExtendedHashTableBucket(page)
     }
 }
 
@@ -497,5 +556,65 @@ mod edge_cases {
         page.set_dirty(false);
         assert!(!page.is_dirty());
         assert_eq!(page.get_data()[0], 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_page_serialization_deserialization() {
+        // Create a test page
+        let mut original_page = Basic(Page::new(42));
+        
+        // Write some test data
+        if let Basic(ref mut page) = original_page {
+            let data = page.get_data_mut();
+            data[1] = 123; // Write test data after type identifier
+        }
+
+        // Serialize
+        let serialized = original_page.serialize();
+        
+        // Deserialize
+        let deserialized = PageType::deserialize(&serialized, 42).unwrap();
+        
+        // Verify type
+        assert!(matches!(deserialized, PageType::Basic(_)));
+        
+        // Verify data
+        if let PageType::Basic(page) = deserialized {
+            assert_eq!(page.get_data()[1], 123);
+        }
+    }
+
+    #[test]
+    fn test_all_page_types() {
+        let page_types = vec![
+            Basic(Page::new(1)),
+            Table(TablePage::new(2)),
+            ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(3)),
+            ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(4)),
+            ExtendedHashTableBucket(ExtendableHTableBucketPage::new(5)),
+        ];
+
+        for original_page in page_types {
+            let page_id = original_page.as_page_trait().get_page_id();
+            let serialized = original_page.serialize();
+            let deserialized = PageType::deserialize(&serialized, page_id).unwrap();
+            
+            // Verify the type matches
+            assert_eq!(
+                original_page.get_type_id_byte(),
+                deserialized.get_type_id_byte()
+            );
+            
+            // Verify the page ID matches
+            assert_eq!(
+                original_page.as_page_trait().get_page_id(),
+                deserialized.as_page_trait().get_page_id()
+            );
+        }
     }
 }

@@ -3,13 +3,13 @@ use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::logger::initialize_logger;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
-use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;
+use crate::concurrency::watermark::Watermark;
+use crate::storage::page::page::PageType;
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -120,22 +120,29 @@ impl TableIterator {
         let bpm = self.table_heap.get_bpm();
 
         if let Some(page_guard) = bpm.fetch_page_guarded(self.rid.get_page_id()) {
-            if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                if let Some((num_tuples, next_page_id)) = table_page.access(|page| {
-                    (page.get_num_tuples(), page.get_next_page_id())
-                }) {
-                    let next_slot = self.rid.get_slot_num() + 1;
+            if let Some(page_type) = page_guard.into_specific_type() {
+                match page_type {
+                    PageType::Table(table_page) => {
+                        let num_tuples = table_page.get_num_tuples();
+                        let next_page_id = table_page.get_next_page_id();
+                        let next_slot = self.rid.get_slot_num() + 1;
 
-                    if next_slot >= num_tuples as u32 {
-                        if next_page_id != INVALID_PAGE_ID {
-                            self.rid = RID::new(next_page_id, 0);
+                        if next_slot >= num_tuples as u32 {
+                            if next_page_id != INVALID_PAGE_ID {
+                                self.rid = RID::new(next_page_id, 0);
+                            } else {
+                                self.rid = RID::new(INVALID_PAGE_ID, 0);
+                            }
                         } else {
-                            self.rid = RID::new(INVALID_PAGE_ID, 0);
+                            self.rid = RID::new(self.rid.get_page_id(), next_slot);
                         }
-                    } else {
-                        self.rid = RID::new(self.rid.get_page_id(), next_slot);
+                        return;
                     }
-                    return;
+                    _ => {
+                        debug!("Wrong page type encountered during iteration");
+                        self.rid = RID::new(INVALID_PAGE_ID, 0);
+                        return;
+                    }
                 }
             }
         }
@@ -169,24 +176,22 @@ impl TableIterator {
         match bpm.fetch_page_guarded(page_id) {
             Some(page_guard) => {
                 debug!("Successfully fetched page {}", page_id);
-                match page_guard.into_specific_type::<TablePage, 8>() {
-                    Some(table_page) => {
-                        debug!("Successfully converted to table page {}", page_id);
-                        match table_page.access(|page| page.get_num_tuples()) {
-                            Some(num_tuples) => {
-                                debug!("Page {} has {} tuples", page_id, num_tuples);
-                                Some(num_tuples)
-                            }
-                            None => {
-                                debug!("Failed to get tuple count for page {}", page_id);
-                                None
-                            }
+                if let Some(page_type) = page_guard.into_specific_type() {
+                    match page_type {
+                        PageType::Table(table_page) => {
+                            debug!("Successfully converted to table page {}", page_id);
+                            let num_tuples = table_page.get_num_tuples();
+                            debug!("Page {} has {} tuples", page_id, num_tuples);
+                            Some(num_tuples)
+                        }
+                        _ => {
+                            debug!("Wrong page type for page {}", page_id);
+                            None
                         }
                     }
-                    None => {
-                        debug!("Failed to convert page {} to table page", page_id);
-                        None
-                    }
+                } else {
+                    debug!("Failed to convert page {} to table page", page_id);
+                    None
                 }
             }
             None => {

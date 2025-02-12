@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
 use std::marker::PhantomData;
+use std::convert::TryInto;
+use crate::catalog::schema::Schema;
+use crate::types_db::value::Value;
 
 /// A generic key used for indexing with opaque data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +34,40 @@ impl<T, const N: usize> GenericKey<T, N> {
     /// Returns a reference to the key's byte data.
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    /// Returns a clone of the underlying value.
+    pub fn get_value(&self) -> T
+    where
+        T: From<[u8; N]>,
+    {
+        T::from(self.data)
+    }
+
+    /// Converts the generic key into a `Value` using the provided schema and column index.
+    ///
+    /// Mimics the C++ `ToValue` method:
+    /// - If the column is inlined, the data is taken directly from the key's data at the column's offset.
+    /// - Otherwise, it reads a 4-byte offset out of the key's data to find the actual value location.
+    pub fn to_value(&self, schema: &Schema, column_idx: u32) -> Value {
+        // Convert the column index to usize and assume it's valid.
+        let column = schema.get_column(column_idx as usize)
+            .expect("Invalid column index in Schema");
+        let column_type = column.get_type();
+        if column.is_inlined() {
+            let offset = column.get_offset() as usize;
+            let data_slice = &self.data[offset..];
+            Value::deserialize_from(data_slice, column_type)
+        } else {
+            let offset = column.get_offset() as usize;
+            // Read a 4-byte offset (i32) from the key's data.
+            let raw_offset_bytes = &self.data[offset..offset + 4];
+            let relative_offset = i32::from_ne_bytes(
+                raw_offset_bytes.try_into().expect("Invalid slice length")
+            ) as usize;
+            let data_slice = &self.data[relative_offset..];
+            Value::deserialize_from(data_slice, column_type)
+        }
     }
 }
 

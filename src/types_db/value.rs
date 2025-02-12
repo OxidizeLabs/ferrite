@@ -184,6 +184,75 @@ impl Value {
                              self.get_type_id(), other.get_type_id()))
         }
     }
+
+    fn is_zero(&self, val: &Value) -> bool {
+        match val.get_val() {
+            Val::Integer(i) => *i == 0,
+            Val::BigInt(i) => *i == 0,
+            Val::SmallInt(i) => *i == 0,
+            Val::TinyInt(i) => *i == 0,
+            Val::Decimal(f) => *f == 0.0,
+            _ => false,
+        }
+    }
+
+    /// Deserializes a Value from a byte slice according to the provided TypeId.
+    pub fn deserialize_from(data: &[u8], column_type: crate::types_db::type_id::TypeId) -> Self {
+        use crate::types_db::type_id::TypeId::*;
+        match column_type {
+            Boolean => {
+                if data.len() >= 1 {
+                    Value::new(data[0] != 0)
+                } else {
+                    Value::new(Val::Null)
+                }
+            },
+            TinyInt => {
+                if data.len() >= 1 {
+                    let arr: [u8; 1] = data[0..1].try_into().expect("slice with incorrect length");
+                    Value::new(i8::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            SmallInt => {
+                if data.len() >= 2 {
+                    let arr: [u8; 2] = data[0..2].try_into().expect("slice with incorrect length");
+                    Value::new(i16::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            Integer => {
+                if data.len() >= 4 {
+                    let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
+                    Value::new(i32::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            BigInt => {
+                if data.len() >= 8 {
+                    let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
+                    Value::new(i64::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            Decimal => {
+                if data.len() >= 8 {
+                    let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
+                    Value::new(f64::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            Timestamp => {
+                if data.len() >= 8 {
+                    let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
+                    Value::new(u64::from_le_bytes(arr))
+                } else { Value::new(Val::Null) }
+            },
+            VarChar | Char => {
+                match std::str::from_utf8(data) {
+                    Ok(s) => Value::new(s),
+                    Err(_) => Value::new(Val::Null),
+                }
+            },
+            // For other types (including Vector), for now return a Null value.
+            _ => Value::new(Val::Null),
+        }
+    }
 }
 
 impl Type for Value {
@@ -485,17 +554,6 @@ impl Type for Value {
             Val::SmallInt(i) => Ok(*i as f64),
             Val::TinyInt(i) => Ok(*i as f64),
             _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_))
-        }
-    }
-
-    fn is_zero(&self, val: &Value) -> bool {
-        match val.get_val() {
-            Val::Integer(i) => *i == 0,
-            Val::BigInt(i) => *i == 0,
-            Val::SmallInt(i) => *i == 0,
-            Val::TinyInt(i) => *i == 0,
-            Val::Decimal(f) => *f == 0.0,
-            _ => false,
         }
     }
 }
