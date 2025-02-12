@@ -245,6 +245,17 @@ impl Tuple {
             .collect::<Vec<String>>()
             .join(", ")
     }
+
+    /// Combines this tuple with another tuple by appending the other tuple's values
+    pub fn combine(&self, other: &Tuple) -> Self {
+        let mut combined_values = self.values.clone();
+        combined_values.extend(other.values.clone());
+        
+        Self {
+            values: combined_values,
+            rid: self.rid,  // Keep the left tuple's RID
+        }
+    }
 }
 
 impl Display for Tuple {
