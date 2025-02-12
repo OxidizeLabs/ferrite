@@ -1,37 +1,21 @@
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::common::exception::DeletePageError;
-use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::page::page::PageType::{
-    ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table,
-};
 use crate::storage::page::page::{Page, PageType};
 use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::{
-    ExtendableHTableBucketPage, TypeErasedBucketPage,
-};
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
-use chrono::Utc;
 use log::{error, info, trace, warn};
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
-
-// Define an enum to represent the type of page to create
-#[derive(Debug)]
-pub enum NewPageType {
-    Basic,
-    Table,
-    ExtendedHashTableDirectory,
-    ExtendedHashTableHeader,
-    ExtendedHashTableBucket,
-}
+use tempfile::TempDir;
 
 /// The `BufferPoolManager` is responsible for managing the buffer poolUnpinning page,
 /// including fetching and unpinning pages, and handling page replacement.
@@ -99,11 +83,8 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional new page.
-    pub fn new_page(&self, new_page_type: NewPageType) -> Option<Arc<RwLock<PageType>>> {
-        trace!(
-            "Attempting to create a new page of type: {:?}",
-            new_page_type
-        );
+    pub fn new_page(&self, page_type: PageType) -> Option<Arc<RwLock<PageType>>> {
+        trace!("Attempting to create a new page of type: {:?}", page_type);
 
         // Step 1: Acquire a frame ID
         let frame_id = self.get_available_frame()?;
@@ -114,7 +95,7 @@ impl BufferPoolManager {
 
         // Step 3: Create a new page
         let new_page_id = self.allocate_page_id();
-        let new_page = self.create_page_of_type(new_page_type, new_page_id);
+        let new_page = self.create_page_of_type(page_type, new_page_id);
         trace!("Created new page with ID: {}", new_page_id);
 
         // Step 4: Update internal data structures
@@ -126,9 +107,9 @@ impl BufferPoolManager {
     /// Creates a new page guard and returns it.
     ///
     /// # Returns
-    /// An optional new `BasicPageGuard`.
-    pub fn new_page_guarded(self: &Arc<Self>, new_page_type: NewPageType) -> Option<PageGuard> {
-        trace!("Creating new page of type: {:?}", new_page_type);
+    /// An optional new `PageGuard`.
+    pub fn new_page_guarded(self: &Arc<Self>, page_type: PageType) -> Option<PageGuard> {
+        trace!("Creating new page of type: {:?}", page_type);
 
         // Step 1: Acquire a frame ID
         let frame_id = self.get_available_frame()?;
@@ -139,7 +120,7 @@ impl BufferPoolManager {
 
         // Step 3: Create a new page
         let new_page_id = self.allocate_page_id();
-        let new_page = self.create_page_of_type(new_page_type, new_page_id);
+        let new_page = self.create_page_of_type(page_type, new_page_id);
         trace!("Created new page with ID: {}", new_page_id);
 
         // Step 4: Update internal data structures
@@ -217,6 +198,12 @@ impl BufferPoolManager {
                     let replacer = self.replacer.write(); // Acquire write lock
                     replacer.record_access(frame_id, AccessType::Lookup);
                     replacer.set_evictable(frame_id, false);
+                }
+
+                // Pin the page before returning it
+                {
+                    let mut page = page_clone.write();
+                    page.as_page_trait_mut().increment_pin_count();
                 }
 
                 return Some(page_clone); // Return the page wrapped in an Arc<RwLock<Page>>
@@ -308,6 +295,12 @@ impl BufferPoolManager {
             let replacer = self.replacer.write(); // Acquire write lock
             replacer.set_evictable(frame_id, false);
             replacer.record_access(frame_id, AccessType::Lookup);
+        }
+
+        // Pin the page before returning it
+        {
+            let mut page = new_page_arc.write();
+            page.as_page_trait_mut().increment_pin_count();
         }
 
         Some(new_page_arc) // Return the page wrapped in an Arc<RwLock<Page>>
@@ -781,22 +774,21 @@ impl BufferPoolManager {
 
     fn create_page_of_type(
         &self,
-        new_page_type: NewPageType,
+        page_type: PageType,
         page_id: PageId,
     ) -> Arc<RwLock<PageType>> {
-        let new_page = match new_page_type {
-            NewPageType::Basic => PageType::Basic(Page::new(page_id)),
-            NewPageType::ExtendedHashTableDirectory => {
-                ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))
+        let new_page = match page_type {
+            PageType::Basic(_) => PageType::Basic(Page::new(page_id)),
+            PageType::Table(_) => PageType::Table(TablePage::new(page_id)),
+            PageType::ExtendedHashTableDirectory(_) => {
+                PageType::ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))
             }
-            NewPageType::ExtendedHashTableHeader => {
-                ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id))
+            PageType::ExtendedHashTableHeader(_) => {
+                PageType::ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id))
             }
-            NewPageType::ExtendedHashTableBucket => {
-                let bucket_page = ExtendableHTableBucketPage::<i32, 8>::new(page_id);
-                ExtendedHashTableBucket(TypeErasedBucketPage::new(bucket_page))
+            PageType::ExtendedHashTableBucket(_) => {
+                PageType::ExtendedHashTableBucket(ExtendableHTableBucketPage::new(page_id))
             }
-            NewPageType::Table => Table(TablePage::new(page_id)),
         };
 
         Arc::new(RwLock::new(new_page))
@@ -822,39 +814,76 @@ impl BufferPoolManager {
         replacer.set_evictable(frame_id, false);
         replacer.record_access(frame_id, AccessType::Lookup);
     }
+
+    /// Writes a page to disk
+    fn write_page_to_disk(&self, page_id: PageId, page: &PageType) -> Result<(), String> {
+        let serialized = page.serialize();
+        self.disk_manager
+            .write_page(page_id, &serialized)
+            .map_err(|e| format!("Failed to write page to disk: {}", e))
+    }
+
+    /// Reads a page from disk
+    fn read_page_from_disk(&self, page_id: PageId) -> Option<Arc<RwLock<PageType>>> {
+        let mut buffer = [0u8; DB_PAGE_SIZE as usize];
+
+        // Read the raw data from disk
+        if let Err(e) = self.disk_manager.read_page(page_id, &mut buffer) {
+            error!("Failed to read page {} from disk: {}", page_id, e);
+            return None;
+        }
+
+        // Deserialize into the appropriate page type
+        match PageType::deserialize(&buffer, page_id) {
+            Some(page) => Some(Arc::new(RwLock::new(page))),
+            None => {
+                error!("Failed to deserialize page {} from disk", page_id);
+                None
+            }
+        }
+    }
 }
 
-pub struct TestContext {
+struct TestContext {
     bpm: Arc<BufferPoolManager>,
-    db_file: String,
-    db_log_file: String,
+    _temp_dir: TempDir,
 }
 
 impl TestContext {
-    pub fn new(test_name: &str) -> Self {
-        initialize_logger();
-        const BUFFER_POOL_SIZE: usize = 10;
+    pub fn new(name: &str) -> Self {
+        const BUFFER_POOL_SIZE: usize = 100;
         const K: usize = 2;
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-        let disk_manager = Arc::new(FileDiskManager::new(
-            db_file.clone(),
-            db_log_file.clone(),
-            100,
-        ));
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+
+        // Create temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Create disk components
+        let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+        let disk_scheduler =
+            Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
         let bpm = Arc::new(BufferPoolManager::new(
             BUFFER_POOL_SIZE,
             disk_scheduler,
             disk_manager.clone(),
             replacer.clone(),
         ));
+
         Self {
             bpm,
-            db_file,
-            db_log_file,
+            _temp_dir: temp_dir,
         }
     }
 
@@ -862,17 +891,8 @@ impl TestContext {
         Arc::clone(&self.bpm)
     }
 
-    fn cleanup(&self) {
-        let _ = std::fs::remove_file(&self.db_file);
-        let _ = std::fs::remove_file(&self.db_log_file);
-    }
 }
 
-impl Drop for TestContext {
-    fn drop(&mut self) {
-        self.cleanup()
-    }
-}
 
 #[cfg(test)]
 mod unit_tests {
@@ -897,11 +917,10 @@ mod unit_tests {
         let context = TestContext::new("test_new_page_creation");
 
         // Create a new page
-
-        let new_page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
 
         assert_eq!(
-            new_page.read().as_page_trait().get_pin_count(),
+            page.read().as_page_trait().get_pin_count(),
             1,
             "The new page should have a pin count of 1."
         );
@@ -921,7 +940,7 @@ mod unit_tests {
 
         // Fill the buffer pool to capacity
         for _i in 0..bpm.get_pool_size() {
-            let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+            let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
             info!(
                 "Created page with ID: {}",
                 page.read().as_page_trait().get_page_id()
@@ -934,7 +953,7 @@ mod unit_tests {
 
         // The next new page should trigger an eviction
         info!("Creating an additional page to trigger eviction...");
-        let extra_page = context.bpm.new_page(NewPageType::Basic);
+        let extra_page = context.bpm.new_page(PageType::Basic(Page::new(0)));
 
         if extra_page.is_none() {
             error!("Failed to create a new page after buffer pool is full. Eviction did not work as expected.");
@@ -959,7 +978,7 @@ mod unit_tests {
         let context = TestContext::new("test_unpin_and_evict_page");
 
         // Create a new page
-        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
         let page_id = page.read().as_page_trait().get_page_id();
 
         // Unpin the page
@@ -967,7 +986,7 @@ mod unit_tests {
         assert!(success, "Unpinning should be successful.");
 
         // Now the page should be evictable
-        let evicted = context.bpm.new_page(NewPageType::Basic).is_some();
+        let evicted = context.bpm.new_page(PageType::Basic(Page::new(0))).is_some();
         assert!(
             evicted,
             "The buffer pool manager should be able to evict an unpinned page."
@@ -979,7 +998,7 @@ mod unit_tests {
         let context = TestContext::new("test_page_fetching_from_disk");
 
         // Create and write to a page
-        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
         let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE as usize];
         rand::rng().fill(&mut data[..]);
@@ -987,7 +1006,7 @@ mod unit_tests {
 
         // Unpin and evict the page
         context.bpm.unpin_page(page_id, true, AccessType::Lookup);
-        context.bpm.new_page(NewPageType::Basic); // Trigger eviction
+        context.bpm.new_page(PageType::Basic(Page::new(0))); // Trigger eviction
 
         // Fetch the page back from disk
         let fetched_page = context.bpm.fetch_page(page_id).unwrap();
@@ -1008,7 +1027,7 @@ mod unit_tests {
         let context = TestContext::new("test_delete_page");
 
         // Create a new page
-        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
         let page_id = page.read().as_page_trait().get_page_id();
 
         // Delete the page
@@ -1035,7 +1054,7 @@ mod unit_tests {
         let context = TestContext::new("test_flush_page");
 
         // Create and write to a page
-        let page = context.bpm.new_page(NewPageType::Basic).unwrap();
+        let page = context.bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
         let page_id = page.read().as_page_trait().get_page_id();
         let mut data = [0u8; DB_PAGE_SIZE as usize];
         rand::rng().fill(&mut data[..]);
@@ -1050,7 +1069,7 @@ mod unit_tests {
 
         // Unpin and evict the page
         context.bpm.unpin_page(page_id, true, AccessType::Lookup);
-        context.bpm.new_page(NewPageType::Basic); // Trigger eviction
+        context.bpm.new_page(PageType::Basic(Page::new(0))); // Trigger eviction
 
         // Fetch the page back from disk and verify the data
         let fetched_page = context.bpm.fetch_page(page_id).unwrap();
@@ -1059,8 +1078,6 @@ mod unit_tests {
             &data[..],
             "The fetched page data should match the written and flushed data."
         );
-
-        context.cleanup();
     }
 }
 
@@ -1078,7 +1095,7 @@ mod concurrency {
     fn concurrent_page_access() {
         let ctx = TestContext::new("concurrent_page_access_test");
         let bpm = Arc::new(RwLock::new(ctx.bpm.clone()));
-        let page = bpm.write().new_page(NewPageType::Basic).unwrap();
+        let page = bpm.write().new_page(PageType::Basic(Page::new(0))).expect("Failed to create page");
 
         let page_id = page.read().as_page_trait().get_page_id();
         let bpm_clone = bpm.clone();
@@ -1161,7 +1178,7 @@ mod concurrency {
                 // Create a new page
                 let page_id = i as u64;
                 bpm_clone
-                    .new_page(NewPageType::Basic)
+                    .new_page(PageType::Basic(Page::new(0)))
                     .expect("Failed to create a new page");
 
                 // Write data to the page
@@ -1186,9 +1203,6 @@ mod concurrency {
             *done,
             "Test did not complete successfully, possible deadlock detected"
         );
-
-        // Cleanup the tests context
-        ctx.cleanup();
     }
 }
 
@@ -1202,11 +1216,10 @@ mod edge_cases {
         let bpm = ctx.bpm.clone();
 
         // Fill the buffer pool completely
-
         for _i in 0..bpm.get_pool_size() {
             // Create a new page within a narrow lock scope
             let page_id = {
-                let page = bpm.new_page(NewPageType::Basic);
+                let page = bpm.new_page(PageType::Basic(Page::new(0)));
 
                 let page_id = page.unwrap().read().as_page_trait().get_page_id();
                 page_id
@@ -1223,7 +1236,7 @@ mod edge_cases {
 
         // Create a new page, forcing an eviction
         info!("Creating a new page to trigger eviction");
-        let _new_page = bpm.new_page(NewPageType::Basic);
+        let _new_page = bpm.new_page(PageType::Basic(Page::new(0)));
 
         // Verify that the last page was evicted
         info!("Verify that the last page was evicted");
@@ -1246,7 +1259,7 @@ mod edge_cases {
         // Create and modify a page repeatedly
         let page = bpm
             .write()
-            .new_page(NewPageType::Basic)
+            .new_page(PageType::Basic(Page::new(0)))
             .expect("Failed to create a new page");
         let page_id = page.read().as_page_trait().get_page_id(); // Store page_id for later use
 
@@ -1296,13 +1309,12 @@ mod edge_cases {
 
         // Create maximum number of pages
         for _ in 0..bpm.get_pool_size() {
-            bpm.new_page(NewPageType::Basic)
-                .expect("Failed to create a new page");
+            bpm.new_page(PageType::Basic(Page::new(0))).expect("Failed to create a new page");
         }
 
         // Attempt to create more pages than the buffer pool can handle
         for _ in 0..10 {
-            let new_page_result = bpm.new_page(NewPageType::Basic);
+            let new_page_result = bpm.new_page(PageType::Basic(Page::new(0)));
             if let Some(ref page) = new_page_result {
                 bpm.unpin_page(
                     page.read().as_page_trait().get_page_id(),

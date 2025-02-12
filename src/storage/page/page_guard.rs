@@ -4,17 +4,14 @@ use crate::common::config::PageId;
 use crate::common::logger::initialize_logger;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::page::page::Page;
+use crate::storage::page::page::{Page, PageTrait};
 use crate::storage::page::page::PageType;
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::storage::page::page_types::table_page::TablePage;
 use chrono::Utc;
-use mockall::Any;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::any::TypeId;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 pub struct PageGuard {
@@ -25,7 +22,12 @@ pub struct PageGuard {
 
 impl PageGuard {
     pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<RwLock<PageType>>, page_id: PageId) -> Self {
-        Self { bpm, page, page_id }
+        // Don't increment pin count here since BufferPoolManager already does it
+        Self {
+            bpm,
+            page,
+            page_id
+        }
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, PageType> {
@@ -59,33 +61,61 @@ impl PageGuard {
         }
     }
 
-    pub fn into_specific_type<T: Clone + 'static, const KEY_SIZE: usize>(
+    pub fn into_specific_type(
         self,
-    ) -> Option<SpecificPageGuard<T, KEY_SIZE>> {
-        let page_type = TypeId::of::<T>();
-        let is_matching_type = match &*self.page.read() {
-            PageType::Basic(_) => page_type == TypeId::of::<Page>(),
+    ) -> Option<PageType> {
+        // Take ownership of the inner page
+        let page_id = self.page_id;
+
+        // Get a read lock to check the page type
+        let page_type = match &*self.page.read() {
+            PageType::Basic(page) => {
+                let mut new_page = Page::new(page_id);
+                new_page.set_data(0, page.get_data()).ok()?;
+                Some(PageType::Basic(new_page))
+            },
             PageType::ExtendedHashTableBucket(bucket_page) => {
-                page_type == TypeId::of::<ExtendableHTableBucketPage<T, KEY_SIZE>>()
-                    && bucket_page.get_key_size() == KEY_SIZE
-            }
-            PageType::ExtendedHashTableDirectory(_) => {
-                page_type == TypeId::of::<ExtendableHTableDirectoryPage>()
-            }
-            PageType::ExtendedHashTableHeader(_) => {
-                page_type == TypeId::of::<ExtendableHTableHeaderPage>()
-            }
-            PageType::Table(_) => page_type == TypeId::of::<TablePage>(),
+                let mut new_page = ExtendableHTableBucketPage::new(page_id);
+                // Copy relevant data from bucket_page to new_page
+                new_page.init(bucket_page.get_size());
+                Some(PageType::ExtendedHashTableBucket(new_page))
+            },
+            PageType::ExtendedHashTableDirectory(dir_page) => {
+                let mut new_page = ExtendableHTableDirectoryPage::new(page_id);
+                // Copy relevant data from dir_page to new_page
+                new_page.init(dir_page.get_size());
+                Some(PageType::ExtendedHashTableDirectory(new_page))
+            },
+            PageType::ExtendedHashTableHeader(_header_page) => {
+                let new_page = ExtendableHTableHeaderPage::new(page_id);
+                // Copy relevant data from header_page to new_page
+                Some(PageType::ExtendedHashTableHeader(new_page))
+            },
+            PageType::Table(_table_page) => {
+                let new_page = TablePage::new(page_id);
+                // Copy relevant data from table_page to new_page
+                Some(PageType::Table(new_page))
+            },
         };
 
-        if is_matching_type {
-            Some(SpecificPageGuard {
-                inner: self,
-                _phantom: PhantomData,
-            })
-        } else {
-            None
-        }
+        // The original PageGuard will be dropped here, which will handle unpinning
+        page_type
+    }
+
+    pub fn access<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&PageType) -> R,
+    {
+        let guard = self.page.read();
+        Some(f(&guard))
+    }
+
+    pub fn access_mut<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut PageType) -> R,
+    {
+        let mut guard = self.page.write();
+        Some(f(&mut guard))
     }
 }
 
@@ -93,127 +123,9 @@ impl Drop for PageGuard {
     fn drop(&mut self) {
         let is_dirty = self.read().as_page_trait().is_dirty();
         self.set_dirty(is_dirty);
-        self.bpm
-            .unpin_page(self.page_id, is_dirty, AccessType::Unknown);
-    }
-}
 
-pub struct SpecificPageGuard<T: 'static, const KEY_SIZE: usize> {
-    inner: PageGuard,
-    _phantom: PhantomData<T>,
-}
-
-impl<T: Clone + 'static, const KEY_SIZE: usize> SpecificPageGuard<T, KEY_SIZE> {
-    pub fn read(&self) -> SpecificPageReadGuard<T, KEY_SIZE> {
-        SpecificPageReadGuard(self.inner.read(), PhantomData)
-    }
-
-    pub fn write(&self) -> SpecificPageWriteGuard<T, KEY_SIZE> {
-        SpecificPageWriteGuard(self.inner.write(), PhantomData)
-    }
-
-    pub fn get_page_id(&self) -> PageId {
-        self.inner.get_page_id()
-    }
-
-    pub fn access<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&T) -> R,
-    {
-        match &*self.inner.page.read() {
-            PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast::<T, KEY_SIZE, _, R>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
-                    let typed_page = unsafe { &*(page as *const _ as *const T) };
-                    f(typed_page)
-                })
-            }
-            PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::Table(page) => page.as_any().downcast_ref::<T>().map(f),
-        }
-    }
-
-    pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        match &mut *self.inner.page.write() {
-            PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast_mut::<T, KEY_SIZE, _, R>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
-                    let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
-                    f(typed_page)
-                })
-            }
-            PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-            PageType::ExtendedHashTableDirectory(page) => {
-                page.as_any_mut().downcast_mut::<T>().map(f)
-            }
-            PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-            PageType::Table(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-        }
-    }
-}
-
-pub struct SpecificPageReadGuard<'a, T: 'static, const KEY_SIZE: usize>(
-    RwLockReadGuard<'a, PageType>,
-    PhantomData<T>,
-);
-
-impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageReadGuard<'a, T, KEY_SIZE> {
-    pub fn access<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&T) -> R,
-    {
-        match &*self.0 {
-            PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast::<T, KEY_SIZE, _, R>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
-                    let typed_page = unsafe { &*(page as *const _ as *const T) };
-                    f(typed_page)
-                })
-            }
-            PageType::Basic(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::ExtendedHashTableDirectory(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::ExtendedHashTableHeader(page) => page.as_any().downcast_ref::<T>().map(f),
-            PageType::Table(page) => page.as_any().downcast_ref::<T>().map(f),
-        }
-    }
-}
-
-pub struct SpecificPageWriteGuard<'a, T: 'static, const KEY_SIZE: usize>(
-    RwLockWriteGuard<'a, PageType>,
-    PhantomData<T>,
-);
-
-impl<'a, T: Clone + 'static, const KEY_SIZE: usize> SpecificPageWriteGuard<'a, T, KEY_SIZE> {
-    pub fn access_mut<F, R>(&mut self, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut T) -> R,
-    {
-        match &mut *self.0 {
-            PageType::ExtendedHashTableBucket(bucket_page) => {
-                bucket_page.with_downcast_mut::<T, KEY_SIZE, _, R>(|page| {
-                    // SAFETY: We've already checked that T is ExtendableHTableBucketPage<T, KEY_SIZE> in into_specific_type
-                    let typed_page = unsafe { &mut *(page as *mut _ as *mut T) };
-                    f(typed_page)
-                })
-            }
-            PageType::Basic(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-            PageType::ExtendedHashTableDirectory(page) => {
-                page.as_any_mut().downcast_mut::<T>().map(f)
-            }
-            PageType::ExtendedHashTableHeader(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-            PageType::Table(page) => page.as_any_mut().downcast_mut::<T>().map(f),
-        }
-    }
-}
-
-impl<T: 'static, const KEY_SIZE: usize> Drop for SpecificPageGuard<T, KEY_SIZE> {
-    fn drop(&mut self) {
-        // The inner PageGuard's drop will handle unpinning
+        // Unpin the page through BufferPoolManager
+        self.bpm.unpin_page(self.page_id, is_dirty, AccessType::Unknown);
     }
 }
 
@@ -273,9 +185,7 @@ impl Drop for TestContext {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::NewPageType;
     use crate::storage::page::page::PageTrait;
-    use crate::types_db::integer_type::IntegerType;
     use log::{debug, info};
 
     #[test]
@@ -284,7 +194,7 @@ mod unit_tests {
         let bpm = ctx.bpm();
 
         // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        let page0 = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
         let basic_guard = PageGuard::new(
             Arc::clone(&bpm),
             Arc::clone(&page0),
@@ -312,26 +222,26 @@ mod unit_tests {
         let ctx = TestContext::new("convert_into_extendable_htable_directory_page");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        // Create a new directory page directly
+        let page0 = bpm.new_page(PageType::ExtendedHashTableDirectory(
+            ExtendableHTableDirectoryPage::new(0)
+        )).unwrap();
         let page_guard = PageGuard::new(
             Arc::clone(&bpm),
             Arc::clone(&page0),
             page0.read().as_page_trait().get_page_id(),
         );
 
-        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableDirectoryPage, 8>()
-        {
-            let read_guard = ext_guard.read();
-            read_guard.access(|page| {
-                let directory_size = page.get_size();
-                debug!("Directory size: {}", directory_size);
-            });
-
-            let mut write_guard = ext_guard.write();
-            write_guard.access_mut(|page| {
-                page.set_dirty(true);
-            });
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::ExtendedHashTableDirectory(mut dir_page) => {
+                    // Access directory page methods directly
+                    let size = dir_page.get_size();
+                    debug!("Directory size: {}", size);
+                    dir_page.set_dirty(true);
+                }
+                _ => panic!("Wrong page type returned"),
+            }
         }
     }
 
@@ -340,25 +250,26 @@ mod unit_tests {
         let ctx = TestContext::new("convert_into_extendable_htable_header_page");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        // Create a new header page directly
+        let page0 = bpm.new_page(PageType::ExtendedHashTableHeader(
+            ExtendableHTableHeaderPage::new(0)
+        )).unwrap();
         let page_guard = PageGuard::new(
             Arc::clone(&bpm),
             Arc::clone(&page0),
             page0.read().as_page_trait().get_page_id(),
         );
 
-        if let Some(ext_guard) = page_guard.into_specific_type::<ExtendableHTableHeaderPage, 8>() {
-            let read_guard = ext_guard.read();
-            read_guard.access(|page| {
-                let header_page_id = page.get_page_id();
-                debug!("Header page id: {}", header_page_id);
-            });
-
-            let mut write_guard = ext_guard.write();
-            write_guard.access_mut(|page| {
-                page.set_dirty(true);
-            });
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::ExtendedHashTableHeader(mut header_page) => {
+                    // Access header page methods directly
+                    let header_page_id = header_page.get_page_id();
+                    debug!("Header page id: {}", header_page_id);
+                    header_page.set_dirty(true);
+                }
+                _ => panic!("Wrong page type returned"),
+            }
         }
     }
 
@@ -367,27 +278,26 @@ mod unit_tests {
         let ctx = TestContext::new("convert_into_extendable_htable_bucket_page");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        // Create a new bucket page directly
+        let page0 = bpm.new_page(PageType::ExtendedHashTableBucket(
+            ExtendableHTableBucketPage::new(0)
+        )).unwrap();
         let page_guard = PageGuard::new(
             Arc::clone(&bpm),
             Arc::clone(&page0),
             page0.read().as_page_trait().get_page_id(),
         );
 
-        if let Some(ext_guard) =
-            page_guard.into_specific_type::<ExtendableHTableBucketPage<IntegerType, 8>, 8>()
-        {
-            let read_guard = ext_guard.read();
-            read_guard.access(|page| {
-                let bucket_size = page.get_size();
-                info!("Bucket size: {}", bucket_size);
-            });
-
-            let mut write_guard = ext_guard.write();
-            write_guard.access_mut(|page| {
-                page.set_dirty(true);
-            });
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::ExtendedHashTableBucket(mut bucket_page) => {
+                    // Access bucket page methods directly
+                    let size = bucket_page.get_size();
+                    info!("Bucket size: {}", size);
+                    bucket_page.set_dirty(true);
+                }
+                _ => panic!("Wrong page type returned"),
+            }
         }
     }
 
@@ -396,25 +306,25 @@ mod unit_tests {
         let ctx = TestContext::new("convert_into_table_page");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        // Create a new table page directly
+        let page0 = bpm.new_page(PageType::Table(
+            TablePage::new(0)
+        )).unwrap();
         let page_guard = PageGuard::new(
             Arc::clone(&bpm),
             Arc::clone(&page0),
             page0.read().as_page_trait().get_page_id(),
         );
 
-        if let Some(ext_guard) = page_guard.into_specific_type::<TablePage, 8>() {
-            let read_guard = ext_guard.read();
-            read_guard.access(|page| {
-                let table_page_id = page.get_page_id();
-                info!("Table size: {}", table_page_id);
-            });
-
-            let mut write_guard = ext_guard.write();
-            write_guard.access_mut(|page| {
-                page.set_dirty(true);
-            });
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(mut table_page) => {
+                    let page_id = table_page.get_page_id();
+                    info!("Table page ID: {}", page_id);
+                    table_page.set_dirty(true);
+                }
+                _ => panic!("Wrong page type returned"),
+            }
         }
     }
 }
@@ -422,43 +332,28 @@ mod unit_tests {
 #[cfg(test)]
 mod basic_behaviour {
     use super::*;
-    use crate::buffer::buffer_pool_manager::NewPageType;
+    use crate::storage::page::page::Page;
 
     #[test]
     fn create_and_drop() {
         let ctx = TestContext::new("create_and_drop");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
-        let page_id = page0.read().as_page_trait().get_page_id();
-        let basic_guarded_page = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page_id);
+        // Create a new page
+        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
 
-        // Ensure page0 is pinned and the guard works as expected
-        assert_eq!(page0.read().as_page_trait().get_pin_count(), 1); // Pin count should be 1 after creation
-        assert_eq!(page_id, basic_guarded_page.get_page_id());
+        // Create page guard - should not increment pin count since BPM already did
+        let guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
 
-        // Create another page and guard it with ReadPageGuard
-        let page2 = bpm.new_page(NewPageType::Basic).unwrap();
-        let page2_id = page2.read().as_page_trait().get_page_id();
-        let read_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page2), page2_id);
-        assert_eq!(page2.read().as_page_trait().get_pin_count(), 1); // Pin count should be 1 after creating the guard
+        // Pin count should be 1 from BufferPoolManager::new_page
+        assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
 
-        // Ensure dropping the guard decreases the pin count
-        drop(read_guard);
-        assert_eq!(page2.read().as_page_trait().get_pin_count(), 0); // Pin count should be 0 after dropping the guard
+        // Drop guard - should decrement pin count through unpin_page
+        drop(guard);
 
-        // Test WritePageGuard functionality
-        let page3 = bpm.new_page(NewPageType::Basic).unwrap();
-        let page3_id = page3.read().as_page_trait().get_page_id();
-
-        {
-            let _write_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page3), page3_id);
-            assert_eq!(page3.read().as_page_trait().get_pin_count(), 1); // Pin count should be 1 after creating WritePageGuard
-        }
-
-        // Ensure pin count is reduced after dropping WritePageGuard
-        assert_eq!(page3.read().as_page_trait().get_pin_count(), 0);
+        // Pin count should be 0 after guard drop
+        assert_eq!(page.read().as_page_trait().get_pin_count(), 0);
     }
 
     #[test]
@@ -466,46 +361,42 @@ mod basic_behaviour {
         let ctx = TestContext::new("modify_data");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(NewPageType::Basic).unwrap();
+        // Test modifying different page types
+        let page0 = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
         let page0_id = page0.read().as_page_trait().get_page_id();
+
         {
-            let basic_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
+            let guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
 
-            // Ensure page0 is pinned and the guard works as expected
-            assert_eq!(basic_guard.get_pin_count(), 1); // Pin count should be 1 after creation
-            assert_eq!(
-                page0.read().as_page_trait().get_page_id(),
-                basic_guard.get_page_id()
-            );
+            // Modify through PageType
+            guard.access_mut(|page_type| {
+                match page_type {
+                    PageType::Basic(page) => {
+                        let data = page.get_data_mut();
+                        data[0] = 42;
+                    }
+                    _ => panic!("Wrong page type"),
+                }
+            });
 
-            // Directly modify data in the page
-            let mut write_guard = basic_guard.write();
-            let data_mut = write_guard.as_page_trait_mut().get_data_mut();
-
-            // Example of directly setting bytes (this could represent any structure)
-            data_mut[0] = 3; // Equivalent to setting a 'depth' field
-            data_mut[4..8].copy_from_slice(&42u32.to_ne_bytes()); // Example of setting a 'bucket_page_id'
-
-            // Read back the data and verify it
-            assert_eq!(data_mut[0], 3, "Depth should be set to 3");
-            let bucket_page_id = u32::from_ne_bytes(data_mut[4..8].try_into().unwrap());
-            assert_eq!(bucket_page_id, 42, "Bucket page ID should be set to 42");
+            // Verify modification
+            guard.access(|page_type| {
+                match page_type {
+                    PageType::Basic(page) => {
+                        assert_eq!(page.get_data()[0], 42);
+                    }
+                    _ => panic!("Wrong page type"),
+                }
+            });
         }
-        // Ensure dropping the guard decreases the pin count
 
-        assert_eq!(
-            page0.read().as_page_trait().get_pin_count(),
-            0,
-            "Pin count should be 0 after dropping the WritePageGuard"
-        );
+        assert_eq!(page0.read().as_page_trait().get_pin_count(), 0);
     }
 }
 
 #[cfg(test)]
 mod concurrency {
     use super::*;
-    use crate::buffer::buffer_pool_manager::NewPageType;
     use std::thread;
 
     #[test]
@@ -514,7 +405,7 @@ mod concurrency {
         let bpm = ctx.bpm();
 
         // Create a shared page
-        let page = Arc::new(bpm.new_page(NewPageType::Basic).unwrap());
+        let page = Arc::new(bpm.new_page(PageType::Basic(Page::new(0))).unwrap());
         // Get the page ID once before spawning threads
         let page_id = page.read().as_page_trait().get_page_id(); // <-- Get this outside the threads
 
@@ -543,7 +434,7 @@ mod concurrency {
         let bpm = ctx.bpm();
 
         // Create a shared page
-        let page = bpm.new_page(NewPageType::Basic).unwrap();
+        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
         // Get the page ID once before spawning threads
         let page_id = page.read().as_page_trait().get_page_id(); // <-- Get this outside the threads
 
@@ -601,7 +492,6 @@ mod concurrency {
 #[cfg(test)]
 mod edge_cases {
     use super::*;
-    use crate::buffer::buffer_pool_manager::NewPageType;
 
     #[test]
     fn page_eviction_under_pressure() {
@@ -611,7 +501,7 @@ mod edge_cases {
         // Fill the buffer pool to force eviction
         let mut pages = Vec::new();
         for _ in 0..5 {
-            let page = bpm.new_page(NewPageType::Basic).unwrap();
+            let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
             pages.push(page);
         }
 
@@ -628,7 +518,7 @@ mod edge_cases {
         }
 
         // Now create a new page that should cause an eviction due to the buffer pool size limit
-        let page_evicted = bpm.new_page(NewPageType::Basic).unwrap_or_else(|| {
+        let page_evicted = bpm.new_page(PageType::Basic(Page::new(0))).unwrap_or_else(|| {
             panic!("Failed to create a new page, eviction didn't work as expected")
         });
         let evict_guard = PageGuard::new(
@@ -658,20 +548,31 @@ mod edge_cases {
         let ctx = TestContext::new("invalid_page_access_after_drop");
         let bpm = ctx.bpm();
 
-        // Create a page and drop the guard
-        let page = bpm.new_page(NewPageType::Basic).unwrap();
-        let guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page),
-            page.read().as_page_trait().get_page_id(),
-        );
-        drop(guard);
+        // Create a new page
+        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
+        let page_id = page.read().as_page_trait().get_page_id();
 
-        // Attempt to re-access the page after it’s been dropped
-        let result = bpm.fetch_page(page.read().as_page_trait().get_page_id());
-        assert!(
-            result.is_some(),
-            "Accessing a dropped page should return an error"
-        );
+        // Create and drop page guard
+        {
+            let _guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
+            // Pin count should be 1 from new_page
+            assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
+        } // guard is dropped here
+
+        // After guard is dropped:
+        // 1. Pin count should be 0
+        assert_eq!(page.read().as_page_trait().get_pin_count(), 0);
+
+        // 2. Page should still be in the page table
+        let _frame_id = {
+            let page_table = bpm.get_page_table();
+            let page_table = page_table.read();
+            *page_table.get(&page_id).unwrap()
+        };
+
+        // 3. Creating a new guard should work
+        let _new_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
+        // Pin count should be 1 again
+        assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
     }
 }

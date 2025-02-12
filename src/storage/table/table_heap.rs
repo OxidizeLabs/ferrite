@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
+use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
 use crate::common::rid::RID;
@@ -8,7 +8,7 @@ use crate::concurrency::transaction::UndoLink;
 use crate::concurrency::transaction::{IsolationLevel, TransactionState, UndoLog};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::page::page::PageTrait;
+use crate::storage::page::page::{PageTrait, PageType};
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_iterator::TableIterator;
@@ -219,15 +219,17 @@ impl TableHeap {
             .get_page(rid.get_page_id())
             .expect("Trying to update tuple_meta page");
 
-        let mut table_page_guard = page_guard
-            .into_specific_type::<TablePage, 8>()
-            .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
-
-        let _ = table_page_guard
-            .access_mut(|table_page| table_page.update_tuple_meta(meta, &rid))
-            .expect("Failed to update table meta");
-
-        Ok(())
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(mut table_page) => {
+                    table_page.update_tuple_meta(meta, &rid)
+                        .map_err(|e| format!("Failed to update tuple meta: {}", e))
+                }
+                _ => panic!("Wrong page type returned"),
+            }
+        } else {
+            Err("Failed to convert to TablePage".to_string())
+        }
     }
 
     pub fn get_bpm(&self) -> Arc<BufferPoolManager> {
@@ -275,26 +277,25 @@ impl TableHeap {
                 .tuple_storage
                 .get_page(rid.get_page_id())?;
 
-            let table_page_guard = page_guard
-                .into_specific_type::<TablePage, 8>()
-                .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
-
-            let result = table_page_guard
-                .access(|table_page| table_page.get_tuple(&rid))
-                .ok_or_else(|| "Failed to get tuple".to_string())?;
-
-            // Handle the PageError properly
-            let (meta, tuple) = match result {
-                Ok((meta, tuple)) => (meta, tuple),
-                Err(e) => return Err(format!("Page error while getting tuple: {}", e)),
-            };
-
-            // Check if tuple is deleted
-            if meta.is_deleted() {
-                return Err("Tuple is deleted".to_string());
+            if let Some(page_type) = page_guard.into_specific_type() {
+                match page_type {
+                    PageType::Table(table_page) => {
+                        match table_page.get_tuple(&rid) {
+                            Ok((meta, tuple)) => {
+                                // Check if tuple is deleted
+                                if meta.is_deleted() {
+                                    return Err("Tuple is deleted".to_string());
+                                }
+                                Ok((meta, tuple))
+                            }
+                            Err(e) => Err(format!("Page error while getting tuple: {}", e)),
+                        }
+                    }
+                    _ => panic!("Wrong page type returned"),
+                }
+            } else {
+                Err("Failed to convert to TablePage".to_string())
             }
-
-            Ok((meta, tuple))
         }
     }
 
@@ -374,9 +375,12 @@ impl TableHeap {
     /// The ID of the next page, or INVALID_PAGE_ID if there is no next page
     pub fn get_next_page_id(&self, current_page_id: PageId) -> PageId {
         if let Ok(page_guard) = self.tuple_storage.get_page(current_page_id) {
-            if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                if let Some(next_page_id) = table_page.access(|page| page.get_next_page_id()) {
-                    return next_page_id;
+            if let Some(page_type) = page_guard.into_specific_type() {
+                match page_type {
+                    PageType::Table(table_page) => {
+                        return table_page.get_next_page_id();
+                    }
+                    _ => panic!("Wrong page type returned"),
                 }
             }
         }
@@ -401,11 +405,14 @@ impl TableHeap {
         // Find first page with tuples
         while current_page_id != INVALID_PAGE_ID {
             if let Some(page_guard) = self.get_bpm().fetch_page_guarded(current_page_id) {
-                if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                    if let Some(num_tuples) = table_page.access(|page| page.get_num_tuples()) {
-                        if num_tuples > 0 {
-                            return current_page_id;
+                if let Some(page_type) = page_guard.into_specific_type() {
+                    match page_type {
+                        PageType::Table(table_page) => {
+                            if table_page.get_num_tuples() > 0 {
+                                return current_page_id;
+                            }
                         }
+                        _ => panic!("Wrong page type returned"),
                     }
                 }
             }
@@ -478,10 +485,13 @@ impl TableHeap {
         while current_page_id != INVALID_PAGE_ID {
             count += 1;
             if let Some(page_guard) = self.tuple_storage.bpm.fetch_page_guarded(current_page_id) {
-                if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                    table_page.access(|page| {
-                        current_page_id = page.get_next_page_id();
-                    });
+                if let Some(page_type) = page_guard.into_specific_type() {
+                    match page_type {
+                        PageType::Table(table_page) => {
+                            current_page_id = table_page.get_next_page_id();
+                        }
+                        _ => panic!("Wrong page type returned"),
+                    }
                 } else {
                     break;
                 }
@@ -505,9 +515,12 @@ impl TableHeap {
         // Iterate through all pages and count tuples
         while current_page_id != INVALID_PAGE_ID {
             if let Some(page_guard) = self.get_bpm().fetch_page_guarded(current_page_id) {
-                if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-                    if let Some(num_tuples) = table_page.access(|page| page.get_num_tuples()) {
-                        count += num_tuples as usize;
+                if let Some(page_type) = page_guard.into_specific_type() {
+                    match page_type {
+                        PageType::Table(table_page) => {
+                            count += table_page.get_num_tuples() as usize;
+                        }
+                        _ => panic!("Wrong page type returned"),
                     }
                 }
                 // Get next page ID
@@ -532,137 +545,138 @@ impl TableHeap {
     ) -> Result<(TupleMeta, Tuple), String> {
         // Get the current version
         let page_guard = self.tuple_storage.get_page(rid.get_page_id())?;
-        let table_page_guard = page_guard
-            .into_specific_type::<TablePage, 8>()
-            .ok_or_else(|| "Failed to convert to TablePage".to_string())?;
+        
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(table_page) => {
+                    match table_page.get_tuple(&rid) {
+                        Ok((meta, tuple)) => {
+                            // First check if this is our own transaction's changes
+                            if meta.get_creator_txn_id() == txn.get_transaction_id() {
+                                debug!("Tuple visible - created by current transaction");
+                                return Ok((meta, tuple));
+                            }
 
-        // Get the tuple and handle potential errors
-        let result = table_page_guard.access(|table_page| {
-            table_page.get_tuple(&rid)
-        });
-
-        let (meta, tuple) = match result {
-            Some(Ok((meta, tuple))) => (meta, tuple),
-            Some(Err(e)) => return Err(format!("Page error while getting tuple: {}", e)),
-            None => return Err("Failed to get tuple from page".to_string()),
-        };
-
-        // First check if this is our own transaction's changes
-        if meta.get_creator_txn_id() == txn.get_transaction_id() {
-            debug!("Tuple visible - created by current transaction");
-            return Ok((meta, tuple));
-        }
-
-        // Handle different isolation levels
-        match txn.get_isolation_level() {
-            IsolationLevel::ReadUncommitted => {
-                debug!("READ UNCOMMITTED - tuple visible");
-                Ok((meta, tuple.clone()))
-            }
-            IsolationLevel::ReadCommitted => {
-                // For READ COMMITTED, we need to check if the creator transaction is committed
-                if meta.get_creator_txn_id() == INVALID_TXN_ID {
-                    debug!("READ COMMITTED - tuple visible (no creator)");
-                    Ok((meta, tuple.clone()))
-                } else if let Some(creator_txn) = txn_manager.get_transaction(&meta.get_creator_txn_id()) {
-                    if creator_txn.get_state() == TransactionState::Committed {
-                        debug!("READ COMMITTED - tuple visible (committed creator)");
-                        Ok((meta, tuple.clone()))
-                    } else {
-                        debug!("READ COMMITTED - tuple not visible (uncommitted creator)");
-                        Err("Tuple is not visible - creator transaction not committed".to_string())
-                    }
-                } else {
-                    debug!("READ COMMITTED - tuple not visible (creator not found)");
-                    Err("Tuple is not visible - creator transaction not found".to_string())
-                }
-            }
-            IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                debug!("Checking version chain for txn {} with read_ts {}", txn.get_transaction_id(), txn.read_ts());
-
-                // Start with the current version
-                let mut current_meta = meta;
-                let mut current_tuple = tuple.clone();
-
-                // If this version is too new, traverse the version chain
-                if current_meta.get_commit_timestamp() > txn.read_ts() {
-                    debug!("Current version too new (commit_ts: {}), traversing version chain", 
-                           current_meta.get_commit_timestamp());
-
-                    let mut current_undo_link = self.txn_manager.transaction_manager.get_undo_link(rid);
-                    let mut seen_txns = std::collections::HashSet::new();
-
-                    // Follow the version chain
-                    while let Some(undo_link) = current_undo_link {
-                        debug!("Found undo link: prev_txn={}, prev_log_idx={}", 
-                               undo_link.prev_txn, undo_link.prev_log_idx);
-
-                        // Check for cycles in the version chain
-                        if !seen_txns.insert(undo_link.prev_txn) {
-                            debug!("Breaking loop - transaction {} already seen", undo_link.prev_txn);
-                            break;
-                        }
-
-                        // Get the previous version
-                        if let Some(creator_txn) = txn_manager.get_transaction(&undo_link.prev_txn) {
-                            // Check if the transaction has any undo logs before trying to access them
-                            if creator_txn.get_undo_log_num() == 0 {
-                                debug!("Transaction {} has no undo logs", creator_txn.get_transaction_id());
-                                // If this transaction has no undo logs but has committed, we can use its commit timestamp
-                                if creator_txn.get_state() == TransactionState::Committed &&
-                                    creator_txn.commit_ts() <= txn.read_ts() {
-                                    debug!("Using committed transaction's version with no undo logs");
-                                    return Ok((current_meta, current_tuple));
+                            // Handle different isolation levels
+                            match txn.get_isolation_level() {
+                                IsolationLevel::ReadUncommitted => {
+                                    debug!("READ UNCOMMITTED - tuple visible");
+                                    Ok((meta, tuple.clone()))
                                 }
-                                break;
+                                IsolationLevel::ReadCommitted => {
+                                    // For READ COMMITTED, we need to check if the creator transaction is committed
+                                    if meta.get_creator_txn_id() == INVALID_TXN_ID {
+                                        debug!("READ COMMITTED - tuple visible (no creator)");
+                                        Ok((meta, tuple.clone()))
+                                    } else if let Some(creator_txn) = txn_manager.get_transaction(&meta.get_creator_txn_id()) {
+                                        if creator_txn.get_state() == TransactionState::Committed {
+                                            debug!("READ COMMITTED - tuple visible (committed creator)");
+                                            Ok((meta, tuple.clone()))
+                                        } else {
+                                            debug!("READ COMMITTED - tuple not visible (uncommitted creator)");
+                                            Err("Tuple is not visible - creator transaction not committed".to_string())
+                                        }
+                                    } else {
+                                        debug!("READ COMMITTED - tuple not visible (creator not found)");
+                                        Err("Tuple is not visible - creator transaction not found".to_string())
+                                    }
+                                }
+                                IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
+                                    debug!("Checking version chain for txn {} with read_ts {}", txn.get_transaction_id(), txn.read_ts());
+
+                                    // Start with the current version
+                                    let mut current_meta = meta;
+                                    let mut current_tuple = tuple.clone();
+
+                                    // If this version is too new, traverse the version chain
+                                    if current_meta.get_commit_timestamp() > txn.read_ts() {
+                                        debug!("Current version too new (commit_ts: {}), traversing version chain", 
+                                               current_meta.get_commit_timestamp());
+
+                                        let mut current_undo_link = self.txn_manager.transaction_manager.get_undo_link(rid);
+                                        let mut seen_txns = std::collections::HashSet::new();
+
+                                        // Follow the version chain
+                                        while let Some(undo_link) = current_undo_link {
+                                            debug!("Found undo link: prev_txn={}, prev_log_idx={}", 
+                                                   undo_link.prev_txn, undo_link.prev_log_idx);
+
+                                            // Check for cycles in the version chain
+                                            if !seen_txns.insert(undo_link.prev_txn) {
+                                                debug!("Breaking loop - transaction {} already seen", undo_link.prev_txn);
+                                                break;
+                                            }
+
+                                            // Get the previous version
+                                            if let Some(creator_txn) = txn_manager.get_transaction(&undo_link.prev_txn) {
+                                                // Check if the transaction has any undo logs before trying to access them
+                                                if creator_txn.get_undo_log_num() == 0 {
+                                                    debug!("Transaction {} has no undo logs", creator_txn.get_transaction_id());
+                                                    // If this transaction has no undo logs but has committed, we can use its commit timestamp
+                                                    if creator_txn.get_state() == TransactionState::Committed &&
+                                                        creator_txn.commit_ts() <= txn.read_ts() {
+                                                        debug!("Using committed transaction's version with no undo logs");
+                                                        return Ok((current_meta, current_tuple));
+                                                    }
+                                                    break;
+                                                }
+
+                                                // Get the undo log - this returns UndoLog directly
+                                                let undo_log = creator_txn.get_undo_log(undo_link.prev_log_idx);
+                                                let prev_commit_ts = creator_txn.commit_ts();
+
+                                                debug!("Previous version - txn_id: {}, commit_ts: {}", 
+                                                       creator_txn.get_transaction_id(), prev_commit_ts);
+
+                                                // Update current version
+                                                current_meta = TupleMeta::new(undo_link.prev_txn);
+                                                current_meta.set_commit_timestamp(prev_commit_ts);
+                                                current_tuple = undo_log.tuple.clone();
+
+                                                // Check if this version is visible
+                                                if prev_commit_ts <= txn.read_ts() {
+                                                    debug!("Found visible version with commit_ts {} <= read_ts {}", 
+                                                           prev_commit_ts, txn.read_ts());
+                                                    return Ok((current_meta, current_tuple));
+                                                }
+
+                                                // Move to the previous version's undo link
+                                                current_undo_link = Some(undo_log.prev_version);
+                                            } else {
+                                                // If transaction not found but has valid commit timestamp
+                                                if current_meta.get_commit_timestamp() <= txn.read_ts() {
+                                                    debug!("Using version with commit_ts {} (transaction not found)", 
+                                                           current_meta.get_commit_timestamp());
+                                                    return Ok((current_meta, current_tuple));
+                                                }
+                                                break;
+                                            }
+                                        }
+
+                                        // Check if the original version is visible
+                                        if meta.get_creator_txn_id() == INVALID_TXN_ID ||
+                                            meta.get_commit_timestamp() <= txn.read_ts() {
+                                            debug!("Using original version (no version chain or visible original)");
+                                            return Ok((meta, tuple));
+                                        }
+
+                                        debug!("No visible version found in chain");
+                                        Err("No visible version found for transaction".to_string())
+                                    } else {
+                                        // Current version is visible
+                                        debug!("Current version is visible (commit_ts <= read_ts)");
+                                        Ok((meta, tuple.clone()))
+                                    }
+                                }
                             }
-
-                            // Get the undo log - this returns UndoLog directly
-                            let undo_log = creator_txn.get_undo_log(undo_link.prev_log_idx);
-                            let prev_commit_ts = creator_txn.commit_ts();
-
-                            debug!("Previous version - txn_id: {}, commit_ts: {}", 
-                                   creator_txn.get_transaction_id(), prev_commit_ts);
-
-                            // Update current version
-                            current_meta = TupleMeta::new(undo_link.prev_txn);
-                            current_meta.set_commit_timestamp(prev_commit_ts);
-                            current_tuple = undo_log.tuple.clone();
-
-                            // Check if this version is visible
-                            if prev_commit_ts <= txn.read_ts() {
-                                debug!("Found visible version with commit_ts {} <= read_ts {}", 
-                                       prev_commit_ts, txn.read_ts());
-                                return Ok((current_meta, current_tuple));
-                            }
-
-                            // Move to the previous version's undo link
-                            current_undo_link = Some(undo_log.prev_version);
-                        } else {
-                            // If transaction not found but has valid commit timestamp
-                            if current_meta.get_commit_timestamp() <= txn.read_ts() {
-                                debug!("Using version with commit_ts {} (transaction not found)", 
-                                       current_meta.get_commit_timestamp());
-                                return Ok((current_meta, current_tuple));
-                            }
-                            break;
                         }
+                        Err(e) => Err(format!("Page error while getting tuple: {}", e)),
                     }
-
-                    // Check if the original version is visible
-                    if meta.get_creator_txn_id() == INVALID_TXN_ID ||
-                        meta.get_commit_timestamp() <= txn.read_ts() {
-                        debug!("Using original version (no version chain or visible original)");
-                        return Ok((meta, tuple));
-                    }
-
-                    debug!("No visible version found in chain");
-                    Err("No visible version found for transaction".to_string())
-                } else {
-                    // Current version is visible
-                    Ok((meta, tuple.clone()))
                 }
+                _ => panic!("Wrong page type returned"),
             }
+        } else {
+            Err("Failed to convert to TablePage".to_string())
         }
     }
 }
@@ -747,15 +761,20 @@ impl TupleStorage {
         let first_page_id = *self.first_page_id.read();
         if first_page_id == INVALID_PAGE_ID {
             // Create and initialize the first page
-            if let Some(new_page) = self.bpm.new_page_guarded(NewPageType::Table) {
+            if let Some(new_page) = self.bpm.new_page_guarded(PageType::Table(
+                TablePage::new(0)  // Using 0 as temporary page_id
+            )) {
                 let new_page_id = new_page.get_page_id();
 
                 // Initialize the new page
-                if let Some(mut table_page) = new_page.into_specific_type::<TablePage, 8>() {
-                    table_page.access_mut(|page| {
-                        page.init();
-                        page.set_dirty(true);
-                    });
+                if let Some(page_type) = new_page.into_specific_type() {
+                    match page_type {
+                        PageType::Table(mut table_page) => {
+                            table_page.init();
+                            table_page.set_dirty(true);
+                        }
+                        _ => panic!("Wrong page type returned"),
+                    }
                 }
 
                 // Update first and last page pointers
@@ -786,28 +805,26 @@ impl TupleStorage {
     ) -> Result<RID, String> {
         let page_guard = self.get_page(page_id)?;
 
-        if let Some(mut table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-            // Let TablePage handle the physical insertion
-            let result = table_page.access_mut(|page| {
-                // Check space at page level using get_length instead of get_size
-                if let Ok(tuple_size) = tuple.get_length() {
-                    if !page.has_space_for(tuple_size) {
-                        return None;
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(mut table_page) => {
+                    // Check space at page level using get_length
+                    if let Ok(tuple_size) = tuple.get_length() {
+                        if !table_page.has_space_for(tuple_size) {
+                            return Err("Not enough space in page".to_string());
+                        }
+
+                        // Delegate actual insertion to TablePage
+                        if let Some(rid) = table_page.insert_tuple(meta, tuple) {
+                            // Handle transaction tracking if insertion was successful
+                            if let Some(txn_ctx) = txn_ctx {
+                                txn_ctx.append_write_set_atomic(self.table_oid, rid);
+                            }
+                            return Ok(rid);
+                        }
                     }
-
-                    // Delegate actual insertion to TablePage
-                    page.insert_tuple(meta, tuple)
-                } else {
-                    None
                 }
-            });
-
-            // Handle transaction tracking if insertion was successful
-            if let Some(Some(rid)) = result {
-                if let Some(txn_ctx) = txn_ctx {
-                    txn_ctx.append_write_set_atomic(self.table_oid, rid);
-                }
-                return Ok(rid);
+                _ => panic!("Wrong page type returned"),
             }
         }
 
@@ -823,84 +840,95 @@ impl TupleStorage {
     ) -> Result<RID, String> {
         let page_guard = self.get_page(rid.get_page_id())?;
 
-        if let Some(mut table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-            let result = table_page.access_mut(|page| {
-                match page.update_tuple(meta, tuple, rid) {
-                    Ok(()) => {
-                        // Update successful in place
-                        if let Some(txn_ctx) = &txn_ctx {
-                            txn_ctx.append_write_set_atomic(self.table_oid, rid);
-                        }
-                        Ok(rid)
-                    }
-                    Err(_) => {
-                        // Try inserting as new tuple if update fails
-                        match page.insert_tuple(meta, tuple) {
-                            Some(new_rid) => {
-                                if let Some(txn_ctx) = &txn_ctx {
-                                    txn_ctx.append_write_set_atomic(self.table_oid, new_rid);
-                                }
-                                Ok(new_rid)
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(mut table_page) => {
+                    match table_page.update_tuple(meta, tuple, rid) {
+                        Ok(()) => {
+                            // Update successful in place
+                            if let Some(txn_ctx) = &txn_ctx {
+                                txn_ctx.append_write_set_atomic(self.table_oid, rid);
                             }
-                            None => Err("Failed to update/insert tuple".to_string()),
+                            Ok(rid)
+                        }
+                        Err(_) => {
+                            // Try inserting as new tuple if update fails
+                            match table_page.insert_tuple(meta, tuple) {
+                                Some(new_rid) => {
+                                    if let Some(txn_ctx) = &txn_ctx {
+                                        txn_ctx.append_write_set_atomic(self.table_oid, new_rid);
+                                    }
+                                    Ok(new_rid)
+                                }
+                                None => Err("Failed to update/insert tuple".to_string()),
+                            }
                         }
                     }
                 }
-            });
-
-            if let Some(result) = result {
-                return result;
+                _ => panic!("Wrong page type returned"),
             }
+        } else {
+            Err("Failed to convert to TablePage".to_string())
         }
-
-        Err("Failed to update tuple".to_string())
     }
 
     pub fn get_tuple(&self, rid: RID) -> Result<(TupleMeta, Tuple), String> {
         let page_guard = self.get_page(rid.get_page_id())?;
 
-        if let Some(table_page) = page_guard.into_specific_type::<TablePage, 8>() {
-            if let Some(result) = table_page.access(|page| page.get_tuple(&rid)) {
-                return Ok(result.unwrap());
+        if let Some(page_type) = page_guard.into_specific_type() {
+            match page_type {
+                PageType::Table(table_page) => {
+                    match table_page.get_tuple(&rid) {
+                        Ok(result) => Ok(result),
+                        Err(e) => Err(format!("Failed to get tuple: {}", e)),
+                    }
+                }
+                _ => panic!("Wrong page type returned"),
             }
+        } else {
+            Err("Failed to convert to TablePage".to_string())
         }
-
-        Err("Failed to get tuple".to_string())
     }
 
     fn create_new_page(&self) -> Result<PageId, String> {
         // Create new page
         let new_page = self
             .bpm
-            .new_page_guarded(NewPageType::Table)
+            .new_page_guarded(PageType::Table(TablePage::new(0)))
             .ok_or_else(|| "Failed to create new page".to_string())?;
         let new_page_id = new_page.get_page_id();
 
         // Initialize the new page
-        if let Some(mut table_page) = new_page.into_specific_type::<TablePage, 8>() {
-            table_page.access_mut(|page| {
-                page.init();
-                page.set_dirty(true);
-            });
+        if let Some(page_type) = new_page.into_specific_type() {
+            match page_type {
+                PageType::Table(mut table_page) => {
+                    table_page.init();
+                    table_page.set_dirty(true);
 
-            // Update the page links
-            let last_page_id = *self.last_page_id.read();
-            if let Ok(last_page) = self.get_page(last_page_id) {
-                if let Some(mut last_table_page) = last_page.into_specific_type::<TablePage, 8>() {
-                    last_table_page.access_mut(|page| {
-                        page.set_next_page_id(new_page_id);
-                        page.set_dirty(true);
-                    });
+                    // Update the page links
+                    let last_page_id = *self.last_page_id.read();
+                    if let Ok(last_page) = self.get_page(last_page_id) {
+                        if let Some(last_page_type) = last_page.into_specific_type() {
+                            match last_page_type {
+                                PageType::Table(mut last_table_page) => {
+                                    last_table_page.set_next_page_id(new_page_id);
+                                    last_table_page.set_dirty(true);
+                                }
+                                _ => panic!("Wrong page type returned"),
+                            }
+                        }
+                    }
+
+                    // Update last page pointer
+                    *self.last_page_id.write() = new_page_id;
+
+                    return Ok(new_page_id);
                 }
+                _ => panic!("Wrong page type returned"),
             }
-
-            // Update last page pointer
-            *self.last_page_id.write() = new_page_id;
-
-            Ok(new_page_id)
-        } else {
-            Err("Failed to initialize new page".to_string())
         }
+
+        Err("Failed to initialize new page".to_string())
     }
 
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard, String> {
@@ -1606,7 +1634,9 @@ mod tests {
         debug!("Updated tuple metadata with commit timestamp: {}", commit_ts1);
 
         // Create third transaction with REPEATABLE_READ before txn2's operations
-        let txn3 = ctx.txn_manager.begin(IsolationLevel::RepeatableRead).unwrap();
+        let txn3 = ctx.txn_manager
+            .begin(IsolationLevel::RepeatableRead)
+            .unwrap();
         // Set read timestamp to be after txn1's commit
         txn3.set_read_ts(commit_ts1 + 1);
         debug!("Created txn3 (REPEATABLE_READ) with ID: {} and read_ts: {}", 

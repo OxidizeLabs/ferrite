@@ -111,16 +111,12 @@ impl ExtendableHTableHeaderPage {
     /// - `directory_idx`: The index in the directory page ID array.
     /// - `directory_page_id`: The page ID of the directory.
     pub fn set_directory_page_id(&mut self, directory_idx: u32, directory_page_id: PageId) {
-        debug!(
-            "Setting directory page ID at index {} to {}",
-            directory_idx, directory_page_id
-        );
-        self.directory_page_ids.push(directory_page_id);
-        info!(
-            "Directory page ID at index {} set to {}",
-            directory_idx, directory_page_id
-        );
-        self.print_header();
+        if (directory_idx as usize) < self.directory_page_ids.len() {
+            self.directory_page_ids[directory_idx as usize] = directory_page_id;
+        } else {
+            self.directory_page_ids.push(directory_page_id);
+        }
+        debug!("Directory page ID at index {} set to {}", directory_idx, directory_page_id);
     }
 
     /// Returns the maximum number of directory page IDs the header page can handle.
@@ -263,12 +259,12 @@ impl TryFrom<PageType> for ExtendableHTableHeaderPage {
 
 #[cfg(test)]
 mod basic_behavior {
-    use crate::buffer::buffer_pool_manager::{BufferPoolManager, NewPageType};
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::page::page::PageTrait;
+    use crate::storage::page::page::{PageTrait, PageType};
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::info;
@@ -329,53 +325,48 @@ mod basic_behavior {
 
         info!("Creating ExtendedHashTableHeader page");
         let header_guard = bpm
-            .new_page_guarded(NewPageType::ExtendedHashTableHeader)
+            .new_page_guarded(PageType::ExtendedHashTableHeader(
+                ExtendableHTableHeaderPage::new(0)
+            ))
             .unwrap();
         info!("Created page type: {}", header_guard.get_page_type());
 
-        match header_guard.into_specific_type::<ExtendableHTableHeaderPage, 8>() {
-            Some(mut ext_guard) => {
-                info!("Successfully converted to ExtendableHTableHeaderPage");
+        if let Some(page_type) = header_guard.into_specific_type() {
+            match page_type {
+                PageType::ExtendedHashTableHeader(mut header_page) => {
+                    info!("Successfully converted to ExtendableHTableHeaderPage");
+                    info!("ExtendableHTableHeaderPage ID: {}", header_page.get_page_id());
 
-                ext_guard.access(|page| {
-                    info!("ExtendableHTableHeaderPage ID: {}", page.get_page_id());
-                });
-
-                // Initialize the header page with a max depth of 2
-                ext_guard.access_mut(|page| {
-                    page.init(2);
+                    // Initialize the header page with a max depth of 2
+                    header_page.init(2);
                     info!(
                         "Initialized header page with global depth: {}",
-                        page.global_depth()
+                        header_page.global_depth()
                     );
-                });
 
-                // Test hashes that will produce different upper bits
-                let hashes = [
-                    0b00000000000000000000000000000000, // Should map to 0
-                    0b01000000000000000000000000000000, // Should map to 1
-                    0b10000000000000000000000000000000, // Should map to 2
-                    0b11000000000000000000000000000000, // Should map to 3
-                ];
+                    // Test hashes that will produce different upper bits
+                    let hashes = [
+                        0b00000000000000000000000000000000, // Should map to 0
+                        0b01000000000000000000000000000000, // Should map to 1
+                        0b10000000000000000000000000000000, // Should map to 2
+                        0b11000000000000000000000000000000, // Should map to 3
+                    ];
 
-                for (i, &hash) in hashes.iter().enumerate() {
-                    ext_guard.access_mut(|page| {
-                        let index = page.hash_to_directory_index(hash);
+                    for (i, &hash) in hashes.iter().enumerate() {
+                        let index = header_page.hash_to_directory_index(hash);
                         info!("Hash {:#034b} mapped to index {}", hash, index);
                         assert_eq!(
                             index, i as u32,
                             "Hash {:#034b} should map to index {}",
                             hash, i
                         );
-                    });
-                }
-                info!("All hash to index mappings verified successfully");
+                    }
+                    info!("All hash to index mappings verified successfully");
 
-                // Test with max_depth 0
-                ext_guard.access_mut(|page| {
-                    page.init(0);
+                    // Test with max_depth 0
+                    header_page.init(0);
                     for &hash in &hashes {
-                        let index = page.hash_to_directory_index(hash);
+                        let index = header_page.hash_to_directory_index(hash);
                         info!(
                             "With max_depth 0, hash {:#034b} mapped to index {}",
                             hash, index
@@ -385,14 +376,12 @@ mod basic_behavior {
                             "With max_depth 0, all hashes should map to index 0"
                         );
                     }
-                });
-                info!("Max depth 0 tests completed successfully");
+                    info!("Max depth 0 tests completed successfully");
 
-                // Test with max_depth 31 (maximum allowed)
-                ext_guard.access_mut(|page| {
-                    page.init(31);
+                    // Test with max_depth 31 (maximum allowed)
+                    header_page.init(31);
                     for (_i, &hash) in hashes.iter().enumerate() {
-                        let index = page.hash_to_directory_index(hash);
+                        let index = header_page.hash_to_directory_index(hash);
                         info!(
                             "With max_depth 31, hash {:#034b} mapped to index {}",
                             hash, index
@@ -405,12 +394,12 @@ mod basic_behavior {
                             hash >> 1
                         );
                     }
-                });
-                info!("Max depth 31 tests completed successfully");
+                    info!("Max depth 31 tests completed successfully");
+                }
+                _ => panic!("Wrong page type returned"),
             }
-            None => {
-                panic!("Failed to convert to ExtendableHTableHeaderPage");
-            }
+        } else {
+            panic!("Failed to convert to ExtendableHTableHeaderPage");
         }
 
         info!("Header page tests completed successfully");
