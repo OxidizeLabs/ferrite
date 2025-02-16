@@ -8,12 +8,13 @@ use crate::types_db::value::Value;
 use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use log;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
-    commit_ts: Timestamp,
+    commit_timestamp: Timestamp,
     deleted: bool,
     undo_log_idx: usize,
 }
@@ -23,7 +24,7 @@ impl TupleMeta {
     pub fn new(txn_id: TxnId) -> Self {
         Self {
             creator_txn_id: txn_id,
-            commit_ts: Timestamp::MAX, // Start with MAX to indicate uncommitted
+            commit_timestamp: Timestamp::MAX, // Start with MAX to indicate uncommitted
             deleted: false,
             undo_log_idx: 0,
         }
@@ -36,17 +37,22 @@ impl TupleMeta {
 
     /// Returns the commit timestamp when the tuple became visible.
     pub fn get_commit_timestamp(&self) -> Timestamp {
-        self.commit_ts
+        self.commit_timestamp
     }
 
     /// Sets the commit timestamp when the tuple became visible.
     pub fn set_commit_timestamp(&mut self, ts: Timestamp) {
-        self.commit_ts = ts;
+        self.commit_timestamp = ts;
     }
 
     /// Returns whether the tuple is committed.
     pub fn is_committed(&self) -> bool {
-        self.commit_ts != Timestamp::MAX
+        let committed = self.commit_timestamp != Timestamp::MAX;
+        log::debug!(
+            "TupleMeta.is_committed(): commit_ts={}, is_committed={}", 
+            self.commit_timestamp, committed
+        );
+        committed
     }
 
     /// Returns whether the tuple is marked as deleted.
@@ -60,23 +66,36 @@ impl TupleMeta {
 
     /// Checks if this tuple is visible to the given transaction.
     pub fn is_visible_to(&self, txn_id: TxnId, watermark: &Watermark) -> bool {
+        log::debug!(
+            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, watermark={}",
+            self.creator_txn_id, txn_id, self.commit_timestamp, self.deleted, watermark.get_watermark()
+        );
+
         // If this tuple was created by the current transaction, it's visible
         if self.creator_txn_id == txn_id {
+            log::debug!("Tuple visible: created by current transaction");
             return true;
         }
 
         // If the tuple is deleted, it's not visible
         if self.deleted {
+            log::debug!("Tuple not visible: deleted");
             return false;
         }
 
         // If the tuple is not committed, it's not visible
         if !self.is_committed() {
+            log::debug!("Tuple not visible: not committed");
             return false;
         }
 
         // The tuple is visible if its commit timestamp is less than the watermark
-        self.commit_ts <= watermark.get_watermark()
+        let visible = self.commit_timestamp <= watermark.get_watermark();
+        log::debug!(
+            "Tuple visibility based on watermark: commit_ts={} <= watermark={} = {}", 
+            self.commit_timestamp, watermark.get_watermark(), visible
+        );
+        visible
     }
 
     /// Gets the undo log index for this tuple version
@@ -87,6 +106,11 @@ impl TupleMeta {
     /// Sets the undo log index for this tuple version
     pub fn set_undo_log_idx(&mut self, idx: usize) {
         self.undo_log_idx = idx;
+    }
+
+    /// Sets the creator transaction ID for this tuple
+    pub fn set_creator_txn_id(&mut self, txn_id: TxnId) {
+        self.creator_txn_id = txn_id;
     }
 }
 
@@ -255,6 +279,11 @@ impl Tuple {
             values: combined_values,
             rid: self.rid,  // Keep the left tuple's RID
         }
+    }
+
+    /// Gets the number of columns in this tuple
+    pub fn get_column_count(&self) -> usize {
+        self.values.len()
     }
 }
 
