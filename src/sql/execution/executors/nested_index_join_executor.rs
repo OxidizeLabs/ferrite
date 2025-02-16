@@ -427,7 +427,6 @@ mod tests {
                 .insert_tuple(
                     &left_tuple_meta,
                     &mut tuple,
-                    Some(ctx.transaction_context()),
                 )
                 .expect("Failed to insert into left table");
             debug!(
@@ -455,7 +454,6 @@ mod tests {
                 .insert_tuple(
                     &right_tuple_meta,
                     &mut tuple,
-                    Some(ctx.transaction_context()),
                 )
                 .expect("Failed to insert into right table");
             debug!(

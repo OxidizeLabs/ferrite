@@ -5,16 +5,21 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::delete_plan::DeleteNode;
-use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::concurrency::transaction::{Transaction, TransactionState};
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::concurrency::lock_manager::LockManager;
+use crate::sql::execution::transaction_context::TransactionContext;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<DeleteNode>,
-    table_heap: Arc<TableHeap>,
+    table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
 }
@@ -49,7 +54,12 @@ impl DeleteExecutor {
                 plan.get_table_name(),
                 table_info.get_table_schema()
             );
-            table_info.get_table_heap()
+            
+            // Create TransactionalTableHeap
+            Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ))
         };
         debug!("Released catalog read lock");
 
@@ -133,8 +143,9 @@ impl AbstractExecutor for DeleteExecutor {
                 let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
 
                 while let Some((mut tuple_meta, mut tuple)) = table_iter.next() {
-                    // Store the current ID before any mutable borrows
+                    // Store the current ID and RID before any mutable borrows
                     let current_id = tuple.get_value(0).get_val().clone();
+                    let rid = tuple.get_rid();
 
                     if current_id == *id_to_delete {
                         debug!("Found matching tuple with ID: {:?}", current_id);
@@ -142,8 +153,7 @@ impl AbstractExecutor for DeleteExecutor {
                         // Mark the tuple as deleted
                         tuple_meta.set_deleted(true);
 
-                        let rid = tuple.get_rid();
-                        match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, Some(txn_ctx.clone())) {
+                        match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx.clone()) {
                             Ok(_) => {
                                 debug!("Successfully deleted tuple with ID: {:?}", &current_id);
                                 return Some((tuple, rid));
@@ -184,13 +194,10 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::sql::execution::expressions::abstract_expression::Expression::Constant;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::values_plan::ValuesNode;
-    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
@@ -204,6 +211,7 @@ mod tests {
         transaction_context: Arc<TransactionContext>,
         catalog: Arc<RwLock<Catalog>>,
         _temp_dir: TempDir,
+        transaction_manager: Arc<TransactionManager>,
     }
 
     impl TestContext {
@@ -243,6 +251,9 @@ mod tests {
             let lock_manager = Arc::new(LockManager::new());
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadCommitted));
+            // Set transaction state to Running
+            transaction.set_state(TransactionState::Running);
+            
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -265,7 +276,25 @@ mod tests {
                 transaction_context,
                 catalog,
                 _temp_dir: temp_dir,
+                transaction_manager,
             }
+        }
+
+        // Add helper method to create new transactions
+        fn create_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
+            // Use a simple atomic counter for test transaction IDs
+            static NEXT_TXN_ID: AtomicU64 = AtomicU64::new(1);
+            
+            let txn_id = NEXT_TXN_ID.fetch_add(1, Ordering::SeqCst);
+            let txn = Arc::new(Transaction::new(txn_id, isolation_level));
+            // Set transaction state to Running
+            txn.set_state(TransactionState::Running);
+            
+            Arc::new(TransactionContext::new(
+                txn,
+                Arc::new(LockManager::new()),
+                self.transaction_manager.clone(),
+            ))
         }
     }
 
@@ -273,7 +302,7 @@ mod tests {
     fn test_delete_executor() {
         let ctx = TestContext::new("test_delete_executor");
 
-        // Create execution context
+        // Create execution context with a running transaction
         let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm.clone(),
             ctx.catalog.clone(),
@@ -295,11 +324,25 @@ mod tests {
             .create_table(table_name.to_string(), schema.clone())
             .unwrap();
 
-        // Insert some test data
-        let binding = execution_context.read();
-        let binding = binding.get_catalog().read();
-        let table_info = binding.get_table(table_name).unwrap();
+        // Get table info and create TransactionalTableHeap
+        let (table_oid, table_heap) = {
+            // Hold the execution context lock
+            let exec_guard = execution_context.read();
+            // Hold the catalog lock
+            let catalog_guard = exec_guard.get_catalog().read();
+            let table_info = catalog_guard.get_table(table_name).expect("Table not found");
+            
+            // Create values that will live beyond the lock scope
+            let oid = table_info.get_table_oidt();
+            let heap = Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ));
+            
+            (oid, heap)
+        };
 
+        // Insert test data
         let test_data = vec![
             (1, "one"),
             (2, "two"),
@@ -308,42 +351,34 @@ mod tests {
             (5, "five"),
         ];
 
-        // Create a schema for the tuples
-        let tuple_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("value", TypeId::VarChar),
-        ]);
-
         for (id, value) in test_data {
             let mut tuple = Tuple::new(
-                &*vec![Value::new(id), Value::new(value.to_string())],
-                tuple_schema.clone(), // Add the schema here
+                &vec![Value::new(id), Value::new(value.to_string())],
+                schema.clone(),
                 Default::default(),
             );
 
             let tuple_meta = TupleMeta::new(ctx.transaction_context.get_transaction_id());
 
-            table_info
-                .get_table_heap()
+            table_heap
                 .insert_tuple(
                     &tuple_meta,
                     &mut tuple,
-                    Some(ctx.transaction_context.clone()),
+                    ctx.transaction_context.clone(),
                 )
                 .expect("Failed to insert tuple");
         }
 
         // Verify initial table state
         let mut initial_count = 0;
-        let mut table_iter = table_info
-            .get_table_heap()
-            .make_iterator(Some(ctx.transaction_context.clone()));
-        while let Some((_meta, tuple)) = table_iter.next() {
-            initial_count += 1;
-            // Optionally verify the tuple contents
-            let id = tuple.get_value(0);
-            let value = tuple.get_value(1);
-            debug!("Found tuple with id: {:?}, value: {}", id, value);
+        let mut table_iter = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
+        while let Some((meta, tuple)) = table_iter.next() {
+            if !meta.is_deleted() {
+                initial_count += 1;
+                let id = tuple.get_value(0);
+                let value = tuple.get_value(1);
+                debug!("Found tuple with id: {:?}, value: {}", id, value);
+            }
         }
         assert_eq!(initial_count, 5, "Should have 5 tuples initially");
 
@@ -385,7 +420,7 @@ mod tests {
         let delete_plan = Arc::new(DeleteNode::new(
             schema.clone(),
             table_name.to_string(),
-            table_info.get_table_oidt(),
+            table_oid,
             vec![values_plan],
         ));
 
@@ -406,13 +441,13 @@ mod tests {
         // Verify remaining tuples
         let mut remaining_count = 0;
         let mut remaining_ids = Vec::new();
-        let mut table_iter = table_info
-            .get_table_heap()
-            .make_iterator(Some(ctx.transaction_context.clone()));
+        let mut table_iter = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
 
-        while let Some((_meta, tuple)) = table_iter.next() {
-            remaining_count += 1;
-            remaining_ids.push(tuple.get_value(0).get_val().clone());
+        while let Some((meta, tuple)) = table_iter.next() {
+            if !meta.is_deleted() {
+                remaining_count += 1;
+                remaining_ids.push(tuple.get_value(0).get_val().clone());
+            }
         }
 
         assert_eq!(remaining_count, 3, "Should have 3 tuples remaining");

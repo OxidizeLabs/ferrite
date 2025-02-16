@@ -396,7 +396,6 @@ mod tests {
             let rid = left_table.insert_tuple(
                 &left_tuple_meta,
                 &mut tuple,
-                Some(ctx.transaction_context()),
             ).expect("Failed to insert into left table");
             debug!("Inserted into left table: id={}, value={} at RID={:?}", id, value, rid);
         }
@@ -416,7 +415,6 @@ mod tests {
             let rid = right_table.insert_tuple(
                 &right_tuple_meta,
                 &mut tuple,
-                Some(ctx.transaction_context()),
             ).expect("Failed to insert into right table");
             debug!("Inserted into right table: id={}, data={} at RID={:?}", id, data, rid);
         }

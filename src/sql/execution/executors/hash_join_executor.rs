@@ -1,20 +1,19 @@
+use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
+use crate::container::hash_function::HashFunction;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::hash_join_plan::HashJoinNode;
 use crate::storage::table::tuple::Tuple;
-use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
-use crate::container::hash_function::HashFunction;
 use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::catalog::column::Column;
-use crate::sql::execution::expressions::abstract_expression::Expression;
-
 
 pub struct HashJoinExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -29,13 +28,13 @@ pub struct HashJoinExecutor {
 
 impl HashJoinExecutor {
     pub fn new(
-        context: Arc<RwLock<ExecutionContext>>, 
+        context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<HashJoinNode>,
         left_child: Box<dyn AbstractExecutor>,
         right_child: Box<dyn AbstractExecutor>,
     ) -> Self {
         debug!("Creating HashJoinExecutor");
-        
+
         Self {
             context,
             plan,
@@ -50,12 +49,11 @@ impl HashJoinExecutor {
 
     fn build_hash_table(&mut self) -> bool {
         debug!("Building hash table from right child");
-        
+
         let hash_table = match DiskExtendableHashTable::new(
             "hash_join_table".to_string(),
             self.get_executor_context().read().get_buffer_pool_manager(),
             HashFunction::new(),
-            self.plan.get_right_schema().clone(),
             4,
             4,
             100,
@@ -70,16 +68,17 @@ impl HashJoinExecutor {
 
         while let Some((tuple, rid)) = self.right_child.next() {
             let key = match self.plan.get_right_key_expressions()[0]
-                .evaluate(&tuple, self.plan.get_right_schema()) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        debug!("Failed to evaluate right key expression");
-                        return false;
-                    }
-                };
-            
+                .evaluate(&tuple, self.plan.get_right_schema())
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    debug!("Failed to evaluate right key expression");
+                    return false;
+                }
+            };
+
             if let Some(ref mut ht) = self.hash_table {
-                if !ht.insert(key, rid, None) {
+                if !ht.insert(key, rid) {
                     debug!("Failed to insert into hash table");
                     return false;
                 }
@@ -96,14 +95,14 @@ impl AbstractExecutor for HashJoinExecutor {
     fn init(&mut self) {
         if !self.initialized {
             debug!("Initializing HashJoinExecutor");
-            
+
             if !self.build_hash_table() {
                 debug!("Failed to build hash table");
                 return;
             }
 
             self.left_child.init();
-            
+
             self.initialized = true;
         }
     }
@@ -128,19 +127,20 @@ impl AbstractExecutor for HashJoinExecutor {
             };
 
             let key = match self.plan.get_left_key_expressions()[0]
-                .evaluate(&left_tuple, self.plan.get_left_schema()) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        debug!("Failed to evaluate left key expression");
-                        self.current_left_tuple = None;
-                        continue;
-                    }
-                };
+                .evaluate(&left_tuple, self.plan.get_left_schema())
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    debug!("Failed to evaluate left key expression");
+                    self.current_left_tuple = None;
+                    continue;
+                }
+            };
 
             if let Some(ref ht) = self.hash_table {
-                if let Some(right_rid) = ht.get_value(&key, None) {
-                    if let Some((_, right_tuple)) = self.right_tuples.iter()
-                        .find(|(rid, _)| *rid == right_rid) 
+                if let Some(right_rid) = ht.get_value(&key) {
+                    if let Some((_, right_tuple)) =
+                        self.right_tuples.iter().find(|(rid, _)| *rid == right_rid)
                     {
                         let combined_tuple = left_tuple.combine(right_tuple);
                         self.current_left_tuple = None;
@@ -165,21 +165,21 @@ impl AbstractExecutor for HashJoinExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use sqlparser::ast::{JoinConstraint, JoinOperator};
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::sql::execution::transaction_context::TransactionContext;
-    use tempfile::TempDir;
     use crate::types_db::type_id::TypeId;
-    use crate::catalog::catalog::Catalog;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use sqlparser::ast::{JoinConstraint, JoinOperator};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_hash_join_executor() {
         let ctx = TestContext::new("test_hash_join_executor");
-        
+
         let execution_ctx = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm(),
             ctx.catalog.clone(),
@@ -314,16 +314,58 @@ mod tests {
 
         // Create test data for left child
         let left_tuples = vec![
-            (Tuple::new(&[Value::new(1), Value::new("Alice")], left_schema.clone(), RID::new(1, 0)), RID::new(1, 0)),
-            (Tuple::new(&[Value::new(2), Value::new("Bob")], left_schema.clone(), RID::new(1, 1)), RID::new(1, 1)),
-            (Tuple::new(&[Value::new(3), Value::new("Charlie")], left_schema.clone(), RID::new(1, 2)), RID::new(1, 2)),
+            (
+                Tuple::new(
+                    &[Value::new(1), Value::new("Alice")],
+                    left_schema.clone(),
+                    RID::new(1, 0),
+                ),
+                RID::new(1, 0),
+            ),
+            (
+                Tuple::new(
+                    &[Value::new(2), Value::new("Bob")],
+                    left_schema.clone(),
+                    RID::new(1, 1),
+                ),
+                RID::new(1, 1),
+            ),
+            (
+                Tuple::new(
+                    &[Value::new(3), Value::new("Charlie")],
+                    left_schema.clone(),
+                    RID::new(1, 2),
+                ),
+                RID::new(1, 2),
+            ),
         ];
 
         // Create test data for right child
         let right_tuples = vec![
-            (Tuple::new(&[Value::new(1), Value::new(25)], right_schema.clone(), RID::new(2, 0)), RID::new(2, 0)),
-            (Tuple::new(&[Value::new(2), Value::new(30)], right_schema.clone(), RID::new(2, 1)), RID::new(2, 1)),
-            (Tuple::new(&[Value::new(4), Value::new(35)], right_schema.clone(), RID::new(2, 2)), RID::new(2, 2)),
+            (
+                Tuple::new(
+                    &[Value::new(1), Value::new(25)],
+                    right_schema.clone(),
+                    RID::new(2, 0),
+                ),
+                RID::new(2, 0),
+            ),
+            (
+                Tuple::new(
+                    &[Value::new(2), Value::new(30)],
+                    right_schema.clone(),
+                    RID::new(2, 1),
+                ),
+                RID::new(2, 1),
+            ),
+            (
+                Tuple::new(
+                    &[Value::new(4), Value::new(35)],
+                    right_schema.clone(),
+                    RID::new(2, 2),
+                ),
+                RID::new(2, 2),
+            ),
         ];
 
         // Create mock executors
@@ -365,12 +407,8 @@ mod tests {
         ));
 
         // Create hash join executor
-        let mut join_executor = HashJoinExecutor::new(
-            execution_ctx,
-            plan,
-            left_executor,
-            right_executor,
-        );
+        let mut join_executor =
+            HashJoinExecutor::new(execution_ctx, plan, left_executor, right_executor);
 
         // Initialize the executor
         join_executor.init();

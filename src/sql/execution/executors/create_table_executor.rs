@@ -129,11 +129,163 @@ impl AbstractExecutor for CreateTableExecutor {
         self.context.clone()
     }
 }
+
 impl Drop for CreateTableExecutor {
     fn drop(&mut self) {
         debug!(
             "Dropping CreateTableExecutor for table '{}'",
             self.plan.get_table_name()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::index::index::IndexType;
+    use crate::types_db::type_id::TypeId;
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        transaction_manager: Arc<TransactionManager>,
+        transaction_context: Arc<TransactionContext>,
+        _temp_dir: TempDir,
+    }
+
+    impl TestContext {
+        pub fn new(name: &str) -> Self {
+            const BUFFER_POOL_SIZE: usize = 100;
+            const K: usize = 2;
+
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer,
+            ));
+
+            // Create transaction manager and lock manager first
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
+            Self {
+                bpm,
+                transaction_manager,
+                transaction_context,
+                _temp_dir: temp_dir,
+            }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
+        }
+    }
+
+    fn create_test_schema() -> Schema {
+        Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ])
+    }
+
+    fn create_catalog(ctx: &TestContext) -> Catalog {
+        Catalog::new(
+            ctx.bpm.clone(),
+            0,              // next_index_oid
+            0,              // next_table_oid
+            HashMap::new(), // tables
+            HashMap::new(), // indexes
+            HashMap::new(), // table_names
+            HashMap::new(), // index_names
+            ctx.transaction_manager.clone(), // Add transaction manager
+        )
+    }
+
+    fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
+        let ctx = TestContext::new("projection_test");
+        let bpm = ctx.bpm();
+        let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
+        let transaction_context = ctx.transaction_context.clone();
+
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            bpm,
+            catalog,
+            transaction_context,
+        )));
+
+        execution_context
+    }
+
+    #[test]
+    fn test_create_table_basic() {
+        let test_context = TestContext::new("test_create_table_basic");
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let schema = create_test_schema();
+
+        // Create execution context with the same catalog instance
+        let exec_context = Arc::new(RwLock::new(ExecutionContext::new(
+            test_context.bpm(),
+            catalog.clone(), // Use the same catalog instance
+            test_context.transaction_context.clone(),
+        )));
+
+        {
+            let mut catalog_guard = catalog.write();
+            catalog_guard.create_table("test_table".to_string(), schema.clone());
+        }
+
+        let key_attrs = vec![0];
+        let plan = Arc::new(CreateTablePlanNode::new(
+            schema.clone(),
+            "test_table".to_string(),
+            false,
+        ));
+
+        let mut executor = CreateTableExecutor::new(exec_context, plan, false);
+        executor.init();
+        assert!(executor.next().is_none());
+
+        let catalog_guard = catalog.read();
+        let tables = catalog_guard.get_table("test_table").unwrap();
+        assert_eq!(tables.get_table_name(), "test_table");
     }
 }

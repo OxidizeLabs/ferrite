@@ -5,7 +5,7 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::insert_plan::InsertNode;
-use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error, warn};
 use parking_lot::RwLock;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 pub struct InsertExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<InsertNode>,
-    table_heap: Arc<TableHeap>,
+    txn_table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
 }
@@ -38,7 +38,7 @@ impl InsertExecutor {
 
         // Then briefly read from catalog to get the TableInfo
         debug!("Acquiring catalog read lock");
-        let table_heap = {
+        let txn_table_heap = {
             let catalog_guard = catalog.read();
             debug!("Catalog lock acquired, getting table info");
             let table_info = catalog_guard
@@ -49,7 +49,10 @@ impl InsertExecutor {
                 plan.get_table_name(),
                 table_info.get_table_schema()
             );
-            table_info.get_table_heap()
+            Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ))
         };
         debug!("Released catalog read lock");
 
@@ -61,7 +64,7 @@ impl InsertExecutor {
         Self {
             context,
             plan,
-            table_heap,
+            txn_table_heap,
             initialized: false,
             child_executor: None,
         }
@@ -128,12 +131,9 @@ impl AbstractExecutor for InsertExecutor {
                 };
 
                 let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
-                let _table_heap_guard = self.table_heap.latch.write();
-                let table_heap = &self.table_heap;
 
-
-                // TableHeap::insert_tuple takes &self, so we can call it directly on Arc<TableHeap>
-                match table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx)) {
+                // Use TransactionalTableHeap's insert_tuple method
+                match self.txn_table_heap.insert_tuple(&tuple_meta, &mut tuple, txn_ctx) {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
                         Some((tuple, rid))

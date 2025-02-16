@@ -133,6 +133,8 @@ pub enum PageError {
     },
     InvalidOperation,
     TupleInvalid,
+    SerializationError,
+    DeserializationError,
 }
 
 #[derive(Debug)]
@@ -281,6 +283,12 @@ impl Display for PageError {
             }
             PageError::TupleInvalid => {
                 write!(f, "Invalid Tuple")
+            }
+            PageError::SerializationError => {
+                write!(f, "Invalid Serialization")
+            }
+            PageError::DeserializationError => {
+                write!(f, "Invalid Deserialization")
             }
         }
     }

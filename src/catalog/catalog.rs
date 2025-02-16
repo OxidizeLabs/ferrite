@@ -9,6 +9,7 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::index::b_plus_tree_i::BPlusTree;
 use crate::storage::index::index::{Index, IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use core::fmt;
 use log::{info, warn};
 use parking_lot::RwLock;
@@ -78,7 +79,6 @@ impl Catalog {
         let table_heap = Arc::new(TableHeap::new(
             self.bpm.clone(),
             table_oid,
-            self.txn_manager.clone(),
         ));
 
         // Increment table OID
@@ -171,14 +171,19 @@ impl Catalog {
 
         // Update catalog maps
         self.index_names.insert(index_name.to_string(), index_oid);
-        self.add_index(index_oid, index_info, index.clone());
+        self.add_index(index_oid, index_info.clone(), index.clone());
 
         self.next_index_oid += 1;
 
-        // Now populate the index using the stored version
+        // Now populate the index using the stored version with transaction support
         if let Some(table_info) = self.get_table(table_name) {
             let table_heap = table_info.get_table_heap();
-            let _table_heap_guard = table_heap.latch.read();
+            
+            // Create transactional table heap wrapper
+            let txn_table_heap = TransactionalTableHeap::new(
+                table_heap.clone(),
+                table_info.get_table_oidt(),
+            );
 
             // Create a transaction for populating the index
             let txn = self
@@ -191,11 +196,13 @@ impl Catalog {
                 self.txn_manager.clone(),
             ));
 
-            let mut iter = table_heap.make_iterator(Some(txn_ctx));
-
             // Get reference to the index we just created
             if let Some(_) = self.indexes.get(&index_oid) {
                 let mut index_write_guard = index.write();
+                
+                // Create iterator using transactional table heap
+                let mut iter = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
+
                 // Populate index with existing table data
                 while let Some((_, tuple)) = iter.next() {
                     index_write_guard.insert_entry(&tuple, tuple.get_rid(), &txn);
@@ -599,9 +606,8 @@ mod tests {
         let table_heap = Arc::new(TableHeap::new(
             bpm.clone(),
             1,
-            txn_manager.clone(),
         ));
-        let table_heap2 = Arc::new(TableHeap::new(bpm, 1, txn_manager));
+        let table_heap2 = Arc::new(TableHeap::new(bpm, 1));
 
         // Create two identical TableInfo instances
         let info1 = TableInfo::new(
@@ -817,7 +823,12 @@ mod tests {
             .create_table("test_table".to_string(), schema.clone())
             .unwrap();
         let table_heap = table_info.get_table_heap();
-        let _table_heap_guard = table_heap.latch.read();
+
+        // Create transactional table heap wrapper
+        let txn_table_heap = TransactionalTableHeap::new(
+            table_heap.clone(),
+            table_info.get_table_oidt(),
+        );
 
         // Create and insert a test tuple
         let mut tuple = Tuple::new(
@@ -826,14 +837,15 @@ mod tests {
             RID::new(0, 0),
         );
 
-        let tuple_meta = TupleMeta::new(0);
+        let tuple_meta = TupleMeta::new(txn.get_transaction_id());
 
-        // Insert the tuple into the table heap
-        let rid = table_heap.insert_tuple(&tuple_meta, &mut tuple, Some(txn_ctx.clone())).unwrap();
-        tuple.set_rid(rid); // Update the tuple's RID with the actual insertion location
+        // Insert the tuple using transactional table heap
+        let rid = txn_table_heap.insert_tuple(&tuple_meta, &mut tuple, txn_ctx.clone())
+            .expect("Failed to insert tuple");
+        tuple.set_rid(rid);
 
-        // Test iterator
-        let mut iter = table_heap.make_iterator(Some(txn_ctx.clone()));
+        // Test iterator using transactional table heap
+        let mut iter = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
 
         // Verify the tuple is visible through the iterator
         let next_result = iter.next();
