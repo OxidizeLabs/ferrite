@@ -1,8 +1,9 @@
 use crate::common::config::FrameId;
-use log::{debug, error, trace, warn};
-use std::collections::HashMap;
+use log::{debug, error, trace};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use parking_lot::{Mutex as ParkingMutex, RwLock};
 
 /// The type of access operation on a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,11 +35,22 @@ pub struct Frame {
 #[derive(Debug)]
 pub struct LRUKReplacer {
     /// The store of frames managed by this replacer.
-    frame_store: Arc<Mutex<HashMap<FrameId, Frame>>>,
+    frame_store: RwLock<HashMap<FrameId, FrameEntry>>,
     /// The maximum number of frames the replacer can manage.
-    replacer_size: usize,
+    size: usize,
     /// The K value determining the K-th most recent access to consider.
     k: usize,
+    /// The current number of frames managed by the replacer.
+    curr_size: usize,
+    /// A mutex-protected queue of evictable frames.
+    evictable_frames: ParkingMutex<VecDeque<FrameId>>,
+}
+
+#[derive(Debug, Clone)]
+struct FrameEntry {
+    access_count: usize,
+    access_history: VecDeque<u64>,
+    is_evictable: bool,
 }
 
 impl LRUKReplacer {
@@ -46,21 +58,20 @@ impl LRUKReplacer {
     ///
     /// # Arguments
     ///
-    /// * `num_frames` - The maximum number of frames to manage.
+    /// * `size` - The maximum number of frames to manage.
     /// * `k` - The K value determining the K-th most recent access to consider for eviction.
     ///
     /// # Returns
     ///
     /// A new `LRUKReplacer` instance.
-    pub fn new(replacer_size: usize, k: usize) -> Self {
-        debug!(
-            "Initializing LRUKReplacer with size {} and k {}",
-            replacer_size, k
-        );
-        Self {
-            frame_store: Arc::new(Mutex::new(HashMap::with_capacity(replacer_size))),
-            replacer_size,
+    pub fn new(size: usize, k: usize) -> Self {
+        debug!("Initializing LRUKReplacer with size {} and k {}", size, k);
+        LRUKReplacer {
+            size,
             k,
+            curr_size: 0,
+            frame_store: RwLock::new(HashMap::new()),
+            evictable_frames: ParkingMutex::new(VecDeque::new()),
         }
     }
 
@@ -81,46 +92,76 @@ impl LRUKReplacer {
     /// # Returns
     ///
     /// The `FrameId` of the evicted frame, or `None` if no frame could be evicted.
-    pub fn evict(&self) -> Option<FrameId> {
-        let mut frame_store = self.frame_store.lock().unwrap();
+    pub fn evict(&mut self) -> Option<FrameId> {
+        let mut evictable = self.evictable_frames.lock();
+        if evictable.is_empty() {
+            return None;
+        }
+
+        let store = self.frame_store.read();
+        
+        // Find the frame to evict based on LRU-K policy
         let mut victim_frame_id = None;
-        let mut min_k_distance = u64::MAX;
-        let mut earliest_access_time = u64::MAX;
-
-        for (&id, frame) in frame_store.iter() {
-            if !frame.is_evictable {
-                continue;
+        let mut min_k_accesses = usize::MAX;
+        let mut oldest_k_access = u64::MAX;
+        
+        for &frame_id in evictable.iter() {
+            if let Some(entry) = store.get(&frame_id) {
+                if !entry.is_evictable {
+                    continue;
+                }
+                
+                let num_accesses = entry.access_history.len();
+                
+                // First prioritize frames with fewer than k accesses
+                if num_accesses < self.k {
+                    if victim_frame_id.is_none() || num_accesses < min_k_accesses {
+                        min_k_accesses = num_accesses;
+                        oldest_k_access = entry.access_history.front().copied().unwrap_or(u64::MAX);
+                        victim_frame_id = Some(frame_id);
+                    } else if num_accesses == min_k_accesses {
+                        // If same number of accesses, choose the one with earlier first access
+                        let first_access = entry.access_history.front().copied().unwrap_or(u64::MAX);
+                        if first_access < oldest_k_access {
+                            oldest_k_access = first_access;
+                            victim_frame_id = Some(frame_id);
+                        }
+                    }
+                } else if min_k_accesses >= self.k {
+                    // For frames with k or more accesses, compare their k-th most recent access
+                    let k_access = entry.access_history
+                        .get(num_accesses - self.k)
+                        .copied()
+                        .unwrap_or(u64::MAX);
+                        
+                    if victim_frame_id.is_none() || k_access < oldest_k_access {
+                        min_k_accesses = self.k;
+                        oldest_k_access = k_access;
+                        victim_frame_id = Some(frame_id);
+                    }
+                }
             }
+        }
 
-            // Calculate k_distance for the frame
-            let k_distance = if frame.access_times.len() < self.k {
-                // Favor eviction of frames with fewer than `k` accesses by assigning a high k_distance
-                u64::MIN
+        if let Some(frame_id) = victim_frame_id {
+            // Remove the frame from the evictable queue
+            if let Some(pos) = evictable.iter().position(|&x| x == frame_id) {
+                evictable.remove(pos);
+            }
+            
+            // Update frame store
+            drop(store);
+            let mut store = self.frame_store.write();
+            if let Some(entry) = store.get_mut(&frame_id) {
+                entry.is_evictable = false;
+                self.curr_size -= 1;
+                Some(frame_id)
             } else {
-                // Use the k-th most recent access time if there are enough accesses
-                let len = frame.access_times.len();
-                frame.access_times[len - self.k]
-            };
-
-            // Eviction decision based on k_distance and earliest access time as a tie-breaker
-            if k_distance < min_k_distance
-                || (k_distance == min_k_distance && frame.access_times[0] < earliest_access_time)
-            {
-                min_k_distance = k_distance;
-                earliest_access_time = frame.access_times[0];
-                victim_frame_id = Some(id);
+                None
             }
+        } else {
+            None
         }
-
-        if let Some(victim_id) = victim_frame_id {
-            if frame_store.remove(&victim_id).is_some() {
-                debug!("Evicting frame {}", victim_id);
-                return Some(victim_id);
-            }
-        }
-
-        warn!("Failed to evict a frame.");
-        None
     }
 
     /// Records an access to a frame.
@@ -131,32 +172,21 @@ impl LRUKReplacer {
     /// * `access_type` - The type of access being performed.
     pub fn record_access(&self, frame_id: FrameId, _access_type: AccessType) {
         let now = Self::current_time_in_micros();
-        let mut frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
+        let mut store = self.frame_store.write();
+        
+        let entry = store.entry(frame_id).or_insert_with(|| FrameEntry {
+            access_count: 0,
+            access_history: VecDeque::with_capacity(self.k as usize),
+            is_evictable: false,
+        });
 
-        frame_store
-            .entry(frame_id)
-            .and_modify(|frame| {
-                frame.access_times.push(now);
-                if frame.access_times.len() > self.k {
-                    frame.access_times.remove(0); // Trim the vector to only keep the last `k` accesses
-                }
-                debug!(
-                    "Updated access times for frame {}: {:?}",
-                    frame_id, frame.access_times
-                );
-            })
-            .or_insert_with(|| {
-                debug!(
-                    "Inserting new frame {} with initial access time {}",
-                    frame_id, now
-                );
-                Frame {
-                    is_evictable: true,
-                    access_times: vec![now],
-                    fid: frame_id,
-                }
-            });
+        entry.access_count += 1;
+        entry.access_history.push_back(now);
+        if entry.access_history.len() > self.k as usize {
+            entry.access_history.pop_front();
+        }
 
+        debug!("Updated access times for frame {}: {:?}", frame_id, entry.access_history);
         trace!("Recorded access for frame {} at {}", frame_id, now);
     }
 
@@ -165,25 +195,33 @@ impl LRUKReplacer {
     /// # Arguments
     ///
     /// * `frame_id` - The ID of the frame to update.
-    /// * `set_evictable` - Whether the frame should be evictable.
-    pub fn set_evictable(&self, frame_id: FrameId, set_evictable: bool) {
-        let mut frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
-        if let Some(frame) = frame_store.get_mut(&frame_id) {
-            frame.is_evictable = set_evictable;
-            trace!("Set frame {} evictable: {}", frame_id, set_evictable);
+    /// * `is_evictable` - Whether the frame should be evictable.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the frame's evictable status was changed, `false` if it was already set to the desired status.
+    pub fn set_evictable(&mut self, frame_id: FrameId, is_evictable: bool) -> bool {
+        let mut store = self.frame_store.write();
+        let mut evictable = self.evictable_frames.lock();
+
+        if let Some(entry) = store.get_mut(&frame_id) {
+            if entry.is_evictable == is_evictable {
+                return false;
+            }
+
+            entry.is_evictable = is_evictable;
+            if is_evictable {
+                self.curr_size += 1;
+                evictable.push_back(frame_id);
+            } else {
+                if let Some(pos) = evictable.iter().position(|&x| x == frame_id) {
+                    evictable.remove(pos);
+                    self.curr_size -= 1;
+                }
+            }
+            true
         } else {
-            debug!(
-                "Frame {} not found in frame_store, adding with evictable status {}",
-                frame_id, set_evictable
-            );
-            frame_store.insert(
-                frame_id,
-                Frame {
-                    is_evictable: set_evictable,
-                    access_times: vec![],
-                    fid: frame_id,
-                },
-            );
+            false
         }
     }
 
@@ -193,11 +231,11 @@ impl LRUKReplacer {
     ///
     /// * `frame_id` - The ID of the frame to remove.
     pub fn remove(&self, frame_id: FrameId) {
-        let mut frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
-        if let Some(frame) = frame_store.get(&frame_id) {
-            if frame.is_evictable {
+        let mut store = self.frame_store.write();
+        if let Some(entry) = store.get_mut(&frame_id) {
+            if entry.is_evictable {
                 debug!("Removing frame {}", frame_id);
-                frame_store.remove(&frame_id);
+                store.remove(&frame_id);
             } else {
                 error!("Attempt to remove a non-evictable frame {}", frame_id);
             }
@@ -212,8 +250,8 @@ impl LRUKReplacer {
     ///
     /// The total number of frames.
     pub fn total_frames(&self) -> usize {
-        let frame_store = self.frame_store.lock().unwrap(); // Acquire std::sync::Mutex lock
-        let total = frame_store.len();
+        let store = self.frame_store.read();
+        let total = store.len();
         debug!("Current total frames: {}", total);
         total
     }
@@ -224,7 +262,7 @@ impl LRUKReplacer {
     ///
     /// The number of frames the replacer can hold.
     pub fn get_replacer_size(&self) -> usize {
-        self.replacer_size
+        self.size
     }
 
     pub fn get_k(&self) -> usize {
@@ -237,10 +275,10 @@ impl LRUKReplacer {
     ///
     /// The number of evictable frames.
     pub fn total_evictable_frames(&self) -> usize {
-        let frame_store = self.frame_store.lock().unwrap();
-        let size = frame_store
+        let store = self.frame_store.read();
+        let size = store
             .iter()
-            .filter(|&frame| frame.1.is_evictable)
+            .filter(|&entry| entry.1.is_evictable)
             .count();
         debug!("Current size of evictable frames: {}", size);
         size
@@ -255,7 +293,7 @@ mod unit_tests {
 
     #[test]
     fn evict_single_frame() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.set_evictable(1, true);
@@ -266,7 +304,7 @@ mod unit_tests {
 
     #[test]
     fn evict_multiple_frames() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.record_access(2, AccessType::Lookup);
@@ -290,7 +328,7 @@ mod unit_tests {
 
     #[test]
     fn evict_non_evictable_frame() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.set_evictable(1, false); // Make frame 1 non-evictable
@@ -304,7 +342,7 @@ mod unit_tests {
 
     #[test]
     fn evict_based_on_k_distance() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         // Frame 1: Access twice, should be kept
         replacer.record_access(1, AccessType::Lookup);
@@ -329,7 +367,7 @@ mod unit_tests {
 
     #[test]
     fn evict_when_all_frames_are_non_evictable() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.record_access(2, AccessType::Lookup);
@@ -346,7 +384,7 @@ mod unit_tests {
 
     #[test]
     fn evict_respects_eviction_order() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.record_access(2, AccessType::Lookup);
@@ -380,7 +418,7 @@ mod unit_tests {
 
     #[test]
     fn basic_lru_tests() {
-        let replacer = LRUKReplacer::new(5, 2);
+        let mut replacer = LRUKReplacer::new(5, 2);
 
         replacer.record_access(1, AccessType::Lookup);
         replacer.record_access(2, AccessType::Lookup);
@@ -587,7 +625,7 @@ mod concurrency {
         for i in 1..=10 {
             let replacer = Arc::clone(&replacer);
             let handle = thread::spawn(move || {
-                let replacer_lock = replacer.lock().unwrap();
+                let mut replacer_lock = replacer.lock().unwrap();
                 replacer_lock.record_access(i, AccessType::Lookup);
                 replacer_lock.set_evictable(i, true);
             });
