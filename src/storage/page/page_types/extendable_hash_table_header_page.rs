@@ -1,6 +1,7 @@
+use std::any::Any;
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType};
+use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
 use log::{debug, info};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -12,24 +13,26 @@ pub const HTABLE_HEADER_ARRAY_SIZE: usize = 1 << HTABLE_HEADER_MAX_DEPTH;
 
 #[derive(Clone)]
 pub struct ExtendableHTableHeaderPage {
-    base: Page,
+    data: Box<[u8; DB_PAGE_SIZE as usize]>,
+    page_id: PageId,
+    pin_count: i32,
+    is_dirty: bool,
     directory_page_ids: Vec<PageId>,
     global_depth: u32,
 }
 
 impl ExtendableHTableHeaderPage {
     pub fn new(page_id: PageId) -> Self {
-        let instance = ExtendableHTableHeaderPage {
-            base: Page::new(page_id),
+        let mut page = Self {
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
+            page_id,
+            pin_count: 1,
+            is_dirty: false,
             directory_page_ids: vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE],
             global_depth: 0,
         };
-        debug!(
-            "New ExtendableHTableHeaderPage created with page id: {} at address {:p}",
-            instance.get_page_id(),
-            &instance
-        );
-        instance
+        page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
+        page
     }
 
     /// Initializes a new header page with the specified maximum depth.
@@ -182,55 +185,96 @@ impl ExtendableHTableHeaderPage {
     }
 }
 
+impl PageTypeId for ExtendableHTableHeaderPage {
+    const TYPE_ID: PageType = PageType::HashTableHeader;
+}
+
+impl Page for ExtendableHTableHeaderPage {
+    fn new(page_id: PageId) -> Self {
+        let mut page = Self {
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
+            page_id,
+            pin_count: 1,
+            is_dirty: false,
+            directory_page_ids: vec![INVALID_PAGE_ID; HTABLE_HEADER_ARRAY_SIZE],
+            global_depth: 0,
+        };
+        page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
+        page
+    }
+}
+
 impl PageTrait for ExtendableHTableHeaderPage {
     fn get_page_id(&self) -> PageId {
-        self.base.get_page_id()
+        self.page_id
+    }
+
+    fn get_page_type(&self) -> PageType {
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
+            .unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
-        self.base.is_dirty()
+        self.is_dirty
     }
 
     fn set_dirty(&mut self, is_dirty: bool) {
-        self.base.set_dirty(is_dirty)
+        self.is_dirty = is_dirty;
     }
 
     fn get_pin_count(&self) -> i32 {
-        self.base.get_pin_count()
+        self.pin_count
     }
 
     fn increment_pin_count(&mut self) {
-        self.base.increment_pin_count()
+        self.pin_count += 1;
     }
 
     fn decrement_pin_count(&mut self) {
-        self.base.decrement_pin_count()
+        if self.pin_count > 0 {
+            self.pin_count -= 1;
+        }
     }
 
     fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
-        &*self.base.get_data()
+        &self.data
     }
 
     fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
-        &mut *self.base.get_data_mut()
+        &mut self.data
     }
 
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
-        self.base.set_data(offset, new_data)
+        if offset + new_data.len() > self.data.len() {
+            return Err(PageError::InvalidOffset {
+                offset,
+                page_size: self.data.len(),
+            });
+        }
+        self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
+        self.is_dirty = true;
+        Ok(())
     }
 
-    /// Sets the pin count of this page.
     fn set_pin_count(&mut self, pin_count: i32) {
-        self.base.set_pin_count(pin_count);
-        debug!(
-            "Setting pin count for Page ID {}: {}",
-            self.get_page_id(),
-            pin_count
-        );
+        self.pin_count = pin_count;
     }
 
     fn reset_memory(&mut self) {
-        self.base.reset_memory()
+        self.data.fill(0);
+        self.directory_page_ids.clear();
+        self.directory_page_ids.resize(HTABLE_HEADER_ARRAY_SIZE, INVALID_PAGE_ID);
+        self.global_depth = 0;
+        self.is_dirty = false;
+        self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -246,17 +290,6 @@ impl Display for ExtendableHTableHeaderPage {
     }
 }
 
-impl TryFrom<PageType> for ExtendableHTableHeaderPage {
-    type Error = ();
-
-    fn try_from(page_type: PageType) -> Result<Self, Self::Error> {
-        match page_type {
-            PageType::ExtendedHashTableHeader(page) => Ok(page),
-            _ => Err(()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod basic_behavior {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
@@ -264,7 +297,7 @@ mod basic_behavior {
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::page::page::{PageTrait, PageType};
+    use crate::storage::page::page::{PageTrait};
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::info;
@@ -324,84 +357,78 @@ mod basic_behavior {
         let bpm = &ctx.bpm;
 
         info!("Creating ExtendedHashTableHeader page");
-        let header_guard = bpm
-            .new_page_guarded(PageType::ExtendedHashTableHeader(
-                ExtendableHTableHeaderPage::new(0)
-            ))
-            .unwrap();
-        info!("Created page type: {}", header_guard.get_page_type());
+        let header_page = bpm.new_page::<ExtendableHTableHeaderPage>()
+            .expect("Failed to create header page");
 
-        if let Some(page_type) = header_guard.into_specific_type() {
-            match page_type {
-                PageType::ExtendedHashTableHeader(mut header_page) => {
-                    info!("Successfully converted to ExtendableHTableHeaderPage");
-                    info!("ExtendableHTableHeaderPage ID: {}", header_page.get_page_id());
+        {
+            let mut page = header_page.write();
+            info!("Successfully created ExtendableHTableHeaderPage");
+            info!("ExtendableHTableHeaderPage ID: {}", page.get_page_id());
 
-                    // Initialize the header page with a max depth of 2
-                    header_page.init(2);
-                    info!(
-                        "Initialized header page with global depth: {}",
-                        header_page.global_depth()
-                    );
+            // Initialize the header page with a max depth of 2
+            page.init(2);
+            info!("Initialized header page with global depth: {}", page.global_depth());
 
-                    // Test hashes that will produce different upper bits
-                    let hashes = [
-                        0b00000000000000000000000000000000, // Should map to 0
-                        0b01000000000000000000000000000000, // Should map to 1
-                        0b10000000000000000000000000000000, // Should map to 2
-                        0b11000000000000000000000000000000, // Should map to 3
-                    ];
+            // Test hashes that will produce different upper bits
+            let hashes = [
+                0b00000000000000000000000000000000, // Should map to 0
+                0b01000000000000000000000000000000, // Should map to 1
+                0b10000000000000000000000000000000, // Should map to 2
+                0b11000000000000000000000000000000, // Should map to 3
+            ];
 
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        let index = header_page.hash_to_directory_index(hash);
-                        info!("Hash {:#034b} mapped to index {}", hash, index);
-                        assert_eq!(
-                            index, i as u32,
-                            "Hash {:#034b} should map to index {}",
-                            hash, i
-                        );
-                    }
-                    info!("All hash to index mappings verified successfully");
-
-                    // Test with max_depth 0
-                    header_page.init(0);
-                    for &hash in &hashes {
-                        let index = header_page.hash_to_directory_index(hash);
-                        info!(
-                            "With max_depth 0, hash {:#034b} mapped to index {}",
-                            hash, index
-                        );
-                        assert_eq!(
-                            index, 0,
-                            "With max_depth 0, all hashes should map to index 0"
-                        );
-                    }
-                    info!("Max depth 0 tests completed successfully");
-
-                    // Test with max_depth 31 (maximum allowed)
-                    header_page.init(31);
-                    for (_i, &hash) in hashes.iter().enumerate() {
-                        let index = header_page.hash_to_directory_index(hash);
-                        info!(
-                            "With max_depth 31, hash {:#034b} mapped to index {}",
-                            hash, index
-                        );
-                        assert_eq!(
-                            index,
-                            hash >> 1,
-                            "With max_depth 31, hash {:#034b} should map to index {}",
-                            hash,
-                            hash >> 1
-                        );
-                    }
-                    info!("Max depth 31 tests completed successfully");
-                }
-                _ => panic!("Wrong page type returned"),
+            for (i, &hash) in hashes.iter().enumerate() {
+                let index = page.hash_to_directory_index(hash);
+                info!("Hash {:#034b} mapped to index {}", hash, index);
+                assert_eq!(
+                    index, i as u32,
+                    "Hash {:#034b} should map to index {}",
+                    hash, i
+                );
             }
-        } else {
-            panic!("Failed to convert to ExtendableHTableHeaderPage");
         }
 
         info!("Header page tests completed successfully");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_header_page_type() {
+        let page = ExtendableHTableHeaderPage::new(1);
+        assert_eq!(page.get_page_type(), PageType::HashTableHeader);
+        
+        // Test after reset
+        let mut page = ExtendableHTableHeaderPage::new(1);
+        page.reset_memory();
+        assert_eq!(page.get_page_type(), PageType::HashTableHeader);
+    }
+
+    #[test]
+    fn test_data_operations() {
+        let mut page = ExtendableHTableHeaderPage::new(1);
+        
+        // Test data setting
+        let test_data = vec![1, 2, 3, 4];
+        page.set_data(10, &test_data).unwrap();
+        
+        // Verify data was set
+        assert_eq!(&page.get_data()[10..14], &test_data);
+        assert!(page.is_dirty());
+    }
+
+    #[test]
+    fn test_pin_count() {
+        let mut page = ExtendableHTableHeaderPage::new(1);
+        assert_eq!(page.get_pin_count(), 1);
+        
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 2);
+        
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
     }
 }

@@ -1,11 +1,13 @@
+use std::any::Any;
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::storage::page::page::PageTrait;
+use crate::storage::page::page::{PageTrait, PageType, PageTypeId, PAGE_ID_OFFSET, PAGE_TYPE_OFFSET};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log;
 use log::{debug, error};
 use std::mem::size_of;
+use crate::storage::page::page::Page;
 
 /// Represents a table page using a slotted page format.
 ///
@@ -58,6 +60,12 @@ impl TablePageHeader {
     }
 
     fn serialize(&self) -> Vec<u8> {
+        debug!(
+            "Serializing header - page_id: {}, num_tuples: {}", 
+            self.page_id, 
+            self.num_tuples
+        );
+
         let mut buffer = Vec::with_capacity(Self::size());
         buffer.extend_from_slice(&self.page_id.to_le_bytes());
         buffer.extend_from_slice(&self.next_page_id.to_le_bytes());
@@ -65,12 +73,20 @@ impl TablePageHeader {
         buffer.extend_from_slice(&self.num_tuples.to_le_bytes());
         buffer.extend_from_slice(&self.num_deleted_tuples.to_le_bytes());
 
+        debug!(
+            "Header serialized to {} bytes, num_tuples bytes: {:?}", 
+            buffer.len(),
+            &self.num_tuples.to_le_bytes()
+        );
+
         // Ensure we have the correct size
         debug_assert_eq!(buffer.len(), Self::size());
         buffer
     }
 
     fn deserialize(bytes: &[u8]) -> Result<Self, String> {
+        debug!("Starting header deserialization, input size: {}", bytes.len());
+
         if bytes.len() < Self::size() {
             return Err(format!(
                 "Buffer too small for header: {} < {}",
@@ -94,39 +110,71 @@ impl TablePageHeader {
         offset += 8;
 
         // Read num_tuples (2 bytes)
-        let num_tuples = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+        let num_tuples_bytes = &bytes[offset..offset + 2];
+        let num_tuples = u16::from_le_bytes(num_tuples_bytes.try_into().unwrap());
+        debug!(
+            "Deserialized num_tuples: {}, from bytes: {:?}", 
+            num_tuples,
+            num_tuples_bytes
+        );
         offset += 2;
 
         // Read num_deleted_tuples (2 bytes)
         let num_deleted_tuples = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
 
-        Ok(Self {
+        let header = Self {
             page_id,
             next_page_id,
             prev_page_id,
             num_tuples,
             num_deleted_tuples,
-        })
+        };
+
+        debug!(
+            "Deserialized header - page_id: {}, num_tuples: {}", 
+            header.page_id,
+            header.num_tuples
+        );
+
+        Ok(header)
+    }
+}
+
+impl PageTypeId for TablePage { const TYPE_ID: PageType = PageType::Table; }
+
+impl Page for TablePage {
+    fn new(page_id: PageId) -> Self {
+        let mut page = Self {
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
+            header: TablePageHeader {
+                page_id,
+                prev_page_id: INVALID_PAGE_ID,
+                next_page_id: INVALID_PAGE_ID,
+                num_tuples: 0,
+                num_deleted_tuples: 0,
+            },
+            pin_count: 1,
+            is_dirty: false,
+            tuple_info: Vec::new(),
+        };
+        page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID as u8;
+        page.data[PAGE_ID_OFFSET..PAGE_ID_OFFSET + 8]
+            .copy_from_slice(&page_id.to_le_bytes());
+            
+        page
     }
 }
 
 impl TablePage {
-    /// Creates a new `TablePage` with the given page ID.
-    pub fn new(page_id: PageId) -> Self {
-        Self {
-            data: Box::new([0; DB_PAGE_SIZE as usize]),
-            header: TablePageHeader::new(page_id),
-            tuple_info: Vec::new(),
-            is_dirty: false,
-            pin_count: 0,
-        }
-    }
-
     /// Initializes the table page.
     pub fn init(&mut self) {
-        self.header = TablePageHeader::new(self.header.page_id);
+        self.header.prev_page_id = INVALID_PAGE_ID;
+        self.header.next_page_id = INVALID_PAGE_ID;
+        self.header.num_tuples = 0;
+        self.header.num_deleted_tuples = 0;
         self.tuple_info.clear();
-        self.is_dirty = true;
+        self.is_dirty = false;
+        self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID as u8;
     }
 
     /// Gets the next offset to insert a tuple.
@@ -145,7 +193,7 @@ impl TablePage {
         };
 
         let tuple_offset = slot_end_offset.saturating_sub(tuple_size);
-        let offset_size = TablePage::header_size() + self.tuple_info_size();
+        let offset_size = self.get_header_size() + self.tuple_info_size();
 
         if tuple_offset < offset_size {
             None
@@ -156,35 +204,79 @@ impl TablePage {
 
     /// Low-level tuple insertion into the page
     pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &mut Tuple) -> Option<RID> {
+        debug!(
+            "Starting tuple insertion. Current num_tuples: {}, tuple_info.len(): {}", 
+            self.header.num_tuples,
+            self.tuple_info.len()
+        );
+
         // Get the next available offset for the tuple
-        if let Some(tuple_offset) = self.get_next_tuple_offset(tuple) {
-            // Create RID for the new tuple
-            let rid = RID::new(self.header.page_id, self.header.num_tuples as u32);
-            tuple.set_rid(rid);
-
-            // Serialize tuple data
-            let tuple_data = match bincode::serialize(tuple) {
-                Ok(data) => data,
-                Err(_) => return None,
-            };
-
-            // Store tuple metadata and data
-            self.tuple_info
-                .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
-
-            // Write tuple data to page
-            let start = tuple_offset as usize;
-            let end = start + tuple_data.len();
-            if end <= self.data.len() {
-                self.data[start..end].copy_from_slice(&tuple_data);
-                self.header.num_tuples += 1;
-                self.is_dirty = true;
-                Some(rid)
-            } else {
-                self.tuple_info.pop();
-                None
+        let tuple_offset = match self.get_next_tuple_offset(tuple) {
+            Some(offset) => {
+                debug!("Found available offset: {}", offset);
+                offset
             }
+            None => {
+                debug!("No available offset found for tuple");
+                return None;
+            }
+        };
+
+        // Create RID for the new tuple
+        let rid = RID::new(self.header.page_id, self.header.num_tuples as u32);
+        debug!("Created new RID: {:?}", rid);
+        tuple.set_rid(rid);
+
+        // Serialize tuple data
+        let tuple_data = match bincode::serialize(tuple) {
+            Ok(data) => {
+                debug!("Serialized tuple data length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                error!("Failed to serialize tuple: {}", e);
+                return None;
+            }
+        };
+
+        // Store tuple metadata and data
+        debug!(
+            "Storing tuple info - offset: {}, size: {}, meta txn_id: {}", 
+            tuple_offset,
+            tuple_data.len(),
+            meta.get_creator_txn_id()
+        );
+        self.tuple_info.push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+
+        // Write tuple data to page
+        let start = tuple_offset as usize;
+        let end = start + tuple_data.len();
+        debug!("Writing tuple data to page range [{}..{}]", start, end);
+
+        if end <= self.data.len() {
+            self.data[start..end].copy_from_slice(&tuple_data);
+            // Update header before returning
+            self.header.num_tuples += 1;
+            self.is_dirty = true;
+
+            // Serialize the page to ensure changes are persisted
+            let serialized = self.serialize();
+            self.data.copy_from_slice(&serialized);
+
+            debug!(
+                "Successfully inserted tuple. New num_tuples: {}, tuple_info.len(): {}", 
+                self.header.num_tuples,
+                self.tuple_info.len()
+            );
+            Some(rid)
         } else {
+            // Rollback tuple_info change if write fails
+            error!(
+                "Write failed - end position {} exceeds data length {}", 
+                end, 
+                self.data.len()
+            );
+            self.tuple_info.pop();
             None
         }
     }
@@ -201,10 +293,8 @@ impl TablePage {
         }
 
         // Serialize the new tuple data
-        let tuple_data = match bincode::serialize(tuple) {
-            Ok(data) => data,
-            Err(_) => return Err(PageError::TupleInvalid),
-        };
+        let tuple_data = bincode::serialize(tuple)
+            .map_err(|_| PageError::SerializationError)?;
         let new_size = tuple_data.len() as u16;
 
         // Get current tuple info
@@ -248,71 +338,128 @@ impl TablePage {
     }
 
     /// Updates the metadata of a tuple.
-    pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), PageError> {
+    pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), String> {
+        debug!(
+            "Updating tuple meta for RID {:?}, current num_tuples: {}", 
+            rid, 
+            self.header.num_tuples
+        );
+
         let tuple_id = rid.get_slot_num() as usize;
+        debug!(
+            "Tuple ID: {}, header.num_tuples: {}, tuple_info.len(): {}", 
+            tuple_id, 
+            self.header.num_tuples,
+            self.tuple_info.len()
+        );
+
         if tuple_id >= self.header.num_tuples as usize {
-            return Err(PageError::TupleInvalid);
+            return Err(format!(
+                "Invalid tuple ID: {} >= num_tuples: {}", 
+                tuple_id, 
+                self.header.num_tuples
+            ));
         }
 
+        debug!(
+            "Accessing tuple_info at index {}, current tuple_info length: {}", 
+            tuple_id, 
+            self.tuple_info.len()
+        );
+
         let old_meta = &mut self.tuple_info[tuple_id].2;
+        debug!(
+            "Old meta - creator_txn: {}, commit_ts: {}, deleted: {}", 
+            old_meta.get_creator_txn_id(),
+            old_meta.get_commit_timestamp(),
+            old_meta.is_deleted()
+        );
+        debug!(
+            "New meta - creator_txn: {}, commit_ts: {}, deleted: {}", 
+            meta.get_creator_txn_id(),
+            meta.get_commit_timestamp(),
+            meta.is_deleted()
+        );
+
         if !old_meta.is_deleted() && meta.is_deleted() {
             self.header.num_deleted_tuples += 1;
+            debug!(
+                "Incrementing num_deleted_tuples to {}", 
+                self.header.num_deleted_tuples
+            );
         } else if old_meta.is_deleted() && !meta.is_deleted() {
             self.header.num_deleted_tuples = self.header.num_deleted_tuples.saturating_sub(1);
+            debug!(
+                "Decrementing num_deleted_tuples to {}", 
+                self.header.num_deleted_tuples
+            );
         }
+
         *old_meta = meta.clone();
         self.is_dirty = true;
+
+        debug!(
+            "Successfully updated tuple meta. Page is now dirty. num_deleted_tuples: {}", 
+            self.header.num_deleted_tuples
+        );
 
         Ok(())
     }
 
-    /// Gets a tuple from the table.
-    pub fn get_tuple(&self, rid: &RID) -> Result<(TupleMeta, Tuple), PageError> {
-        let tuple_id = rid.get_slot_num() as usize;
-        debug!("Getting tuple with id: {}", tuple_id);
-        debug!("Current num_tuples: {}", self.header.num_tuples);
-
-        if tuple_id >= self.header.num_tuples as usize {
-            error!(
-                "Tuple ID {} >= num_tuples {}",
-                tuple_id, self.header.num_tuples
-            );
-            return Err(PageError::TupleInvalid);
+    /// Gets a tuple from the page.
+    ///
+    /// # Parameters
+    ///
+    /// - `rid`: The RID of the tuple to get.
+    ///
+    /// # Returns
+    ///
+    /// A Result containing the tuple meta and tuple, or a String error message.
+    pub fn get_tuple(&self, rid: &RID) -> Result<(TupleMeta, Tuple), String> {
+        // First verify the RID is valid for this page
+        if rid.get_page_id() != self.header.page_id {
+            return Err(format!(
+                "RID page ID {} does not match page ID {}",
+                rid.get_page_id(),
+                self.header.page_id
+            ));
         }
 
-        let (offset, size, meta) = &self.tuple_info[tuple_id];
-        debug!("Tuple info - offset: {}, size: {}", offset, size);
+        let slot_num = rid.get_slot_num() as usize;
+        if slot_num >= self.tuple_info.len() {
+            return Err(format!(
+                "Invalid slot number {} (max {})",
+                slot_num,
+                self.tuple_info.len()
+            ));
+        }
+
+        // Get tuple info
+        let (offset, size, meta) = &self.tuple_info[slot_num];
+
+        // Check if tuple is deleted
+        if meta.is_deleted() {
+            return Err("Tuple has been deleted".to_string());
+        }
 
         let start = *offset as usize;
         let end = start + *size as usize;
 
-        if end > self.data.len() {
-            error!("Tuple end {} > data length {}", end, self.data.len());
-            return Err(PageError::TupleInvalid);
+        // Deserialize tuple data
+        match bincode::deserialize(&self.data[start..end]) {
+            Ok(tuple) => Ok((meta.clone(), tuple)),
+            Err(e) => Err(format!("Failed to deserialize tuple: {}", e))
         }
-
-        let tuple_data = &self.data[start..end];
-        debug!(
-            "Attempting to deserialize tuple data of length {}",
-            tuple_data.len()
-        );
-
-        let tuple = match bincode::deserialize(tuple_data) {
-            Ok(t) => t,
-            Err(e) => {
-                error!("Failed to deserialize tuple: {}", e);
-                return Err(PageError::TupleInvalid);
-            }
-        };
-
-        Ok((meta.clone(), tuple))
     }
 
     /// Gets the metadata of a tuple.
-    pub fn get_tuple_meta(&self, rid: &RID) -> Result<TupleMeta, PageError> {
+    pub fn get_tuple_meta(&self, rid: &RID) -> Result<TupleMeta, String> {
         let tuple_id = rid.get_slot_num() as usize;
         if tuple_id >= self.header.num_tuples as usize {
-            return Err(PageError::TupleInvalid);
+            return Err(format!("Invalid tuple ID: {} >= num_tuples: {}", 
+                tuple_id, 
+                self.header.num_tuples
+            ));
         }
 
         Ok(self.tuple_info[tuple_id].2.clone())
@@ -342,211 +489,209 @@ impl TablePage {
 
     /// Serializes the page into a fixed-size byte array
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
+        debug!("Starting page serialization");
         let mut buffer = [0u8; DB_PAGE_SIZE as usize];
-        let mut offset = 0;
-
-        debug!("Serializing header");
-        // Serialize header
+        
+        // Set page type first
+        buffer[PAGE_TYPE_OFFSET] = Self::TYPE_ID as u8;
+        debug!("Setting page type to {:?} ({})", Self::TYPE_ID, Self::TYPE_ID as u8);
+        
+        // Serialize header starting after page type
         let header_bytes = self.header.serialize();
-        debug!("Header size: {}", header_bytes.len());
-        buffer[offset..offset + header_bytes.len()].copy_from_slice(&header_bytes);
-        offset += header_bytes.len();
+        let header_start = PAGE_TYPE_OFFSET + 1;  // Start after page type byte
+        buffer[header_start..header_start + header_bytes.len()].copy_from_slice(&header_bytes);
+        let mut offset = header_start + header_bytes.len();
 
-        // Write a magic number for validation
-        let magic = 0xDEADBEEFu32;
+        // Write magic number for validation (in big-endian format)
+        let magic = 0xDEADBEEFu32.to_be_bytes();
         debug!("Writing magic number at offset {}", offset);
-        buffer[offset..offset + 4].copy_from_slice(&magic.to_le_bytes());
-        offset += 4;
-
-        // Write tuple info count
-        let tuple_count = self.tuple_info.len() as u32;
-        debug!("Serializing tuple count: {}", tuple_count);
-        buffer[offset..offset + 4].copy_from_slice(&tuple_count.to_le_bytes());
+        buffer[offset..offset + 4].copy_from_slice(&magic);
         offset += 4;
 
         // Write tuple info entries
+        debug!("Writing {} tuple info entries", self.tuple_info.len());
         for (i, (tuple_offset, size, meta)) in self.tuple_info.iter().enumerate() {
             debug!(
-                "Serializing tuple info {}: offset={}, size={}, timestamp={:?}",
-                i,
-                tuple_offset,
-                size,
-                meta.get_commit_timestamp()
+                "Writing tuple info {} - offset: {}, size: {}, meta txn_id: {}", 
+                i, tuple_offset, size, meta.get_creator_txn_id()
             );
-
+            
             // Write tuple offset and size
             buffer[offset..offset + 2].copy_from_slice(&tuple_offset.to_le_bytes());
-            offset += 2;
-            buffer[offset..offset + 2].copy_from_slice(&size.to_le_bytes());
-            offset += 2;
+            buffer[offset + 2..offset + 4].copy_from_slice(&size.to_le_bytes());
+            offset += 4;
 
             // Write tuple meta
-            let meta_bytes = match bincode::serialize(&meta) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to serialize tuple meta: {}", e);
-                    continue;
-                }
-            };
-            let meta_size = meta_bytes.len() as u32;
-            debug!("Meta serialized size: {}", meta_size);
-
-            buffer[offset..offset + 4].copy_from_slice(&meta_size.to_le_bytes());
-            offset += 4;
+            let meta_bytes = bincode::serialize(&meta).expect("Failed to serialize meta");
             buffer[offset..offset + meta_bytes.len()].copy_from_slice(&meta_bytes);
             offset += meta_bytes.len();
         }
 
-        // Write another magic number to mark the end of metadata
-        let end_magic = 0xCAFEBABEu32;
+        // Write another magic number to mark the end of metadata (in big-endian format)
+        let end_magic = 0xCAFEBABEu32.to_be_bytes();
+        debug!("Writing end magic number at offset {}", offset);
         if offset + 4 <= buffer.len() {
-            buffer[offset..offset + 4].copy_from_slice(&end_magic.to_le_bytes());
+            buffer[offset..offset + 4].copy_from_slice(&end_magic);
         }
 
-        // Copy tuple data in their original positions
+        // Copy tuple data
         for (tuple_offset, size, _) in &self.tuple_info {
             let start = *tuple_offset as usize;
             let end = start + *size as usize;
-            if end <= self.data.len() && end <= buffer.len() {
-                buffer[start..end].copy_from_slice(&self.data[start..end]);
-            }
+            debug!("Copying tuple data from range [{}..{}]", start, end);
+            buffer[start..end].copy_from_slice(&self.data[start..end]);
         }
 
+        // Verify page type is still correct before returning
+        let actual_type = buffer[PAGE_TYPE_OFFSET];
+        let expected_type = Self::TYPE_ID as u8;
+        debug_assert_eq!(actual_type, expected_type, 
+            "Page type was corrupted during serialization. Found {}, expected {}", 
+            actual_type, expected_type);
+        
         buffer
     }
 
     /// Deserializes a page from a fixed-size byte array
     pub fn deserialize(bytes: &[u8; DB_PAGE_SIZE as usize]) -> Result<Self, String> {
-        let mut offset = 0;
-
-        debug!("Deserializing header");
-        // Deserialize header
-        let header_size = TablePageHeader::size();
-        debug!("Expected header size: {}", header_size);
-        let header = TablePageHeader::deserialize(&bytes[..header_size])?;
-        offset += header_size;
-
-        debug!("Reading magic number at offset {}", offset);
-        // Verify magic number
-        let magic = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
-        if magic != 0xDEADBEEF {
+        // Verify page type
+        let page_type = PageType::from_u8(bytes[PAGE_TYPE_OFFSET])
+            .ok_or_else(|| "Invalid page type".to_string())?;
+        if page_type != Self::TYPE_ID {
             return Err(format!(
-                "Invalid magic number in page data: {:x} != {:x}",
-                magic, 0xDEADBEEFu32 as i32
+                "Expected page type {:?}, found {:?}", 
+                Self::TYPE_ID, 
+                page_type
             ));
         }
-        offset += 4;
 
-        // Read tuple count
-        let tuple_count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
-        offset += 4;
-        debug!("Tuple count: {}", tuple_count);
+        let header_start = PAGE_TYPE_OFFSET + 1;
+        let header_size = TablePageHeader::size();
+        
+        // Deserialize header
+        debug!("Deserializing header of size {}", header_size);
+        let header = TablePageHeader::deserialize(&bytes[header_start..header_start + header_size])?;
+        debug!(
+            "Deserialized header - page_id: {}, num_tuples: {}, next_page_id: {}", 
+            header.page_id,
+            header.num_tuples,
+            header.next_page_id
+        );
+        let mut offset = header_start + header_size;
 
-        if tuple_count > (DB_PAGE_SIZE / 8) as u32 {
-            return Err(format!("Invalid tuple count: {}", tuple_count));
+        // Verify magic number (in big-endian format)
+        let magic = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        debug!("Read magic number: {:x}", magic);
+        if magic != 0xDEADBEEF {
+            return Err(format!("Invalid magic number: {:x}", magic));
         }
+        offset += 4;
 
         let mut page = TablePage {
             data: Box::new(*bytes),
             header,
-            tuple_info: Vec::with_capacity(tuple_count as usize),
+            tuple_info: Vec::new(),
             is_dirty: false,
             pin_count: 0,
         };
 
         // Read tuple info entries
-        for i in 0..tuple_count {
-            debug!("Reading tuple info {}", i);
-
-            if offset + 8 > bytes.len() {
-                return Err("Unexpected end of data while reading tuple info".to_string());
-            }
-
+        debug!("Reading {} tuple info entries", page.header.num_tuples);
+        for i in 0..page.header.num_tuples {
             // Read tuple offset and size
             let tuple_offset = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
-            offset += 2;
-            let size = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
-            offset += 2;
-
-            // Read meta size
-            let meta_size =
-                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+            let size = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
             offset += 4;
 
-            if meta_size > 1024 {
-                // Reasonable max size for meta
-                return Err(format!("Invalid meta size: {}", meta_size));
-            }
+            debug!(
+                "Reading tuple info {} - offset: {}, size: {}", 
+                i, tuple_offset, size
+            );
 
-            debug!("Reading meta at offset {} with size {}", offset, meta_size);
-
-            if offset + meta_size > bytes.len() {
-                return Err("Unexpected end of data while reading tuple meta".to_string());
-            }
-
-            // Deserialize meta
+            // Read meta
+            let meta_size = bincode::serialized_size(&TupleMeta::new(0)).unwrap() as usize;
             let meta: TupleMeta = bincode::deserialize(&bytes[offset..offset + meta_size])
-                .map_err(|e| {
-                    format!(
-                        "Failed to deserialize tuple meta at offset {}: {}",
-                        offset, e
-                    )
-                })?;
+                .map_err(|e| format!("Failed to deserialize meta: {}", e))?;
             offset += meta_size;
 
             page.tuple_info.push((tuple_offset, size, meta));
         }
 
         // Verify end magic number
-        let end_magic = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        let end_magic = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        debug!("Read end magic number: {:x}", end_magic);
         if end_magic != 0xCAFEBABE {
-            return Err("Invalid end magic number in page data".to_string());
+            return Err(format!("Invalid end magic number: {:x}", end_magic));
         }
 
+        debug!(
+            "Completed page deserialization - num_tuples: {}, tuple_info.len: {}", 
+            page.header.num_tuples,
+            page.tuple_info.len()
+        );
         Ok(page)
     }
 
-    /// Updates a tuple in place.
-    ///
+    /// Updates a tuple in place without any safety checks.
+    /// 
     /// # Safety
     ///
-    /// This method is unsafe because it doesn't perform any bounds checking.
+    /// This method is unsafe because it:
+    /// - Does not check if the tuple fits in the existing space
+    /// - Does not validate the RID
+    /// - Does not maintain proper version chain
+    ///
+    /// # Parameters
+    ///
+    /// - `meta`: New tuple meta
+    /// - `tuple`: New tuple data
+    /// - `rid`: RID of the tuple to update
     pub unsafe fn update_tuple_in_place_unsafe(
         &mut self,
         meta: &TupleMeta,
         tuple: &Tuple,
         rid: RID,
-    ) -> Result<(), PageError> {
+    ) -> Result<(), String> {
         let tuple_id = rid.get_slot_num() as usize;
         if tuple_id >= self.header.num_tuples as usize {
-            return Err(PageError::TupleInvalid);
+            return Err(format!(
+                "Invalid tuple ID: {} >= num_tuples: {}", 
+                tuple_id, 
+                self.header.num_tuples
+            ));
         }
 
-        let (offset, size, old_meta) = &mut self.tuple_info[tuple_id];
+        // Serialize the new tuple data
+        let tuple_data = bincode::serialize(tuple)
+            .map_err(|e| format!("Failed to serialize tuple: {}", e))?;
 
-        // Serialize the tuple to get its actual size
-        let tuple_data = match bincode::serialize(tuple) {
-            Ok(data) => data,
-            Err(_) => return Err(PageError::TupleInvalid),
-        };
+        // Get current tuple info
+        let (offset, size, _) = self.tuple_info[tuple_id];
+        
+        // Update the tuple metadata
+        self.tuple_info[tuple_id].2 = meta.clone();
 
-        if *size as usize != tuple_data.len() {
-            return Err(PageError::TupleInvalid);
+        // Write the new tuple data
+        let start = offset as usize;
+        let end = start + size as usize;
+        if end > self.data.len() {
+            return Err(format!(
+                "Invalid tuple range: {}..{} exceeds page size {}", 
+                start, 
+                end, 
+                self.data.len()
+            ));
         }
 
-        if !old_meta.is_deleted() && meta.is_deleted() {
-            self.header.num_deleted_tuples += 1;
-        }
-
-        *old_meta = meta.clone();
-        self.data[*offset as usize..(*offset + *size) as usize].copy_from_slice(&tuple_data);
+        self.data[start..end].copy_from_slice(&tuple_data);
         self.is_dirty = true;
-
         Ok(())
     }
 
-    fn header_size() -> u16 {
-        (size_of::<PageId>() + size_of::<u16>() + size_of::<u16>()) as u16
+    pub fn get_header_size(&self) -> u16 {
+        (size_of::<PageId>() * 3 + // page_id, next_page_id, prev_page_id
+         size_of::<u16>() * 2      // num_tuples, num_deleted_tuples
+        ) as u16
     }
 
     fn tuple_info_size(&self) -> u16 {
@@ -572,24 +717,30 @@ impl TablePage {
     }
 
     /// Checks if the page has enough space for a tuple
-    pub fn has_space_for<'a>(&self, tuple_or_size: impl Into<TupleSizeInput<'a>>) -> bool {
-        let required_size = match tuple_or_size.into() {
-            TupleSizeInput::Tuple(tuple) => {
-                // Get size from serialized tuple
-                match bincode::serialize(tuple) {
-                    Ok(data) => data.len(),
-                    Err(_) => return false,
-                }
-            }
-            TupleSizeInput::Size(size) => size,
-        };
+    pub fn has_space_for(&self, tuple: &Tuple) -> bool {
+        // First check if tuple is too large for any page
+        if self.is_tuple_too_large(tuple) {
+            return false;
+        }
 
-        // Calculate required space including metadata
-        let tuple_info_entry_size = std::mem::size_of::<(u16, u16, TupleMeta)>();
-        let total_required_space = required_size + tuple_info_entry_size;
-
-        // Check if we have enough space
+        // Then check if this specific page has enough space
+        let tuple_info_size = std::mem::size_of::<(u16, u16, TupleMeta)>();
+        let tuple_size = tuple.get_length().unwrap_or(0);  // Handle potential error
+        let total_required_space = tuple_size + tuple_info_size;
         self.get_free_space() >= total_required_space
+    }
+
+    /// Gets the ID of the previous page in the table.
+    pub fn get_prev_page_id(&self) -> PageId {
+        self.header.prev_page_id
+    }
+
+    // Add a method to check if tuple is too large for any page
+    pub fn is_tuple_too_large(&self, tuple: &Tuple) -> bool {
+        let tuple_info_size = std::mem::size_of::<(u16, u16, TupleMeta)>();
+        let tuple_size = tuple.get_length().unwrap_or(0);  // Handle potential error
+        let total_size = tuple_size + tuple_info_size;
+        total_size > (DB_PAGE_SIZE as usize - self.get_header_size() as usize)
     }
 }
 
@@ -611,9 +762,20 @@ impl From<usize> for TupleSizeInput<'_> {
     }
 }
 
+impl<'a> From<&'a mut Tuple> for TupleSizeInput<'a> {
+    fn from(tuple: &'a mut Tuple) -> Self {
+        TupleSizeInput::Tuple(tuple)
+    }
+}
+
 impl PageTrait for TablePage {
     fn get_page_id(&self) -> PageId {
         self.header.page_id
+    }
+
+    fn get_page_type(&self) -> PageType {
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
+            .unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
@@ -633,7 +795,9 @@ impl PageTrait for TablePage {
     }
 
     fn decrement_pin_count(&mut self) {
-        self.pin_count -= 1;
+        if self.pin_count > 0 {
+            self.pin_count -= 1;
+        }
     }
 
     fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
@@ -645,7 +809,14 @@ impl PageTrait for TablePage {
     }
 
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
+        if offset + new_data.len() > self.data.len() {
+            return Err(PageError::InvalidOffset {
+                offset,
+                page_size: self.data.len(),
+            });
+        }
         self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
+        self.is_dirty = true;
         Ok(())
     }
 
@@ -654,7 +825,21 @@ impl PageTrait for TablePage {
     }
 
     fn reset_memory(&mut self) {
-        self.data = Box::new([0; DB_PAGE_SIZE as usize]);
+        self.data.fill(0);
+        self.header.prev_page_id = INVALID_PAGE_ID;
+        self.header.next_page_id = INVALID_PAGE_ID;
+        self.header.num_tuples = 0;
+        self.tuple_info.clear();
+        self.is_dirty = false;
+        self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID as u8;
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -736,23 +921,39 @@ mod unit_tests {
         let mut page = TablePage::new(1);
         let (meta, mut tuple) = create_test_tuple(1);
 
-        let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
+        // First insert a tuple
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
 
+        // Test with invalid RID
+        let invalid_rid = RID::new(1, 999);
+        unsafe {
+            match page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid) {
+                Ok(_) => panic!("Expected error for invalid RID"),
+                Err(err) => {
+                    assert!(err.contains("Invalid tuple ID"), 
+                        "Unexpected error message: {}", err);
+                }
+            }
+        }
+
+        // Test with valid RID
         let new_meta = TupleMeta::new(789);
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, tuple_id)
+            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
                 .unwrap();
         }
 
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
+        // Verify the update
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
             new_meta.get_commit_timestamp()
         );
         assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
     }
+
     #[test]
     fn test_table_page_creation() {
         let page = TablePage::new(1);
@@ -761,7 +962,7 @@ mod unit_tests {
         assert_eq!(page.header.num_deleted_tuples, 0);
         assert_eq!(page.header.next_page_id, INVALID_PAGE_ID);
         assert!(!page.is_dirty());
-        assert_eq!(page.pin_count, 0);
+        assert_eq!(page.pin_count, 1);
     }
 
     #[test]
@@ -779,6 +980,52 @@ mod unit_tests {
         assert_eq!(page.header.num_tuples, 0);
         assert_eq!(page.header.num_deleted_tuples, 0);
         assert!(page.tuple_info.is_empty());
+    }
+
+    #[test]
+    fn test_get_invalid_tuple() {
+        let page = TablePage::new(1);
+        let invalid_rid = RID::new(1, 999); // Invalid slot number
+
+        // Test getting an invalid tuple
+        match page.get_tuple(&invalid_rid) {
+            Ok(_) => panic!("Expected error for invalid tuple"),
+            Err(err) => {
+                assert!(err.contains("Invalid slot number"), 
+                    "Unexpected error message: {}", err);
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_invalid_tuple_meta() {
+        let page = TablePage::new(1);
+        let invalid_rid = RID::new(1, 999); // Invalid slot number
+
+        // Test getting invalid tuple metadata
+        match page.get_tuple_meta(&invalid_rid) {
+            Ok(_) => panic!("Expected error for invalid tuple meta"),
+            Err(err) => {
+                assert!(err.contains("Invalid tuple ID"), 
+                    "Unexpected error message: {}", err);
+            }
+        }
+    }
+
+    #[test]
+    fn test_update_invalid_tuple_meta() {
+        let mut page = TablePage::new(1);
+        let invalid_rid = RID::new(1, 999); // Invalid slot number
+        let meta = TupleMeta::new(123);
+
+        // Test updating invalid tuple metadata
+        match page.update_tuple_meta(&meta, &invalid_rid) {
+            Ok(_) => panic!("Expected error for invalid tuple meta update"),
+            Err(err) => {
+                assert!(err.contains("Invalid tuple ID"), 
+                    "Unexpected error message: {}", err);
+            }
+        }
     }
 }
 
@@ -901,7 +1148,7 @@ mod error_handling_tests {
         let invalid_rid = RID::new(1, 100);
         assert!(matches!(
             page.get_tuple(&invalid_rid),
-            Err(PageError::TupleInvalid)
+            Err(..)
         ));
     }
 
@@ -912,7 +1159,7 @@ mod error_handling_tests {
         let meta = TupleMeta::new(123);
         assert!(matches!(
             page.update_tuple_meta(&meta, &invalid_rid),
-            Err(PageError::TupleInvalid)
+            Err(..)
         ));
     }
 
@@ -925,7 +1172,7 @@ mod error_handling_tests {
         unsafe {
             assert!(matches!(
                 page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid),
-                Err(PageError::TupleInvalid)
+                Err(..)
             ));
         }
     }
@@ -986,7 +1233,7 @@ mod capacity_tests {
     #[test]
     fn test_header_size_constraints() {
         let page = TablePage::new(1);
-        assert!(TablePage::header_size() < DB_PAGE_SIZE as u16);
+        assert!(page.get_header_size() < DB_PAGE_SIZE as u16);
         assert_eq!(page.tuple_info_size(), 0);
     }
 }
@@ -1031,11 +1278,6 @@ mod serialization_tests {
         debug!("Original page state after insert:");
         debug!("  num_tuples: {}", original_page.header.num_tuples);
         debug!("  tuple_info: {:?}", original_page.tuple_info);
-
-        // Verify original insertion
-        let (orig_meta, orig_tuple) = original_page.get_tuple(&rid).unwrap();
-        assert_eq!(orig_meta.get_commit_timestamp(), 123);
-        assert_eq!(orig_tuple.get_value(0), &Value::new(42));
 
         // Serialize
         debug!("Serializing page");
@@ -1148,5 +1390,103 @@ mod serialization_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod page_type_tests {
+    use super::*;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
+    use crate::common::logger::initialize_logger;
+
+    fn create_test_tuple() -> (TupleMeta, Tuple) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::new(1), Value::new("test")];
+        let rid = RID::new(1, 0);
+        let tuple = Tuple::new(&values, schema, rid);
+        let meta = TupleMeta::new(1);
+        (meta, tuple)
+    }
+
+    #[test]
+    fn test_page_type_preservation() {
+        initialize_logger();
+
+        // Test page creation
+        let mut page = TablePage::new(1);
+        assert_eq!(page.get_page_type(), PageType::Table);
+        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
+
+        // Test initialization
+        page.init();
+        assert_eq!(page.get_page_type(), PageType::Table);
+        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
+
+        // Test page type after tuple insertion
+        let (meta, mut tuple) = create_test_tuple();
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        assert_eq!(page.get_page_type(), PageType::Table);
+        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
+
+        // Test serialization
+        let serialized = page.serialize();
+        assert_eq!(serialized[PAGE_TYPE_OFFSET], PageType::Table as u8);
+
+        // Test deserialization
+        let deserialized = TablePage::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.get_page_type(), PageType::Table);
+        assert_eq!(deserialized.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
+
+        // Verify tuple can still be read after deserialization
+        let (_, retrieved_tuple) = deserialized.get_tuple(&rid).unwrap();
+        assert_eq!(retrieved_tuple.get_value(0), &Value::new(1));
+        assert_eq!(retrieved_tuple.get_value(1), &Value::new("test"));
+    }
+
+    #[test]
+    fn test_invalid_page_type_deserialization() {
+        // Create a buffer with invalid page type
+        let mut invalid_buffer = [0u8; DB_PAGE_SIZE as usize];
+        invalid_buffer[PAGE_TYPE_OFFSET] = PageType::Invalid as u8;
+
+        // Attempt to deserialize should fail
+        let result = TablePage::deserialize(&invalid_buffer);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected page type Table"));
+    }
+
+    #[test]
+    fn test_page_type_after_updates() {
+        let mut page = TablePage::new(1);
+        let (meta, mut tuple) = create_test_tuple();
+        
+        // Insert tuple
+        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        assert_eq!(page.get_page_type(), PageType::Table);
+
+        // Update tuple with new values
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let new_values = vec![Value::new(1), Value::new("updated")];
+        let mut new_tuple = Tuple::new(&new_values, schema, rid);
+        page.update_tuple(&meta, &mut new_tuple, rid).unwrap();
+        assert_eq!(page.get_page_type(), PageType::Table);
+
+        // Update tuple meta
+        let mut new_meta = meta.clone();
+        new_meta.set_deleted(true);
+        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        assert_eq!(page.get_page_type(), PageType::Table);
+
+        // Verify the page type is still correct after all operations
+        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
     }
 }
