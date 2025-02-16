@@ -694,28 +694,45 @@ mod index_scan_executor_tests {
 
         let txn_ctx = context.read().get_transaction_context();
 
-        // Mark tuples as deleted
+        // Mark tuples as deleted using delete_tuple
         for i in &[3, 7] {
             let mut iterator = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
             
-            while let Some((mut meta, mut tuple)) = iterator.next() {
+            while let Some((_, tuple)) = iterator.next() {
                 let id = tuple.get_value(0).compare_equals(&Value::new(*i));
                 let rid = tuple.get_rid();
 
                 if id == CmpBool::CmpTrue {
-                    meta.set_deleted(true);
-                    let _ = txn_table_heap.update_tuple(
-                        &meta,
-                        &mut tuple,
-                        rid,
-                        txn_ctx.clone()
-                    );
+                    // Use delete_tuple instead of manually setting deleted flag
+                    let _ = txn_table_heap.delete_tuple(rid, txn_ctx.clone());
                     break;
                 }
             }
         }
 
-        // Create and execute scan
+        // Commit the transaction that performed the deletes
+        let txn_manager = txn_ctx.get_transaction_manager();
+        txn_manager.commit(
+            txn_ctx.get_transaction(),
+            context.read().get_buffer_pool_manager()
+        );
+
+        // Create new transaction for scanning with new execution context
+        let scan_txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
+        let scan_txn_ctx = Arc::new(TransactionContext::new(
+            scan_txn,
+            Arc::new(LockManager::new()),
+            txn_manager.clone()
+        ));
+
+        // Create new execution context with the new transaction
+        let scan_context = Arc::new(RwLock::new(ExecutionContext::new(
+            context.read().get_buffer_pool_manager(),
+            context.read().get_catalog().clone(),
+            scan_txn_ctx.clone()
+        )));
+
+        // Create and execute scan with new context
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
             table_name,
@@ -725,7 +742,7 @@ mod index_scan_executor_tests {
             vec![], // no predicates
         ));
 
-        let mut executor = IndexScanExecutor::new(context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(scan_context.clone(), plan);
 
         let mut count = 0;
         let mut seen_ids = Vec::new();
@@ -746,6 +763,17 @@ mod index_scan_executor_tests {
             );
         }
         assert_eq!(count, 8, "Should see 8 non-deleted tuples");
+
+        // Verify we see the expected IDs
+        for i in 1..=10 {
+            if i != 3 && i != 7 {
+                assert!(
+                    seen_ids.iter().any(|id| id.compare_equals(&Value::new(i)) == CmpBool::CmpTrue),
+                    "Missing ID {}",
+                    i
+                );
+            }
+        }
     }
 
     #[test]

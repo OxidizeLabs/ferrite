@@ -290,6 +290,84 @@ impl TransactionalTableHeap {
         meta.set_creator_txn_id(meta.get_creator_txn_id());
         Ok(())
     }
+
+    /// Deletes a tuple at the given RID by marking it as deleted
+    pub fn delete_tuple(
+        &self,
+        rid: RID,
+        txn_ctx: Arc<TransactionContext>,
+    ) -> Result<(), String> {
+        let txn = txn_ctx.get_transaction();
+        
+        // Transaction checks
+        if txn.get_state() != TransactionState::Running {
+            return Err("Transaction not in running state".to_string());
+        }
+
+        // Lock acquisition
+        // let lock_manager = txn_ctx.get_lock_manager();
+        // lock_manager.lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
+        //     .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
+
+        // Get current version for visibility check
+        let (mut current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
+
+        // Visibility checks
+        if current_meta.get_creator_txn_id() != txn.get_transaction_id() && 
+           !current_meta.is_committed() {
+            return Err("Cannot delete uncommitted tuple from another transaction".to_string());
+        }
+
+        // Create undo log with link to current version
+        let txn_manager = txn_ctx.get_transaction_manager();
+        log::debug!(
+            "Creating undo log for delete. Current version: creator_txn={}, commit_ts={}",
+            current_meta.get_creator_txn_id(),
+            current_meta.get_commit_timestamp()
+        );
+
+        // Create undo log that points to the original version
+        let undo_log = UndoLog {
+            is_deleted: false, // Original version was not deleted
+            modified_fields: vec![true; current_tuple.get_column_count()],
+            tuple: current_tuple.clone(),
+            ts: current_meta.get_commit_timestamp(),
+            prev_version: UndoLink {
+                prev_txn: current_meta.get_creator_txn_id(),
+                prev_log_idx: current_meta.get_undo_log_idx(),
+            },
+        };
+
+        // Append undo log and get link
+        let undo_link = txn.append_undo_log(undo_log);
+        log::debug!(
+            "Appended undo log. New link: prev_txn={}, prev_log_idx={}",
+            undo_link.prev_txn,
+            undo_link.prev_log_idx
+        );
+
+        // Update version chain
+        txn_manager.update_undo_link(rid, Some(undo_link), None);
+
+        // Create new meta with current transaction as creator
+        let mut new_meta = TupleMeta::new(txn.get_transaction_id());
+        new_meta.set_deleted(true);  // Mark as deleted
+        new_meta.set_commit_timestamp(Timestamp::MAX);
+        new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
+
+        log::debug!(
+            "Created new meta: creator={}, idx={}, commit_ts={}, deleted=true",
+            new_meta.get_creator_txn_id(),
+            new_meta.get_undo_log_idx(),
+            new_meta.get_commit_timestamp()
+        );
+
+        // Update the tuple with deleted metadata
+        self.table_heap.update_tuple(&new_meta, &mut current_tuple.clone(), rid, None)?;
+        txn.append_write_set(self.table_oid, rid);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

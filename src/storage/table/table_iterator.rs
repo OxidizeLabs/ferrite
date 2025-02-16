@@ -84,12 +84,12 @@ impl TableIterator {
         debug!("Initializing iterator with starting RID: {:?}, stop_at_rid: {:?}",
                self.current_rid, self.stop_at_rid);
 
-        // Acquire table lock if needed
-        if !self.acquire_table_lock() {
-            debug!("Failed to acquire table lock");
-            self.current_rid = RID::new(INVALID_PAGE_ID, 0);
-            return;
-        }
+        // // Acquire table lock if needed
+        // if !self.acquire_table_lock() {
+        //     debug!("Failed to acquire table lock");
+        //     self.current_rid = RID::new(INVALID_PAGE_ID, 0);
+        //     return;
+        // }
 
         let table_heap = self.table_heap.get_table_heap();
         let _guard = table_heap.latch.read();
