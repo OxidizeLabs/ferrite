@@ -58,6 +58,7 @@ impl DiskExtendableHashTable {
         let directory_page = bpm
             .new_page::<ExtendableHTableDirectoryPage>()
             .ok_or_else(|| "Failed to create directory page".to_string())?;
+        let directory_page_id = directory_page.read().get_page_id();
 
         // Initialize directory page
         {
@@ -68,10 +69,7 @@ impl DiskExtendableHashTable {
             let bucket_page = bpm
                 .new_page::<ExtendableHTableBucketPage>()
                 .ok_or_else(|| "Failed to create bucket page".to_string())?;
-            let bucket_page_id = {
-                let bucket = bucket_page.read();
-                bucket.get_page_id()
-            };
+            let bucket_page_id = bucket_page.read().get_page_id();
 
             // Initialize bucket page
             {
@@ -79,17 +77,19 @@ impl DiskExtendableHashTable {
                 bucket.init(bucket_max_size as u16);
             }
 
+            // Set up initial directory entry
             directory.set_bucket_page_id(0, bucket_page_id);
+            debug!("Set initial bucket page {} in directory at index 0", bucket_page_id);
         }
 
         // Update header page with directory page ID
         {
             let mut header = header_page.write();
-            let directory_id = {
-                let directory = directory_page.read();
-                directory.get_page_id()
-            };
-            header.set_directory_page_id(0, directory_id);
+            // Set directory page ID for all possible directory indices initially
+            for i in 0..(1 << header_max_depth) {
+                header.set_directory_page_id(i, directory_page_id);
+            }
+            debug!("Set directory page {} in header for all indices", directory_page_id);
         }
 
         Ok(Self {
@@ -126,10 +126,15 @@ impl DiskExtendableHashTable {
                 header.hash_to_directory_index(hash)
             } as usize;
 
+            debug!("Mapped hash to directory index: {}", directory_index);
+
             // Get directory page and find bucket index
             let directory_page = match self.get_directory_page(directory_index) {
                 Some(page) => page,
-                None => return false,
+                None => {
+                    debug!("Failed to get directory page for index {}", directory_index);
+                    return false;
+                }
             };
 
             let bucket_index = {
@@ -137,10 +142,15 @@ impl DiskExtendableHashTable {
                 directory.hash_to_bucket_index(hash)
             } as usize;
 
+            debug!("Mapped hash to bucket index: {}", bucket_index);
+
             // Get or create bucket page
             let bucket_page = match self.get_bucket_page(directory_index, bucket_index) {
                 Some(page) => page,
-                None => return false,
+                None => {
+                    debug!("Failed to get bucket page for index {}", bucket_index);
+                    return false;
+                }
             };
 
             // Try to insert into bucket
@@ -347,7 +357,6 @@ impl DiskExtendableHashTable {
         {
             let mut new_bucket = new_bucket_page.write();
             new_bucket.init(self.bucket_max_size as u16);
-            new_bucket.set_local_depth((local_depth + 1) as u8);
         }
 
         // Get the old bucket page
@@ -359,33 +368,36 @@ impl DiskExtendableHashTable {
         // Update directory and redistribute entries
         {
             let mut directory = directory_page.write();
-            directory.split_bucket(bucket_index, new_bucket_page_id);
+            
+            // Use the new directory page method to handle the split
+            if let Some(split_bucket_index) = directory.update_directory_for_split(bucket_index, new_bucket_page_id) {
+                // Redistribute entries between old and new buckets
+                let mut old_bucket = old_bucket_page.write();
+                let mut new_bucket = new_bucket_page.write();
 
-            // Redistribute entries
-            let mut old_bucket = old_bucket_page.write();
-            let mut new_bucket = new_bucket_page.write();
+                let entries = old_bucket.get_all_entries();
+                old_bucket.clear();
 
-            let entries = old_bucket.get_all_entries();
-            old_bucket.clear();
+                // Redistribute entries based on the new local depth
+                let new_local_depth = directory.get_local_depth(bucket_index as u32);
+                let mask = (1 << new_local_depth) - 1;
 
-            // Set new local depth for old bucket
-            old_bucket.set_local_depth((local_depth + 1) as u8);
+                for (key, value) in entries {
+                    let hash = self.hash_fn.get_hash(&key) as u32;
+                    let target_bucket_index = hash & mask;
 
-            // Redistribute entries based on the new local depth
-            for (key, value) in entries {
-                let hash = self.hash_fn.get_hash(&key) as u32;
-                let mask = (1 << (local_depth + 1)) - 1;
-                let target_bucket_index = hash & mask;
-
-                if target_bucket_index == bucket_index as u32 {
-                    old_bucket.insert(key, value);
-                } else {
-                    new_bucket.insert(key, value);
+                    if target_bucket_index == bucket_index as u32 {
+                        old_bucket.insert(key, value);
+                    } else {
+                        new_bucket.insert(key, value);
+                    }
                 }
+                
+                return true;
             }
         }
 
-        true
+        false
     }
 
     // Add a new method to handle bucket merging
@@ -395,7 +407,7 @@ impl DiskExtendableHashTable {
             None => return false,
         };
 
-        // Try to merge buckets
+        // Try to merge buckets using the new directory page method
         let removed_bucket_id = {
             let mut directory = directory_page.write();
             directory.merge_bucket(bucket_index)
