@@ -124,14 +124,26 @@ impl ExtendableHTableDirectoryPage {
     /// Gets the split image index for a bucket at the given index
     pub fn get_split_image_index(&self, bucket_idx: u32) -> u32 {
         let local_depth = self.get_local_depth(bucket_idx);
-        let distinguishing_bit = 1 << (local_depth - 1);
+        
+        // Handle case where local_depth is 0
+        if local_depth == 0 {
+            debug!(
+                "Local depth is 0 for bucket_idx={}, returning bucket_idx + 1",
+                bucket_idx
+            );
+            return bucket_idx + 1;
+        }
+        
+        // Calculate split image using the current local depth
+        let split_point = 1 << local_depth;
+        let split_idx = bucket_idx ^ split_point;
         
         debug!(
-            "Calculating split image for bucket_idx={}, local_depth={}",
-            bucket_idx, local_depth
+            "Calculating split image for bucket_idx={}, local_depth={}, split_point={}, split_idx={}",
+            bucket_idx, local_depth, split_point, split_idx
         );
 
-        bucket_idx ^ distinguishing_bit
+        split_idx
     }
 
     /// Returns a mask of global depth 1's and the rest 0's.
@@ -179,24 +191,57 @@ impl ExtendableHTableDirectoryPage {
         let local_depth = self.get_local_depth(bucket_idx as u32);
         let new_local_depth = local_depth + 1;
 
+        debug!(
+            "Updating directory for split: bucket_idx={}, local_depth={}, new_local_depth={}",
+            bucket_idx, local_depth, new_local_depth
+        );
+
         // Check if we need to grow directory
         while new_local_depth > self.global_depth {
             if !self.grow_directory() {
+                debug!("Failed to grow directory during split");
                 return None;
             }
         }
 
-        // Get split image index
+        // Calculate masks for redistribution
+        let mask = (1 << local_depth) - 1;
+        let split_point = 1 << local_depth;
+        
+        debug!(
+            "Split masks: mask={}, split_point={}, global_depth={}",
+            mask, split_point, self.global_depth
+        );
+
+        // Get the old bucket page ID
+        let old_bucket_page_id = self.get_bucket_page_id(bucket_idx)
+            .expect("Bucket being split must exist");
+
+        // Update directory entries
+        for i in 0..(1 << self.global_depth) {
+            if (i & mask) == (bucket_idx & mask) {
+                // Update local depth for all affected entries
+                self.set_local_depth(i, new_local_depth);
+                
+                // Determine which entries point to new bucket
+                if i & split_point != 0 {
+                    self.set_bucket_page_id(i, new_page_id);
+                    debug!("Directory entry {} now points to new bucket {}", i, new_page_id);
+                } else {
+                    self.set_bucket_page_id(i, old_bucket_page_id);
+                    debug!("Directory entry {} keeps old bucket {}", i, old_bucket_page_id);
+                }
+            }
+        }
+
+        // Get split image index for returning
         let split_idx = self.get_split_image_index(bucket_idx as u32) as usize;
         
-        // Update local depths and page IDs
-        self.set_local_depth(bucket_idx, new_local_depth);
-        self.set_local_depth(split_idx, new_local_depth);
-        
-        // Update the split bucket to point to the new page
-        self.set_bucket_page_id(split_idx, new_page_id);
+        debug!(
+            "Directory split complete: bucket_idx={}, split_idx={}, new_local_depth={}", 
+            bucket_idx, split_idx, new_local_depth
+        );
 
-        // Return split image index so hash table knows where to map new bucket
         Some(split_idx)
     }
 
