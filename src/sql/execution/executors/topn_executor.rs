@@ -6,7 +6,7 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::storage::table::tuple::Tuple;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::types_db::types::Type;
+use crate::types_db::types::{CmpBool, Type};
 use log::{debug, trace};
 use parking_lot::RwLock;
 use std::cmp::Reverse;
@@ -14,18 +14,21 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::cmp::Ordering;
 use crate::catalog::catalog::Catalog;
+use crate::types_db::value::Value;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
 struct TupleWithKeys {
-    sort_keys: Vec<i32>,
+    sort_keys: Vec<Value>,
     tuple: Tuple,
     rid: RID,
 }
 
 impl PartialEq for TupleWithKeys {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_keys == other.sort_keys
+        self.sort_keys.len() == other.sort_keys.len() && 
+        self.sort_keys.iter().zip(other.sort_keys.iter())
+            .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
     }
 }
 
@@ -37,7 +40,21 @@ impl PartialOrd for TupleWithKeys {
 
 impl Ord for TupleWithKeys {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.sort_keys.cmp(&other.sort_keys)
+        // Compare sort keys in ascending order for min-heap
+        for (a, b) in self.sort_keys.iter().zip(other.sort_keys.iter()) {
+            match a.compare_less_than(b) {
+                CmpBool::CmpTrue => return Ordering::Less,
+                CmpBool::CmpFalse => {
+                    match a.compare_greater_than(b) {
+                        CmpBool::CmpTrue => return Ordering::Greater,
+                        CmpBool::CmpFalse => continue,  // Equal, check next key
+                        CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                    }
+                }
+                CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+            }
+        }
+        Ordering::Equal
     }
 }
 
@@ -46,8 +63,8 @@ pub struct TopNExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<TopNNode>,
     child: Box<dyn AbstractExecutor>,
-    // Store tuples in reverse order (min-heap) so we can efficiently maintain top K largest elements
-    heap: BinaryHeap<TupleWithKeys>,
+    // Store sorted tuples for output
+    sorted_tuples: Vec<TupleWithKeys>,
     current_index: usize,
     initialized: bool,
 }
@@ -56,7 +73,6 @@ impl TopNExecutor {
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<TopNNode>) -> Self {
         debug!("Creating TopNExecutor");
         
-        // Get the child executor from the plan's child
         let child_plan = plan.get_children().first().expect("TopN should have a child");
         let child = child_plan.create_executor(Arc::clone(&context))
             .expect("Failed to create child executor");
@@ -65,20 +81,20 @@ impl TopNExecutor {
             context,
             plan,
             child,
-            heap: BinaryHeap::new(),
+            sorted_tuples: Vec::new(),
             current_index: 0,
             initialized: false,
         }
     }
 
     /// Evaluates the sort keys for a tuple based on the order by expressions
-    fn evaluate_sort_keys(&self, tuple: &Tuple) -> Vec<i32> {
+    fn evaluate_sort_keys(&self, tuple: &Tuple) -> Vec<Value> {
         let schema = self.plan.get_output_schema();
         let keys = self.plan
             .get_sort_order_by()
             .iter()
-            .map(|expr| expr.evaluate(tuple, schema).unwrap().as_integer().unwrap())
-            .collect::<Vec<i32>>();
+            .map(|expr| expr.evaluate(tuple, schema).unwrap())
+            .collect();
         trace!("Evaluated sort keys for tuple: {:?}", keys);
         keys
     }
@@ -96,8 +112,10 @@ impl AbstractExecutor for TopNExecutor {
         let k = self.plan.get_k();
         debug!("TopN k value: {}", k);
         
-        // Collect all tuples first
-        let mut all_tuples = Vec::new();
+        // Use min-heap to maintain top K elements
+        let mut heap = BinaryHeap::new();
+        
+        // Process tuples one at a time
         while let Some((tuple, rid)) = self.child.next() {
             let sort_keys = self.evaluate_sort_keys(&tuple);
             debug!("Processing tuple with sort keys: {:?}", sort_keys);
@@ -107,19 +125,28 @@ impl AbstractExecutor for TopNExecutor {
                 tuple,
                 rid,
             };
-            all_tuples.push(tuple_with_keys);
-        }
-        
-        // Sort all tuples in descending order
-        all_tuples.sort_by(|a, b| b.sort_keys.cmp(&a.sort_keys));
-        
-        // Take top k tuples
-        for tuple in all_tuples.into_iter().take(k) {
-            debug!("Adding to heap: {:?}", tuple.sort_keys);
-            self.heap.push(tuple);
+            
+            if heap.len() < k {
+                // Heap not full yet, add element
+                debug!("Heap not full (size {}), adding tuple", heap.len());
+                heap.push(Reverse(tuple_with_keys));
+            } else if let Some(Reverse(current_min)) = heap.peek() {
+                // Compare with smallest element in heap
+                if current_min < &tuple_with_keys {
+                    // Remove smallest and add new larger element
+                    debug!("Replacing smallest element with larger tuple");
+                    heap.pop();
+                    heap.push(Reverse(tuple_with_keys));
+                }
+            }
         }
 
-        debug!("TopNExecutor initialization complete. Heap size: {}", self.heap.len());
+        // Convert heap to sorted vector (will be in ascending order)
+        self.sorted_tuples = heap.into_iter().map(|Reverse(t)| t).collect();
+        // Reverse to get descending order
+        self.sorted_tuples.reverse();
+
+        debug!("TopNExecutor initialization complete. Number of tuples: {}", self.sorted_tuples.len());
         self.initialized = true;
     }
 
@@ -128,16 +155,15 @@ impl AbstractExecutor for TopNExecutor {
             self.init();
         }
 
-        let result = self.heap.pop().map(|t| {
-            debug!("Returning tuple with sort keys: {:?}", t.sort_keys);
-            (t.tuple, t.rid)
-        });
-        
-        if result.is_none() {
+        if self.current_index < self.sorted_tuples.len() {
+            let result = &self.sorted_tuples[self.current_index];
+            self.current_index += 1;
+            debug!("Returning tuple {} with sort keys: {:?}", self.current_index - 1, result.sort_keys);
+            Some((result.tuple.clone(), result.rid))
+        } else {
             debug!("No more tuples to return");
+            None
         }
-        
-        result
     }
 
     fn get_output_schema(&self) -> &Schema {
