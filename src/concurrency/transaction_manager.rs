@@ -13,6 +13,16 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use crate::storage::page::page_types::table_page::TablePage;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
+use crate::common::config::TableOidT;
+use crate::catalog::catalog::Catalog;
+use crate::catalog::column::Column;
+use crate::catalog::schema::Schema;
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
+use std::thread;
+use tempfile::TempDir;
 
 #[derive(Debug)]
 pub struct PageVersionInfo {
@@ -26,6 +36,7 @@ struct TransactionManagerState {
     txn_map: RwLock<HashMap<TxnId, Arc<Transaction>>>,
     running_txns: RwLock<Watermark>,
     version_info: RwLock<HashMap<PageId, Arc<PageVersionInfo>>>,
+    table_heaps: RwLock<HashMap<TableOidT, Arc<TransactionalTableHeap>>>,
     is_shutdown: AtomicBool,
 }
 
@@ -44,6 +55,7 @@ impl TransactionManager {
                 txn_map: RwLock::new(HashMap::new()),
                 running_txns: RwLock::new(Watermark::default()),
                 version_info: RwLock::new(HashMap::new()),
+                table_heaps: RwLock::new(HashMap::new()),
                 is_shutdown: AtomicBool::new(false),
             }),
         };
@@ -108,57 +120,71 @@ impl TransactionManager {
         Ok(txn)
     }
 
-    /// Commits the specified transaction.
-    ///
-    /// # Parameters
-    /// - `txn`: The transaction to commit.
-    /// - `buffer_pool`: The buffer pool for flushing pages.
-    ///
-    /// # Returns
-    /// `true` if the transaction was successfully committed; otherwise, `false`.
-    pub fn commit(&self, txn: Arc<Transaction>, buffer_pool: Arc<BufferPoolManager>) -> bool {
+    /// Commits a transaction and updates the watermark
+    pub fn commit(&self, txn: Arc<Transaction>, bpm: Arc<BufferPoolManager>) -> bool {
+        // Check if transaction is in a valid state to commit
         if txn.get_state() != TransactionState::Running {
-            panic!("txn not in running state");
-        }
-
-        // 1. Get write set before any state changes
-        let write_set = txn.get_write_set();
-
-        // 2. Flush dirty pages
-        let mut all_pages_flushed = true;
-        for (_, rid) in write_set {
-            let page_id = rid.get_page_id();
-            if let Some(success) = buffer_pool.flush_page(page_id) {
-                if !success {
-                    all_pages_flushed = false;
-                    break;
-                }
-            }
-        }
-
-        if !all_pages_flushed {
-            self.abort(txn);
+            log::debug!("Transaction {} not in running state: {:?}", txn.get_transaction_id(), txn.get_state());
             return false;
         }
 
-        // 3. Update transaction state and metadata atomically
+        // Get next timestamp for commit
+        let commit_ts = self.state.running_txns.read().get_next_ts();
+        log::debug!("Committing transaction {} with commit_ts {}", txn.get_transaction_id(), commit_ts);
+        
+        // Set transaction's commit timestamp and state
+        txn.set_commit_ts(commit_ts);
+        txn.set_state(TransactionState::Committed);
+
+        // Update watermark and transaction map atomically
         {
+            let mut watermark = self.state.running_txns.write();
             let mut txn_map = self.state.txn_map.write();
-            let mut running_txns = self.state.running_txns.write();
 
-            // Get new commit timestamp and update watermark
-            let commit_ts = running_txns.get_next_ts();
-            txn.set_commit_ts(commit_ts);
-            running_txns.update_commit_ts_and_get_watermark(commit_ts);
-
-            // Remove transaction's read timestamp from active set
-            running_txns.unregister_txn(txn.read_ts());
-
-            // Update transaction state
-            txn.set_state(TransactionState::Committed);
-
-            // Update transaction map
+            watermark.remove_txn(txn.read_ts());
+            watermark.update_commit_ts(commit_ts);
+            
+            // Update transaction map with committed transaction
             txn_map.insert(txn.get_transaction_id(), txn.clone());
+            log::debug!("Updated watermark and transaction map for txn {}", txn.get_transaction_id());
+        }
+
+        // Update commit timestamps in undo logs
+        let write_set = txn.get_write_set();
+        for (_, rid) in write_set {
+            if let Some(undo_link) = self.get_undo_link(rid) {
+                let mut undo_log = self.get_undo_log(undo_link.clone());
+                undo_log.ts = commit_ts;
+                txn.modify_undo_log(undo_link.prev_log_idx, undo_log);
+            }
+        }
+
+        // Flush any dirty pages from this transaction
+        for (_table_oid, rid) in txn.get_write_set() {
+            // Update tuple metadata with commit timestamp
+            let page_id = rid.get_page_id();
+            if let Some(page_guard) = bpm.fetch_page::<TablePage>(page_id) {
+                let mut page = page_guard.write();
+                if let Ok((mut meta, _)) = page.get_tuple(&rid) {
+                    // Only update commit timestamp if this transaction created/modified the tuple
+                    if meta.get_creator_txn_id() == txn.get_transaction_id() {
+                        meta.set_commit_timestamp(commit_ts);
+                        if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                            log::error!("Failed to update tuple metadata: {}", e);
+                            return false;
+                        }
+                        log::debug!("Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}", 
+                            rid, meta.get_creator_txn_id(), commit_ts);
+                    }
+                }
+            }
+
+            // Flush the page
+            if let Err(e) = bpm.flush_page(page_id) {
+                log::error!("Failed to flush page {}: {}", page_id, e);
+                return false;
+            }
+            log::debug!("Flushed page {} for txn {}", page_id, txn.get_transaction_id());
         }
 
         true
@@ -170,18 +196,46 @@ impl TransactionManager {
     /// - `txn`: The transaction to abort.
     pub fn abort(&self, txn: Arc<Transaction>) {
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
-        {
+        if current_state != TransactionState::Running && current_state != TransactionState::Tainted {
             panic!("txn not in running / tainted state");
         }
 
+        // Get all modified tuples from write set
+        let write_set = txn.get_write_set();
+        
+        // Roll back changes using undo logs
+        for (table_oid, rid) in write_set {
+            if let Some(table_heap) = self.get_table_heap(table_oid) {
+                if let Some(undo_link) = self.get_undo_link(rid) {
+                    // Get the undo log
+                    let undo_log = self.get_undo_log(undo_link.clone());
+                    
+                    // Restore the previous version
+                    let mut meta = TupleMeta::new(undo_link.prev_txn);
+                    meta.set_commit_timestamp(undo_log.ts);
+                    meta.set_deleted(undo_log.is_deleted);
+                    meta.set_undo_log_idx(undo_link.prev_log_idx);
+
+                    // Restore the tuple to its previous state
+                    let mut tuple = undo_log.tuple.clone();
+                    if let Err(e) = table_heap.rollback_tuple(&meta, &mut tuple, rid) {
+                        log::error!("Failed to rollback tuple: {}", e);
+                    }
+                } else {
+                    // If no undo link exists, this was a newly inserted tuple
+                    // Mark it as deleted since it was part of an aborted transaction
+                    let mut meta = TupleMeta::new(txn.get_transaction_id());
+                    meta.set_deleted(true);
+                }
+            }
+        }
+
+        // Update transaction state and remove from running transactions
         {
             let mut txn_map = self.state.txn_map.write();
             let mut running_txns = self.state.running_txns.write();
 
-            // Remove transaction's read timestamp from active set
-            running_txns.unregister_txn(txn.read_ts());
-
+            running_txns.remove_txn(txn.read_ts());
             txn.set_state(TransactionState::Aborted);
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
@@ -263,61 +317,33 @@ impl TransactionManager {
             .and_then(|page_info| page_info.prev_link.read().get(&rid).cloned())
     }
 
-    pub fn update_tuple_and_undo_link(
+    pub fn update_tuple(
         &self,
-        rid: RID,
-        undo_link: Option<UndoLink>,
-        table_heap: &mut TableHeap,
-        txn: &Transaction,
+        table_heap: &TableHeap,
         meta: &TupleMeta,
         tuple: &mut Tuple,
-        lock_manager: Arc<LockManager>,
-        check: Option<Box<dyn Fn(&TupleMeta, &Tuple, RID, Option<UndoLink>) -> bool>>,
-    ) -> bool {
-        // Create transaction context for this operation
-        let txn_ctx = Arc::new(TransactionContext::new(
-            Arc::new(txn.clone()),
-            lock_manager,
-            Arc::new(self.clone()),
-        ));
+        rid: RID,
+        txn_ctx: Option<Arc<TransactionContext>>,
+    ) -> Result<(), String> {
+        // Get the current transaction
+        let txn = txn_ctx.as_ref().map(|ctx| ctx.get_transaction());
 
-        // Proceed with update with transaction context
-        let update_result = match table_heap.update_tuple(meta, tuple, rid, Some(txn_ctx.clone())) {
-            Ok(new_rid) => {
-                if new_rid != rid {
-                    if !self.update_undo_link(
-                        new_rid,
-                        undo_link.clone(),
-                        Some(Box::new(move |_| true)),
-                    ) {
-                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                        let _ = table_heap.update_tuple_meta(&rollback_meta, new_rid);
-                        return false;
-                    }
-                    new_rid
-                } else {
-                    if !self.update_undo_link(rid, undo_link.clone(), Some(Box::new(|_| true))) {
-                        let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                        let _ = table_heap.update_tuple_meta(&rollback_meta, rid);
-                        return false;
-                    }
-                    rid
-                }
-            }
-            Err(_) => return false,
-        };
-
-        // Verify update if check function provided
-        if let Some(check_fn) = check {
-            if !check_fn(meta, tuple, update_result, undo_link.clone()) {
-                let rollback_meta = TupleMeta::new(txn.get_transaction_id());
-                let _ = table_heap.update_tuple_meta(&rollback_meta, update_result);
-                self.update_undo_link(update_result, None, Some(Box::new(|_| true)));
-                return false;
+        // Check if transaction is in a valid state
+        if let Some(txn) = &txn {
+            if txn.get_state() != TransactionState::Running {
+                return Err("Transaction not in running state".to_string());
             }
         }
 
-        true
+        // Perform the update
+        let result = table_heap.update_tuple(meta, tuple, rid, txn_ctx)?;
+
+        // If successful, update transaction's write set
+        if let Some(txn) = txn {
+            txn.append_write_set(table_heap.get_table_oid(), rid);
+        }
+
+        Ok(())
     }
 
     pub fn get_tuple_and_undo_link(
@@ -337,7 +363,7 @@ impl TransactionManager {
         ));
 
         // Get the tuple from table heap with transaction context
-        let (meta, tuple) = table_heap.get_tuple(rid, Some(txn_ctx)).unwrap();
+        let (meta, tuple) = table_heap.get_tuple_with_txn(rid, txn_ctx).unwrap();
 
         // Get the undo link using self reference
         let undo_link = self.get_undo_link(rid);
@@ -353,9 +379,12 @@ impl TransactionManager {
     /// # Returns
     /// The undo log, if it exists.
     pub fn get_undo_log_optional(&self, link: UndoLink) -> Option<UndoLog> {
-        if !link.is_valid() {
-            return None;
-        }
+        // Add debug logging
+        log::debug!(
+            "Looking up transaction {} for undo log index {}",
+            link.prev_txn,
+            link.prev_log_idx
+        );
 
         self.state
             .txn_map
@@ -372,8 +401,15 @@ impl TransactionManager {
     /// # Returns
     /// The undo log.
     pub fn get_undo_log(&self, link: UndoLink) -> UndoLog {
+        // Add debug logging
+        log::debug!(
+            "Getting undo log for link: txn={}, idx={}",
+            link.prev_txn,
+            link.prev_log_idx
+        );
+
         self.get_undo_log_optional(link)
-            .expect("Failed to get undo log for valid link")
+            .expect("Failed to get undo log")
     }
 
     /// Gets the lowest read timestamp in the system.
@@ -382,6 +418,11 @@ impl TransactionManager {
     /// The watermark.
     pub fn get_watermark(&self) -> Timestamp {
         self.state.running_txns.read().get_watermark()
+    }
+
+    /// Gets the running transactions watermark
+    pub fn get_running_transactions(&self) -> Watermark {
+        self.state.running_txns.read().clone_watermark()
     }
 
     pub fn get_transaction(&self, txn_id: &TxnId) -> Option<Arc<Transaction>> {
@@ -394,6 +435,28 @@ impl TransactionManager {
 
     pub fn get_active_transaction_count(&self) -> usize {
         self.get_transactions().len()
+    }
+
+    /// Gets the undo link for a specific transaction
+    pub fn get_undo_link_for_txn(&self, rid: RID, txn_id: TxnId) -> Option<UndoLink> {
+        let version_info = self.state.version_info.read();
+        version_info.get(&rid.get_page_id())
+            .and_then(|page_info| {
+                page_info.prev_link.read()
+                    .get(&rid)
+                    .filter(|link| link.prev_txn == txn_id)
+                    .cloned()
+            })
+    }
+
+    // Add method to register table heaps
+    pub fn register_table(&self, table_heap: Arc<TransactionalTableHeap>) {
+        let mut table_heaps = self.state.table_heaps.write();
+        table_heaps.insert(table_heap.get_table_oid(), table_heap);
+    }
+
+    fn get_table_heap(&self, table_oid: TableOidT) -> Option<Arc<TransactionalTableHeap>> {
+        self.state.table_heaps.read().get(&table_oid).cloned()
     }
 }
 
@@ -478,7 +541,7 @@ mod tests {
             }
         }
 
-        fn create_test_table(&self) -> (TableOidT, TableHeap) {
+        fn create_test_table(&self) -> (TableOidT, Arc<TableHeap>) {
             let schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
                 Column::new("value", TypeId::Integer),
@@ -490,11 +553,17 @@ mod tests {
                 .create_table("test_table".to_string(), schema)
                 .unwrap();
 
-            let table_heap = TableHeap::new(
+            let table_heap = Arc::new(TableHeap::new(
                 self.buffer_pool.clone(),
                 table_info.get_table_oidt(),
-                self.txn_manager.clone(),
-            );
+            ));
+
+            // Create and register transactional table heap
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+                table_heap.clone(),
+                table_info.get_table_oidt(),
+            ));
+            self.txn_manager.register_table(txn_table_heap);
 
             (table_info.get_table_oidt(), table_heap)
         }
@@ -580,7 +649,7 @@ mod tests {
 
         // Insert tuple
         let rid = table_heap
-            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple, Some(txn_ctx.clone()))
+            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple)
             .unwrap();
 
         // Append to write set
@@ -598,7 +667,7 @@ mod tests {
             .unwrap();
 
         // Ensure verify_txn has a higher timestamp than the commit
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        thread::sleep(std::time::Duration::from_millis(1));
 
         let verify_ctx = Arc::new(TransactionContext::new(
             verify_txn.clone(),
@@ -607,7 +676,7 @@ mod tests {
         ));
 
         // Get tuple with verification transaction
-        let result = table_heap.get_tuple(rid, Some(verify_ctx.clone()));
+        let result = table_heap.get_tuple_with_txn(rid, txn_ctx);
         assert!(
             result.is_ok(),
             "Failed to read committed tuple: {:?}",
@@ -646,7 +715,7 @@ mod tests {
 
         // Insert tuple
         let rid = table_heap
-            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple, Some(txn_ctx.clone()))
+            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple)
             .unwrap();
 
         txn.append_write_set(table_oid, rid);
@@ -666,7 +735,7 @@ mod tests {
         ));
 
         // Get tuple should fail since transaction was aborted
-        let result = table_heap.get_tuple(rid, Some(verify_ctx.clone()));
+        let result = table_heap.get_tuple_with_txn(rid, txn_ctx);
         assert!(
             result.is_err(),
             "Tuple from aborted transaction should not be visible"
@@ -682,6 +751,10 @@ mod tests {
         let ctx = TestContext::new("test_transaction_isolation");
 
         let (table_oid, table_heap) = ctx.create_test_table();
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_heap.clone(),
+            table_oid,
+        ));
 
         // Start two transactions
         let txn1 = ctx
@@ -704,25 +777,23 @@ mod tests {
 
         // Insert with txn1
         let mut tuple = TestContext::create_test_tuple();
-        let rid = table_heap
+        let rid = txn_table_heap
             .insert_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
                 &mut tuple,
-                Some(txn_ctx1.clone()),
+                txn_ctx1.clone(),
             )
             .unwrap();
-
-        txn1.append_write_set(table_oid, rid);
 
         // Try to update with txn2 before txn1 commits - should fail
         let mut modified_tuple = tuple.clone();
         modified_tuple.get_values_mut()[1] = Value::new(200);
 
-        let update_result = table_heap.update_tuple(
+        let update_result = txn_table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
             &mut modified_tuple,
             rid,
-            Some(txn_ctx2.clone()),
+            txn_ctx2.clone(),
         );
         assert!(update_result.is_err(), "Update should fail before commit");
 
@@ -730,11 +801,11 @@ mod tests {
         assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()));
 
         // Now txn2 should succeed in updating
-        let update_result = table_heap.update_tuple(
+        let update_result = txn_table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
             &mut modified_tuple,
             rid,
-            Some(txn_ctx2.clone()),
+            txn_ctx2.clone(),
         );
         assert!(update_result.is_ok(), "Update should succeed after commit");
 

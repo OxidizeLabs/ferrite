@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
+use log;
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -189,10 +190,20 @@ impl Transaction {
     /// The link to the appended undo log entry.
     pub fn append_undo_log(&self, log: UndoLog) -> UndoLink {
         let mut logs = self.undo_logs.lock().unwrap();
+        let idx = logs.len();
         logs.push(log);
+        
+        // Add debug logging
+        log::debug!(
+            "Appended undo log at index {} for txn {}. New length: {}",
+            idx,
+            self.txn_id,
+            logs.len()
+        );
+
         UndoLink {
             prev_txn: self.txn_id,
-            prev_log_idx: logs.len() - 1,
+            prev_log_idx: idx,
         }
     }
 
@@ -204,6 +215,13 @@ impl Transaction {
     /// # Returns
     /// The undo log entry at the specified index.
     pub fn get_undo_log(&self, log_id: usize) -> UndoLog {
+        // Add debug logging
+        log::debug!(
+            "Getting undo log at index {} for txn {}. Current undo logs: {}",
+            log_id,
+            self.txn_id,
+            self.undo_logs.lock().unwrap().len()
+        );
         self.undo_logs.lock().unwrap()[log_id].clone()
     }
 
@@ -308,21 +326,30 @@ impl Transaction {
     }
 
     /// Enhanced tuple visibility check that considers watermark
-    pub fn is_tuple_visible(&self, tuple_meta: &TupleMeta, watermark: &Watermark) -> bool {
-        match self.get_isolation_level() {
+    pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
+        log::debug!(
+            "Transaction.is_tuple_visible(): txn_id={}, isolation={:?}, read_ts={}, meta={{creator={}, commit_ts={}, deleted={}}}",
+            self.txn_id, self.isolation_level, *self.read_ts.read(), 
+            meta.get_creator_txn_id(), meta.get_commit_timestamp(), meta.is_deleted()
+        );
+
+        match self.isolation_level {
             IsolationLevel::ReadUncommitted => {
-                // Can see all non-deleted tuples, even uncommitted ones
-                !tuple_meta.is_deleted()
+                let visible = !meta.is_deleted();
+                log::debug!("READ_UNCOMMITTED visibility: {}", visible);
+                visible
             }
             IsolationLevel::ReadCommitted => {
-                // Can only see committed tuples up to current watermark
-                tuple_meta.is_visible_to(self.get_transaction_id(), watermark)
+                let visible = (meta.is_committed() || meta.get_creator_txn_id() == self.txn_id) && !meta.is_deleted();
+                log::debug!("READ_COMMITTED visibility: {}", visible);
+                visible
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                // Can only see tuples committed before this transaction's read timestamp
-                tuple_meta.is_committed()
-                    && tuple_meta.get_commit_timestamp() <= self.read_ts()
-                    && !tuple_meta.is_deleted()
+                let visible = meta.is_committed() && 
+                             meta.get_commit_timestamp() <= *self.read_ts.read() && 
+                             !meta.is_deleted();
+                log::debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
+                visible
             }
         }
     }
@@ -472,14 +499,17 @@ mod tests {
 
         // Test append undo log
         let link = txn.append_undo_log(undo_log.clone());
-        assert_eq!(link.prev_txn, txn.get_transaction_id());
-        assert_eq!(link.prev_log_idx, 0);
+        assert_eq!(link, UndoLink {
+            prev_txn: txn.get_transaction_id(),  // Should be txn's ID (1), not INVALID_TXN_ID
+            prev_log_idx: 0,
+        });
 
         // Test get undo log
         let retrieved_log = txn.get_undo_log(0);
         assert_eq!(retrieved_log.is_deleted, undo_log.is_deleted);
         assert_eq!(retrieved_log.modified_fields, undo_log.modified_fields);
         assert_eq!(retrieved_log.ts, undo_log.ts);
+        assert_eq!(retrieved_log.prev_version, undo_log.prev_version);
 
         // Test modify undo log
         let mut modified_log = undo_log.clone();
