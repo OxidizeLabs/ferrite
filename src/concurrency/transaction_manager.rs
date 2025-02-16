@@ -226,6 +226,17 @@ impl TransactionManager {
                     // Mark it as deleted since it was part of an aborted transaction
                     let mut meta = TupleMeta::new(txn.get_transaction_id());
                     meta.set_deleted(true);
+                    meta.set_commit_timestamp(0); // Set to 0 to ensure it's not visible
+                    
+                    // Update the tuple metadata to mark it as deleted
+                    if let Some(page_guard) = table_heap.get_table_heap().get_bpm().fetch_page::<TablePage>(rid.get_page_id()) {
+                        let mut page = page_guard.write();
+                        if let Ok((_, _)) = page.get_tuple(&rid) {
+                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                                log::error!("Failed to mark tuple as deleted: {}", e);
+                            }
+                        }
+                    }
                 }
             }
         }
