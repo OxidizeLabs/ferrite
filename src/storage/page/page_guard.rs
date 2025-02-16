@@ -1,578 +1,538 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::PageId;
-use crate::common::logger::initialize_logger;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::page::page::{Page, PageTrait};
-use crate::storage::page::page::PageType;
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-use crate::storage::page::page_types::table_page::TablePage;
-use chrono::Utc;
+use crate::storage::page::page::{Page, PageTrait, PageType};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
+use log::trace;
 
-pub struct PageGuard {
-    bpm: Arc<BufferPoolManager>,
-    page: Arc<RwLock<PageType>>,
+pub struct PageGuard<P: ?Sized + PageTrait> {
+    page: Arc<RwLock<P>>,
     page_id: PageId,
 }
 
-impl PageGuard {
-    pub fn new(bpm: Arc<BufferPoolManager>, page: Arc<RwLock<PageType>>, page_id: PageId) -> Self {
-        // Don't increment pin count here since BufferPoolManager already does it
-        Self {
-            bpm,
-            page,
-            page_id
-        }
+impl<P: Page + 'static> PageGuard<P> {
+    /// Creates a new page guard for an existing page, incrementing the pin count
+    pub fn new(page: Arc<RwLock<P>>, page_id: PageId) -> Self {
+        // Increment pin count when creating a guard for an existing page
+        page.write().increment_pin_count();  // Increment instead of setting to 1
+        trace!("Created new page guard for page {} with pin count {}", 
+            page_id, page.read().get_pin_count());
+        
+        Self { page, page_id }
     }
 
-    pub fn read(&self) -> RwLockReadGuard<'_, PageType> {
+    /// Creates a new page guard for a newly created page (pin count already set)
+    pub fn new_for_new_page(page: Arc<RwLock<P>>, page_id: PageId) -> Self {
+        trace!("Created new page guard for new page {} with pin count {}", 
+            page_id, page.read().get_pin_count());
+        
+        Self { page, page_id }
+    }
+
+    pub fn read(&self) -> RwLockReadGuard<'_, P> {
         self.page.read()
     }
 
-    pub fn write(&self) -> RwLockWriteGuard<'_, PageType> {
+    pub fn write(&self) -> RwLockWriteGuard<'_, P> {
         self.page.write()
+    }
+
+    pub fn get_page_type(&self) -> PageType {
+        self.read().get_page_type()
     }
 
     pub fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
-    pub fn get_pin_count(&self) -> i32 {
-        self.page.read().as_page_trait().get_pin_count()
+    pub fn get_page(&self) -> &Arc<RwLock<P>> {
+        &self.page
     }
+}
 
-    fn set_dirty(&self, is_dirty: bool) {
-        self.page.write().as_page_trait_mut().set_dirty(is_dirty)
-    }
-
-    pub fn get_page_type(&self) -> &'static str {
-        let page = self.read();
-        match *page {
-            PageType::Basic(_) => "Basic",
-            PageType::ExtendedHashTableDirectory(_) => "ExtendedHashTableDirectory",
-            PageType::ExtendedHashTableHeader(_) => "ExtendedHashTableHeader",
-            PageType::ExtendedHashTableBucket(_) => "ExtendedHashTableBucket",
-            PageType::Table(_) => "TablePage",
+impl<P: PageTrait + ?Sized> PageGuard<P> {
+    fn unpin(&self, is_dirty: bool) {
+        let pin_count = self.page.read().get_pin_count();
+        trace!("Unpinning page {} with pin count {}, dirty: {}", 
+            self.page_id, pin_count, is_dirty);
+        
+        // Decrement pin count
+        let mut page = self.page.write();
+        page.decrement_pin_count();
+        
+        if is_dirty {
+            page.set_dirty(true);
+        }
+        
+        // If pin count reaches zero, mark page as evictable
+        if page.get_pin_count() == 0 {
+            trace!("Page {} is now evictable", self.page_id);
+            // The buffer pool manager will handle marking the page as evictable
+            // when it processes the unpin
         }
     }
-
-    pub fn into_specific_type(
-        self,
-    ) -> Option<PageType> {
-        // Take ownership of the inner page
-        let page_id = self.page_id;
-
-        // Get a read lock to check the page type
-        let page_type = match &*self.page.read() {
-            PageType::Basic(page) => {
-                let mut new_page = Page::new(page_id);
-                new_page.set_data(0, page.get_data()).ok()?;
-                Some(PageType::Basic(new_page))
-            },
-            PageType::ExtendedHashTableBucket(bucket_page) => {
-                let mut new_page = ExtendableHTableBucketPage::new(page_id);
-                // Copy relevant data from bucket_page to new_page
-                new_page.init(bucket_page.get_size());
-                Some(PageType::ExtendedHashTableBucket(new_page))
-            },
-            PageType::ExtendedHashTableDirectory(dir_page) => {
-                let mut new_page = ExtendableHTableDirectoryPage::new(page_id);
-                // Copy relevant data from dir_page to new_page
-                new_page.init(dir_page.get_size());
-                Some(PageType::ExtendedHashTableDirectory(new_page))
-            },
-            PageType::ExtendedHashTableHeader(_header_page) => {
-                let new_page = ExtendableHTableHeaderPage::new(page_id);
-                // Copy relevant data from header_page to new_page
-                Some(PageType::ExtendedHashTableHeader(new_page))
-            },
-            PageType::Table(_table_page) => {
-                let new_page = TablePage::new(page_id);
-                // Copy relevant data from table_page to new_page
-                Some(PageType::Table(new_page))
-            },
-        };
-
-        // The original PageGuard will be dropped here, which will handle unpinning
-        page_type
-    }
-
-    pub fn access<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&PageType) -> R,
-    {
-        let guard = self.page.read();
-        Some(f(&guard))
-    }
-
-    pub fn access_mut<F, R>(&self, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut PageType) -> R,
-    {
-        let mut guard = self.page.write();
-        Some(f(&mut guard))
-    }
 }
 
-impl Drop for PageGuard {
+impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
     fn drop(&mut self) {
-        let is_dirty = self.read().as_page_trait().is_dirty();
-        self.set_dirty(is_dirty);
-
-        // Unpin the page through BufferPoolManager
-        self.bpm.unpin_page(self.page_id, is_dirty, AccessType::Unknown);
+        let initial_pin_count = self.page.read().get_pin_count();
+        let was_dirty = self.page.read().is_dirty();
+        
+        trace!("Dropping page {} with pin count {}, dirty: {}", 
+            self.page_id, initial_pin_count, was_dirty);
+        
+        // If pin count reaches zero, mark page as dirty to ensure it's written back
+        let should_mark_dirty = initial_pin_count == 1;
+        
+        // Unpin the page
+        self.unpin(should_mark_dirty);
+        
+        let final_state = self.page.read();
+        trace!("Page {} dropped, pin count: {} -> {}, dirty: {} -> {}", 
+            self.page_id, initial_pin_count, final_state.get_pin_count(),
+            was_dirty, final_state.is_dirty());
     }
 }
 
-pub struct TestContext {
-    bpm: Arc<BufferPoolManager>,
-    db_file: String,
-    db_log_file: String,
-}
-
-impl TestContext {
-    pub fn new(test_name: &str) -> Self {
-        initialize_logger();
-        const BUFFER_POOL_SIZE: usize = 5;
-        const K: usize = 2;
-
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-        let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-        let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-
-        let disk_manager = Arc::new(FileDiskManager::new(
-            db_file.clone(),
-            db_log_file.clone(),
-            100,
-        ));
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(
-            BUFFER_POOL_SIZE,
-            disk_scheduler,
-            disk_manager.clone(),
-            replacer.clone(),
-        ));
-
-        Self {
-            bpm,
-            db_file,
-            db_log_file,
-        }
+impl PageGuard<dyn PageTrait> {
+    pub fn new_untyped(page: Arc<RwLock<dyn PageTrait>>, page_id: PageId) -> Self {
+        Self { page, page_id }
     }
 
-    pub fn bpm(&self) -> Arc<BufferPoolManager> {
-        Arc::clone(&self.bpm)
+    pub fn read(&self) -> RwLockReadGuard<'_, dyn PageTrait> {
+        self.page.read()
     }
 
-    fn cleanup(&self) {
-        let _ = std::fs::remove_file(&self.db_file);
-        let _ = std::fs::remove_file(&self.db_log_file);
+    pub fn write(&self) -> RwLockWriteGuard<'_, dyn PageTrait> {
+        self.page.write()
     }
-}
 
-impl Drop for TestContext {
-    fn drop(&mut self) {
-        self.cleanup();
+    pub fn get_page_type(&self) -> PageType {
+        self.read().get_page_type()
+    }
+
+    pub fn get_page_id(&self) -> PageId {
+        self.page_id
+    }
+
+    pub fn get_page(&self) -> &Arc<RwLock<dyn PageTrait>> {
+        &self.page
     }
 }
 
 #[cfg(test)]
-mod unit_tests {
-    use super::*;
-    use crate::storage::page::page::PageTrait;
-    use log::{debug, info};
+mod tests {
+    use crate::storage::page::page::PAGE_TYPE_OFFSET;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+    use chrono::Utc;
+    use parking_lot::RwLock;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    pub struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        db_file: String,
+        db_log_file: String,
+    }
+
+    impl TestContext {
+        pub fn new(test_name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 5;
+            const K: usize = 2;
+
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
+            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_file.clone(),
+                db_log_file.clone(),
+                100,
+            ));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            ));
+
+            Self {
+                bpm,
+                db_file,
+                db_log_file,
+            }
+        }
+
+        pub fn bpm(&self) -> Arc<BufferPoolManager> {
+            Arc::clone(&self.bpm)
+        }
+
+        fn cleanup(&self) {
+            let _ = std::fs::remove_file(&self.db_file);
+            let _ = std::fs::remove_file(&self.db_log_file);
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            self.cleanup();
+        }
+    }
 
     #[test]
-    fn basic_page_guard() {
-        let ctx = TestContext::new("basic_page_guard");
+    fn test_basic_page_operations() {
+        let ctx = TestContext::new("basic_page_operations");
         let bpm = ctx.bpm();
 
-        // Create a new guarded page with bpm
-        let page0 = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-        let basic_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page0),
-            page0.read().as_page_trait().get_page_id(),
-        );
+        // Create a new page using the buffer pool manager
+        let page_guard = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create new page");
 
-        // Ensure page0 is pinned and the guard works as expected
-        assert_eq!(page0.read().as_page_trait().get_pin_count(), 1); // Pin count should be 1 after creation
-        assert_eq!(
-            page0.read().as_page_trait().get_page_id(),
-            basic_guard.get_page_id()
-        );
+        // Test read operations
+        {
+            let data = page_guard.read();
+            assert_eq!(data.get_page_type(), PageType::Basic);
+        }
 
-        // Ensure dropping the guard decreases the pin count
+        // Test write operations
+        {
+            let mut data = page_guard.write();
+            data.get_data_mut()[0] = 42;
+            assert_eq!(data.get_data()[0], 42);
+        }
+    }
+
+    #[test]
+    fn test_page_guard_type_safety() {
+        let ctx = TestContext::new("page_guard_type_safety");
+        let bpm = ctx.bpm();
+
+        // Create pages of different types
+        let basic_guard = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create basic page");
+
+        // Verify correct type identification
+        assert_eq!(basic_guard.get_page_type(), PageType::Basic);
+
+        // Verify type persistence across guard creation/drop
+        let page_id = basic_guard.get_page_id();
         drop(basic_guard);
-        assert_eq!(
-            page0.read().as_page_trait().get_pin_count(),
-            0,
-            "Pin count should be 0 after dropping the WritePageGuard"
-        );
+
+        let fetched_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        assert_eq!(fetched_guard.get_page_type(), PageType::Basic);
     }
 
     #[test]
-    fn convert_into_extendable_htable_directory_page() {
-        let ctx = TestContext::new("convert_into_extendable_htable_directory_page");
-        let bpm = ctx.bpm();
-
-        // Create a new directory page directly
-        let page0 = bpm.new_page(PageType::ExtendedHashTableDirectory(
-            ExtendableHTableDirectoryPage::new(0)
-        )).unwrap();
-        let page_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page0),
-            page0.read().as_page_trait().get_page_id(),
-        );
-
-        if let Some(page_type) = page_guard.into_specific_type() {
-            match page_type {
-                PageType::ExtendedHashTableDirectory(mut dir_page) => {
-                    // Access directory page methods directly
-                    let size = dir_page.get_size();
-                    debug!("Directory size: {}", size);
-                    dir_page.set_dirty(true);
-                }
-                _ => panic!("Wrong page type returned"),
-            }
-        }
-    }
-
-    #[test]
-    fn convert_into_extendable_htable_header_page() {
-        let ctx = TestContext::new("convert_into_extendable_htable_header_page");
-        let bpm = ctx.bpm();
-
-        // Create a new header page directly
-        let page0 = bpm.new_page(PageType::ExtendedHashTableHeader(
-            ExtendableHTableHeaderPage::new(0)
-        )).unwrap();
-        let page_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page0),
-            page0.read().as_page_trait().get_page_id(),
-        );
-
-        if let Some(page_type) = page_guard.into_specific_type() {
-            match page_type {
-                PageType::ExtendedHashTableHeader(mut header_page) => {
-                    // Access header page methods directly
-                    let header_page_id = header_page.get_page_id();
-                    debug!("Header page id: {}", header_page_id);
-                    header_page.set_dirty(true);
-                }
-                _ => panic!("Wrong page type returned"),
-            }
-        }
-    }
-
-    #[test]
-    fn convert_into_extendable_htable_bucket_page() {
-        let ctx = TestContext::new("convert_into_extendable_htable_bucket_page");
-        let bpm = ctx.bpm();
-
-        // Create a new bucket page directly
-        let page0 = bpm.new_page(PageType::ExtendedHashTableBucket(
-            ExtendableHTableBucketPage::new(0)
-        )).unwrap();
-        let page_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page0),
-            page0.read().as_page_trait().get_page_id(),
-        );
-
-        if let Some(page_type) = page_guard.into_specific_type() {
-            match page_type {
-                PageType::ExtendedHashTableBucket(mut bucket_page) => {
-                    // Access bucket page methods directly
-                    let size = bucket_page.get_size();
-                    info!("Bucket size: {}", size);
-                    bucket_page.set_dirty(true);
-                }
-                _ => panic!("Wrong page type returned"),
-            }
-        }
-    }
-
-    #[test]
-    fn convert_into_table_page() {
-        let ctx = TestContext::new("convert_into_table_page");
-        let bpm = ctx.bpm();
-
-        // Create a new table page directly
-        let page0 = bpm.new_page(PageType::Table(
-            TablePage::new(0)
-        )).unwrap();
-        let page_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page0),
-            page0.read().as_page_trait().get_page_id(),
-        );
-
-        if let Some(page_type) = page_guard.into_specific_type() {
-            match page_type {
-                PageType::Table(mut table_page) => {
-                    let page_id = table_page.get_page_id();
-                    info!("Table page ID: {}", page_id);
-                    table_page.set_dirty(true);
-                }
-                _ => panic!("Wrong page type returned"),
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod basic_behaviour {
-    use super::*;
-    use crate::storage::page::page::Page;
-
-    #[test]
-    fn create_and_drop() {
-        let ctx = TestContext::new("create_and_drop");
+    fn test_concurrent_access() {
+        let ctx = TestContext::new("concurrent_access");
         let bpm = ctx.bpm();
 
         // Create a new page
-        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-        let page_id = page.read().as_page_trait().get_page_id();
+        let page_guard1 = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create new page");
+        let page_id = page_guard1.read().get_page_id();
 
-        // Create page guard - should not increment pin count since BPM already did
-        let guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
+        // Create another guard for the same page
+        let page_guard2 = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
 
-        // Pin count should be 1 from BufferPoolManager::new_page
-        assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
-
-        // Drop guard - should decrement pin count through unpin_page
-        drop(guard);
-
-        // Pin count should be 0 after guard drop
-        assert_eq!(page.read().as_page_trait().get_pin_count(), 0);
-    }
-
-    #[test]
-    fn modify_data() {
-        let ctx = TestContext::new("modify_data");
-        let bpm = ctx.bpm();
-
-        // Test modifying different page types
-        let page0 = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-        let page0_id = page0.read().as_page_trait().get_page_id();
-
+        // Test concurrent reads
         {
-            let guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
-
-            // Modify through PageType
-            guard.access_mut(|page_type| {
-                match page_type {
-                    PageType::Basic(page) => {
-                        let data = page.get_data_mut();
-                        data[0] = 42;
-                    }
-                    _ => panic!("Wrong page type"),
-                }
-            });
-
-            // Verify modification
-            guard.access(|page_type| {
-                match page_type {
-                    PageType::Basic(page) => {
-                        assert_eq!(page.get_data()[0], 42);
-                    }
-                    _ => panic!("Wrong page type"),
-                }
-            });
+            let data1 = page_guard1.read();
+            let data2 = page_guard2.read();
+            assert_eq!(data1.get_page_id(), data2.get_page_id());
         }
 
-        assert_eq!(page0.read().as_page_trait().get_pin_count(), 0);
-    }
-}
+        // Test write followed by read
+        {
+            let mut data = page_guard1.write();
+            data.get_data_mut()[0] = 42;
+            drop(data);
 
-#[cfg(test)]
-mod concurrency {
-    use super::*;
-    use std::thread;
-
-    #[test]
-    fn reads() {
-        let ctx = TestContext::new("concurrent_reads");
-        let bpm = ctx.bpm();
-
-        // Create a shared page
-        let page = Arc::new(bpm.new_page(PageType::Basic(Page::new(0))).unwrap());
-        // Get the page ID once before spawning threads
-        let page_id = page.read().as_page_trait().get_page_id(); // <-- Get this outside the threads
-
-        let mut threads = Vec::new();
-        for _ in 0..3 {
-            let bpm_clone = Arc::clone(&bpm);
-            let page_clone = Arc::clone(&page);
-
-            threads.push(thread::spawn(move || {
-                let page_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_id); // <-- Use stored page_id
-                let read_guard = page_guard.read();
-
-                // Simply verify the page ID without acquiring another lock
-                assert_eq!(read_guard.as_page_trait().get_page_id(), page_id);
-            }));
-        }
-
-        for thread in threads {
-            thread.join().unwrap();
+            let data = page_guard2.read();
+            assert_eq!(data.get_data()[0], 42);
         }
     }
 
     #[test]
-    fn reads_and_writes() {
-        let ctx = TestContext::new("concurrent_reads_and_writes");
+    fn test_buffer_pool_interaction() {
+        let ctx = TestContext::new("buffer_pool_interaction");
         let bpm = ctx.bpm();
 
-        // Create a shared page
-        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-        // Get the page ID once before spawning threads
-        let page_id = page.read().as_page_trait().get_page_id(); // <-- Get this outside the threads
-
-        let mut writer_threads = Vec::new();
-        let mut reader_threads = Vec::new();
-
-        // Writer threads
-        for i in 0..2 {
-            let bpm_clone = Arc::clone(&bpm);
-            let page_clone = Arc::clone(&page);
-
-            writer_threads.push(thread::spawn(move || {
-                let write_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_id); // <-- Use stored page_id
-                let mut binding = write_guard.write();
-                let data_mut = binding.as_page_trait_mut().get_data_mut();
-                data_mut[i] = (i + 1) as u8;
-            }));
-        }
-
-        for thread in writer_threads {
-            thread.join().expect("Failed to join writer threads");
-        }
-
-        // Reader threads
-        for i in 0..2 {
-            let bpm_clone = Arc::clone(&bpm);
-            let page_clone = Arc::clone(&page);
-
-            reader_threads.push(thread::spawn(move || {
-                let read_guard = PageGuard::new(Arc::clone(&bpm_clone), Arc::clone(&page_clone), page_id); // <-- Use stored page_id
-                let binding = read_guard.read();
-                let data = binding.as_page_trait().get_data();
-
-                // Simply verify the page ID without acquiring another lock
-                assert_eq!(read_guard.get_page_id(), page_id);
-                assert_eq!(data[i], (i + 1) as u8, "Unexpected values in the data");
-            }));
-        }
-
-        for thread in reader_threads {
-            thread.join().expect("Failed to join reader threads");
-        }
-
-        let final_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
-        let binding = final_guard.read();
-        let data = binding.as_page_trait().get_data();
-
-        assert!(
-            data[0] <= 2 && data[1] <= 2,
-            "Unexpected values in the data after concurrent operations"
-        );
-    }
-}
-
-#[cfg(test)]
-mod edge_cases {
-    use super::*;
-
-    #[test]
-    fn page_eviction_under_pressure() {
-        let ctx = TestContext::new("page_eviction_under_pressure");
-        let bpm = ctx.bpm();
-
-        // Fill the buffer pool to force eviction
+        // Fill buffer pool
         let mut pages = Vec::new();
         for _ in 0..5 {
-            let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-            pages.push(page);
+            let page_guard = bpm
+                .new_page::<BasicPage>()
+                .expect("Failed to create new page");
+            pages.push(page_guard);
         }
 
-        let page0_id;
-        {
-            // Access the first page and hold onto it
-            let page0 = Arc::clone(&pages[0]);
-            page0_id = page0.read().as_page_trait().get_page_id(); // Store page ID before releasing the guard
-
-            // Keep the first page pinned
-            let guard0 = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page0), page0_id);
-            // Perform the assertion to ensure the page is accessible
-            assert_eq!(guard0.get_page_id(), page0_id);
+        // Verify all pages are pinned
+        for guard in &pages {
+            assert_eq!(guard.read().get_pin_count(), 1, "New page should have pin count 1");
         }
 
-        // Now create a new page that should cause an eviction due to the buffer pool size limit
-        let page_evicted = bpm.new_page(PageType::Basic(Page::new(0))).unwrap_or_else(|| {
-            panic!("Failed to create a new page, eviction didn't work as expected")
-        });
-        let evict_guard = PageGuard::new(
-            Arc::clone(&bpm),
-            Arc::clone(&page_evicted),
-            page_evicted.read().as_page_trait().get_page_id(),
-        );
-
-        // Ensure the first page was not evicted by checking the page ID directly
-        assert_eq!(
-            pages[0].read().as_page_trait().get_page_id(),
-            page0_id,
-            "The first page should not be evicted"
-        );
-
-        // Test if the evicted page is correctly unpinned
-        drop(evict_guard);
-        assert_eq!(
-            page_evicted.read().as_page_trait().get_pin_count(),
-            0,
-            "Evicted page should be unpinned"
-        );
+        // Drop guards one by one
+        for guard in pages {
+            let page_id = guard.read().get_page_id();
+            drop(guard);
+            // Verify the page can be fetched again
+            if let Some(fetched_page) = bpm.fetch_page::<BasicPage>(page_id) {
+                assert_eq!(fetched_page.read().get_pin_count(), 1, 
+                    "Fetched page should have pin count 1");
+            }
+        }
     }
 
     #[test]
-    fn invalid_page_access_after_drop() {
-        let ctx = TestContext::new("invalid_page_access_after_drop");
+    fn test_page_guard_drop_behavior() {
+        let ctx = TestContext::new("page_guard_drop");
+        let bpm = ctx.bpm();
+
+        let page_id = {
+            // Create a new page in a nested scope
+            let page_guard = bpm
+                .new_page::<BasicPage>()
+                .expect("Failed to create new page");
+            
+            // Write some data (to a non-type byte location)
+            {
+                let mut data = page_guard.write();
+                data.get_data_mut()[1] = 42;  // Write to offset 1 instead of 0
+                data.set_dirty(true);
+                
+                // Verify type byte is preserved
+                assert_eq!(data.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(),
+                    "Page type should be preserved");
+            }
+
+            let page_id = page_guard.get_page_id();
+            
+            // Verify pin count before drop
+            assert_eq!(page_guard.read().get_pin_count(), 1, 
+                "Initial pin count should be 1");
+            
+            page_id
+        }; // page_guard is dropped here
+
+        // Fetch the page again and verify state
+        let fetched_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        
+        // Verify pin count is 1 (fetching a page pins it)
+        assert_eq!(fetched_guard.read().get_pin_count(), 1, 
+            "Fetched page should have pin count 1");
+        
+        // Verify data persisted and type byte is preserved
+        let data = fetched_guard.read();
+        assert_eq!(data.get_data()[1], 42, "Data should be preserved");
+        assert_eq!(data.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(),
+            "Page type should be preserved");
+    }
+
+    #[test]
+    fn test_page_guard_concurrent_access_patterns() {
+        let ctx = TestContext::new("page_guard_concurrent");
         let bpm = ctx.bpm();
 
         // Create a new page
-        let page = bpm.new_page(PageType::Basic(Page::new(0))).unwrap();
-        let page_id = page.read().as_page_trait().get_page_id();
+        let page_guard = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create new page");
+        let page_id = page_guard.get_page_id();
 
-        // Create and drop page guard
+        // Spawn multiple threads to access the page
+        let mut handles = vec![];
+        for i in 0..5 {
+            let bpm_clone = Arc::clone(&bpm);
+            let handle = thread::spawn(move || {
+                // Each thread fetches the same page
+                let guard = bpm_clone
+                    .fetch_page::<BasicPage>(page_id)
+                    .expect("Failed to fetch page");
+
+                // Write unique data
+                {
+                    let mut data = guard.write();
+                    data.get_data_mut()[i] = (i + 1) as u8;
+                    data.set_dirty(true);
+                }
+
+                // Small delay to increase chance of concurrent access
+                thread::sleep(Duration::from_millis(10));
+
+                // Read back the data
+                let data = guard.read();
+                assert_eq!(data.get_data()[i], (i + 1) as u8);
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify final state
+        let final_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        let data = final_guard.read();
+        for i in 0..5 {
+            assert_eq!(data.get_data()[i], (i + 1) as u8);
+        }
+    }
+
+    #[test]
+    fn test_page_guard_dirty_flag() {
+        let ctx = TestContext::new("page_guard_dirty");
+        let bpm = ctx.bpm();
+
+        let page_guard = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create new page");
+        
+        // Initially not dirty
+        assert!(!page_guard.read().is_dirty());
+
+        // Modify data and explicitly set dirty flag
         {
-            let _guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
-            // Pin count should be 1 from new_page
-            assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
-        } // guard is dropped here
+            let mut data = page_guard.write();
+            data.get_data_mut()[1] = 42;  // Write to non-type byte
+            data.set_dirty(true);  // Explicitly set dirty flag
+            assert!(data.is_dirty(), "Page should be dirty after modification");
+        }
 
-        // After guard is dropped:
-        // 1. Pin count should be 0
-        assert_eq!(page.read().as_page_trait().get_pin_count(), 0);
+        // Verify dirty flag persists after write lock is released
+        assert!(page_guard.read().is_dirty(), "Dirty flag should persist after write lock release");
 
-        // 2. Page should still be in the page table
-        let _frame_id = {
-            let page_table = bpm.get_page_table();
-            let page_table = page_table.read();
-            *page_table.get(&page_id).unwrap()
-        };
+        // Test dirty flag persistence across guard drop and fetch
+        let page_id = page_guard.get_page_id();
+        drop(page_guard);
 
-        // 3. Creating a new guard should work
-        let _new_guard = PageGuard::new(Arc::clone(&bpm), Arc::clone(&page), page_id);
-        // Pin count should be 1 again
-        assert_eq!(page.read().as_page_trait().get_pin_count(), 1);
+        // Fetch the page again and verify dirty flag
+        let fetched_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        assert!(fetched_guard.read().is_dirty(), "Dirty flag should persist after page fetch");
+    }
+
+    #[test]
+    fn test_page_guard_multiple_guards() {
+        let ctx = TestContext::new("page_guard_multiple");
+        let bpm = ctx.bpm();
+
+        // Create initial page
+        let guard1 = bpm
+            .new_page::<BasicPage>()
+            .expect("Failed to create new page");
+        let page_id = guard1.get_page_id();
+
+        // Verify initial pin count
+        assert_eq!(guard1.read().get_pin_count(), 1, "Initial pin count should be 1");
+
+        // Create additional guards for the same page
+        let guard2 = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        
+        // Verify pin count after second guard
+        assert_eq!(guard1.read().get_pin_count(), 2, "Pin count should be 2 after second guard");
+        
+        let guard3 = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+
+        // Verify all guards point to the same page
+        assert_eq!(guard1.get_page_id(), guard2.get_page_id());
+        assert_eq!(guard2.get_page_id(), guard3.get_page_id());
+
+        // Verify pin count reflects multiple guards
+        assert_eq!(guard1.read().get_pin_count(), 3, "Pin count should be 3 with three guards");
+        assert_eq!(guard2.read().get_pin_count(), 3, "All guards should see same pin count");
+        assert_eq!(guard3.read().get_pin_count(), 3, "All guards should see same pin count");
+
+        // Drop guards one by one and verify pin count
+        drop(guard3);
+        thread::sleep(Duration::from_millis(1)); // Small delay to ensure pin count update
+        assert_eq!(guard1.read().get_pin_count(), 2, "Pin count should be 2 after dropping first guard");
+        
+        drop(guard2);
+        thread::sleep(Duration::from_millis(1)); // Small delay to ensure pin count update
+        assert_eq!(guard1.read().get_pin_count(), 1, "Pin count should be 1 after dropping second guard");
+        
+        drop(guard1);
+        
+        // Verify final state
+        let final_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        assert_eq!(final_guard.read().get_pin_count(), 1, 
+            "Pin count should be 1 for newly fetched guard");
+    }
+
+    #[test]
+    fn test_page_guard_drop_writeback() {
+        let ctx = TestContext::new("page_guard_writeback");
+        let bpm = ctx.bpm();
+
+        let page_id = {
+            // Create a new page
+            let page_guard = bpm
+                .new_page::<BasicPage>()
+                .expect("Failed to create new page");
+            
+            // Write some data but don't mark as dirty
+            {
+                let mut data = page_guard.write();
+                data.get_data_mut()[1] = 42;  // Write to offset 1 to preserve page type
+                assert!(!data.is_dirty());
+                
+                // Verify page type is preserved
+                assert_eq!(data.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(),
+                    "Page type should be preserved");
+            }
+
+            let id = page_guard.get_page_id();
+            
+            // Verify initial state
+            assert_eq!(page_guard.read().get_pin_count(), 1);
+            assert!(!page_guard.read().is_dirty());
+            
+            id
+        }; // page_guard is dropped here - should mark as dirty since pin count reaches 0
+
+        // Fetch the page and verify state
+        let fetched_guard = bpm
+            .fetch_page::<BasicPage>(page_id)
+            .expect("Failed to fetch page");
+        
+        // Page should be marked dirty after being unpinned
+        assert!(fetched_guard.read().is_dirty(), 
+            "Page should be marked dirty when unpinned");
+        assert_eq!(fetched_guard.read().get_pin_count(), 1);
+        
+        // Verify data and type are preserved
+        let data = fetched_guard.read();
+        assert_eq!(data.get_data()[1], 42, "Data should be preserved");
+        assert_eq!(data.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(),
+            "Page type should be preserved");
     }
 }

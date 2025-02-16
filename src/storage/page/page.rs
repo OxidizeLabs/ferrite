@@ -1,42 +1,35 @@
 use crate::common::config::*;
 use crate::common::exception::PageError;
-use crate::storage::page::page::PageType::{Basic, ExtendedHashTableBucket, ExtendedHashTableDirectory, ExtendedHashTableHeader, Table};
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-use crate::storage::page::page_types::table_page::TablePage;
-use log::{debug, error, info};
 use std::any::Any;
+use std::fmt::Debug;
 
-// Constants
-const OFFSET_LSN: usize = 4;
+// Constants for page type identification
+pub const PAGE_TYPE_INVALID: u8 = 0;
+pub const PAGE_TYPE_BASIC: u8 = 1;
+pub const PAGE_TYPE_TABLE: u8 = 2;
+pub const PAGE_TYPE_HASH_TABLE_DIRECTORY: u8 = 3;
+pub const PAGE_TYPE_HASH_TABLE_BUCKET: u8 = 4;
+pub const PAGE_TYPE_HASH_TABLE_HEADER: u8 = 5;
 
-#[derive(Debug)]
+// Page header format (first few bytes of data)
+pub const PAGE_TYPE_OFFSET: usize = 0;
+pub const PAGE_ID_OFFSET: usize = 1;
+// ... other header offsets
+
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum PageType {
-    Basic(Page),
-    Table(TablePage),
-    ExtendedHashTableDirectory(ExtendableHTableDirectoryPage),
-    ExtendedHashTableHeader(ExtendableHTableHeaderPage),
-    ExtendedHashTableBucket(ExtendableHTableBucketPage),
+    Invalid = PAGE_TYPE_INVALID as isize,
+    Basic = PAGE_TYPE_BASIC as isize,
+    Table = PAGE_TYPE_TABLE as isize,
+    HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY as isize,
+    HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET as isize,
+    HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER as isize,
 }
 
-/// Page is the basic unit of storage within the database system. Page provides a wrapper for actual data pages being
-/// held in main memory. Page also contains book-keeping information that is used by the buffer pool manager, e.g.
-/// pin count, dirty flag, page id, etc.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Page {
-    /// The actual data that is stored within a page.
-    data: Box<[u8; DB_PAGE_SIZE as usize]>,
-    /// The ID of this page.
-    page_id: PageId,
-    /// The pin count of this page.
-    pin_count: i32,
-    /// True if the page is dirty.
-    is_dirty: bool,
-}
-
-pub trait PageTrait {
+// Keep PageTrait as the main trait for dynamic dispatch
+pub trait PageTrait: Send + Sync + Debug {
     fn get_page_id(&self) -> PageId;
+    fn get_page_type(&self) -> PageType;
     fn is_dirty(&self) -> bool;
     fn set_dirty(&mut self, is_dirty: bool);
     fn get_pin_count(&self) -> i32;
@@ -47,515 +40,143 @@ pub trait PageTrait {
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError>;
     fn set_pin_count(&mut self, pin_count: i32);
     fn reset_memory(&mut self);
-}
-
-pub trait AsAny {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl Page {
-    /// Constructor. Zeros out the page data.
-    pub fn new(page_id: PageId) -> Self {
-        let mut page = Page {
+// Keep PageTypeId as a separate trait for static type information
+pub trait PageTypeId {
+    const TYPE_ID: PageType;
+}
+
+// Add new requirement to Page trait
+pub trait Page: PageTrait + PageTypeId + 'static {
+    // Add new associated function requirement
+    fn new(page_id: PageId) -> Self;
+}
+
+// Implement Page for BasicPage
+impl Page for BasicPage {
+    fn new(page_id: PageId) -> Self {
+        let mut page = Self {
             data: Box::new([0; DB_PAGE_SIZE as usize]),
             page_id,
             pin_count: 1,
             is_dirty: false,
         };
-        page.reset_memory();
-        info!("Created new Page with ID {}", page_id);
+        // Set the page type in the data immediately
+        page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
         page
-    }
-
-    /// Returns the page LSN.
-    pub fn get_lsn(&self) -> Lsn {
-        let bytes = &self.data[OFFSET_LSN..OFFSET_LSN + 8];
-        let lsn = u64::from_ne_bytes(bytes.try_into().unwrap()).into();
-        debug!("Fetching LSN for Page ID {}: {}", self.page_id, lsn);
-        lsn
-    }
-
-    /// Sets the page LSN.
-    pub fn set_lsn(&mut self, lsn: Lsn) {
-        let lsn_bytes = lsn.to_ne_bytes();
-        self.data[OFFSET_LSN..OFFSET_LSN + 8].copy_from_slice(&lsn_bytes);
-        info!("Set LSN for Page ID {}", self.page_id);
     }
 }
 
-impl PageTrait for Page {
-    /// Returns the page id of this page.
+// Basic page implementation
+#[derive(Debug)]
+pub struct BasicPage {
+    data: Box<[u8; DB_PAGE_SIZE as usize]>,
+    page_id: PageId,
+    pin_count: i32,
+    is_dirty: bool,
+}
+
+impl PageType {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            PAGE_TYPE_INVALID => Some(Self::Invalid),
+            PAGE_TYPE_BASIC => Some(Self::Basic),
+            PAGE_TYPE_TABLE => Some(Self::Table),
+            PAGE_TYPE_HASH_TABLE_DIRECTORY => Some(Self::HashTableDirectory),
+            PAGE_TYPE_HASH_TABLE_BUCKET => Some(Self::HashTableBucket),
+            PAGE_TYPE_HASH_TABLE_HEADER => Some(Self::HashTableHeader),
+            _ => None,
+        }
+    }
+
+    pub fn to_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+impl PageTypeId for BasicPage {
+    const TYPE_ID: PageType = PageType::Basic;
+}
+
+impl PageTrait for BasicPage {
     fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
-    /// Returns true if the page is dirty.
+    fn get_page_type(&self) -> PageType {
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
+            .unwrap_or(PageType::Invalid)
+    }
+
     fn is_dirty(&self) -> bool {
         self.is_dirty
     }
 
-    /// Sets the dirty flag of this page.
     fn set_dirty(&mut self, is_dirty: bool) {
-        debug!("Setting page {} dirty flag to {}", self.page_id, is_dirty);
         self.is_dirty = is_dirty;
     }
 
-    /// Returns the pin count of this page.
     fn get_pin_count(&self) -> i32 {
         self.pin_count
     }
 
-    /// Increments the pin count of this page.
     fn increment_pin_count(&mut self) {
         self.pin_count += 1;
-        debug!(
-            "Incremented pin count for Page ID {}: {}",
-            self.page_id, self.pin_count
-        );
     }
 
-    /// Decrements the pin count of this page.
     fn decrement_pin_count(&mut self) {
         if self.pin_count > 0 {
             self.pin_count -= 1;
-            debug!(
-                "Decremented pin count for Page ID {}: {}",
-                self.page_id, self.pin_count
-            );
-        } else {
-            error!(
-                "Attempted to decrement pin count below 0 for Page ID {}",
-                self.page_id
-            );
         }
     }
 
-    /// Returns an immutable reference to the data. The data is protected by an internal read lock.
     fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
-        debug!("Fetching data for page ID {}", self.page_id);
-        // Return a copy of the data.
-        &*self.data
+        &self.data
     }
 
-    /// Returns a mutable reference to the data, marks the page as dirty, and returns a copy.
     fn get_data_mut(&mut self) -> &mut [u8; DB_PAGE_SIZE as usize] {
-        debug!("Fetching mutable data for page ID {}", self.page_id);
-
-        // Return a copy of the mutable data.
-        &mut *self.data
+        &mut self.data
     }
 
-    /// Method to modify the data
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
-        debug!(
-            "Attempting to modify data for Page ID {} at offset {}",
-            self.page_id, offset
-        );
-
-        if offset >= self.data.len() {
+        if offset + new_data.len() > self.data.len() {
             return Err(PageError::InvalidOffset {
                 offset,
                 page_size: self.data.len(),
             });
         }
 
-        let remaining_space = self.data.len() - offset;
-        if new_data.len() > remaining_space {
-            return Err(PageError::DataTooLarge {
-                data_size: new_data.len(),
-                remaining_space,
-            });
+        // Copy the data
+        self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
+
+        // Always preserve the page type byte at PAGE_TYPE_OFFSET
+        if offset <= PAGE_TYPE_OFFSET && offset + new_data.len() > PAGE_TYPE_OFFSET {
+            self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
         }
 
-        // Copy the contents of `new_data` into `self.data` starting at the specified offset
-        self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
         self.is_dirty = true;
-
-        debug!(
-            "Successfully modified data for Page ID {} at offset {}",
-            self.page_id, offset
-        );
         Ok(())
     }
 
-    /// Sets the pin count of this page.
     fn set_pin_count(&mut self, pin_count: i32) {
         self.pin_count = pin_count;
-        debug!(
-            "Setting pin count for Page ID {}: {}",
-            self.page_id, pin_count
-        );
     }
 
-    /// Zeroes out the data that is held within the page.
     fn reset_memory(&mut self) {
         self.data.fill(0);
-        debug!("Reset memory for Page ID {}", self.page_id);
-    }
-}
-
-impl PageType {
-    /// Get the type identifier byte for this page type
-    pub fn get_type_id_byte(&self) -> u8 {
-        match self {
-            PageType::Basic(_) => 0,
-            PageType::Table(_) => 1,
-            PageType::ExtendedHashTableDirectory(_) => 2,
-            PageType::ExtendedHashTableHeader(_) => 3,
-            PageType::ExtendedHashTableBucket(_) => 4,
-        }
+        self.is_dirty = false;
+        self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
     }
 
-    /// Create a new page of the specified type from a type identifier byte
-    pub fn from_type_id_byte(type_id: u8, page_id: PageId) -> Option<Self> {
-        match type_id {
-            0 => Some(PageType::Basic(Page::new(page_id))),
-            1 => Some(PageType::Table(TablePage::new(page_id))),
-            2 => Some(PageType::ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(page_id))),
-            3 => Some(PageType::ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(page_id))),
-            4 => Some(PageType::ExtendedHashTableBucket(ExtendableHTableBucketPage::new(page_id))),
-            _ => None,
-        }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
-    /// Serialize the page to bytes, including type information
-    pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
-        let mut data = [0u8; DB_PAGE_SIZE as usize];
-        
-        // Write the type identifier as the first byte
-        data[0] = self.get_type_id_byte();
-
-        // Write the actual page data starting from index 1
-        match self {
-            PageType::Basic(page) => {
-                data[1..].copy_from_slice(&page.get_data()[1..]);
-            }
-            PageType::Table(page) => {
-                let serialized = page.get_data();
-                data[1..].copy_from_slice(&serialized[1..]);
-            }
-            PageType::ExtendedHashTableDirectory(page) => {
-                let serialized = page.get_data();
-                data[1..].copy_from_slice(&serialized[1..]);
-            }
-            PageType::ExtendedHashTableHeader(page) => {
-                let serialized = page.get_data();
-                data[1..].copy_from_slice(&serialized[1..]);
-            }
-            PageType::ExtendedHashTableBucket(page) => {
-                let serialized = page.get_data();
-                data[1..].copy_from_slice(&serialized[1..]);
-            }
-        }
-        data
-    }
-
-    /// Deserialize bytes into the appropriate page type
-    pub fn deserialize(buffer: &[u8; DB_PAGE_SIZE as usize], page_id: PageId) -> Option<Self> {
-        // Read the type identifier from the first byte
-        let type_id = buffer[0];
-        
-        // Create the appropriate page type
-        let mut page = Self::from_type_id_byte(type_id, page_id)?;
-        
-        // Deserialize the data into the page
-        match &mut page {
-            PageType::Basic(p) => {
-                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
-            }
-            PageType::Table(p) => {
-                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
-            }
-            PageType::ExtendedHashTableDirectory(p) => {
-                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
-            }
-            PageType::ExtendedHashTableHeader(p) => {
-                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
-            }
-            PageType::ExtendedHashTableBucket(p) => {
-                p.get_data_mut()[1..].copy_from_slice(&buffer[1..]);
-            }
-        }
-        
-        Some(page)
-    }
-
-    pub fn as_page_trait(&self) -> &dyn PageTrait {
-        match self {
-            Basic(page) => page,
-            ExtendedHashTableDirectory(page) => page,
-            ExtendedHashTableHeader(page) => page,
-            ExtendedHashTableBucket(page) => page,
-            Table(page) => page,
-        }
-    }
-
-    pub fn as_page_trait_mut(&mut self) -> &mut dyn PageTrait {
-        match self {
-            Basic(page) => page,
-            ExtendedHashTableDirectory(page) => page,
-            ExtendedHashTableHeader(page) => page,
-            ExtendedHashTableBucket(page) => page,
-            Table(page) => page,
-        }
-    }
-
-    pub fn as_any(&self) -> &dyn Any {
-        match self {
-            Basic(page) => page as &dyn Any,
-            ExtendedHashTableDirectory(page) => page as &dyn Any,
-            ExtendedHashTableHeader(page) => page as &dyn Any,
-            ExtendedHashTableBucket(page) => page as &dyn Any,
-            Table(page) => page as &dyn Any,
-        }
-    }
-
-    pub fn as_any_mut(&mut self) -> &mut dyn Any {
-        match self {
-            Basic(ref mut page) => page as &mut dyn Any,
-            ExtendedHashTableDirectory(ref mut page) => page as &mut dyn Any,
-            ExtendedHashTableHeader(ref mut page) => page as &mut dyn Any,
-            ExtendedHashTableBucket(ref mut page) => page as &mut dyn Any,
-            Table(ref mut page) => page as &mut dyn Any,
-        }
-    }
-}
-
-impl From<ExtendableHTableDirectoryPage> for PageType {
-    fn from(page: ExtendableHTableDirectoryPage) -> Self {
-        ExtendedHashTableDirectory(page)
-    }
-}
-
-impl From<ExtendableHTableHeaderPage> for PageType {
-    fn from(page: ExtendableHTableHeaderPage) -> Self {
-        ExtendedHashTableHeader(page)
-    }
-}
-
-// Unit Tests
-#[cfg(test)]
-mod unit_tests {
-    use crate::common::config::{Lsn, DB_PAGE_SIZE};
-    use crate::storage::page::page::{Page, PageTrait};
-
-    #[test]
-    fn test_page_creation() {
-        let page = Page::new(1);
-        assert_eq!(page.get_page_id(), 1);
-        assert_eq!(page.get_pin_count(), 1);
-        assert!(!page.is_dirty());
-    }
-
-    #[test]
-    fn test_page_data_access() {
-        let mut page = Page::new(2);
-        let mut data = [0u8; DB_PAGE_SIZE as usize];
-        data[0] = 42;
-        // Use the set_data method with the offset to update the page data
-        if let Err(e) = page.set_data(0, &data) {
-            panic!("Error setting data: {:?}", e);
-        }
-        assert_eq!(page.get_data().get(0), Some(42).as_ref());
-    }
-
-    #[test]
-    fn test_set_and_get_lsn() {
-        let mut page = Page::new(3);
-        let lsn: Lsn = 1234;
-        page.set_lsn(lsn);
-        assert_eq!(page.get_lsn(), lsn);
-    }
-}
-
-// Basic Behavior
-#[cfg(test)]
-mod basic_behavior {
-    use crate::common::config::DB_PAGE_SIZE;
-    use crate::storage::page::page::{Page, PageTrait};
-
-    #[test]
-    fn test_increment_and_decrement_pin_count() {
-        let mut page = Page::new(1);
-        page.increment_pin_count();
-        assert_eq!(page.get_pin_count(), 2);
-        page.decrement_pin_count();
-        assert_eq!(page.get_pin_count(), 1);
-    }
-
-    #[test]
-    fn test_setting_dirty_flag() {
-        let mut page = Page::new(1);
-        assert!(!page.is_dirty());
-        page.set_dirty(true);
-        assert!(page.is_dirty());
-    }
-
-    #[test]
-    fn test_reset_memory() {
-        let mut page = Page::new(1);
-        let mut data = [0u8; DB_PAGE_SIZE as usize];
-        data[0] = 255;
-        if let Err(e) = page.set_data(0, &data) {
-            panic!("Error setting data: {:?}", e);
-        }
-
-        // Ensure data is modified before reset
-        assert_eq!(page.get_data()[0], 255);
-
-        // Reset the memory
-        page.reset_memory();
-        assert_eq!(page.get_data()[0], 0);
-    }
-}
-
-// Concurrency
-#[cfg(test)]
-mod concurrency {
-    use crate::common::config::DB_PAGE_SIZE;
-    use crate::storage::page::page::{Page, PageTrait};
-    use spin::{Barrier, RwLock};
-    use std::sync::Arc;
-    use std::thread;
-
-    #[test]
-    fn concurrent_read_and_write() {
-        let page = Arc::new(RwLock::new(Page::new(1))); // Wrap Page in Arc<RwLock>.
-        let start_barrier = Arc::new(Barrier::new(4)); // Used to start all threads simultaneously.
-        let end_barrier = Arc::new(Barrier::new(4)); // Used to ensure writers finish before readers start.
-        let mut handles = vec![];
-
-        // Writer threads
-        for i in 0..2 {
-            let page = Arc::clone(&page);
-            let start_barrier = Arc::clone(&start_barrier);
-            let end_barrier = Arc::clone(&end_barrier);
-            handles.push(thread::spawn(move || {
-                start_barrier.wait(); // Wait until all threads are ready to start.
-
-                // Perform the write operation.
-                {
-                    let mut page = page.write(); // Acquire write lock on the entire Page.
-                    let mut data = [0u8; DB_PAGE_SIZE as usize];
-                    data[0] = (i + 1) as u8;
-                    if let Err(e) = page.set_data(0, &data) {
-                        panic!("Error setting data: {:?}", e);
-                    }
-                }
-
-                end_barrier.wait(); // Signal that the writer has finished.
-            }));
-        }
-
-        // Reader threads
-        for _ in 0..2 {
-            let page = Arc::clone(&page);
-            let start_barrier = Arc::clone(&start_barrier);
-            let end_barrier = Arc::clone(&end_barrier);
-
-            handles.push(thread::spawn(move || {
-                start_barrier.wait(); // Wait until all threads are ready to start.
-
-                // Ensure writers are finished before reading.
-                end_barrier.wait();
-
-                // Perform the read operation.
-                let page = page.read(); // Acquire read lock on the entire Page.
-                let data = page.get_data(); // Safely access immutable data.
-                assert!(
-                    data[0] == 1 || data[0] == 2,
-                    "Unexpected values in the data"
-                );
-            }));
-        }
-
-        // Wait for all threads to finish.
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        // Verify the final content of the page after all operations.
-        let page = page.read(); // Acquire read lock on the entire Page.
-        let data = page.get_data();
-        assert!(
-            data[0] == 1 || data[0] == 2,
-            "Unexpected values in the data after concurrent operations"
-        );
-    }
-
-    #[test]
-    fn multiple_concurrent_reads() {
-        // Wrap the Page in Arc<RwLock> to manage thread-safe access.
-        let page = Arc::new(RwLock::new(Page::new(1)));
-        let barrier = Arc::new(Barrier::new(4)); // Barrier for synchronizing thread starts.
-        let mut handles = vec![];
-
-        // Launch multiple reader threads.
-        for _ in 0..3 {
-            let page = Arc::clone(&page);
-            let barrier = Arc::clone(&barrier);
-            handles.push(thread::spawn(move || {
-                barrier.wait(); // Synchronize start.
-
-                // Acquire read lock on the Page.
-                let page = page.read();
-
-                // Perform the read operation.
-                let data = page.get_data();
-                assert_eq!(data[0], 0); // Since no write happened, data should be zeroed.
-            }));
-        }
-
-        barrier.wait(); // Trigger all threads to start.
-
-        // Wait for all threads to finish.
-        for handle in handles {
-            handle.join().unwrap();
-        }
-    }
-}
-
-// Edge Cases
-#[cfg(test)]
-mod edge_cases {
-    use crate::common::config::Lsn;
-    use crate::storage::page::page::{Page, PageTrait};
-
-    #[test]
-    fn test_pin_count_underflow_protection() {
-        let mut page = Page::new(1);
-        page.decrement_pin_count(); // Pin count goes to 0
-        assert_eq!(page.get_pin_count(), 0);
-
-        // Attempting to decrement below 0 should be prevented
-        page.decrement_pin_count();
-        assert_eq!(page.get_pin_count(), 0);
-    }
-
-    #[test]
-    fn test_page_with_large_lsn_value() {
-        let mut page = Page::new(1);
-        let large_lsn: Lsn = u64::MAX.into();
-        page.set_lsn(large_lsn);
-        assert_eq!(page.get_lsn(), large_lsn);
-    }
-
-    #[test]
-    fn test_page_reset_memory_after_dirty() {
-        let mut page = Page::new(1);
-        let mut data = *page.get_data_mut();
-        data[0] = 255;
-        if let Err(e) = page.set_data(0, &data) {
-            panic!("Error setting data: {:?}", e);
-        }
-        assert!(page.is_dirty());
-
-        // Reset memory and verify it's no longer dirty
-        page.reset_memory();
-        page.set_dirty(false);
-        assert!(!page.is_dirty());
-        assert_eq!(page.get_data()[0], 0);
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -564,57 +185,266 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_page_serialization_deserialization() {
-        // Create a test page
-        let mut original_page = Basic(Page::new(42));
+    fn test_page_type_conversions() {
+        // Test conversion from u8 to PageType
+        assert_eq!(PageType::from_u8(PAGE_TYPE_BASIC), Some(PageType::Basic));
+        assert_eq!(PageType::from_u8(PAGE_TYPE_TABLE), Some(PageType::Table));
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_HASH_TABLE_DIRECTORY),
+            Some(PageType::HashTableDirectory)
+        );
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_HASH_TABLE_BUCKET),
+            Some(PageType::HashTableBucket)
+        );
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_HASH_TABLE_HEADER),
+            Some(PageType::HashTableHeader)
+        );
+        assert_eq!(PageType::from_u8(PAGE_TYPE_INVALID), Some(PageType::Invalid));
         
-        // Write some test data
-        if let Basic(ref mut page) = original_page {
-            let data = page.get_data_mut();
-            data[1] = 123; // Write test data after type identifier
-        }
+        // Test invalid conversion
+        assert_eq!(PageType::from_u8(255), None);
 
-        // Serialize
-        let serialized = original_page.serialize();
-        
-        // Deserialize
-        let deserialized = PageType::deserialize(&serialized, 42).unwrap();
-        
-        // Verify type
-        assert!(matches!(deserialized, PageType::Basic(_)));
-        
-        // Verify data
-        if let PageType::Basic(page) = deserialized {
-            assert_eq!(page.get_data()[1], 123);
-        }
+        // Test conversion from PageType to u8
+        assert_eq!(PageType::Basic.to_u8(), PAGE_TYPE_BASIC);
+        assert_eq!(PageType::Table.to_u8(), PAGE_TYPE_TABLE);
+        assert_eq!(
+            PageType::HashTableDirectory.to_u8(),
+            PAGE_TYPE_HASH_TABLE_DIRECTORY
+        );
+        assert_eq!(
+            PageType::HashTableBucket.to_u8(),
+            PAGE_TYPE_HASH_TABLE_BUCKET
+        );
+        assert_eq!(
+            PageType::HashTableHeader.to_u8(),
+            PAGE_TYPE_HASH_TABLE_HEADER
+        );
+        assert_eq!(PageType::Invalid.to_u8(), PAGE_TYPE_INVALID);
     }
 
     #[test]
-    fn test_all_page_types() {
-        let page_types = vec![
-            Basic(Page::new(1)),
-            Table(TablePage::new(2)),
-            ExtendedHashTableDirectory(ExtendableHTableDirectoryPage::new(3)),
-            ExtendedHashTableHeader(ExtendableHTableHeaderPage::new(4)),
-            ExtendedHashTableBucket(ExtendableHTableBucketPage::new(5)),
+    fn test_basic_page_type() {
+        let mut page = BasicPage {
+            data: Box::new([0; DB_PAGE_SIZE as usize]),
+            page_id: 1,
+            pin_count: 0,
+            is_dirty: false,
+        };
+
+        // Test that the static type ID is correct
+        assert_eq!(BasicPage::TYPE_ID, PageType::Basic);
+
+        // Set the page type in the data
+        page.data[PAGE_TYPE_OFFSET] = PageType::Basic.to_u8();
+
+        // Test that get_page_type returns the correct type
+        assert_eq!(page.get_page_type(), PageType::Basic);
+
+        // Test invalid page type handling
+        page.data[PAGE_TYPE_OFFSET] = 255; // Invalid page type
+        assert_eq!(page.get_page_type(), PageType::Invalid);
+    }
+
+    #[test]
+    fn test_page_type_equality() {
+        assert!(PageType::Basic == PageType::Basic);
+        assert!(PageType::Table != PageType::Basic);
+        
+        // Test that the enum values match their corresponding constants
+        assert_eq!(PageType::Basic as u8, PAGE_TYPE_BASIC);
+        assert_eq!(PageType::Table as u8, PAGE_TYPE_TABLE);
+        assert_eq!(
+            PageType::HashTableDirectory as u8,
+            PAGE_TYPE_HASH_TABLE_DIRECTORY
+        );
+    }
+
+    #[test]
+    fn test_basic_page_operations() {
+        let mut page = BasicPage::new(1);
+        
+        // Test initial state
+        assert_eq!(page.get_page_id(), 1);
+        assert_eq!(page.get_pin_count(), 1);
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_page_type(), PageType::Basic, "Page type should be set in new()");
+        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(), "Page type should be set in data");
+        
+        // Test pin count operations
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 2);
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
+        
+        // Test dirty flag
+        page.set_dirty(true);
+        assert!(page.is_dirty());
+        page.set_dirty(false);
+        assert!(!page.is_dirty());
+
+        // Test page type persistence
+        assert_eq!(page.get_page_type(), PageType::Basic);
+        page.data[PAGE_TYPE_OFFSET] = PageType::Table.to_u8();
+        assert_eq!(page.get_page_type(), PageType::Table);
+    }
+
+    #[test]
+    fn test_page_data_operations() {
+        let mut page = BasicPage::new(1);
+
+        // Test data writing and reading
+        let test_data = [42u8; 128];
+        page.set_data(0, &test_data).expect("Failed to set data");
+        
+        // Create expected data array that accounts for preserved page type
+        let mut expected_data = [42u8; 128];
+        expected_data[PAGE_TYPE_OFFSET] = PageType::Basic.to_u8();
+        
+        assert_eq!(&page.get_data()[0..128], &expected_data);
+
+        // Test data boundaries
+        assert!(page.set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20]).is_err());
+        assert!(page.set_data(DB_PAGE_SIZE as usize, &[1u8]).is_err());
+    }
+
+    // Add a new test specifically for page type preservation
+    #[test]
+    fn test_page_type_preservation() {
+        let mut page = BasicPage::new(1);
+        
+        // Try to overwrite the entire page including page type
+        let test_data = [0xFF; DB_PAGE_SIZE as usize];
+        page.set_data(0, &test_data).expect("Failed to set data");
+        
+        // Verify that page type is preserved
+        assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
+        
+        // Try to overwrite just the page type byte
+        page.set_data(PAGE_TYPE_OFFSET, &[0xFF]).expect("Failed to set data");
+        assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
+        
+        // Write data that includes page type byte
+        let test_data = [0xFF; 4];
+        page.set_data(PAGE_TYPE_OFFSET, &test_data).expect("Failed to set data");
+        assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
+        
+        // Write data starting at offset 0
+        let test_data = [0xFF; 2];
+        page.set_data(0, &test_data).expect("Failed to set data");
+        assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
+    }
+
+    #[test]
+    fn test_page_type_persistence() {
+        let mut page = BasicPage::new(1);
+        
+        // Set page type
+        page.get_data_mut()[PAGE_TYPE_OFFSET] = PageType::Basic.to_u8();
+        
+        // Verify type is preserved
+        assert_eq!(page.get_page_type(), PageType::Basic);
+        
+        // Change type and verify
+        page.get_data_mut()[PAGE_TYPE_OFFSET] = PageType::Table.to_u8();
+        assert_eq!(page.get_page_type(), PageType::Table);
+    }
+
+    #[test]
+    fn test_page_reset() {
+        let mut page = BasicPage::new(1);
+        
+        // Fill page with non-zero data
+        page.get_data_mut().fill(42);
+        page.set_dirty(true);
+        page.set_pin_count(5);
+        
+        // Reset memory
+        page.reset_memory();
+        
+        // Verify data is zeroed except for page type byte
+        assert!(page.get_data().iter().enumerate().all(|(i, &x)| {
+            if i == PAGE_TYPE_OFFSET {
+                x == PageType::Basic.to_u8()
+            } else {
+                x == 0
+            }
+        }));
+
+        // Verify page type is preserved
+        assert_eq!(page.get_page_type(), PageType::Basic);
+
+        // Verify metadata is reset
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_pin_count(), 5); // Pin count should be preserved
+    }
+
+    #[test]
+    fn test_invalid_page_operations() {
+        let mut page = BasicPage::new(1);
+        
+        // Test invalid pin count operations
+        page.set_pin_count(0);
+        page.decrement_pin_count(); // Should not go below 0
+        assert_eq!(page.get_pin_count(), 0);
+        
+        // Test invalid data operations
+        let result = page.set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20]);
+        assert!(matches!(result, Err(PageError::InvalidOffset { .. })));
+        
+        let result = page.set_data(DB_PAGE_SIZE as usize, &[1u8]);
+        assert!(matches!(result, Err(PageError::InvalidOffset { .. })));
+    }
+
+    #[test]
+    fn test_page_type_conversion() {
+        // Test all valid page types
+        let valid_types = [
+            (PAGE_TYPE_BASIC, PageType::Basic),
+            (PAGE_TYPE_TABLE, PageType::Table),
+            (PAGE_TYPE_HASH_TABLE_DIRECTORY, PageType::HashTableDirectory),
+            (PAGE_TYPE_HASH_TABLE_BUCKET, PageType::HashTableBucket),
+            (PAGE_TYPE_HASH_TABLE_HEADER, PageType::HashTableHeader),
+            (PAGE_TYPE_INVALID, PageType::Invalid),
         ];
 
-        for original_page in page_types {
-            let page_id = original_page.as_page_trait().get_page_id();
-            let serialized = original_page.serialize();
-            let deserialized = PageType::deserialize(&serialized, page_id).unwrap();
-            
-            // Verify the type matches
-            assert_eq!(
-                original_page.get_type_id_byte(),
-                deserialized.get_type_id_byte()
-            );
-            
-            // Verify the page ID matches
-            assert_eq!(
-                original_page.as_page_trait().get_page_id(),
-                deserialized.as_page_trait().get_page_id()
-            );
+        for (byte, expected_type) in valid_types {
+            assert_eq!(PageType::from_u8(byte), Some(expected_type));
+            assert_eq!(expected_type.to_u8(), byte);
         }
+
+        // Test invalid conversions
+        assert_eq!(PageType::from_u8(255), None);
+        assert_eq!(PageType::from_u8(100), None);
+    }
+
+    #[test]
+    fn test_concurrent_pin_operations() {
+        use std::sync::Arc;
+        use parking_lot::RwLock;
+        use std::thread;
+
+        let page = Arc::new(RwLock::new(BasicPage::new(1)));
+        let mut handles = vec![];
+
+        // Spawn multiple threads to increment pin count
+        for _ in 0..10 {
+            let page_clone = Arc::clone(&page);
+            let handle = thread::spawn(move || {
+                let mut page = page_clone.write();
+                page.increment_pin_count();
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify final pin count
+        assert_eq!(page.read().get_pin_count(), 11); // Initial 1 + 10 increments
     }
 }
+
