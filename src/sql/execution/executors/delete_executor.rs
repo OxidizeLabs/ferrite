@@ -15,6 +15,10 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::lock_manager::LockManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::common::config::Timestamp;
+use crate::concurrency::transaction::IsolationLevel;
+use crate::types_db::value::{Val, Value};
+use crate::storage::table::tuple::TupleMeta;
 
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -142,7 +146,7 @@ impl AbstractExecutor for DeleteExecutor {
                 // Scan the table to find the matching tuple
                 let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
 
-                while let Some((mut tuple_meta, mut tuple)) = table_iter.next() {
+                while let Some((tuple_meta, tuple)) = table_iter.next() {
                     // Store the current ID and RID before any mutable borrows
                     let current_id = tuple.get_value(0).get_val().clone();
                     let rid = tuple.get_rid();
@@ -150,10 +154,8 @@ impl AbstractExecutor for DeleteExecutor {
                     if current_id == *id_to_delete {
                         debug!("Found matching tuple with ID: {:?}", current_id);
 
-                        // Mark the tuple as deleted
-                        tuple_meta.set_deleted(true);
-
-                        match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx.clone()) {
+                        // Delete the tuple
+                        match self.table_heap.delete_tuple(rid, txn_ctx.clone()) {
                             Ok(_) => {
                                 debug!("Successfully deleted tuple with ID: {:?}", &current_id);
                                 return Some((tuple, rid));
@@ -438,30 +440,43 @@ mod tests {
 
         assert_eq!(delete_count, 2, "Should have deleted 2 tuples");
 
+        // Commit the transaction after deletes
+        let txn_ctx = execution_context.read().get_transaction_context();
+        ctx.transaction_manager.commit(
+            txn_ctx.get_transaction(),
+            ctx.bpm.clone()
+        );
+
+        // Create new transaction for verification
+        let verify_txn_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
+        
         // Verify remaining tuples
         let mut remaining_count = 0;
         let mut remaining_ids = Vec::new();
-        let mut table_iter = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
+        let mut table_iter = table_heap.make_iterator(Some(verify_txn_ctx.clone()));
 
         while let Some((meta, tuple)) = table_iter.next() {
+            // Only count and collect non-deleted tuples
             if !meta.is_deleted() {
                 remaining_count += 1;
                 remaining_ids.push(tuple.get_value(0).get_val().clone());
+                debug!("Found remaining tuple with id: {:?}", tuple.get_value(0));
+            } else {
+                debug!("Skipping deleted tuple with id: {:?}", tuple.get_value(0));
             }
         }
 
         assert_eq!(remaining_count, 3, "Should have 3 tuples remaining");
-        assert!(
-            remaining_ids.contains(&Val::from(1)),
-            "ID 1 should still exist"
-        );
-        assert!(
-            remaining_ids.contains(&Val::from(2)),
-            "ID 2 should still exist"
-        );
-        assert!(
-            remaining_ids.contains(&Val::from(3)),
-            "ID 3 should still exist"
+        
+        // Verify specific IDs remain
+        assert!(remaining_ids.contains(&Val::from(1)), "ID 1 should still exist");
+        assert!(remaining_ids.contains(&Val::from(2)), "ID 2 should still exist");
+        assert!(remaining_ids.contains(&Val::from(3)), "ID 3 should still exist");
+
+        // Clean up - commit verification transaction
+        ctx.transaction_manager.commit(
+            verify_txn_ctx.get_transaction(),
+            ctx.bpm.clone()
         );
     }
 }

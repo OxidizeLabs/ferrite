@@ -98,4 +98,9 @@ impl ExecutionContext {
     pub fn set_delete(&mut self, is_delete: bool) {
         self.is_delete = is_delete;
     }
+
+    /// Sets a new transaction context
+    pub fn set_transaction_context(&mut self, txn_ctx: Arc<TransactionContext>) {
+        self.transaction_context = txn_ctx;
+    }
 }
