@@ -151,7 +151,7 @@ mod tests {
         let ctx = TestContext::new(test_name);
         let bpm = ctx.bpm.clone();
         let txn_manager = ctx.transaction_manager.clone();
-        let table_heap = Arc::new(TableHeap::new(bpm, 0, txn_manager.clone()));
+        let table_heap = Arc::new(TableHeap::new(bpm, 0));
         (table_heap, txn_manager)
     }
 

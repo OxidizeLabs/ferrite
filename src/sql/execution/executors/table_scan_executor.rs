@@ -204,7 +204,7 @@ mod tests {
 
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
-            table_heap.insert_tuple(&meta, &mut tuple, None).expect("Failed to insert tuple");
+            table_heap.insert_tuple(&meta, &mut tuple).expect("Failed to insert tuple");
         }
 
         // Create scan plan and executor

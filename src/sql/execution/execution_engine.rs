@@ -231,7 +231,7 @@ impl ExecutionEngine {
         let table_heap = table_info.get_table_heap_mut();
         let _table_heap_guard = table_heap.latch.write();
 
-        table_heap.insert_tuple(&meta, &mut tuple, Some(txn_ctx)).expect("Insert failed");
+        table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
 
         debug!("Insert executed successfully");
         Ok(())
@@ -391,7 +391,7 @@ mod tests {
             for values in tuples {
                 let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
 
-                table_heap.insert_tuple(&meta, &mut tuple, Some(self.transaction_context())).map_err(|e| e.to_string())?;
+                table_heap.insert_tuple(&meta, &mut tuple).map_err(|e| e.to_string())?;
             }
             Ok(())
         }

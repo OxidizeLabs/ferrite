@@ -9,7 +9,7 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::storage::index::index::IndexInfo;
 use crate::storage::index::index_iterator::IndexIterator;
-use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
 use log::{debug, error, info};
@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub struct IndexScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<IndexScanNode>,
-    table_heap: Arc<TableHeap>,
+    table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     iterator: Option<IndexIterator>,
     child_executor: Option<Box<dyn AbstractExecutor>>,
@@ -45,6 +45,7 @@ impl IndexScanExecutor {
         debug!("Attempting to acquire catalog read lock");
         let catalog = context_guard.get_catalog();
         let catalog_guard = catalog.read();
+        let txn_ctx = context_guard.get_transaction_context();
 
         // Get table info
         let table_info = match catalog_guard.get_table(table_name) {
@@ -58,8 +59,11 @@ impl IndexScanExecutor {
             }
         };
 
-        // Clone the table heap while we have the lock
-        let table_heap = table_info.get_table_heap().clone();
+        // Create TransactionalTableHeap
+        let table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
 
         // Verify index exists
         if catalog_guard
@@ -289,49 +293,51 @@ impl AbstractExecutor for IndexScanExecutor {
 
         // Get iterator reference
         let iter = self.iterator.as_mut()?;
-        let _table_heap_guard = self.table_heap.latch.read();
 
         // Keep trying until we find a valid tuple or reach the end
         while let Some(rid) = iter.next() {
             debug!("Found RID {:?} in index", rid);
 
             // Use RID to fetch tuple from table heap with transaction context
-            if let Ok((meta, tuple)) = self.table_heap.get_tuple(rid, Some(txn_ctx.clone())) {
-                // Skip deleted tuples
-                if meta.is_deleted() {
-                    debug!("Skipping deleted tuple with RID {:?}", rid);
-                    continue;
-                }
+            match self.table_heap.get_tuple(rid, txn_ctx.clone()) {
+                Ok((meta, tuple)) => {
+                    // Skip deleted tuples
+                    if meta.is_deleted() {
+                        debug!("Skipping deleted tuple with RID {:?}", rid);
+                        continue;
+                    }
 
-                // Additional check against predicates
-                let mut predicates_match = true;
-                for predicate in predicate_keys {
-                    if let Ok(result) = predicate.evaluate(&tuple, &output_schema) {
-                        match result.get_val() {
-                            Val::Boolean(b) => {
-                                if !b {
+                    // Additional check against predicates
+                    let mut predicates_match = true;
+                    for predicate in predicate_keys {
+                        if let Ok(result) = predicate.evaluate(&tuple, &output_schema) {
+                            match result.get_val() {
+                                Val::Boolean(b) => {
+                                    if !b {
+                                        predicates_match = false;
+                                        break;
+                                    }
+                                }
+                                _ => {
                                     predicates_match = false;
                                     break;
                                 }
                             }
-                            _ => {
-                                predicates_match = false;
-                                break;
-                            }
                         }
                     }
-                }
 
-                if !predicates_match {
-                    debug!("Tuple does not match all predicates, skipping");
+                    if !predicates_match {
+                        debug!("Tuple does not match all predicates, skipping");
+                        continue;
+                    }
+
+                    debug!("Successfully fetched tuple for RID {:?}", rid);
+                    return Some((tuple, rid));
+                }
+                Err(e) => {
+                    debug!("Failed to fetch tuple for RID {:?}, skipping: {}", rid, e);
                     continue;
                 }
-
-                debug!("Successfully fetched tuple for RID {:?}", rid);
-                return Some((tuple, rid));
-            } else {
-                debug!("Failed to fetch tuple for RID {:?}, skipping", rid);
-                continue;
             }
         }
 
@@ -351,6 +357,7 @@ impl AbstractExecutor for IndexScanExecutor {
 
 #[cfg(test)]
 mod index_scan_executor_tests {
+    use crate::storage::table::table_iterator::TableIterator;
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -479,7 +486,7 @@ mod index_scan_executor_tests {
     fn setup_test_table(
         schema: &Schema,
         context: &Arc<RwLock<ExecutionContext>>,
-    ) -> (String, String, TableOidT, IndexOidT) {
+    ) -> (String, String, TableOidT, IndexOidT, Arc<TransactionalTableHeap>) {
         let context_guard = context.read();
         let catalog = context_guard.get_catalog();
         let mut catalog_guard = catalog.write();
@@ -492,7 +499,13 @@ mod index_scan_executor_tests {
             .unwrap();
         let table_id = table_info.get_table_oidt();
 
-        // Create index first
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Create index
         let index_name = "test_index".to_string();
         let key_schema = Schema::new(vec![schema.get_column(0).unwrap().clone()]);
 
@@ -502,7 +515,7 @@ mod index_scan_executor_tests {
                 &table_name,
                 key_schema,
                 vec![0],
-                4, // key size
+                4,
                 false,
                 IndexType::BPlusTreeIndex,
             )
@@ -510,16 +523,11 @@ mod index_scan_executor_tests {
 
         let index_id = index_info.0.get_index_oid();
 
-        // Get table info and insert data
-        let table_info = catalog_guard.get_table(&table_name).unwrap();
-        let table_heap = table_info.get_table_heap();
-
         // Get index info
         let (_, btree) = catalog_guard.get_index_by_index_oid(index_id).unwrap();
 
-        // Insert test data within a single write lock scope
+        // Insert test data
         {
-            let _table_heap_guard = table_heap.latch.write();
             let mut btree_guard = btree.write();
 
             // Insert test data
@@ -529,17 +537,19 @@ mod index_scan_executor_tests {
                     schema.clone(),
                     RID::new(0, i),
                 );
-                let tuple_meta = TupleMeta::new(i as u64);
-                let rid = table_heap
-                    .insert_tuple(&tuple_meta, &mut tuple, Some(transaction_context.clone()))
+                let tuple_meta = TupleMeta::new(transaction_context.get_transaction_id());
+                
+                // Insert using transactional table heap
+                let rid = txn_table_heap
+                    .insert_tuple(&tuple_meta, &mut tuple, transaction_context.clone())
                     .unwrap();
 
-                // Insert into index - use the actual value as the key
+                // Insert into index
                 btree_guard.insert(Value::new(i as i32), rid);
             }
         }
 
-        (table_name, index_name, table_id, index_id)
+        (table_name, index_name, table_id, index_id, txn_table_heap)
     }
 
     fn create_predicate_expression(op: ComparisonType, value: i32) -> Arc<Expression> {
@@ -578,7 +588,8 @@ mod index_scan_executor_tests {
         let ctx = TestContext::new("test_index_scan_full");
         let context = ctx.execution_context();
 
-        let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
+        let (table_name, index_name, table_id, index_id, _) = 
+            setup_test_table(&schema, &context);
 
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -606,7 +617,7 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         // Setup table and index - data is inserted here
-        let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
+        let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
 
         // id = 5
         let predicate = create_predicate_expression(ComparisonType::Equal, 5);
@@ -639,7 +650,7 @@ mod index_scan_executor_tests {
         let ctx = TestContext::new("test_index_scan_range");
         let context = ctx.execution_context();
 
-        let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
+        let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
 
         // 3 <= id <= 7
         let pred_low = create_predicate_expression(ComparisonType::GreaterThanOrEqual, 3);
@@ -678,28 +689,33 @@ mod index_scan_executor_tests {
         let schema = create_test_schema();
         let ctx = TestContext::new("test_index_scan_with_deletion");
         let context = ctx.execution_context();
-        let (table_name, index_name, table_id, index_id) = setup_test_table(&schema, &context);
+        let (table_name, index_name, table_id, index_id, txn_table_heap) = 
+            setup_test_table(&schema, &context);
 
-        // Delete tuples with id = 3 and id = 7
-        let context_guard = context.read();
-        let catalog = context_guard.get_catalog();
-        let catalog_guard = catalog.read();
-        let table_info = catalog_guard.get_table(&table_name).unwrap();
-        let table_heap = table_info.get_table_heap();
+        let txn_ctx = context.read().get_transaction_context();
 
         // Mark tuples as deleted
         for i in &[3, 7] {
-            let mut iterator = table_heap.make_iterator(None);
-            while let Some((mut meta, tuple)) = iterator.next() {
-                if tuple.get_value(0).compare_equals(&Value::new(*i)) == CmpBool::CmpTrue {
+            let mut iterator = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
+            
+            while let Some((mut meta, mut tuple)) = iterator.next() {
+                let id = tuple.get_value(0).compare_equals(&Value::new(*i));
+                let rid = tuple.get_rid();
+
+                if id == CmpBool::CmpTrue {
                     meta.set_deleted(true);
-                    let _ = table_heap.update_tuple_meta(&meta, tuple.get_rid());
+                    let _ = txn_table_heap.update_tuple(
+                        &meta,
+                        &mut tuple,
+                        rid,
+                        txn_ctx.clone()
+                    );
                     break;
                 }
             }
         }
 
-        // Scan all tuples
+        // Create and execute scan
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
             table_name,
@@ -718,18 +734,18 @@ mod index_scan_executor_tests {
             let id = tuple.get_value(0);
             seen_ids.push(id.clone());
 
-            // Check if the ID is not 3 or 7
-            let not_three = id.compare_not_equals(&Value::new(3));
-            let not_seven = id.compare_not_equals(&Value::new(7));
-
-            assert_eq!(not_three, CmpBool::CmpTrue, "Found deleted tuple with ID {id}");
-            assert_eq!(not_seven, CmpBool::CmpTrue, "Found deleted tuple with ID 7");
+            assert_eq!(
+                id.compare_not_equals(&Value::new(3)), 
+                CmpBool::CmpTrue, 
+                "Found deleted tuple with ID 3"
+            );
+            assert_eq!(
+                id.compare_not_equals(&Value::new(7)), 
+                CmpBool::CmpTrue, 
+                "Found deleted tuple with ID 7"
+            );
         }
         assert_eq!(count, 8, "Should see 8 non-deleted tuples");
-        assert!(!seen_ids.iter().any(|id| id.compare_equals(&Value::new(3)) == CmpBool::CmpTrue),
-                "Should not contain deleted ID 3");
-        assert!(!seen_ids.iter().any(|id| id.compare_equals(&Value::new(7)) == CmpBool::CmpTrue),
-                "Should not contain deleted ID 7");
     }
 
     #[test]
@@ -743,24 +759,33 @@ mod index_scan_executor_tests {
         {
             let mut catalog_guard = catalog.write();
             let table_info = catalog_guard.create_table("test_table".to_string(), schema.clone()).unwrap();
-            let table_heap = table_info.get_table_heap();
-            let _table_heap_guard = table_heap.latch.write();
-
+            let table_heap = Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ));
 
             // Insert test data
             for i in 1..=10 {
                 let mut tuple = create_test_tuple(&schema, i);
                 let meta = TupleMeta::new(0);
-                table_heap.insert_tuple(&meta, &mut tuple, Some(transaction_context.clone())).unwrap();
+                table_heap.insert_tuple(&meta, &mut tuple, transaction_context.clone()).unwrap();
             }
 
             // Delete tuples with IDs 3 and 7
             let mut iterator = table_heap.make_iterator(Some(transaction_context.clone()));
-            while let Some((mut meta, tuple)) = iterator.next() {
+            while let Some((mut meta, mut tuple)) = iterator.next() {
+                // Store both id and rid before any mutable borrows
                 let id = tuple.get_value(0).as_integer().unwrap();
+                let rid = tuple.get_rid();
+
                 if id == 3 || id == 7 {
-                    meta.set_deleted(true);  // Mark the tuple as deleted
-                    table_heap.update_tuple_meta(&meta, tuple.get_rid()).unwrap();
+                    meta.set_deleted(true);
+                    let _ = table_heap.update_tuple(
+                        &meta,
+                        &mut tuple,
+                        rid,  // Use the stored rid
+                        transaction_context.clone()
+                    );
                 }
             }
         }

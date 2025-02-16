@@ -8,7 +8,7 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
-use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::warn;
 use log::{debug, error};
@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<UpdateNode>,
-    table_heap: Arc<TableHeap>,
+    table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
     updated_rids: HashSet<RID>,
@@ -55,7 +55,12 @@ impl UpdateExecutor {
                 plan.get_table_name(),
                 table_info.get_table_schema()
             );
-            table_info.get_table_heap()
+            
+            // Create TransactionalTableHeap
+            Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ))
         };
         debug!("Released catalog read lock");
 
@@ -152,7 +157,7 @@ impl AbstractExecutor for UpdateExecutor {
 
             let txn_ctx = {
                 let context = self.context.read();
-                context.get_transaction_context()
+                context.get_transaction_context().clone()
             };
 
             // Get the target expressions before applying updates
@@ -177,9 +182,8 @@ impl AbstractExecutor for UpdateExecutor {
             // Create tuple meta
             let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
 
-            // Update the tuple in the table - no need to explicitly acquire the latch
-            // as table_heap.update_tuple handles locking internally
-            match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, Some(txn_ctx)) {
+            // Update the tuple using TransactionalTableHeap
+            match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx) {
                 Ok(new_rid) => {
                     debug!("Successfully updated tuple: {:?}", new_rid);
                     // Add the RID to our set of updated tuples
@@ -232,7 +236,6 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::table_heap::TableHeap;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
@@ -372,7 +375,7 @@ mod tests {
     }
 
     fn setup_test_table(
-        table_heap: &TableHeap,
+        table_heap: &TransactionalTableHeap,
         schema: &Schema,
         transaction_context: &Arc<TransactionContext>,
     ) {
@@ -391,9 +394,9 @@ mod tests {
                 Value::new(age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(0);
+            let meta = TupleMeta::new(transaction_context.get_transaction_id());
             table_heap
-                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
                 .unwrap();
         }
     }
@@ -414,15 +417,21 @@ mod tests {
                 .expect("Failed to create table");
         }
 
-        // Get table info and heap
+        // Get table info and create TransactionalTableHeap
         let (table_oid, table_heap) = {
             let catalog = catalog.read();
             let table_info = catalog.get_table(&table_name).expect("Table not found");
-            (table_info.get_table_oidt(), table_info.get_table_heap())
+            (
+                table_info.get_table_oidt(),
+                Arc::new(TransactionalTableHeap::new(
+                    table_info.get_table_heap(),
+                    table_info.get_table_oidt(),
+                ))
+            )
         };
 
         // Insert test data
-        setup_test_table(&table_heap, &schema, &ctx.transaction_context);
+        setup_test_table(table_heap.as_ref(), &schema, &ctx.transaction_context);
 
         // Create filter for age > 30
         let filter_plan = create_age_filter(30, ComparisonType::GreaterThan, &schema);
@@ -465,7 +474,7 @@ mod tests {
             schema.clone(),
             table_name,
             table_oid,
-            vec![target_col_expr, update_expr],  // Include both expressions
+            vec![target_col_expr, update_expr],
             vec![PlanNode::Filter(filter_plan)],
         ));
 
@@ -481,11 +490,14 @@ mod tests {
 
         assert_eq!(update_count, 2); // Should update 2 records (Charlie and Eve)
 
-        // Verify the updates using TableHeap's iterator
+        // Verify the updates using TransactionalTableHeap's iterator
         let mut found_updates = 0;
-        let iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
+        let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
 
-        for (_meta, tuple) in iterator {
+        while let Some((meta, tuple)) = iterator.next() {
+            if meta.is_deleted() {
+                continue;
+            }
             let name = ToString::to_string(&tuple.get_value(1));
             let age = tuple.get_value(2).as_integer();
             match name.as_str() {

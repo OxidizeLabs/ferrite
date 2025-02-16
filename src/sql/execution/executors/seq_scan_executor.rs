@@ -12,11 +12,12 @@ use crate::storage::table::tuple::Tuple;
 use log::{debug, error, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
 pub struct SeqScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<SeqScanPlanNode>,
-    table_heap: Arc<TableHeap>,
+    table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     iterator: Option<TableIterator>,
     child_executor: Option<Box<dyn AbstractExecutor>>,
@@ -27,11 +28,12 @@ impl SeqScanExecutor {
         let table_name = plan.get_table_name();
         trace!("Creating SeqScanExecutor for table '{}'", table_name);
 
-        // Get the table heap using table OID instead of name
+        // Get the table heap using table OID
         let table_heap = {
             let context_guard = context.read();
             let catalog = context_guard.get_catalog();
             let catalog_guard = catalog.read();
+            let txn_ctx = context_guard.get_transaction_context();
 
             // Use table OID to get the table info
             let table_oid = plan.get_table_oid();
@@ -40,7 +42,11 @@ impl SeqScanExecutor {
             match catalog_guard.get_table_by_oid(table_oid) {
                 Some(table_info) => {
                     trace!("Found table with OID {} in catalog", table_oid);
-                    table_info.get_table_heap()
+                    // Create TransactionalTableHeap with table_oid
+                    Arc::new(TransactionalTableHeap::new(
+                        table_info.get_table_heap(),
+                        table_oid, // Pass table_oid instead of txn_ctx
+                    ))
                 }
                 None => {
                     error!("Table with OID {} not found in catalog", table_oid);
@@ -62,7 +68,6 @@ impl SeqScanExecutor {
 
 impl AbstractExecutor for SeqScanExecutor {
     fn init(&mut self) {
-        // Reset initialized flag first
         self.initialized = false;
 
         trace!(
@@ -70,21 +75,8 @@ impl AbstractExecutor for SeqScanExecutor {
             self.plan.get_table_name()
         );
 
-        // Get transaction context from execution context
-        let txn_ctx = {
-            let context = self.context.read();
-            let txn_ctx = context.get_transaction_context().clone();
-
-            // For READ_UNCOMMITTED, we don't need table locks
-            if txn_ctx.get_transaction().get_isolation_level() == IsolationLevel::ReadUncommitted {
-                None
-            } else {
-                Some(txn_ctx)
-            }
-        };
-
-        // Get the table's first page ID
-        let first_page_id = self.table_heap.get_first_page_id();
+        // Get the table's first page ID from the underlying table heap
+        let first_page_id = self.table_heap.get_table_heap().get_first_page_id();
         trace!("Table '{}' first page ID: {}", self.plan.get_table_name(), first_page_id);
 
         // Create iterator from first page to end of table
@@ -95,12 +87,12 @@ impl AbstractExecutor for SeqScanExecutor {
             start_rid, stop_rid
         );
 
-        // Create new iterator
+        // Create new iterator with TransactionalTableHeap
         self.iterator = Some(TableIterator::new(
-            self.table_heap.clone(),
+            self.table_heap.clone(),  // Pass the TransactionalTableHeap directly
             start_rid,
             stop_rid,
-            txn_ctx,
+            None,
         ));
         self.initialized = true;
     }
@@ -164,6 +156,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -278,7 +271,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                .insert_tuple(&meta, &mut tuple)
                 .expect("Failed to insert tuple");
         }
 
@@ -399,7 +392,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
+                .insert_tuple(&meta, &mut tuple)
                 .expect("Failed to insert tuple");
         }
 

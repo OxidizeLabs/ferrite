@@ -10,6 +10,7 @@ use crate::types_db::value::Val;
 use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
 pub struct FilterExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -366,7 +367,7 @@ mod tests {
     }
 
     fn setup_test_table(
-        table_heap: &TableHeap,
+        txn_table_heap: &TransactionalTableHeap,
         schema: &Schema,
         transaction_context: &Arc<TransactionContext>,
     ) {
@@ -385,10 +386,9 @@ mod tests {
                 Value::new(age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(0);
-            table_heap
-                .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
-                .unwrap();
+            let meta = TupleMeta::new(transaction_context.get_transaction_id());
+            txn_table_heap.insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                .expect("Failed to insert tuple");
         }
     }
 
@@ -407,12 +407,14 @@ mod tests {
                 .unwrap()
         };
 
-        // Set up test data with proper transaction handling
-        {
-            let table_heap = table_info.get_table_heap();
-            let _guard = table_heap.latch.write();
-            setup_test_table(&table_heap, &schema, transaction_context);
-        }
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data with transaction handling
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
 
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
 
@@ -462,7 +464,7 @@ mod tests {
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
-        // Create catalog and table with Arc<RwLock> wrapping
+        // Create catalog and table
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let table_info = {
             let mut catalog_guard = catalog.write();
@@ -471,32 +473,14 @@ mod tests {
                 .unwrap()
         };
 
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
         // Set up test data
-        {
-            let table_heap = table_info.get_table_heap();
-            let _guard = table_heap.latch.write();
-
-            let test_data = vec![
-                (1, "Alice", 25),
-                (2, "Bob", 30),
-                (3, "Charlie", 35),
-                (4, "David", 28),
-                (5, "Eve", 32),
-            ];
-
-            for (id, name, age) in test_data {
-                let values = vec![
-                    Value::new(id),
-                    Value::new(name.to_string()),
-                    Value::new(age),
-                ];
-                let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-                let meta = TupleMeta::new(0);
-                table_heap
-                    .insert_tuple(&meta, &mut tuple, Some(transaction_context.clone()))
-                    .unwrap();
-            }
-        }
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
 
         // Create executor context
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
@@ -580,10 +564,8 @@ mod tests {
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
-        // Create catalog and wrap it in Arc<RwLock>
+        // Create catalog and table
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
-
-        // Create table and get table info
         let table_info = {
             let mut catalog_guard = catalog.write();
             catalog_guard
@@ -591,12 +573,14 @@ mod tests {
                 .unwrap()
         };
 
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
         // Insert test data within a transaction
-        {
-            let table_heap = table_info.get_table_heap();
-            let _guard = table_heap.latch.write();
-            setup_test_table(&table_heap, &schema, transaction_context);
-        }
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
 
         // Create executor context
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));

@@ -705,6 +705,25 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn nested_index_join(
+        left_schema: Schema,
+        right_schema: Schema,
+        predicate: Arc<Expression>,
+        join_type: JoinOperator,
+        left: Box<LogicalPlan>,
+        right: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            },
+            vec![left, right],
+        ))
+    }
+
     pub fn hash_join(
         left_schema: Schema,
         right_schema: Schema,
@@ -765,13 +784,13 @@ impl LogicalPlan {
         match &self.plan_type {
             // Plans with explicit schemas
             LogicalPlanType::CreateTable { schema, .. } => schema.clone(),
+            LogicalPlanType::CreateIndex { .. } => self.children[0].get_schema(),
+            LogicalPlanType::MockScan { schema, .. } => schema.clone(),
             LogicalPlanType::TableScan { schema, .. } => schema.clone(),
+            LogicalPlanType::IndexScan { schema, .. } => schema.clone(),
             LogicalPlanType::Projection { schema, .. } => (*schema).clone(),
             LogicalPlanType::Insert { schema, .. } => schema.clone(),
             LogicalPlanType::Values { schema, .. } => schema.clone(),
-            LogicalPlanType::Aggregate { schema, .. } => schema.clone(),
-            LogicalPlanType::CreateIndex { .. } => self.children[0].get_schema(),
-            LogicalPlanType::IndexScan { schema, .. } => schema.clone(),
             LogicalPlanType::Delete { schema, .. } => schema.clone(),
             LogicalPlanType::Update { schema, .. } => schema.clone(),
 
@@ -781,40 +800,31 @@ impl LogicalPlan {
                 right_schema,
                 ..
             } => {
-                let mut left_columns = left_schema.clone();
-                let combined_columns: &mut Vec<Column> = left_columns.get_columns_mut();
-                combined_columns.extend(right_schema.get_columns().iter().cloned());
-                Schema::new(combined_columns.to_vec())
+                Schema::merge(left_schema, right_schema)
+            }
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
+                Schema::merge(left_schema, right_schema)
             }
             LogicalPlanType::HashJoin {
                 left_schema,
                 right_schema,
                 ..
             } => {
-                let mut left_columns = left_schema.clone();
-                let combined_columns: &mut Vec<Column> = left_columns.get_columns_mut();
-                combined_columns.extend(right_schema.get_columns().iter().cloned());
-                Schema::new(combined_columns.to_vec())
+                Schema::merge(left_schema, right_schema)
             }
 
             // Plans that propagate schema from child
             LogicalPlanType::Filter { .. } => self.children[0].get_schema(),
-
-            // Plans that modify schema structure
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
-            LogicalPlanType::MockScan { schema, .. } => schema.clone(),
-            LogicalPlanType::NestedIndexJoin {
-                left_schema,
-                right_schema,
-                ..
-            } => {
-                let mut left_columns = left_schema.clone();
-                let combined_columns: &mut Vec<Column> = left_columns.get_columns_mut();
-                combined_columns.extend(right_schema.get_columns().iter().cloned());
-                Schema::new(combined_columns.to_vec())
-            }
+
+            // Plans that modify schema structure
+            LogicalPlanType::Aggregate { schema, .. } => schema.clone(),
             LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
             LogicalPlanType::Window { schema, .. } => schema.clone(),
         }

@@ -150,7 +150,6 @@ mod tests {
         let table_heap = Arc::new(TableHeap::new(
             ctx.bpm.clone(),
             0,
-            ctx.transaction_manager.clone(),
         ));
         let table_info = TableInfo::new(
             schema.clone(),
