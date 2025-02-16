@@ -80,6 +80,15 @@ impl Watermark {
         self.update_commit_ts(ts);
         self.get_watermark()
     }
+
+    /// Creates a clone of the watermark
+    pub fn clone_watermark(&self) -> Self {
+        Self {
+            watermark: self.watermark,
+            active_txns: self.active_txns.clone(),
+            next_ts: AtomicU64::new(self.next_ts.load(Ordering::SeqCst)),
+        }
+    }
 }
 
 impl Default for Watermark {
