@@ -1,29 +1,23 @@
-use crate::common::config::INVALID_PAGE_ID;
-use crate::storage::page::page::PageType;
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::PageId;
-use crate::concurrency::transaction::Transaction;
-use crate::container::hash_function::HashFunction;
-use std::sync::Arc;
-use crate::types_db::value::Value;
-use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
-use log::{debug, info};
-use crate::storage::page::page_guard::PageGuard;
-use std::default::Default;
-use crate::catalog::schema::Schema;
+use crate::common::config::INVALID_PAGE_ID;
 use crate::common::rid::RID;
+use crate::container::hash_function::HashFunction;
+use crate::storage::page::page::PageTrait;
+use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
+use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
+use crate::types_db::value::Value;
+use log::{debug, info};
+use std::sync::Arc;
 
 /// Implementation of an extendable hash table backed by a buffer pool manager.
 /// Non-unique keys are supported. Supports insert and delete. The table grows/shrinks
 /// dynamically as buckets become full/empty.
 pub struct DiskExtendableHashTable {
-    index_name: String,
     bpm: Arc<BufferPoolManager>,
     hash_fn: HashFunction<Value>,
-    schema: Schema,
-    header_max_depth: u32,
     directory_max_depth: u32,
     bucket_max_size: u32,
     header_page_id: PageId,
@@ -35,35 +29,72 @@ impl DiskExtendableHashTable {
         name: String,
         bpm: Arc<BufferPoolManager>,
         hash_fn: HashFunction<Value>,
-        schema: Schema,
         header_max_depth: u32,
         directory_max_depth: u32,
         bucket_max_size: u32,
     ) -> Result<Self, String> {
         info!("Creating DiskExtendableHashTable with index name: {}", name);
+
         // Create header page
-        let header_page = bpm.new_page_guarded(PageType::ExtendedHashTableHeader(
-            ExtendableHTableHeaderPage::new(INVALID_PAGE_ID)
-        )).ok_or("Failed to create header page")?;
+        let header_page = bpm
+            .new_page::<ExtendableHTableHeaderPage>()
+            .ok_or_else(|| "Failed to create header page".to_string())?;
+        let header_page_id = {
+            let header = header_page.read();
+            header.get_page_id()
+        };
 
-        let header_page_id = header_page.get_page_id();
-        debug!("Created header page with id: {}", header_page_id);
-
-        // Initialize the header page
+        // Initialize header page
         {
-            let mut header_guard = header_page.write();
-            if let PageType::ExtendedHashTableHeader(ref mut header_page) = *header_guard {
-                header_page.init(header_max_depth);
-                debug!("Initialized header page with max depth: {}", header_max_depth);
+            let mut header = header_page.write();
+            header.init(header_max_depth);
+            debug!(
+                "Initialized header page with max depth: {}",
+                header_max_depth
+            );
+        }
+
+        // Create directory page
+        let directory_page = bpm
+            .new_page::<ExtendableHTableDirectoryPage>()
+            .ok_or_else(|| "Failed to create directory page".to_string())?;
+
+        // Initialize directory page
+        {
+            let mut directory = directory_page.write();
+            directory.init(directory_max_depth);
+
+            // Create first bucket page
+            let bucket_page = bpm
+                .new_page::<ExtendableHTableBucketPage>()
+                .ok_or_else(|| "Failed to create bucket page".to_string())?;
+            let bucket_page_id = {
+                let bucket = bucket_page.read();
+                bucket.get_page_id()
+            };
+
+            // Initialize bucket page
+            {
+                let mut bucket = bucket_page.write();
+                bucket.init(bucket_max_size as u16);
             }
+
+            directory.set_bucket_page_id(0, bucket_page_id);
+        }
+
+        // Update header page with directory page ID
+        {
+            let mut header = header_page.write();
+            let directory_id = {
+                let directory = directory_page.read();
+                directory.get_page_id()
+            };
+            header.set_directory_page_id(0, directory_id);
         }
 
         Ok(Self {
-            index_name: name,
             bpm,
             hash_fn,
-            schema,
-            header_max_depth,
             directory_max_depth,
             bucket_max_size,
             header_page_id,
@@ -73,7 +104,7 @@ impl DiskExtendableHashTable {
     const MAX_INSERT_RETRIES: usize = 10;
 
     /// Public insert API (uses a helper with retry count).
-    pub fn insert(&mut self, key: Value, value: RID, transaction: Option<&Transaction>) -> bool {
+    pub fn insert(&mut self, key: Value, value: RID) -> bool {
         debug!("Starting insert operation for key: {:?}", key);
         let mut attempt = 0;
         loop {
@@ -82,19 +113,18 @@ impl DiskExtendableHashTable {
             debug!("Computed hash: {} for key: {:?}", hash, key);
 
             // Get directory index from header page
-            let header_page = match self.bpm.fetch_page_guarded(self.header_page_id) {
+            let header_page = match self
+                .bpm
+                .fetch_page::<ExtendableHTableHeaderPage>(self.header_page_id)
+            {
                 Some(page) => page,
                 None => return false,
             };
 
             let directory_index = {
-                let header_guard = header_page.read();
-                if let PageType::ExtendedHashTableHeader(ref header_page) = *header_guard {
-                    Some(header_page.hash_to_directory_index(hash))
-                } else {
-                    None
-                }
-            }.unwrap_or(0) as usize;
+                let header = header_page.read();
+                header.hash_to_directory_index(hash)
+            } as usize;
 
             // Get directory page and find bucket index
             let directory_page = match self.get_directory_page(directory_index) {
@@ -103,40 +133,31 @@ impl DiskExtendableHashTable {
             };
 
             let bucket_index = {
-                let dir_guard = directory_page.read();
-                if let PageType::ExtendedHashTableDirectory(ref dir_page) = *dir_guard {
-                    dir_page.hash_to_bucket_index(hash)
-                } else {
-                    0
-                }
+                let directory = directory_page.read();
+                directory.hash_to_bucket_index(hash)
             } as usize;
 
             // Get or create bucket page
             let bucket_page = match self.get_bucket_page(directory_index, bucket_index) {
                 Some(page) => page,
-                None => match self.create_bucket_page(directory_index, bucket_index) {
-                    Some(page) => page,
-                    None => return false,
-                },
+                None => return false,
             };
 
             // Try to insert into bucket
-            let mut bucket_guard = bucket_page.write();
-            if let PageType::ExtendedHashTableBucket(ref mut bucket) = *bucket_guard {
-                if !bucket.is_full() {
-                    if bucket.insert(key.clone(), value) {
-                        debug!("Successfully inserted key: {:?}", key);
-                        return true;
-                    }
-                } else {
-                    // Bucket is full, need to split
-                    debug!("Bucket is full, splitting required");
-                    drop(bucket_guard);
-                    if self.split_bucket_internal(directory_index, bucket_index) {
-                        attempt += 1;
-                        if attempt < Self::MAX_INSERT_RETRIES {
-                            continue;
-                        }
+            let mut bucket = bucket_page.write();
+            if !bucket.is_full() {
+                if bucket.insert(key.clone(), value) {
+                    debug!("Successfully inserted key: {:?}", key);
+                    return true;
+                }
+            } else {
+                // Bucket is full, need to split
+                debug!("Bucket is full, splitting required");
+                drop(bucket);
+                if self.split_bucket_internal(directory_index, bucket_index) {
+                    attempt += 1;
+                    if attempt < Self::MAX_INSERT_RETRIES {
+                        continue;
                     }
                 }
             }
@@ -145,64 +166,51 @@ impl DiskExtendableHashTable {
     }
 
     /// Gets the value associated with a key.
-    pub fn get_value(&self, key: &Value, transaction: Option<&Transaction>) -> Option<RID> {
+    pub fn get_value(&self, key: &Value) -> Option<RID> {
         debug!("Get value called for key: {:?}", key);
         let hash = self.hash_fn.get_hash(key) as u32;
         debug!("Computed hash: {} for key: {:?}", hash, key);
 
         // Get directory index from header
-        let header_page = self.bpm.fetch_page_guarded(self.header_page_id)?;
+        let header_page = self
+            .bpm
+            .fetch_page::<ExtendableHTableHeaderPage>(self.header_page_id)?;
         let directory_index = {
-            let header_guard = header_page.read();
-            if let PageType::ExtendedHashTableHeader(ref header_page) = *header_guard {
-                header_page.hash_to_directory_index(hash)
-            } else {
-                0
-            }
+            let header = header_page.read();
+            header.hash_to_directory_index(hash)
         } as usize;
 
         // Get bucket index from directory
         let directory_page = self.get_directory_page(directory_index)?;
         let bucket_index = {
-            let dir_guard = directory_page.read();
-            if let PageType::ExtendedHashTableDirectory(ref dir_page) = *dir_guard {
-                dir_page.hash_to_bucket_index(hash)
-            } else {
-                0
-            }
+            let directory = directory_page.read();
+            directory.hash_to_bucket_index(hash)
         } as usize;
 
         // Get bucket and lookup key
         let bucket_page = self.get_bucket_page(directory_index, bucket_index)?;
-        let bucket_guard = bucket_page.read();
-        if let PageType::ExtendedHashTableBucket(ref bucket) = *bucket_guard {
-            let result = bucket.lookup(key);
-            debug!("Lookup result for key {:?}: {:?}", key, result);
-            result
-        } else {
-            None
-        }
+        let bucket = bucket_page.read();
+        bucket.lookup(key)
     }
 
     /// Removes a key-value pair from the hash table.
-    pub fn remove(&mut self, key: &Value, transaction: Option<&Transaction>) -> bool {
+    pub fn remove(&mut self, key: &Value) -> bool {
         debug!("Remove called for key: {:?}", key);
         let hash = self.hash_fn.get_hash(key) as u32;
 
         // Get directory index from header
-        let header_page = match self.bpm.fetch_page_guarded(self.header_page_id) {
+        let header_page = match self
+            .bpm
+            .fetch_page::<ExtendableHTableHeaderPage>(self.header_page_id)
+        {
             Some(page) => page,
             None => return false,
         };
 
         let directory_index = {
-            let header_guard = header_page.read();
-            if let PageType::ExtendedHashTableHeader(ref header_page) = *header_guard {
-                Some(header_page.hash_to_directory_index(hash))
-            } else {
-                None
-            }
-        }.unwrap_or(0) as usize;
+            let header = header_page.read();
+            header.hash_to_directory_index(hash)
+        } as usize;
 
         // Get bucket index from directory
         let directory_page = match self.get_directory_page(directory_index) {
@@ -211,12 +219,8 @@ impl DiskExtendableHashTable {
         };
 
         let bucket_index = {
-            let dir_guard = directory_page.read();
-            if let PageType::ExtendedHashTableDirectory(ref dir_page) = *dir_guard {
-                dir_page.hash_to_bucket_index(hash)
-            } else {
-                0
-            }
+            let directory = directory_page.read();
+            directory.hash_to_bucket_index(hash)
         } as usize;
 
         // Remove from bucket
@@ -226,25 +230,13 @@ impl DiskExtendableHashTable {
         };
 
         let removed = {
-            let mut bucket_guard = bucket_page.write();
-            if let PageType::ExtendedHashTableBucket(ref mut bucket) = *bucket_guard {
-                bucket.remove(key)
-            } else {
-                false
-            }
+            let mut bucket = bucket_page.write();
+            bucket.remove(key)
         };
 
         // If removal was successful and bucket is empty, try to merge
         if removed {
-            let is_empty = {
-                let bucket_guard = bucket_page.read();
-                if let PageType::ExtendedHashTableBucket(ref bucket) = *bucket_guard {
-                    bucket.is_empty()
-                } else {
-                    false
-                }
-            };
-
+            let is_empty = bucket_page.read().is_empty();
             if is_empty {
                 self.merge_bucket(directory_index, bucket_index);
             }
@@ -254,118 +246,79 @@ impl DiskExtendableHashTable {
     }
 
     // Helper functions
-    fn get_directory_page(&self, directory_index: usize) -> Option<PageGuard> {
-        let header_page = self.bpm.fetch_page_guarded(self.header_page_id)?;
-        let (directory_page_id, global_depth) = {
-            let header_guard = header_page.read();
-            if let PageType::ExtendedHashTableHeader(ref header) = *header_guard {
-                (header.get_directory_page_id(directory_index), header.global_depth())
-            } else {
-                (None, 0)
-            }
-        };
+    fn get_directory_page(
+        &self,
+        directory_index: usize,
+    ) -> Option<PageGuard<ExtendableHTableDirectoryPage>> {
+        let header_page = self
+            .bpm
+            .fetch_page::<ExtendableHTableHeaderPage>(self.header_page_id)?;
+        let directory_page_id = header_page.read().get_directory_page_id(directory_index)?;
 
-        match directory_page_id {
-            Some(INVALID_PAGE_ID) => {
-                // Create new directory page
-                let directory_page = self.bpm.new_page_guarded(PageType::ExtendedHashTableDirectory(
-                    ExtendableHTableDirectoryPage::new(INVALID_PAGE_ID)
-                ))?;
-
-                // Initialize directory page with correct max depth
-                {
-                    let mut dir_guard = directory_page.write();
-                    if let PageType::ExtendedHashTableDirectory(ref mut dir_page) = *dir_guard {
-                        dir_page.init(global_depth);
-                    }
-                }
-
-                // Update header page with new directory page ID
-                {
-                    let mut header_guard = header_page.write();
-                    if let PageType::ExtendedHashTableHeader(ref mut header) = *header_guard {
-                        header.set_directory_page_id(directory_index as u32, directory_page.get_page_id());
-                    }
-                }
-
-                Some(directory_page)
-            }
-            Some(page_id) => {
-                // Return existing directory page without reinitializing
-                debug!("Existing directory page found for index {}: {}", directory_index, page_id);
-                self.bpm.fetch_page_guarded(page_id)
-            }
-            None => None
+        if directory_page_id == INVALID_PAGE_ID {
+            None
+        } else {
+            self.bpm
+                .fetch_page::<ExtendableHTableDirectoryPage>(directory_page_id)
         }
     }
 
-    fn get_bucket_page(&self, directory_index: usize, bucket_index: usize) -> Option<PageGuard> {
-        // Get directory page
+    fn get_bucket_page(
+        &self,
+        directory_index: usize,
+        bucket_index: usize,
+    ) -> Option<PageGuard<ExtendableHTableBucketPage>> {
         let directory_page = self.get_directory_page(directory_index)?;
+        let bucket_page_id = directory_page.read().get_bucket_page_id(bucket_index)?;
 
-        // Get bucket page ID from directory using read guard
-        let bucket_page_id = {
-            let dir_guard = directory_page.read();
-            if let PageType::ExtendedHashTableDirectory(ref dir_page) = *dir_guard {
-                dir_page.get_bucket_page_id(bucket_index)
-            } else {
-                None
-            }
-        };
-
-        // Return bucket page if it exists and is valid
-        match bucket_page_id {
-            Some(INVALID_PAGE_ID) => None,
-            Some(page_id) => {
-                debug!(
-                    "Existing bucket page found for bucket index {} in directory index {}: {}",
-                    bucket_index, directory_index, page_id
-                );
-                self.bpm.fetch_page_guarded(page_id)
-            }
-            None => None
+        if bucket_page_id == INVALID_PAGE_ID {
+            None
+        } else {
+            self.bpm
+                .fetch_page::<ExtendableHTableBucketPage>(bucket_page_id)
         }
     }
 
-    fn create_bucket_page(&self, directory_index: usize, bucket_index: usize) -> Option<PageGuard> {
+    fn create_bucket_page(
+        &self,
+        directory_index: usize,
+        bucket_index: usize,
+    ) -> Option<PageGuard<ExtendableHTableBucketPage>> {
         // Get directory page
         let directory_page = self.get_directory_page(directory_index)?;
 
         // Create new bucket page
-        let bucket_page = self.bpm.new_page_guarded(PageType::ExtendedHashTableBucket(
-            ExtendableHTableBucketPage::new(INVALID_PAGE_ID)
-        ))?;
-        let bucket_page_id = bucket_page.get_page_id();
+        let bucket_page = self.bpm.new_page::<ExtendableHTableBucketPage>()?;
+        let bucket_page_id = bucket_page.read().get_page_id();
         debug!("Created new bucket page with ID {}", bucket_page_id);
 
         // Initialize bucket page
         {
-            let mut bucket_guard = bucket_page.write();
-            if let PageType::ExtendedHashTableBucket(ref mut bucket) = *bucket_guard {
-                debug!("Initializing new bucket page {} with max size {}", bucket_page_id, self.bucket_max_size);
-                bucket.init(self.bucket_max_size as u16);
-                bucket.set_local_depth(0);
-            }
+            let mut bucket = bucket_page.write();
+            bucket.init(self.bucket_max_size as u16);
+            bucket.set_local_depth(0);
         }
 
         // Update directory to point to new bucket page
         {
-            let mut dir_guard = directory_page.write();
-            if let PageType::ExtendedHashTableDirectory(ref mut dir_page) = *dir_guard {
-                dir_page.set_bucket_page_id(bucket_index, bucket_page_id);
-                debug!("Updated directory to point bucket index {} to new page {}",
-                    bucket_index, bucket_page_id);
-            }
+            let mut directory = directory_page.write();
+            directory.set_bucket_page_id(bucket_index, bucket_page_id);
+            debug!(
+                "Updated directory to point bucket index {} to new page {}",
+                bucket_index, bucket_page_id
+            );
         }
 
-        debug!("Successfully created and initialized bucket page {}", bucket_page_id);
         Some(bucket_page)
     }
 
     // New method: split_bucket_internal performs directory updates and re-distribution
     fn split_bucket_internal(&mut self, directory_index: usize, bucket_index: usize) -> bool {
-        debug!("Splitting bucket for directory index {} and bucket index {}", directory_index, bucket_index);
-        
+        debug!(
+            "Splitting bucket for directory index {} and bucket index {}",
+            directory_index, bucket_index
+        );
+
         // Get directory page
         let directory_page = match self.get_directory_page(directory_index) {
             Some(page) => page,
@@ -374,12 +327,8 @@ impl DiskExtendableHashTable {
 
         // Check if we've hit the maximum local depth
         let local_depth = {
-            let dir_guard = directory_page.read();
-            if let PageType::ExtendedHashTableDirectory(ref dir_page) = *dir_guard {
-                dir_page.get_local_depth(bucket_index as u32)
-            } else {
-                return false;
-            }
+            let directory = directory_page.read();
+            directory.get_local_depth(bucket_index as u32)
         };
 
         if local_depth >= self.directory_max_depth {
@@ -388,22 +337,17 @@ impl DiskExtendableHashTable {
         }
 
         // Create new bucket page
-        let new_bucket_page = match self.bpm.new_page_guarded(PageType::ExtendedHashTableBucket(
-            ExtendableHTableBucketPage::new(INVALID_PAGE_ID)
-        )) {
+        let new_bucket_page = match self.bpm.new_page::<ExtendableHTableBucketPage>() {
             Some(page) => page,
             None => return false,
         };
+        let new_bucket_page_id = new_bucket_page.read().get_page_id();
 
-        let new_bucket_page_id = new_bucket_page.get_page_id();
-        
         // Initialize the new bucket
         {
-            let mut new_bucket_guard = new_bucket_page.write();
-            if let PageType::ExtendedHashTableBucket(ref mut new_bucket) = *new_bucket_guard {
-                new_bucket.init(self.bucket_max_size as u16);
-                new_bucket.set_local_depth((local_depth + 1) as u8);
-            }
+            let mut new_bucket = new_bucket_page.write();
+            new_bucket.init(self.bucket_max_size as u16);
+            new_bucket.set_local_depth((local_depth + 1) as u8);
         }
 
         // Get the old bucket page
@@ -414,36 +358,29 @@ impl DiskExtendableHashTable {
 
         // Update directory and redistribute entries
         {
-            let mut dir_guard = directory_page.write();
-            if let PageType::ExtendedHashTableDirectory(ref mut dir_page) = *dir_guard {
-                dir_page.split_bucket(bucket_index, new_bucket_page_id);
-                
-                // Redistribute entries
-                let mut old_bucket_guard = old_bucket_page.write();
-                let mut new_bucket_guard = new_bucket_page.write();
-                
-                if let (PageType::ExtendedHashTableBucket(ref mut old_bucket),
-                        PageType::ExtendedHashTableBucket(ref mut new_bucket)) = 
-                    (&mut *old_bucket_guard, &mut *new_bucket_guard) 
-                {
-                    let entries = old_bucket.get_all_entries();
-                    old_bucket.clear();
-                    
-                    // Set new local depth for old bucket
-                    old_bucket.set_local_depth((local_depth + 1) as u8);
+            let mut directory = directory_page.write();
+            directory.split_bucket(bucket_index, new_bucket_page_id);
 
-                    // Redistribute entries based on the new local depth
-                    for (key, value) in entries {
-                        let hash = self.hash_fn.get_hash(&key) as u32;
-                        let mask = (1 << (local_depth + 1)) - 1;
-                        let target_bucket_index = hash & mask;
-                        
-                        if target_bucket_index == bucket_index as u32 {
-                            old_bucket.insert(key, value);
-                        } else {
-                            new_bucket.insert(key, value);
-                        }
-                    }
+            // Redistribute entries
+            let mut old_bucket = old_bucket_page.write();
+            let mut new_bucket = new_bucket_page.write();
+
+            let entries = old_bucket.get_all_entries();
+            old_bucket.clear();
+
+            // Set new local depth for old bucket
+            old_bucket.set_local_depth((local_depth + 1) as u8);
+
+            // Redistribute entries based on the new local depth
+            for (key, value) in entries {
+                let hash = self.hash_fn.get_hash(&key) as u32;
+                let mask = (1 << (local_depth + 1)) - 1;
+                let target_bucket_index = hash & mask;
+
+                if target_bucket_index == bucket_index as u32 {
+                    old_bucket.insert(key, value);
+                } else {
+                    new_bucket.insert(key, value);
                 }
             }
         }
@@ -460,17 +397,13 @@ impl DiskExtendableHashTable {
 
         // Try to merge buckets
         let removed_bucket_id = {
-            let mut dir_guard = directory_page.write();
-            if let PageType::ExtendedHashTableDirectory(ref mut dir_page) = *dir_guard {
-                dir_page.merge_bucket(bucket_index)
-            } else {
-                None
-            }
+            let mut directory = directory_page.write();
+            directory.merge_bucket(bucket_index)
         };
 
         // If merge was successful, delete the removed bucket page
         if let Some(page_id) = removed_bucket_id {
-            self.bpm.delete_page(page_id);
+            let _ = self.bpm.delete_page(page_id);
             true
         } else {
             false
@@ -545,32 +478,24 @@ mod tests {
         let bpm = test_context.bpm();
         let hash_fn = HashFunction::new();
 
-        let mut ht = DiskExtendableHashTable::new(
-            "test_table".to_string(),
-            bpm,
-            hash_fn,
-            Default::default(),  // Supply a proper schema instance
-            4,
-            4,
-            4
-        ).unwrap();
+        let mut ht =
+            DiskExtendableHashTable::new("test_table".to_string(), bpm, hash_fn, 4, 4, 4).unwrap();
 
         // Create test values
         let key1 = Value::from(1);
         let key2 = Value::from(2);
         let key3 = Value::from(3);
-        // Use RID as the stored value. For example, create a RID with page_id and slot.
         let rid1 = RID::new(1, 0);
         let rid2 = RID::new(2, 0);
 
         // Test insert
-        assert!(ht.insert(key1.clone(), rid1, None));
-        assert!(ht.insert(key2.clone(), rid2, None));
+        assert!(ht.insert(key1.clone(), rid1));
+        assert!(ht.insert(key2.clone(), rid2));
 
         // Test get
-        assert_eq!(ht.get_value(&key1, None), Some(rid1));
-        assert_eq!(ht.get_value(&key2, None), Some(rid2));
-        assert_eq!(ht.get_value(&key3, None), None);
+        assert_eq!(ht.get_value(&key1), Some(rid1));
+        assert_eq!(ht.get_value(&key2), Some(rid2));
+        assert_eq!(ht.get_value(&key3), None);
     }
 
     #[test]
@@ -579,24 +504,17 @@ mod tests {
         let bpm = test_context.bpm();
         let hash_fn = HashFunction::new();
 
-        let mut ht = DiskExtendableHashTable::new(
-            "test_table".to_string(),
-            bpm,
-            hash_fn,
-            Default::default(),  // Supply a proper schema instance
-            4,
-            4,
-            4
-        ).unwrap();
+        let mut ht =
+            DiskExtendableHashTable::new("test_table".to_string(), bpm, hash_fn, 4, 4, 4).unwrap();
 
         // Create test values
         let key1 = Value::from(1);
         let rid1 = RID::new(1, 1);
 
         // Test insert and remove
-        assert!(ht.insert(key1.clone(), rid1, None));
-        assert!(ht.remove(&key1, None));
-        assert_eq!(ht.get_value(&key1, None), None);
+        assert!(ht.insert(key1.clone(), rid1));
+        assert!(ht.remove(&key1));
+        assert_eq!(ht.get_value(&key1), None);
     }
 
     #[test]
@@ -611,11 +529,11 @@ mod tests {
             "test_table".to_string(),
             bpm,
             hash_fn,
-            Default::default(),
             4,
             4,
-            2  // Small bucket size to test splitting
-        ).unwrap();
+            2, // Small bucket size to test splitting
+        )
+        .unwrap();
 
         debug!("Starting insertions...");
         // Insert enough items to cause bucket split
@@ -623,15 +541,19 @@ mod tests {
             debug!("Inserting item {}", i);
             let key = Value::new(i);
             let rid = RID::new(i, 0);
-            assert!(ht.insert(key, rid, None), "Failed to insert item {}", i);
+            assert!(ht.insert(key, rid), "Failed to insert item {}", i);
         }
 
         debug!("Verifying insertions...");
         // Verify all values can still be retrieved
         for i in 0..5 {
             let key = Value::from(i);
-            assert_eq!(ht.get_value(&key, None), Some(RID::new(i, 0)),
-                      "Failed to retrieve item {}", i);
+            assert_eq!(
+                ht.get_value(&key),
+                Some(RID::new(i, 0)),
+                "Failed to retrieve item {}",
+                i
+            );
         }
         debug!("Test completed successfully");
     }
