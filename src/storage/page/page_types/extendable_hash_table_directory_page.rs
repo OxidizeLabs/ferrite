@@ -134,13 +134,13 @@ impl ExtendableHTableDirectoryPage {
             return bucket_idx + 1;
         }
         
-        // Calculate split image using the current local depth
-        let split_point = 1 << local_depth;
-        let split_idx = bucket_idx ^ split_point;
+        // Calculate split image using the distinguishing bit at the local depth position
+        let distinguishing_bit = 1 << (local_depth - 1);
+        let split_idx = bucket_idx ^ distinguishing_bit;
         
         debug!(
-            "Calculating split image for bucket_idx={}, local_depth={}, split_point={}, split_idx={}",
-            bucket_idx, local_depth, split_point, split_idx
+            "Calculating split image for bucket_idx={}, local_depth={}, distinguishing_bit={}, split_idx={}",
+            bucket_idx, local_depth, distinguishing_bit, split_idx
         );
 
         split_idx
@@ -206,11 +206,11 @@ impl ExtendableHTableDirectoryPage {
 
         // Calculate masks for redistribution
         let mask = (1 << local_depth) - 1;
-        let split_point = 1 << local_depth;
+        let distinguishing_bit = 1 << local_depth;
         
         debug!(
-            "Split masks: mask={}, split_point={}, global_depth={}",
-            mask, split_point, self.global_depth
+            "Split masks: mask={}, distinguishing_bit={}, global_depth={}",
+            mask, distinguishing_bit, self.global_depth
         );
 
         // Get the old bucket page ID
@@ -224,7 +224,7 @@ impl ExtendableHTableDirectoryPage {
                 self.set_local_depth(i, new_local_depth);
                 
                 // Determine which entries point to new bucket
-                if i & split_point != 0 {
+                if i & distinguishing_bit != 0 {
                     self.set_bucket_page_id(i, new_page_id);
                     debug!("Directory entry {} now points to new bucket {}", i, new_page_id);
                 } else {
