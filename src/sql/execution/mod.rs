@@ -6,3 +6,4 @@ pub mod executors;
 pub mod expressions;
 pub mod plans;
 pub mod transaction_context;
+pub mod expression_parser;
