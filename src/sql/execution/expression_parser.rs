@@ -372,11 +372,12 @@ impl ExpressionParser {
             Expr::Cast { expr, data_type, .. } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let target_type = match data_type {
-                    sqlparser::ast::DataType::Int(_) => TypeId::Integer,
+                    sqlparser::ast::DataType::Int(_) | 
+                    sqlparser::ast::DataType::Integer(_) => TypeId::Integer,
                     sqlparser::ast::DataType::BigInt(_) => TypeId::BigInt,
                     sqlparser::ast::DataType::Float(_) | 
                     sqlparser::ast::DataType::Double | 
-                    sqlparser::ast::DataType::Decimal(_) => TypeId::Decimal,  // Add support for Decimal with precision
+                    sqlparser::ast::DataType::Decimal(_) => TypeId::Decimal,
                     sqlparser::ast::DataType::Char(_) => TypeId::Char,
                     sqlparser::ast::DataType::Varchar(_) => TypeId::VarChar,
                     sqlparser::ast::DataType::Boolean => TypeId::Boolean,
