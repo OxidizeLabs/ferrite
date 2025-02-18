@@ -14,6 +14,9 @@ use crate::sql::execution::expressions::comparison_expression::{
 };
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
+use crate::sql::execution::expressions::case_expression::CaseExpression;
+use crate::sql::execution::expressions::cast_expression::CastExpression;
+use crate::sql::execution::expressions::string_expression::{StringExpression, StringExpressionType};
 use crate::sql::planner::planner::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
@@ -286,10 +289,102 @@ impl ExpressionParser {
                 Ok(result)
             }
 
-            Expr::Function(func) => match self.parse_aggregate_function(&func, schema) {
-                Ok(aggregate_function) => Ok(aggregate_function.0),
-                _ => Err(format!("Unsupported function: {}", func)),
-            },
+            Expr::Function(func) => {
+                let name = func.name.to_string().to_uppercase();
+                match name.as_str() {
+                    "LOWER" | "UPPER" => {
+                        // Get the argument
+                        let arg = match &func.args {
+                            FunctionArguments::List(list) if list.args.len() == 1 => {
+                                match &list.args[0] {
+                                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                        Arc::new(self.parse_expression(expr, schema)?)
+                                    }
+                                    _ => return Err("Invalid string function argument".to_string()),
+                                }
+                            }
+                            _ => return Err(format!("{}() requires exactly one argument", name)),
+                        };
+
+                        let expr_type = match name.as_str() {
+                            "LOWER" => StringExpressionType::Lower,
+                            "UPPER" => StringExpressionType::Upper,
+                            _ => unreachable!(),
+                        };
+
+                        Ok(Expression::String(StringExpression::new(
+                            arg.clone(),
+                            expr_type,
+                            vec![arg],
+                        )))
+                    }
+                    // Handle other function types (aggregates etc.)
+                    _ => match self.parse_aggregate_function(&func, schema) {
+                        Ok(aggregate_function) => Ok(aggregate_function.0),
+                        _ => Err(format!("Unsupported function: {}", func)),
+                    },
+                }
+            }
+
+            Expr::Case {
+                operand,
+                conditions,
+                results,
+                else_result,
+            } => {
+                // Parse the base expression if present
+                let base_expr = match operand {
+                    Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
+                    None => None,
+                };
+
+                // Parse WHEN conditions
+                let when_exprs = conditions
+                    .iter()
+                    .map(|expr| self.parse_expression(expr, schema))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect();
+
+                // Parse THEN results
+                let then_exprs = results
+                    .iter()
+                    .map(|expr| self.parse_expression(expr, schema))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect();
+
+                // Parse ELSE result if present
+                let else_expr = match else_result {
+                    Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
+                    None => None,
+                };
+
+                // Create the CASE expression
+                Ok(Expression::Case(
+                    CaseExpression::new(base_expr, when_exprs, then_exprs, else_expr)
+                        .map_err(|e| e.to_string())?,
+                ))
+            }
+
+            Expr::Cast { expr, data_type, .. } => {
+                let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
+                let target_type = match data_type {
+                    sqlparser::ast::DataType::Int(_) => TypeId::Integer,
+                    sqlparser::ast::DataType::BigInt(_) => TypeId::BigInt,
+                    sqlparser::ast::DataType::Float(_) | 
+                    sqlparser::ast::DataType::Double | 
+                    sqlparser::ast::DataType::Decimal(_) => TypeId::Decimal,  // Add support for Decimal with precision
+                    sqlparser::ast::DataType::Char(_) => TypeId::Char,
+                    sqlparser::ast::DataType::Varchar(_) => TypeId::VarChar,
+                    sqlparser::ast::DataType::Boolean => TypeId::Boolean,
+                    _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
+                };
+
+                Ok(Expression::Cast(CastExpression::new(inner_expr, target_type)))
+            }
 
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
@@ -918,6 +1013,131 @@ mod tests {
                 }
                 _ => panic!("Expected Comparison expression for '{}'", expr_str),
             }
+        }
+    }
+
+    #[test]
+    fn test_parse_case_expressions() {
+        let ctx = TestContext::new("test_parse_case_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            // Simple CASE
+            ("CASE WHEN age > 18 THEN 'Adult' ELSE 'Minor' END", TypeId::VarChar),
+            // CASE with multiple WHEN clauses
+            ("CASE WHEN age < 13 THEN 'Child' WHEN age < 20 THEN 'Teen' ELSE 'Adult' END", TypeId::VarChar),
+            // CASE with expression
+            ("CASE age WHEN 18 THEN 'New Adult' WHEN 21 THEN 'Drinking Age' ELSE 'Other' END", TypeId::VarChar),
+        ];
+
+        for (expr_str, expected_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::Case(case) => {
+                    assert_eq!(
+                        case.get_return_type().get_type(),
+                        expected_type,
+                        "CASE expression '{}' should return {:?}",
+                        expr_str,
+                        expected_type
+                    );
+                }
+                _ => panic!("Expected Case expression for '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_cast_expressions() {
+        let ctx = TestContext::new("test_parse_cast_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            ("CAST(age AS DECIMAL)", TypeId::Decimal),
+            ("CAST('123' AS INTEGER)", TypeId::Integer),
+            ("CAST(salary AS INTEGER)", TypeId::Integer),
+        ];
+
+        for (expr_str, expected_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::Cast(cast) => {
+                    assert_eq!(
+                        cast.get_return_type().get_type(),
+                        expected_type,
+                        "CAST expression '{}' should return {:?}",
+                        expr_str,
+                        expected_type
+                    );
+                }
+                _ => panic!("Expected Cast expression for '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_string_functions() {
+        let ctx = TestContext::new("test_parse_string_functions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            ("LOWER(name)", TypeId::VarChar),
+            ("UPPER(name)", TypeId::VarChar),
+            ("LOWER(UPPER(name))", TypeId::VarChar),  // Nested function calls
+        ];
+
+        for (expr_str, expected_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::String(string) => {
+                    assert_eq!(
+                        string.get_return_type().get_type(),
+                        expected_type,
+                        "String function '{}' should return {:?}",
+                        expr_str,
+                        expected_type
+                    );
+                }
+                _ => panic!("Expected String expression for '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_complex_expressions() {
+        let ctx = TestContext::new("test_parse_complex_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            // Arithmetic with CAST
+            ("CAST(age AS DECIMAL) + salary", TypeId::Decimal),
+            // String function with CASE
+            ("UPPER(CASE WHEN age > 21 THEN name ELSE 'Minor' END)", TypeId::VarChar),
+            // Complex condition
+            ("CASE WHEN LOWER(name) = 'john' AND salary > 50000.0 THEN 'High Paid' ELSE 'Standard' END", TypeId::VarChar),
+        ];
+
+        for (expr_str, expected_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            assert_eq!(
+                expr.get_return_type().get_type(),
+                expected_type,
+                "Complex expression '{}' should return {:?}",
+                expr_str,
+                expected_type
+            );
         }
     }
 }

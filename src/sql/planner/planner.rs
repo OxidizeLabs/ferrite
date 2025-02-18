@@ -7,7 +7,7 @@ use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::comparison_expression::ComparisonType;
-use crate::sql::execution::expressions::expression_parser::ExpressionParser;
+use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
