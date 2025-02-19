@@ -2,10 +2,10 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::{LockManager, LockMode};
+use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction::UndoLink;
-use crate::concurrency::transaction::{TransactionState, UndoLog};
+use crate::concurrency::transaction::UndoLog;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::page::page::{Page, PageTrait};
@@ -19,7 +19,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use crate::common::exception::PageError;
 use crate::concurrency::transaction::IsolationLevel;
-use crate::types_db::value::Value;
 use std::collections::HashSet;
 
 // Page Management
@@ -553,11 +552,11 @@ impl TableHeap {
         // Get the current version
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
-        
+
         match page.get_tuple(&rid) {
             Ok((meta, tuple)) => {
                 // Check if this version is visible to the transaction
-                if meta.get_creator_txn_id() == INVALID_TXN_ID 
+                if meta.get_creator_txn_id() == INVALID_TXN_ID
                     || meta.get_creator_txn_id() == txn.get_transaction_id() {
                     // Tuple was created by this transaction or has no creator
                     Ok((meta, tuple))
@@ -651,17 +650,17 @@ impl TableHeap {
     }
 
     // Internal methods use these instead of accessing latch directly
-    fn with_read_lock<F, R>(&self, f: F) -> R 
-    where 
-        F: FnOnce() -> R 
+    fn with_read_lock<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R
     {
         let _guard = self.latch.read();
         f()
     }
 
-    fn with_write_lock<F, R>(&self, f: F) -> R 
-    where 
-        F: FnOnce() -> R 
+    fn with_write_lock<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R
     {
         let _guard = self.latch.write();
         f()
@@ -770,7 +769,6 @@ impl TupleStorage {
         &self,
         meta: &TupleMeta,
         tuple: &mut Tuple,
-        txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<RID, String> {
         // Get the last page or create a new one if none exists
         let page_guard = if *self.last_page_id.read() == INVALID_PAGE_ID {

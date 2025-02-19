@@ -45,7 +45,6 @@ impl IndexScanExecutor {
         debug!("Attempting to acquire catalog read lock");
         let catalog = context_guard.get_catalog();
         let catalog_guard = catalog.read();
-        let txn_ctx = context_guard.get_transaction_context();
 
         // Get table info
         let table_info = match catalog_guard.get_table(table_name) {
@@ -144,6 +143,57 @@ impl IndexScanExecutor {
                             ranges.extend(Self::analyze_predicate_ranges(child));
                         }
                     }
+                    LogicType::Not => {
+                        // For NOT operations on comparisons, we need to invert the bounds
+                        if let Some(child) = logic_expr.get_children().first() {
+                            match child.as_ref() {
+                                Expression::Comparison(comp_expr) => {
+                                    if let Ok(value) = comp_expr.get_right().evaluate(
+                                        &Tuple::new(&vec![], Schema::new(vec![]), RID::new(0, 0)),
+                                        &Schema::new(vec![]),
+                                    ) {
+                                        match comp_expr.get_comp_type() {
+                                            ComparisonType::Equal => {
+                                                // NOT (x = value) -> x < value OR x > value
+                                                // This requires full scan as it creates a disjoint range
+                                                Vec::new()
+                                            }
+                                            ComparisonType::GreaterThan => {
+                                                // NOT (x > value) -> x <= value
+                                                vec![(None, false, Some(value), true)]
+                                            }
+                                            ComparisonType::GreaterThanOrEqual => {
+                                                // NOT (x >= value) -> x < value
+                                                vec![(None, false, Some(value), false)]
+                                            }
+                                            ComparisonType::LessThan => {
+                                                // NOT (x < value) -> x >= value
+                                                vec![(Some(value), true, None, false)]
+                                            }
+                                            ComparisonType::LessThanOrEqual => {
+                                                // NOT (x <= value) -> x > value
+                                                vec![(Some(value), false, None, false)]
+                                            }
+                                            ComparisonType::NotEqual => {
+                                                // NOT (x != value) -> x = value
+                                                vec![(Some(value.clone()), true, Some(value), true)]
+                                            }
+                                            ComparisonType::IsNotNull => {
+                                                // NOT (IS NOT NULL) -> IS NULL
+                                                // This requires special handling at runtime
+                                                Vec::new()
+                                            }
+                                        }
+                                    } else {
+                                        Vec::new()
+                                    }
+                                }
+                                _ => Vec::new(), // NOT on non-comparison expressions
+                            }
+                        } else {
+                            Vec::new()
+                        };
+                    }
                 }
                 ranges
             }
@@ -175,6 +225,11 @@ impl IndexScanExecutor {
                         }
                         ComparisonType::NotEqual => {
                             // Full scan for not equal
+                            Vec::new()
+                        },
+                        ComparisonType::IsNotNull => {
+                            // For IS NOT NULL, scan all non-null values
+                            // This effectively means no bounds, as we'll filter nulls later
                             Vec::new()
                         }
                     }
@@ -357,7 +412,6 @@ impl AbstractExecutor for IndexScanExecutor {
 
 #[cfg(test)]
 mod index_scan_executor_tests {
-    use crate::storage::table::table_iterator::TableIterator;
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;

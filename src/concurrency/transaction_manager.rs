@@ -16,13 +16,6 @@ use std::sync::Arc;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::common::config::TableOidT;
-use crate::catalog::catalog::Catalog;
-use crate::catalog::column::Column;
-use crate::catalog::schema::Schema;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
-use std::thread;
-use tempfile::TempDir;
 
 #[derive(Debug)]
 pub struct PageVersionInfo {
@@ -345,9 +338,6 @@ impl TransactionManager {
                 return Err("Transaction not in running state".to_string());
             }
         }
-
-        // Perform the update
-        let result = table_heap.update_tuple(meta, tuple, rid, txn_ctx)?;
 
         // If successful, update transaction's write set
         if let Some(txn) = txn {
@@ -679,12 +669,6 @@ mod tests {
 
         // Ensure verify_txn has a higher timestamp than the commit
         thread::sleep(std::time::Duration::from_millis(1));
-
-        let verify_ctx = Arc::new(TransactionContext::new(
-            verify_txn.clone(),
-            ctx.lock_manager(),
-            ctx.txn_manager(),
-        ));
 
         // Get tuple with verification transaction
         let result = table_heap.get_tuple_with_txn(rid, txn_ctx);

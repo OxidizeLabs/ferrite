@@ -4,12 +4,11 @@ use crate::common::exception::DBError;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
-use crate::sql::planner::planner::{LogicalPlan, LogicalPlanType};
 use crate::types_db::value::Val;
 use log::{debug, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-
+use crate::sql::planner::logical_plan::{LogicalPlan, LogicalPlanType};
 
 pub struct Optimizer {
     catalog: Arc<RwLock<Catalog>>,

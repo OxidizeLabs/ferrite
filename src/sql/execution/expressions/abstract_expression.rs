@@ -16,9 +16,13 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::sql::execution::expressions::case_expression::CaseExpression;
+use crate::sql::execution::expressions::cast_expression::CastExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
+    Case(CaseExpression),
+    Cast(CastExpression),
     Constant(ConstantExpression),
     ColumnRef(ColumnRefExpression),
     Arithmetic(ArithmeticExpression),
@@ -60,6 +64,8 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.evaluate(tuple, schema),
             Self::Aggregate(expr) => expr.evaluate(tuple, schema),
             Self::Window(expr) => expr.evaluate(tuple, schema),
+            Self::Cast(expr) => expr.evaluate(tuple, schema),
+            Self::Case(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -100,6 +106,8 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
+            Self::Cast(expr) => expr.evaluate(left_tuple, right_schema),
+            Self::Case(expr) => expr.evaluate(left_tuple, right_schema),
         }
     }
 
@@ -115,6 +123,8 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.get_child_at(child_idx),
             Self::Aggregate(expr) => expr.get_child_at(child_idx),
             Self::Window(expr) => expr.get_child_at(child_idx),
+            Self::Cast(expr) => expr.get_child_at(child_idx),
+            Self::Case(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -130,6 +140,8 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.get_children(),
             Self::Aggregate(expr) => expr.get_children(),
             Self::Window(expr) => expr.get_children(),
+            Self::Cast(expr) => expr.get_children(),
+            Self::Case(expr) => expr.get_children(),
         }
     }
 
@@ -145,6 +157,8 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.get_return_type(),
             Self::Aggregate(expr) => expr.get_return_type(),
             Self::Window(expr) => expr.get_return_type(),
+            Self::Cast(expr) => expr.get_return_type(),
+            Self::Case(expr) => expr.get_return_type(),
         }
     }
 
@@ -160,6 +174,8 @@ impl ExpressionOps for Expression {
             Self::Mock(expr) => expr.clone_with_children(children),
             Self::Aggregate(expr) => expr.clone_with_children(children),
             Self::Window(expr) => expr.clone_with_children(children),
+            Self::Cast(expr) => expr.clone_with_children(children),
+            Self::Case(expr) => expr.clone_with_children(children),
         }
     }
 
@@ -250,6 +266,20 @@ impl Display for Expression {
                 }
             }
             Self::Window(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Cast(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Case(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {

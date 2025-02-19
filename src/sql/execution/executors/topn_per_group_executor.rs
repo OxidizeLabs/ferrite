@@ -320,10 +320,6 @@ mod tests {
                 _temp_dir: temp_dir,
             }
         }
-
-        pub fn bpm(&self) -> Arc<BufferPoolManager> {
-            Arc::clone(&self.bpm)
-        }
     }
 
     #[test]
