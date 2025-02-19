@@ -1,3 +1,4 @@
+use log::debug;
 use super::logical_plan::LogicalPlan;
 use super::schema_manager::SchemaManager;
 use crate::catalog::catalog::Catalog;
@@ -9,6 +10,7 @@ use crate::sql::execution::expressions::column_value_expression::ColumnRefExpres
 use parking_lot::RwLock;
 use sqlparser::ast::*;
 use std::sync::Arc;
+use log;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -157,6 +159,10 @@ impl LogicalPlanBuilder {
             .has_aggregate_functions(&select.projection);
 
         if has_group_by || has_aggregates {
+            debug!("=== Starting Aggregation Planning ===");
+            debug!("Input schema: {:?}", schema);
+            debug!("Has GROUP BY: {}, Has Aggregates: {}", has_group_by, has_aggregates);
+            
             // Parse group by expressions
             let group_by_exprs: Vec<_> = self
                 .expression_parser
@@ -165,10 +171,14 @@ impl LogicalPlanBuilder {
                 .map(Arc::new)
                 .collect();
 
+            debug!("Group by expressions: {:?}", group_by_exprs);
+
             // Parse aggregates
             let (agg_exprs, _) = self
                 .expression_parser
                 .parse_aggregates(&select.projection, &schema)?;
+
+            debug!("Aggregate expressions: {:?}", agg_exprs);
 
             // Create output schema for aggregation
             let agg_schema = self.schema_manager.create_aggregation_output_schema(
@@ -180,8 +190,25 @@ impl LogicalPlanBuilder {
                 has_group_by,
             );
 
-            current_plan =
-                LogicalPlan::aggregate(group_by_exprs, agg_exprs, agg_schema, current_plan);
+            debug!("Aggregation schema: {:?}", agg_schema);
+
+            // Create the aggregate plan node
+            current_plan = LogicalPlan::aggregate(group_by_exprs, agg_exprs.clone(), agg_schema.clone(), current_plan);
+
+            // Handle HAVING clause if present
+            if let Some(having) = &select.having {
+                let predicate = Arc::new(
+                    self.expression_parser
+                        .parse_expression(having, &schema)?, // Use input schema for HAVING clause
+                );
+                current_plan = LogicalPlan::filter(
+                    agg_schema.clone(),      // Use aggregation schema since we're filtering after aggregation
+                    String::new(),           // No single table name for aggregates
+                    0,                       // No single table OID for aggregates
+                    predicate,
+                    current_plan,
+                );
+            }
         }
 
         // Handle ORDER BY
@@ -347,9 +374,14 @@ impl LogicalPlanBuilder {
                 SelectItem::UnnamedExpr(expr) => {
                     if let Expr::Function(func) = expr {
                         // For aggregate functions, use the formatted name
-                        let (expr, agg_type) = self
+                        let expr = self
                             .expression_parser
                             .parse_aggregate_function(&func, schema)?;
+                        let agg_type = if let Expression::Aggregate(agg_expr) = &expr {
+                            agg_expr.get_agg_type().clone()
+                        } else {
+                            return Err("Expected aggregate expression".to_string());
+                        };
                         let col_name = format!(
                             "{}({})",
                             agg_type.to_string(),
@@ -373,9 +405,14 @@ impl LogicalPlanBuilder {
                 SelectItem::ExprWithAlias { expr, alias } => {
                     if let Expr::Function(func) = expr {
                         // For aliased aggregate functions, use the alias name
-                        let (expr, _) = self
+                        let expr = self
                             .expression_parser
                             .parse_aggregate_function(&func, schema)?;
+                        let agg_type = if let Expression::Aggregate(agg_expr) = &expr {
+                            agg_expr.get_agg_type().clone()
+                        } else {
+                            return Err("Expected aggregate expression".to_string());
+                        };
                         let col_ref = Expression::ColumnRef(ColumnRefExpression::new(
                             0,
                             projection_exprs.len(),
@@ -682,7 +719,6 @@ mod tests {
             let mut fixture = TestContext::new("create_table_if_not_exists");
 
             // First creation should succeed
-            // First creation should succeed
             fixture.create_table("users", "id INTEGER", false).unwrap();
 
             // Second creation without IF NOT EXISTS should fail
@@ -966,6 +1002,267 @@ mod tests {
                     LogicalPlanType::TableScan { .. } => {}
                     _ => panic!("Expected TableScan as leaf node for query: {}", sql),
                 }
+            }
+        }
+    }
+
+    mod join_tests {
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_tables(fixture: &mut TestContext) {
+            fixture
+                .create_table(
+                    "users",
+                    "id INTEGER, name VARCHAR(255), age INTEGER",
+                    false,
+                )
+                .unwrap();
+            fixture
+                .create_table(
+                    "orders",
+                    "order_id INTEGER, user_id INTEGER, amount DECIMAL",
+                    false,
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn test_inner_join() {
+            let mut fixture = TestContext::new("inner_join");
+            setup_test_tables(&mut fixture);
+
+            let join_sql = "SELECT u.name, o.amount \
+                           FROM users u \
+                           INNER JOIN orders o ON u.id = o.user_id";
+            
+            let plan = fixture.planner.create_logical_plan(join_sql).unwrap();
+
+            // Verify projection
+            match &plan.plan_type {
+                LogicalPlanType::Projection { expressions, schema } => {
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert_eq!(expressions.len(), 2);
+                }
+                _ => panic!("Expected Projection as root node"),
+            }
+
+            // Verify join
+            match &plan.children[0].plan_type {
+                LogicalPlanType::NestedLoopJoin { 
+                    left_schema, 
+                    right_schema,
+                    predicate,
+                    join_type 
+                } => {
+                    assert_eq!(left_schema.get_column_count(), 3);
+                    assert_eq!(right_schema.get_column_count(), 3);
+                    assert!(matches!(join_type, JoinOperator::Inner(_)));
+                }
+                _ => panic!("Expected NestedLoopJoin node"),
+            }
+        }
+    }
+
+    mod group_by_tests {
+        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_table(fixture: &mut TestContext) {
+            fixture
+                .create_table(
+                    "sales",
+                    "id INTEGER, product VARCHAR(255), amount DECIMAL, region VARCHAR(255)",
+                    false,
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn test_group_by_with_aggregates() {
+            let mut fixture = TestContext::new("group_by_aggregates");
+            setup_test_table(&mut fixture);
+
+            let group_sql = "SELECT region, SUM(amount) as total_sales, COUNT(*) as num_sales \
+                            FROM sales \
+                            GROUP BY region \
+                            HAVING SUM(amount) > 1000";
+
+            let plan = fixture.planner.create_logical_plan(group_sql).unwrap();
+
+            // Verify projection
+            match &plan.plan_type {
+                LogicalPlanType::Projection { expressions, schema } => {
+                    assert_eq!(schema.get_column_count(), 3);
+                    assert_eq!(expressions.len(), 3);
+                }
+                _ => panic!("Expected Projection as root node"),
+            }
+
+            // Verify filter (HAVING)
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Filter { predicate, .. } => {
+                    // Verify the predicate is comparing SUM(amount) > 1000
+                    match predicate.as_ref() {
+                        Expression::Comparison(comp) => {
+                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
+                        }
+                        _ => panic!("Expected Comparison expression in HAVING clause"),
+                    }
+                }
+                _ => panic!("Expected Filter node for HAVING clause"),
+            }
+
+            // Verify aggregation
+            match &plan.children[0].children[0].plan_type {
+                LogicalPlanType::Aggregate { 
+                    group_by, 
+                    aggregates,
+                    schema 
+                } => {
+                    assert_eq!(group_by.len(), 1); // region
+                    assert_eq!(aggregates.len(), 2); // SUM(amount), COUNT(*)
+                    assert_eq!(schema.get_column_count(), 3);
+                }
+                _ => panic!("Expected Aggregate node"),
+            }
+        }
+
+        #[test]
+        fn test_simple_group_by() {
+            let mut fixture = TestContext::new("simple_group_by");
+            setup_test_table(&mut fixture);
+
+            let sql = "SELECT region, COUNT(*) as count \
+                      FROM sales \
+                      GROUP BY region";
+
+            let plan = fixture.planner.create_logical_plan(sql).unwrap();
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Aggregate { 
+                    group_by, 
+                    aggregates,
+                    schema 
+                } => {
+                    assert_eq!(group_by.len(), 1);
+                    assert_eq!(aggregates.len(), 1);
+                    assert_eq!(schema.get_column_count(), 2);
+                }
+                _ => panic!("Expected Aggregate node"),
+            }
+        }
+    }
+
+    mod order_by_tests {
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_table(fixture: &mut TestContext) {
+            fixture
+                .create_table(
+                    "employees",
+                    "id INTEGER, name VARCHAR(255), salary DECIMAL, dept VARCHAR(255)",
+                    false,
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn test_order_by_with_limit() {
+            let mut fixture = TestContext::new("order_by_limit");
+            setup_test_table(&mut fixture);
+
+            let sql = "SELECT name, salary \
+                      FROM employees \
+                      ORDER BY salary DESC \
+                      LIMIT 10";
+
+            let plan = fixture.planner.create_logical_plan(sql).unwrap();
+
+            // Verify limit
+            match &plan.plan_type {
+                LogicalPlanType::Limit { limit, schema } => {
+                    assert_eq!(*limit, 10);
+                    assert_eq!(schema.get_column_count(), 2);
+                }
+                _ => panic!("Expected Limit as root node"),
+            }
+
+            // Verify sort
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Sort { 
+                    sort_expressions,
+                    schema 
+                } => {
+                    assert_eq!(sort_expressions.len(), 1);
+                    assert_eq!(schema.get_column_count(), 2);
+                }
+                _ => panic!("Expected Sort node"),
+            }
+
+            // Verify projection
+            match &plan.children[0].children[0].plan_type {
+                LogicalPlanType::Projection { expressions, schema } => {
+                    assert_eq!(expressions.len(), 2);
+                    assert_eq!(schema.get_column_count(), 2);
+                }
+                _ => panic!("Expected Projection node"),
+            }
+        }
+    }
+
+    mod subquery_tests {
+        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_tables(fixture: &mut TestContext) {
+            fixture
+                .create_table(
+                    "employees",
+                    "id INTEGER, name VARCHAR(255), salary DECIMAL, dept_id INTEGER",
+                    false,
+                )
+                .unwrap();
+            fixture
+                .create_table(
+                    "departments",
+                    "dept_id INTEGER, name VARCHAR(255), budget DECIMAL",
+                    false,
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn test_subquery_in_where() {
+            let mut fixture = TestContext::new("subquery_where");
+            setup_test_tables(&mut fixture);
+
+            let sql = "SELECT e.name, e.salary \
+                      FROM employees e \
+                      WHERE e.salary > (SELECT AVG(salary) FROM employees)";
+
+            let plan = fixture.planner.create_logical_plan(sql).unwrap();
+
+            // Verify the overall structure matches what we expect for a subquery
+            match &plan.plan_type {
+                LogicalPlanType::Projection { .. } => {
+                    // Verify filter with subquery
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { predicate, .. } => {
+                            match predicate.as_ref() {
+                                Expression::Comparison(comp) => {
+                                    assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
+                                }
+                                _ => panic!("Expected Comparison expression"),
+                            }
+                        }
+                        _ => panic!("Expected Filter node"),
+                    }
+                }
+                _ => panic!("Expected Projection as root node"),
             }
         }
     }

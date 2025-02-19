@@ -21,11 +21,9 @@ use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
-use sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
-    JoinConstraint, JoinOperator, ObjectName, Select, SelectItem, TableFactor, UnaryOperator,
-};
+use sqlparser::ast::{BinaryOperator, DuplicateTreatment, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, Select, SelectItem, TableFactor, UnaryOperator};
 use std::sync::Arc;
+use log::debug;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -320,6 +318,10 @@ impl ExpressionParser {
             Expr::Function(func) => {
                 let name = func.name.to_string().to_uppercase();
                 match name.as_str() {
+                    "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" => {
+                        // Handle aggregate functions in HAVING clause
+                        self.parse_aggregate_function(&func, schema)
+                    }
                     "LOWER" | "UPPER" => {
                         // Get the argument
                         let arg = match &func.args {
@@ -346,11 +348,7 @@ impl ExpressionParser {
                             vec![arg],
                         )))
                     }
-                    // Handle other function types (aggregates etc.)
-                    _ => match self.parse_aggregate_function(&func, schema) {
-                        Ok(aggregate_function) => Ok(aggregate_function.0),
-                        _ => Err(format!("Unsupported function: {}", func)),
-                    },
+                    _ => Err(format!("Unsupported function: {}", name)),
                 }
             }
 
@@ -419,58 +417,77 @@ impl ExpressionParser {
         }
     }
 
-    pub fn parse_aggregate_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<(Expression, AggregationType), String> {
+    pub fn parse_aggregate_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
         let func_name = func.name.to_string().to_uppercase();
-
-        let (agg_type, arg_expr) = match func_name.as_str() {
+        
+        match func_name.as_str() {
             "COUNT" => {
                 match &func.args {
-                    FunctionArguments::None => (
-                        AggregationType::CountStar,
-                        Expression::Constant(ConstantExpression::new(
-                            Value::new(1),
-                            Column::new("count", TypeId::BigInt), // Changed to BigInt
-                            vec![],
-                        )),
-                    ),
                     FunctionArguments::List(list) => {
-                        if list.args.is_empty() {
-                            (
-                                AggregationType::CountStar,
-                                Expression::Constant(ConstantExpression::new(
-                                    Value::new(1),
-                                    Column::new("count", TypeId::BigInt), // Changed to BigInt
-                                    vec![],
-                                )),
-                            )
-                        } else {
-                            match &list.args[0] {
-                                FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => (
+                        if list.args.len() != 1 {
+                            return Err("COUNT requires exactly one argument".to_string());
+                        }
+                        match &list.args[0] {
+                            FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
+                                // Handle COUNT(*)
+                                let agg_col = Column::new("count", TypeId::BigInt);
+                                Ok(Expression::Aggregate(AggregateExpression::new(
                                     AggregationType::CountStar,
-                                    Expression::Constant(ConstantExpression::new(
+                                    Arc::new(Expression::Constant(ConstantExpression::new(
                                         Value::new(1),
-                                        Column::new("count", TypeId::BigInt), // Changed to BigInt
+                                        Column::new("const", TypeId::Integer),
                                         vec![],
-                                    )),
-                                ),
-                                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                    let inner_expr = self.parse_expression(expr, schema)?;
-                                    (AggregationType::Count, inner_expr)
-                                }
-                                _ => return Err("Unsupported COUNT argument".to_string()),
+                                    ))),
+                                    vec![],
+                                ).with_return_type(agg_col)))
                             }
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                let inner_expr = self.parse_expression(expr, schema)?;
+                                let agg_col = Column::new("count", TypeId::BigInt);
+                                Ok(Expression::Aggregate(AggregateExpression::new(
+                                    AggregationType::Count,
+                                    Arc::new(inner_expr),
+                                    vec![],
+                                ).with_return_type(agg_col)))
+                            }
+                            _ => Err("Invalid COUNT argument".to_string()),
                         }
                     }
-                    _ => return Err("Invalid COUNT function arguments".to_string()),
+                    _ => Err("COUNT requires an argument".to_string()),
                 }
             }
-            "SUM" | "MIN" | "MAX" | "AVG" => {
+            "SUM" => {
+                match &func.args {
+                    FunctionArguments::List(list) => {
+                        if list.args.len() != 1 {
+                            return Err("SUM requires exactly one argument".to_string());
+                        }
+                        match &list.args[0] {
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                // Parse the inner expression using the input schema
+                                let inner_expr = self.parse_expression(expr, schema)?;
+                                let ret_type = match inner_expr.get_return_type().get_type() {
+                                    TypeId::Integer | TypeId::BigInt | TypeId::Decimal => inner_expr.get_return_type().get_type(),
+                                    _ => return Err("SUM requires numeric argument".to_string()),
+                                };
+                                
+                                // Create a new column for the aggregate result
+                                let agg_col = Column::new("total_sales", ret_type);
+                                
+                                Ok(Expression::Aggregate(AggregateExpression::new(
+                                    AggregationType::Sum,
+                                    Arc::new(inner_expr),
+                                    vec![],
+                                ).with_return_type(agg_col)))
+                            }
+                            _ => Err("Invalid SUM argument".to_string()),
+                        }
+                    }
+                    _ => Err("SUM requires an argument".to_string()),
+                }
+            }
+            "MIN" | "MAX" | "AVG" => {
                 let agg_type = match func_name.as_str() {
-                    "SUM" => AggregationType::Sum,
                     "MIN" => AggregationType::Min,
                     "MAX" => AggregationType::Max,
                     "AVG" => AggregationType::Avg,
@@ -478,52 +495,30 @@ impl ExpressionParser {
                 };
 
                 match &func.args {
-                    FunctionArguments::None => {
-                        return Err(format!("{}() requires an argument", func_name));
-                    }
                     FunctionArguments::List(list) => {
-                        if list.args.is_empty() {
-                            return Err(format!("{}() requires an argument", func_name));
+                        if list.args.len() != 1 {
+                            return Err(format!("{} requires exactly one argument", func_name));
                         }
-
                         match &list.args[0] {
-                            FunctionArg::Named { .. } => {
-                                return Err("Named arguments not supported in aggregate functions"
-                                    .to_string());
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                let inner_expr = self.parse_expression(expr, schema)?;
+                                let ret_type = inner_expr.get_return_type().get_type();
+                                let agg_col = Column::new(&format!("{}({})", func_name, expr), ret_type);
+                                
+                                Ok(Expression::Aggregate(AggregateExpression::new(
+                                    agg_type,
+                                    Arc::new(inner_expr),
+                                    vec![],
+                                ).with_return_type(agg_col)))
                             }
-                            FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                                FunctionArgExpr::Expr(expr) => {
-                                    (agg_type, self.parse_expression(expr, schema)?)
-                                }
-                                FunctionArgExpr::Wildcard
-                                | FunctionArgExpr::QualifiedWildcard(_) => {
-                                    return Err(format!("{}(*) is not valid", func_name));
-                                }
-                            },
-                            FunctionArg::ExprNamed { .. } => {
-                                return Err(
-                                    "ExprNamed arguments not supported in aggregate functions"
-                                        .to_string(),
-                                );
-                            }
+                            _ => Err(format!("Invalid {} argument", func_name)),
                         }
                     }
-                    FunctionArguments::Subquery(_) => {
-                        return Err("Subqueries not supported in aggregate functions".to_string());
-                    }
+                    _ => Err(format!("{} requires an argument", func_name)),
                 }
             }
-            _ => return Err(format!("Unsupported aggregate function: {}", func_name)),
-        };
-
-        Ok((
-            Expression::Aggregate(AggregateExpression::new(
-                agg_type.clone(),
-                Arc::new(arg_expr),
-                vec![],
-            )),
-            agg_type,
-        ))
+            _ => Err(format!("Unsupported aggregate function: {}", func_name)),
+        }
     }
 
     pub fn parse_aggregates(
@@ -536,31 +531,28 @@ impl ExpressionParser {
 
         for item in projection {
             match item {
-                SelectItem::UnnamedExpr(expr) => {
-                    if let Expr::Function(func) = expr {
-                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_types.push(agg_type);
+                SelectItem::UnnamedExpr(Expr::Function(func)) => {
+                    let expr = self.parse_aggregate_function(&func, schema)?;
+                    if let Expression::Aggregate(agg_expr) = &expr {
+                        agg_types.push(agg_expr.get_agg_type().clone());
+                        agg_exprs.push(Arc::new(expr));
                     }
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     if let Expr::Function(func) = expr {
-                        let (agg_expr, agg_type) = self.parse_aggregate_function(&func, schema)?;
-                        // Create new aggregate expression with aliased column
-                        if let Expression::Aggregate(agg) = agg_expr {
-                            let orig_type = agg.get_return_type().get_type();
+                        let expr = self.parse_aggregate_function(&func, schema)?;
+                        if let Expression::Aggregate(agg_expr) = &expr {
+                            // Create new aggregate expression with aliased column
+                            let orig_type = agg_expr.get_return_type().get_type();
                             let new_col = Column::new(&alias.value, orig_type);
                             let new_agg = AggregateExpression::new(
-                                agg.get_agg_type().clone(),
-                                agg.get_arg().clone(),
+                                agg_expr.get_agg_type().clone(),
+                                agg_expr.get_arg().clone(),
                                 vec![],
-                            )
-                            .with_return_type(new_col);
+                            ).with_return_type(new_col);
                             agg_exprs.push(Arc::new(Expression::Aggregate(new_agg)));
-                        } else {
-                            agg_exprs.push(Arc::new(agg_expr));
+                            agg_types.push(agg_expr.get_agg_type().clone());
                         }
-                        agg_types.push(agg_type);
                     }
                 }
                 SelectItem::Wildcard(_) => {
@@ -582,6 +574,9 @@ impl ExpressionParser {
                 _ => {}
             }
         }
+
+        debug!("Parsed aggregate expressions: {:?}", agg_exprs);
+        debug!("Parsed aggregate types: {:?}", agg_types);
 
         Ok((agg_exprs, agg_types))
     }
@@ -735,6 +730,25 @@ impl ExpressionParser {
         match table_name {
             ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
             _ => Err("Only single table INSERT statements are supported".to_string()),
+        }
+    }
+
+    fn get_single_argument<'a>(&self, func: &'a Function) -> Result<&'a Expr, String> {
+        match &func.args {
+            FunctionArguments::List(list) => {
+                if list.args.len() != 1 {
+                    return Err(format!(
+                        "Function {} requires exactly one argument",
+                        func.name
+                    ));
+                }
+                match &list.args[0] {
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Ok(expr),
+                    _ => Err("Expected unnamed expression argument".to_string()),
+                }
+            }
+            FunctionArguments::None => Err("Function requires an argument".to_string()),
+            FunctionArguments::Subquery(_) => Err("Subquery not supported as argument".to_string()),
         }
     }
 }
