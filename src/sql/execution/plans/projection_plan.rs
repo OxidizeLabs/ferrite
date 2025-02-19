@@ -9,19 +9,26 @@ pub struct ProjectionNode {
     output_schema: Schema,
     expressions: Vec<Arc<Expression>>,
     children: Vec<PlanNode>,
+    column_mappings: Vec<usize>,
 }
 
 impl ProjectionNode {
     pub fn new(
         output_schema: Schema,
         expressions: Vec<Arc<Expression>>,
-        children: Vec<PlanNode>,
+        column_mappings: Vec<usize>,
     ) -> Self {
         Self {
             output_schema,
             expressions,
-            children,
+            children: vec![],
+            column_mappings,
         }
+    }
+
+    pub fn with_children(mut self, children: Vec<PlanNode>) -> Self {
+        self.children = children;
+        self
     }
 
     pub fn get_expressions(&self) -> &Vec<Arc<Expression>> {
@@ -30,6 +37,10 @@ impl ProjectionNode {
 
     pub fn get_child_plan(&self) -> &PlanNode {
         &self.children[0]
+    }
+
+    pub fn get_children_indices(&self) -> &Vec<usize> {
+        &self.column_mappings
     }
 }
 
@@ -83,7 +94,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -96,7 +106,6 @@ mod tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>,
         db_file: String,
         db_log_file: String,
     }
@@ -123,12 +132,8 @@ mod tests {
                 replacer,
             ));
 
-            // Create transaction manager
-            let transaction_manager = Arc::new(TransactionManager::new());
-
             Self {
                 bpm,
-                transaction_manager,
                 db_file,
                 db_log_file,
             }
@@ -191,7 +196,8 @@ mod tests {
         ];
 
         let child_node = vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
-        let projection = ProjectionNode::new(output_schema.clone(), expressions, child_node);
+        let projection = ProjectionNode::new(output_schema.clone(), expressions, vec![0, 1])
+            .with_children(child_node);
 
         assert_eq!(projection.get_type(), PlanType::Projection);
         assert_eq!(projection.get_expressions().len(), 2);
@@ -223,7 +229,8 @@ mod tests {
         ];
 
         let child_node = vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
-        let projection = ProjectionNode::new(output_schema, expressions, child_node);
+        let projection = ProjectionNode::new(output_schema, expressions, vec![0, 1])
+            .with_children(child_node);
 
         let exprs = projection.get_expressions();
         assert_eq!(exprs.len(), 2);

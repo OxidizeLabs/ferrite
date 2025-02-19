@@ -9,11 +9,13 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {
     And,
     Or,
+    Not,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +43,22 @@ impl LogicExpression {
         }
     }
 
+    pub fn new_not(expr: Arc<Expression>) -> Self {
+        let true_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+
+        Self {
+            left: expr.clone(),
+            right: true_expr,
+            logic_type: LogicType::Not,
+            ret_type: Column::new("logic_result", TypeId::Boolean),
+            children: vec![expr],
+        }
+    }
+
     pub fn get_left(&self) -> &Arc<Expression> {
         &self.left
     }
@@ -58,11 +76,21 @@ impl LogicExpression {
     }
 
     fn perform_computation(&self, lhs: &Value, rhs: &Value) -> CmpBool {
-        let l = Self::get_bool_as_cmp_bool(lhs);
-        let r = Self::get_bool_as_cmp_bool(rhs);
         match self.logic_type {
-            LogicType::And => Self::perform_and(l, r),
-            LogicType::Or => Self::perform_or(l, r),
+            LogicType::And => Self::perform_and(
+                Self::get_bool_as_cmp_bool(lhs),
+                Self::get_bool_as_cmp_bool(rhs)
+            ),
+            LogicType::Or => Self::perform_or(
+                Self::get_bool_as_cmp_bool(lhs),
+                Self::get_bool_as_cmp_bool(rhs)
+            ),
+            LogicType::Not => {
+                match lhs.get_val() {
+                    Val::Boolean(b) => CmpBool::from(!b),
+                    _ => CmpBool::CmpNull,
+                }
+            }
         }
     }
 
@@ -176,22 +204,34 @@ impl Display for LogicType {
         match self {
             LogicType::And => write!(f, "AND"),
             LogicType::Or => write!(f, "OR"),
+            LogicType::Not => write!(f, "NOT"),
         }
     }
 }
 
 impl Display for LogicExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let op_str = match self.logic_type {
-            LogicType::And => "AND",
-            LogicType::Or => "OR",
-        };
+        match self.logic_type {
+            LogicType::And | LogicType::Or => {
+                let op_str = match self.logic_type {
+                    LogicType::And => "AND",
+                    LogicType::Or => "OR",
+                    _ => unreachable!(),
+                };
 
-        // Use parentheses to ensure proper operator precedence
-        if f.alternate() {
-            write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
-        } else {
-            write!(f, "({} {} {})", self.left, op_str, self.right)
+                if f.alternate() {
+                    write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
+                } else {
+                    write!(f, "({} {} {})", self.left, op_str, self.right)
+                }
+            }
+            LogicType::Not => {
+                if f.alternate() {
+                    write!(f, "NOT ({:#})", self.left)
+                } else {
+                    write!(f, "NOT ({})", self.left)
+                }
+            }
         }
     }
 }

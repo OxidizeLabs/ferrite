@@ -187,7 +187,7 @@ impl ExpressionOps for CaseExpression {
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        let mut offset = 0;
+        let mut offset;
         
         // Extract base expression if present
         let (base_expr, base_offset) = match &self.base_expr {

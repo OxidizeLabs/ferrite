@@ -14,8 +14,6 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::fmt;
-use std::time::Duration;
-use std::error::Error;
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
@@ -771,7 +769,9 @@ impl Clone for BufferPoolManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::error::Error;
+    use std::time::Duration;
+use super::*;
     use std::sync::Arc;
     use std::thread;
     use parking_lot::RwLock;

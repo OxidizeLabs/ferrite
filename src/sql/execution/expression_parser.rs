@@ -17,7 +17,7 @@ use crate::sql::execution::expressions::logic_expression::{LogicExpression, Logi
 use crate::sql::execution::expressions::case_expression::CaseExpression;
 use crate::sql::execution::expressions::cast_expression::CastExpression;
 use crate::sql::execution::expressions::string_expression::{StringExpression, StringExpressionType};
-use crate::sql::planner::planner::LogicalPlan;
+use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
@@ -66,24 +66,52 @@ impl ExpressionParser {
                     return Err("Only table.column compound identifiers are supported".to_string());
                 }
 
-                let table_name = &parts[0].value;
+                let table_alias = &parts[0].value;
                 let column_name = &parts[1].value;
 
-                // Look up column in the provided schema
+                // Try different formats for column lookup
                 let column_idx = schema
-                    .get_column_index(&format!("{}.{}", table_name, column_name))
+                    .get_column_index(&format!("{}.{}", table_alias, column_name))
+                    .or_else(|| {
+                        // Try looking up the original table name if alias doesn't work
+                        let catalog = self.catalog.read();
+                        
+                        // Try to find the table by alias
+                        if let Some(table) = catalog.get_table(table_alias) {
+                            // Check if column exists in this table
+                            let table_schema = table.get_table_schema();
+                            if let Some(_) = table_schema.get_column_index(column_name) {
+                                // If found in original table, look for it in the schema
+                                // Try both qualified and unqualified names
+                                schema.get_column_index(&format!("{}.{}", table_alias, column_name))
+                                    .or_else(|| schema.get_column_index(column_name))
+                            } else {
+                                None
+                            }
+                        } else {
+                            // If not found by alias, try just the column name
+                            // This is a fallback for cases where the schema might not use qualified names
+                            schema.get_column_index(column_name)
+                        }
+                    })
                     .ok_or_else(|| {
-                        format!("Column {}.{} not found in schema", table_name, column_name)
+                        format!("Column {}.{} not found in schema", table_alias, column_name)
                     })?;
 
                 let column = schema
                     .get_column(column_idx)
                     .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
 
+                // Create a new column with the aliased name to preserve the table alias
+                let aliased_column = Column::new(
+                    &format!("{}.{}", table_alias, column_name),
+                    column.get_type()
+                );
+
                 Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                    0,
+                    0,  // table index will be handled by the planner/executor
                     column_idx,
-                    column.clone(),
+                    aliased_column,
                     vec![],
                 )))
             }
@@ -722,7 +750,6 @@ mod tests {
     use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
     use crate::sql::execution::expressions::comparison_expression::ComparisonType;
     use crate::sql::execution::expressions::logic_expression::LogicType;
-    use crate::sql::planner::planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use sqlparser::ast::{SetExpr, Statement};
@@ -730,10 +757,10 @@ mod tests {
     use sqlparser::parser::Parser;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use crate::sql::planner::query_planner::QueryPlanner;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
-        planner: QueryPlanner,
         _temp_dir: TempDir,
     }
 
@@ -787,7 +814,6 @@ mod tests {
 
             Self {
                 catalog,
-                planner,
                 _temp_dir: temp_dir,
             }
         }

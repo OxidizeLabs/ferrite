@@ -9,16 +9,12 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::common::config::TableOidT;
 use crate::concurrency::transaction::UndoLog;
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use parking_lot::RwLock;
-use tempfile::TempDir;
 use log;
 use crate::common::config::{INVALID_PAGE_ID};
-use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_iterator::TableIterator;
 
 #[derive(Debug, Clone)]
@@ -310,7 +306,7 @@ impl TransactionalTableHeap {
         //     .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
         // Get current version for visibility check
-        let (mut current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
+        let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
 
         // Visibility checks
         if current_meta.get_creator_txn_id() != txn.get_transaction_id() && 
@@ -463,7 +459,6 @@ mod tests {
 
         // Create second transaction
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
-        let txn2 = txn_ctx2.get_transaction();
 
         // Update tuple with txn2
         let mut new_tuple = tuple.clone();

@@ -596,7 +596,6 @@ mod tests {
     fn test_table_info_equality() {
         let ctx = TestContext::new("test_table_info_equality");
         let bpm = ctx.bpm();
-        let txn_manager = ctx.txn_manager();
 
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),

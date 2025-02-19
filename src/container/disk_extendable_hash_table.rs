@@ -289,39 +289,6 @@ impl DiskExtendableHashTable {
         }
     }
 
-    fn create_bucket_page(
-        &self,
-        directory_index: usize,
-        bucket_index: usize,
-    ) -> Option<PageGuard<ExtendableHTableBucketPage>> {
-        // Get directory page
-        let directory_page = self.get_directory_page(directory_index)?;
-
-        // Create new bucket page
-        let bucket_page = self.bpm.new_page::<ExtendableHTableBucketPage>()?;
-        let bucket_page_id = bucket_page.read().get_page_id();
-        debug!("Created new bucket page with ID {}", bucket_page_id);
-
-        // Initialize bucket page
-        {
-            let mut bucket = bucket_page.write();
-            bucket.init(self.bucket_max_size as u16);
-            bucket.set_local_depth(0);
-        }
-
-        // Update directory to point to new bucket page
-        {
-            let mut directory = directory_page.write();
-            directory.set_bucket_page_id(bucket_index, bucket_page_id);
-            debug!(
-                "Updated directory to point bucket index {} to new page {}",
-                bucket_index, bucket_page_id
-            );
-        }
-
-        Some(bucket_page)
-    }
-
     // New method: split_bucket_internal performs directory updates and re-distribution
     fn split_bucket_internal(&mut self, directory_index: usize, bucket_index: usize) -> bool {
         debug!(
@@ -370,7 +337,7 @@ impl DiskExtendableHashTable {
             let mut directory = directory_page.write();
             
             // Use the new directory page method to handle the split
-            if let Some(split_bucket_index) = directory.update_directory_for_split(bucket_index, new_bucket_page_id) {
+            if let Some(_split_bucket_index) = directory.update_directory_for_split(bucket_index, new_bucket_page_id) {
                 // Redistribute entries between old and new buckets
                 let mut old_bucket = old_bucket_page.write();
                 let mut new_bucket = new_bucket_page.write();

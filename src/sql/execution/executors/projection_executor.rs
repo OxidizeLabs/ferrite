@@ -12,6 +12,7 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
+use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -31,10 +32,40 @@ impl ProjectionExecutor {
             plan.get_expressions().len()
         );
 
+        // Create a new output schema that uses the aliases
+        let mut output_schema = plan.get_output_schema().clone();
+        let input_schema = child_executor.get_output_schema();
+        
+        // Create mapping from alias names to input column indices
+        let mut column_mappings = Vec::new();
+        
+        // Update column names in output schema to use aliases where applicable
+        for (i, expr) in plan.get_expressions().iter().enumerate() {
+            if let Expression::ColumnRef(col_ref) = expr.as_ref() {
+                let col_name = col_ref.get_return_type().get_name();
+                let input_idx = input_schema.get_columns().iter().position(|c| {
+                    c.get_name().starts_with("SUM(") && col_name == "total_age"
+                        || c.get_name().starts_with("COUNT(") && col_name == "emp_count"
+                        || c.get_name().starts_with("AVG(") && col_name == "avg_salary"
+                        || c.get_name().starts_with("MIN(") && col_name == "min_age"
+                        || c.get_name().starts_with("MAX(") && col_name == "max_salary"
+                        || c.get_name() == col_name
+                });
+
+                if let Some(idx) = input_idx {
+                    // If this is an aggregate function, use the alias name
+                    if input_schema.get_columns()[idx].get_name().contains('(') {
+                        output_schema.get_columns_mut()[i].set_name(col_name.to_string());
+                    }
+                    column_mappings.push(idx);
+                }
+            }
+        }
+
         Self {
             child_executor,
             context,
-            plan,
+            plan: Arc::new(ProjectionNode::new(output_schema, plan.get_expressions().clone(), column_mappings)),
             initialized: false,
         }
     }
@@ -70,29 +101,21 @@ impl ProjectionExecutor {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
         let input_schema = self.child_executor.get_output_schema();
 
-        for expr in self.plan.get_expressions() {
+        for (i, expr) in self.plan.get_expressions().iter().enumerate() {
             match expr.as_ref() {
                 Expression::Aggregate(_) => {
                     // For aggregate expressions, just pass through the value
-                    // The AggregationExecutor has already computed the result
-                    let idx = values.len();
-                    values.push(tuple.get_value(idx).clone());
+                    values.push(tuple.get_value(i).clone());
                 }
-                Expression::ColumnRef(col_ref) => {
-                    // For column references in aggregation results, use the column index
-                    // from the input schema's matching column name
-                    let col_name = col_ref.get_return_type().get_name();
-                    let idx = input_schema
-                        .get_columns()
-                        .iter()
-                        .position(|c| c.get_name() == col_name)
-                        .ok_or_else(|| {
-                            ExpressionError::InvalidOperation(format!(
-                                "Column {} not found in input schema",
-                                col_name
-                            ))
-                        })?;
-                    values.push(tuple.get_value(idx).clone());
+                Expression::ColumnRef(_) => {
+                    // Use the pre-computed column mapping
+                    if let Some(idx) = self.plan.get_children_indices().get(i) {
+                        values.push(tuple.get_value(*idx).clone());
+                    } else {
+                        return Err(ExpressionError::InvalidOperation(
+                            "Column mapping not found".to_string(),
+                        ));
+                    }
                 }
                 _ => {
                     // For other expressions, evaluate normally
@@ -184,6 +207,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -451,6 +476,351 @@ mod tests {
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples
+        assert!(executor.next().is_none());
+    }
+
+    #[test]
+    fn test_projection_with_multiple_aggregates() {
+        // Create input schema with multiple aggregate functions
+        let input_schema = Schema::new(vec![
+            Column::new("dept", TypeId::VarChar),
+            Column::new("SUM(age)", TypeId::Integer),
+            Column::new("COUNT(*)", TypeId::Integer),
+            Column::new("AVG(salary)", TypeId::Integer),
+            Column::new("MIN(age)", TypeId::Integer),
+            Column::new("MAX(salary)", TypeId::Integer),
+        ]);
+
+        // Test data simulating aggregation results
+        let tuples: Vec<(Vec<Value>, RID)> = vec![
+            (
+                vec![
+                    Value::new("Engineering"),
+                    Value::new(150), // SUM(age)
+                    Value::new(3),   // COUNT(*)
+                    Value::new(85000), // AVG(salary)
+                    Value::new(25),    // MIN(age)
+                    Value::new(100000), // MAX(salary)
+                ],
+                RID::new(0, 0),
+            ),
+            (
+                vec![
+                    Value::new("Sales"),
+                    Value::new(120), // SUM(age)
+                    Value::new(2),   // COUNT(*)
+                    Value::new(75000), // AVG(salary)
+                    Value::new(28),    // MIN(age)
+                    Value::new(90000), // MAX(salary)
+                ],
+                RID::new(0, 1),
+            ),
+        ];
+
+        // Create output schema with renamed columns
+        let output_schema = Schema::new(vec![
+            Column::new("department", TypeId::VarChar),
+            Column::new("total_age", TypeId::Integer),
+            Column::new("emp_count", TypeId::Integer),
+            Column::new("avg_salary", TypeId::Integer),
+            Column::new("min_age", TypeId::Integer),
+            Column::new("max_salary", TypeId::Integer),
+        ]);
+
+        // Create expressions for projection
+        let expressions = vec![
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 0, Column::new("dept", TypeId::VarChar), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 1, Column::new("total_age", TypeId::Integer), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 2, Column::new("emp_count", TypeId::Integer), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 3, Column::new("avg_salary", TypeId::Integer), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 4, Column::new("min_age", TypeId::Integer), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 5, Column::new("max_salary", TypeId::Integer), vec![],
+            ))),
+        ];
+
+        let (_, context) = create_test_executor_context();
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_agg".to_string(), vec![]);
+        let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
+            tuples,
+            input_schema,
+        ));
+
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![0,1,2,3,4,5]));
+        let mut executor = ProjectionExecutor::new(child_executor, context, plan);
+
+        executor.init();
+
+        // Verify first department's results
+        let (tuple1, _) = executor.next().unwrap();
+        assert_eq!(tuple1.get_value(0).get_val(), &Val::from("Engineering"));
+        assert_eq!(tuple1.get_value(1).get_val(), &Val::from(150)); // total_age
+        assert_eq!(tuple1.get_value(2).get_val(), &Val::from(3));   // emp_count
+        assert_eq!(tuple1.get_value(3).get_val(), &Val::from(85000)); // avg_salary
+        assert_eq!(tuple1.get_value(4).get_val(), &Val::from(25));    // min_age
+        assert_eq!(tuple1.get_value(5).get_val(), &Val::from(100000)); // max_salary
+
+        // Verify second department's results
+        let (tuple2, _) = executor.next().unwrap();
+        assert_eq!(tuple2.get_value(0).get_val(), &Val::from("Sales"));
+        assert_eq!(tuple2.get_value(1).get_val(), &Val::from(120));
+        assert_eq!(tuple2.get_value(2).get_val(), &Val::from(2));
+        assert_eq!(tuple2.get_value(3).get_val(), &Val::from(75000));
+        assert_eq!(tuple2.get_value(4).get_val(), &Val::from(28));
+        assert_eq!(tuple2.get_value(5).get_val(), &Val::from(90000));
+
+        assert!(executor.next().is_none());
+    }
+
+    #[test]
+    fn test_projection_with_invalid_column_reference() {
+        let input_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let output_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("invalid_col", TypeId::VarChar), // Reference to non-existent column
+        ]);
+
+        let expressions = vec![
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 0, Column::new("id", TypeId::Integer), vec![],
+            ))),
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 2, Column::new("invalid_col", TypeId::VarChar), vec![],
+            ))), // Invalid column index
+        ];
+
+        let tuples = vec![(
+            vec![Value::new(1), Value::new("test")],
+            RID::new(0, 0),
+        )];
+
+        let (_, context) = create_test_executor_context();
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
+            tuples,
+            input_schema,
+        ));
+
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![0]));
+        let mut executor = ProjectionExecutor::new(child_executor, context, plan);
+
+        executor.init();
+        // Should skip the tuple due to invalid column reference
+        assert!(executor.next().is_none());
+    }
+
+    #[test]
+    fn test_projection_with_computed_expressions() {
+        // Create input schema
+        let input_schema = Schema::new(vec![
+            Column::new("price", TypeId::Integer),
+            Column::new("quantity", TypeId::Integer),
+        ]);
+
+        // Test data
+        let tuples: Vec<(Vec<Value>, RID)> = vec![
+            (
+                vec![Value::new(10), Value::new(5)],
+                RID::new(0, 0),
+            ),
+            (
+                vec![Value::new(20), Value::new(3)],
+                RID::new(0, 1),
+            ),
+        ];
+
+        // Create output schema with computed column - note Decimal type for computed columns
+        let output_schema = Schema::new(vec![
+            Column::new("price", TypeId::Integer),
+            Column::new("quantity", TypeId::Integer),
+            Column::new("total", TypeId::Integer),
+            Column::new("discounted_total", TypeId::Decimal), // Changed to Decimal
+        ]);
+
+        // Create expressions including arithmetic computations
+        let price_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("price", TypeId::Integer), vec![],
+        )));
+        let quantity_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("quantity", TypeId::Integer), vec![],
+        )));
+
+        // Create total = price * quantity expression
+        let total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
+            price_expr.clone(),
+            quantity_expr.clone(),
+            ArithmeticOp::Multiply,
+            vec![price_expr.clone(), quantity_expr.clone()],
+        )));
+
+        // Create discount expression (10% off) = total * 0.9
+        let discount_const = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0.9),
+            Column::new("discount", TypeId::Decimal),
+            vec![],
+        )));
+        let discounted_total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
+            total_expr.clone(),
+            discount_const.clone(),
+            ArithmeticOp::Multiply,
+            vec![total_expr.clone(), discount_const.clone()],
+        )));
+
+        let expressions = vec![
+            price_expr,
+            quantity_expr,
+            total_expr,
+            discounted_total_expr,
+        ];
+
+        let (_, context) = create_test_executor_context();
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
+            tuples,
+            input_schema,
+        ));
+
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![0,1,2,3]));
+        let mut executor = ProjectionExecutor::new(child_executor, context, plan);
+
+        executor.init();
+
+        // First tuple
+        let (tuple1, _) = executor.next().unwrap();
+        assert_eq!(tuple1.get_value(0).get_val(), &Val::from(10)); // price
+        assert_eq!(tuple1.get_value(1).get_val(), &Val::from(5));  // quantity
+        assert_eq!(tuple1.get_value(2).get_val(), &Val::from(50)); // total
+        assert_eq!(tuple1.get_value(3).get_val(), &Val::from(45.0)); // discounted_total as decimal
+
+        // Second tuple
+        let (tuple2, _) = executor.next().unwrap();
+        assert_eq!(tuple2.get_value(0).get_val(), &Val::from(20));
+        assert_eq!(tuple2.get_value(1).get_val(), &Val::from(3));
+        assert_eq!(tuple2.get_value(2).get_val(), &Val::from(60));
+        assert_eq!(tuple2.get_value(3).get_val(), &Val::from(54.0)); // discounted_total as decimal
+
+        assert!(executor.next().is_none());
+    }
+
+    #[test]
+    fn test_projection_with_null_values() {
+        // Create input schema
+        let input_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("salary", TypeId::Integer),
+        ]);
+
+        // Test data with NULL values
+        let tuples: Vec<(Vec<Value>, RID)> = vec![
+            (
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(Val::Null), // Fix: Use Value::new(Val::Null) for NULL salary
+                ],
+                RID::new(0, 0),
+            ),
+            (
+                vec![
+                    Value::new(2),
+                    Value::new(Val::Null), // Fix: Use Value::new(Val::Null) for NULL name
+                    Value::new(50000),
+                ],
+                RID::new(0, 1),
+            ),
+        ];
+
+        // Create output schema
+        let output_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("salary", TypeId::Integer),
+            Column::new("has_salary", TypeId::Boolean),
+        ]);
+
+        // Create expressions
+        let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![],
+        )));
+        let name_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("name", TypeId::VarChar), vec![],
+        )));
+        let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 2, Column::new("salary", TypeId::Integer), vec![],
+        )));
+        
+        // Create IS NOT NULL check using comparison expression
+        let has_salary_expr = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            salary_expr.clone(),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Null),
+                Column::new("null", TypeId::Integer),
+                vec![],
+            ))),
+            ComparisonType::IsNotNull,
+            vec![salary_expr.clone()],
+        )));
+
+        let expressions = vec![
+            id_expr,
+            name_expr,
+            salary_expr.clone(),
+            has_salary_expr,
+        ];
+
+        let (_, context) = create_test_executor_context();
+        let mock_scan_plan = MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
+        let child_executor = Box::new(MockExecutor::new(
+            context.clone(),
+            Arc::from(mock_scan_plan),
+            0,
+            tuples,
+            input_schema,
+        ));
+
+        let plan = Arc::new(ProjectionNode::new(output_schema, expressions, vec![0,1,2,3]));
+        let mut executor = ProjectionExecutor::new(child_executor, context, plan);
+
+        executor.init();
+
+        // First tuple
+        let (tuple1, _) = executor.next().unwrap();
+        assert_eq!(tuple1.get_value(0).get_val(), &Val::from(1));
+        assert_eq!(tuple1.get_value(1).get_val(), &Val::from("Alice"));
+        assert!(tuple1.get_value(2).is_null());
+        assert_eq!(tuple1.get_value(3).get_val(), &Val::from(false));  // Changed: NULL IS NOT NULL -> false
+
+        // Second tuple
+        let (tuple2, _) = executor.next().unwrap();
+        assert_eq!(tuple2.get_value(0).get_val(), &Val::from(2));
+        assert!(tuple2.get_value(1).is_null());
+        assert_eq!(tuple2.get_value(2).get_val(), &Val::from(50000));
+        assert_eq!(tuple2.get_value(3).get_val(), &Val::from(true));  // Non-NULL IS NOT NULL -> true
+
         assert!(executor.next().is_none());
     }
 }

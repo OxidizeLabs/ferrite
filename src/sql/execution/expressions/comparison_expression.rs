@@ -18,6 +18,7 @@ pub enum ComparisonType {
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
+    IsNotNull,
 }
 
 impl Display for ComparisonType {
@@ -29,6 +30,7 @@ impl Display for ComparisonType {
             ComparisonType::LessThanOrEqual => write!(f, "<="),
             ComparisonType::GreaterThan => write!(f, ">"),
             ComparisonType::GreaterThanOrEqual => write!(f, ">="),
+            ComparisonType::IsNotNull => write!(f, "IS NOT NULL"),
         }
     }
 }
@@ -79,6 +81,11 @@ impl ComparisonExpression {
             ComparisonType::LessThanOrEqual => Ok(lhs.compare_less_than_equals(rhs)),
             ComparisonType::GreaterThan => Ok(lhs.compare_greater_than(rhs)),
             ComparisonType::GreaterThanOrEqual => Ok(lhs.compare_greater_than_equals(rhs)),
+            ComparisonType::IsNotNull => Ok(if lhs.is_null() { 
+                CmpBool::CmpFalse 
+            } else { 
+                CmpBool::CmpTrue 
+            }),
         }
     }
 }
@@ -182,6 +189,7 @@ impl Display for ComparisonExpression {
             ComparisonType::LessThanOrEqual => "<=",
             ComparisonType::GreaterThan => ">",
             ComparisonType::GreaterThanOrEqual => ">=",
+            ComparisonType::IsNotNull => "IS NOT NULL",
         };
 
         if f.alternate() {

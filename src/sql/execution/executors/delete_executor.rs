@@ -15,10 +15,7 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::lock_manager::LockManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::common::config::Timestamp;
-use crate::concurrency::transaction::IsolationLevel;
-use crate::types_db::value::{Val, Value};
-use crate::storage::table::tuple::TupleMeta;
+
 
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -146,7 +143,7 @@ impl AbstractExecutor for DeleteExecutor {
                 // Scan the table to find the matching tuple
                 let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
 
-                while let Some((tuple_meta, tuple)) = table_iter.next() {
+                while let Some((_tuple_meta, tuple)) = table_iter.next() {
                     // Store the current ID and RID before any mutable borrows
                     let current_id = tuple.get_value(0).get_val().clone();
                     let rid = tuple.get_rid();

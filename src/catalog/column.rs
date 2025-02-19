@@ -18,7 +18,7 @@ impl Column {
             TypeId::SmallInt => 2,
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
-            TypeId::VarChar => length,
+            TypeId::VarChar | TypeId::Char => length,
             TypeId::Vector => length * size_of::<f64>(),
             _ => panic!("Cannot get size of invalid type"),
         }
@@ -35,7 +35,7 @@ impl Column {
 
     pub fn new_varlen(column_name: &str, column_type: TypeId, length: usize) -> Self {
         assert!(
-            matches!(column_type, TypeId::VarChar | TypeId::Vector),
+            matches!(column_type, TypeId::VarChar | TypeId::Vector | TypeId::Char),
             "Wrong constructor for fixed-size type."
         );
         Self {
@@ -84,8 +84,8 @@ impl Column {
         self.column_type != TypeId::VarChar
     }
 
-    pub fn set_name(&mut self, new_name: &str) {
-        self.column_name = new_name.to_string();
+    pub fn set_name(&mut self, name: String) {
+        self.column_name = name;
     }
 }
 

@@ -10,7 +10,6 @@ use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
-use crate::sql::planner::planner::{LogicalPlan, LogicalToPhysical, QueryPlanner};
 use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
@@ -19,6 +18,8 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
+use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
+use crate::sql::planner::query_planner::QueryPlanner;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -237,7 +238,7 @@ impl ExecutionEngine {
         Ok(())
     }
 
-    pub fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
+    fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Committing transaction {}", txn_ctx.get_transaction_id());
 
         // Get transaction manager
@@ -508,6 +509,257 @@ mod tests {
                 row_count,
                 expected_groups,
                 "Incorrect number of groups for query: {}",
+                sql
+            );
+        }
+    }
+
+    #[test]
+    fn test_group_by_aggregates() {
+        let mut ctx = TestContext::new("test_group_by_aggregates");
+
+        // Create test table
+        let table_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+            Column::new("salary", TypeId::BigInt),
+            Column::new("department", TypeId::VarChar),
+        ]);
+
+        let table_name = "employees";
+        ctx.create_test_table(table_name, table_schema.clone()).unwrap();
+
+        // Insert test data
+        let test_data = vec![
+            vec![Value::new("Alice"), Value::new(25), Value::new(50000i64), Value::new("Engineering")],
+            vec![Value::new("Alice"), Value::new(25), Value::new(52000i64), Value::new("Engineering")],
+            vec![Value::new("Bob"), Value::new(30), Value::new(60000i64), Value::new("Sales")],
+            vec![Value::new("Bob"), Value::new(30), Value::new(65000i64), Value::new("Sales")],
+            vec![Value::new("Charlie"), Value::new(35), Value::new(70000i64), Value::new("Engineering")],
+            vec![Value::new("David"), Value::new(40), Value::new(80000i64), Value::new("Sales")],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema).unwrap();
+
+        let test_cases = vec![
+            // Basic GROUP BY with multiple aggregates
+            (
+                "SELECT name, COUNT(*) as count, SUM(salary) as total_salary FROM employees GROUP BY name",
+                vec!["name", "count", "total_salary"],
+                4, // Alice, Bob, Charlie, David
+            ),
+            // GROUP BY with AVG
+            (
+                "SELECT department, AVG(salary) as avg_salary FROM employees GROUP BY department",
+                vec!["department", "avg_salary"],
+                2, // Engineering, Sales
+            ),
+            // GROUP BY with MIN/MAX
+            (
+                "SELECT department, MIN(age) as min_age, MAX(salary) as max_salary FROM employees GROUP BY department",
+                vec!["department", "min_age", "max_salary"],
+                2,
+            ),
+            // Multiple GROUP BY columns
+            (
+                "SELECT department, age, COUNT(*) as count FROM employees GROUP BY department, age",
+                vec!["department", "age", "count"],
+                5, // Unique department-age combinations
+            ),
+            // GROUP BY with HAVING clause
+            (
+                "SELECT department, COUNT(*) as emp_count FROM employees GROUP BY department HAVING COUNT(*) > 2",
+                vec!["department", "emp_count"],
+                2,
+            ),
+        ];
+
+        for (sql, expected_columns, expected_groups) in test_cases {
+            let mut writer = TestResultWriter::new();
+            let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+            
+            assert!(success, "Query execution failed for: {}", sql);
+
+            // Verify column names
+            let schema = writer.get_schema();
+            assert_eq!(
+                schema.get_columns().len(),
+                expected_columns.len(),
+                "Incorrect number of columns for query: {}",
+                sql
+            );
+            
+            for (i, expected_name) in expected_columns.iter().enumerate() {
+                assert_eq!(
+                    schema.get_columns()[i].get_name(),
+                    *expected_name,
+                    "Column name mismatch for query: {}",
+                    sql
+                );
+            }
+
+            // Verify number of result rows
+            assert_eq!(
+                writer.get_rows().len(),
+                expected_groups,
+                "Incorrect number of groups for query: {}",
+                sql
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_queries() {
+        let mut ctx = TestContext::new("test_simple_queries");
+
+        // Create test table
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("active", TypeId::Boolean),
+        ]);
+
+        let table_name = "users";
+        ctx.create_test_table(table_name, table_schema.clone()).unwrap();
+
+        // Insert test data
+        let test_data = vec![
+            vec![Value::new(1), Value::new("Alice"), Value::new(true)],
+            vec![Value::new(2), Value::new("Bob"), Value::new(true)],
+            vec![Value::new(3), Value::new("Charlie"), Value::new(false)],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema).unwrap();
+
+        // Split test cases into separate functions to isolate any potential stack issues
+        test_simple_select(&mut ctx);
+        test_where_clause(&mut ctx);
+        test_limit_clause(&mut ctx);
+    }
+
+    fn test_simple_select(ctx: &mut TestContext) {
+        let mut writer = TestResultWriter::new();
+        let sql = "SELECT * FROM users";
+        let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+        
+        assert!(success, "Query execution failed for: {}", sql);
+        assert_eq!(writer.get_rows().len(), 3, "Incorrect number of rows for SELECT *");
+        
+        // Verify all columns are present
+        let schema = writer.get_schema();
+        assert_eq!(schema.get_columns().len(), 3, "Incorrect number of columns");
+        assert_eq!(schema.get_columns()[0].get_name(), "id");
+        assert_eq!(schema.get_columns()[1].get_name(), "name");
+        assert_eq!(schema.get_columns()[2].get_name(), "active");
+    }
+
+    fn test_where_clause(ctx: &mut TestContext) {
+        let test_cases = vec![
+            (
+                "SELECT name FROM users WHERE active = true",
+                2,
+                vec!["Alice", "Bob"],
+            ),
+            (
+                "SELECT id FROM users WHERE id > 1",
+                2,
+                vec!["2", "3"],
+            ),
+        ];
+
+        for (sql, expected_count, expected_values) in test_cases {
+            let mut writer = TestResultWriter::new();
+            let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+            
+            assert!(success, "Query execution failed for: {}", sql);
+            assert_eq!(
+                writer.get_rows().len(),
+                expected_count,
+                "Incorrect number of rows for query: {}",
+                sql
+            );
+
+            // Verify the values if needed
+            let actual_values: Vec<String> = writer.get_rows()
+                .iter()
+                .map(|row| row[0].to_string())
+                .collect();
+            
+            assert_eq!(
+                actual_values, 
+                expected_values,
+                "Incorrect values returned for query: {}",
+                sql
+            );
+        }
+    }
+
+    fn test_limit_clause(ctx: &mut TestContext) {
+        let test_cases = vec![
+            ("SELECT name FROM users LIMIT 2", 2),
+            ("SELECT name FROM users LIMIT 1", 1),
+            ("SELECT name FROM users LIMIT 5", 3), // Should return all rows since there are only 3
+        ];
+
+        for (sql, expected_count) in test_cases {
+            let mut writer = TestResultWriter::new();
+            let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+            
+            assert!(success, "Query execution failed for: {}", sql);
+            assert_eq!(
+                writer.get_rows().len(),
+                expected_count,
+                "Incorrect number of rows for query: {}",
+                sql
+            );
+        }
+    }
+
+    #[test]
+    fn test_order_by() {
+        let mut ctx = TestContext::new("test_order_by");
+
+        // Create test table
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let table_name = "sorted_users";
+        ctx.create_test_table(table_name, table_schema.clone()).unwrap();
+
+        // Insert test data
+        let test_data = vec![
+            vec![Value::new(1), Value::new("Charlie")],
+            vec![Value::new(2), Value::new("Alice")],
+            vec![Value::new(3), Value::new("Bob")],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema).unwrap();
+
+        let test_cases = vec![
+            (
+                "SELECT name FROM sorted_users ORDER BY name ASC",
+                vec!["Alice", "Bob", "Charlie"],
+            ),
+            (
+                "SELECT name FROM sorted_users ORDER BY id DESC",
+                vec!["Bob", "Alice", "Charlie"],
+            ),
+        ];
+
+        for (sql, expected_order) in test_cases {
+            let mut writer = TestResultWriter::new();
+            let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+            
+            assert!(success, "Query execution failed for: {}", sql);
+            
+            let actual_values: Vec<String> = writer.get_rows()
+                .iter()
+                .map(|row| row[0].to_string())
+                .collect();
+            
+            assert_eq!(
+                actual_values,
+                expected_order,
+                "Incorrect sort order for query: {}",
                 sql
             );
         }

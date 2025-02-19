@@ -8,8 +8,6 @@ use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;
-use crate::concurrency::watermark::Watermark;
-use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// An iterator over the tuples in a table.
@@ -278,7 +276,6 @@ impl Iterator for TableIterator {
                 self.table_heap.get_table_heap().get_tuple(self.current_rid).ok()
             };
 
-            let current_rid = self.current_rid;
             self.advance();
 
             if let Some(tuple) = result {
@@ -299,15 +296,12 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanType};
-    use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::TempDir;
 
     /// Helper struct for test setup and common operations

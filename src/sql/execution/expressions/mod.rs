@@ -9,3 +9,5 @@ pub mod mock_expression;
 pub mod string_expression;
 pub mod aggregate_expression;
 pub mod window_expression;
+pub mod cast_expression;
+pub mod case_expression;

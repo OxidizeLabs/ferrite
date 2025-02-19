@@ -152,7 +152,6 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::index::index::IndexType;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use std::collections::HashMap;
@@ -240,21 +239,6 @@ mod tests {
         )
     }
 
-    fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
-        let ctx = TestContext::new("projection_test");
-        let bpm = ctx.bpm();
-        let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
-        let transaction_context = ctx.transaction_context.clone();
-
-        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
-            bpm,
-            catalog,
-            transaction_context,
-        )));
-
-        execution_context
-    }
-
     #[test]
     fn test_create_table_basic() {
         let test_context = TestContext::new("test_create_table_basic");
@@ -273,7 +257,6 @@ mod tests {
             catalog_guard.create_table("test_table".to_string(), schema.clone());
         }
 
-        let key_attrs = vec![0];
         let plan = Arc::new(CreateTablePlanNode::new(
             schema.clone(),
             "test_table".to_string(),

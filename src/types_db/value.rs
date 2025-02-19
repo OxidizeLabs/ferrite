@@ -253,6 +253,41 @@ impl Value {
             _ => Value::new(Val::Null),
         }
     }
+
+    /// Attempts to cast this value to the specified type
+    pub fn cast_to(&self, target_type: TypeId) -> Result<Value, String> {
+        // If types are the same, return clone
+        if self.type_id_ == target_type {
+            return Ok(self.clone());
+        }
+
+        // Handle NULL values
+        if self.is_null() {
+            return Ok(Value::new_with_type(Val::Null, target_type));
+        }
+
+        match (&self.value_, target_type) {
+            // Numeric conversions
+            (Val::Integer(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
+            (Val::Integer(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
+            (Val::BigInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
+            (Val::BigInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
+            (Val::Decimal(f), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*f as i32), target_type)),
+            (Val::Decimal(f), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type)),
+            (Val::SmallInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
+            (Val::TinyInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
+            
+            // String conversions
+            (Val::VarLen(s), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type)),
+            (Val::ConstLen(s), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type)),
+            
+            // Same type (should be handled by first check, but just in case)
+            (val, _) if self.type_id_ == target_type => Ok(Value::new_with_type(val.clone(), target_type)),
+            
+            // Invalid conversions
+            _ => Err(format!("Cannot cast from {:?} to {:?}", self.type_id_, target_type))
+        }
+    }
 }
 
 impl Type for Value {
@@ -1375,5 +1410,60 @@ mod edge_cases {
         let empty_str1 = Value::new("");
         let empty_str2 = Value::new("");
         assert_eq!(empty_str1.compare_equals(&empty_str2), CmpBool::CmpTrue);
+    }
+}
+
+#[cfg(test)]
+mod cast_tests {
+    use super::*;
+
+    #[test]
+    fn test_numeric_casts() {
+        let int_val = Value::new(42);
+        let big_val = int_val.cast_to(TypeId::BigInt).unwrap();
+        let dec_val = int_val.cast_to(TypeId::Decimal).unwrap();
+
+        assert_eq!(big_val.get_type_id(), TypeId::BigInt);
+        assert_eq!(dec_val.get_type_id(), TypeId::Decimal);
+        
+        match big_val.get_val() {
+            Val::BigInt(i) => assert_eq!(*i, 42i64),
+            _ => panic!("Expected BigInt"),
+        }
+        
+        match dec_val.get_val() {
+            Val::Decimal(f) => assert_eq!(*f, 42.0),
+            _ => panic!("Expected Decimal"),
+        }
+    }
+
+    #[test]
+    fn test_string_casts() {
+        let var_val = Value::new("test");
+        let const_val = var_val.cast_to(TypeId::Char).unwrap();
+        
+        assert_eq!(const_val.get_type_id(), TypeId::Char);
+        match const_val.get_val() {
+            Val::ConstLen(s) => assert_eq!(s.as_str(), "test"),
+            _ => panic!("Expected ConstLen"),
+        }
+    }
+
+    #[test]
+    fn test_null_casts() {
+        let null_val = Value::new(Val::Null);
+        let cast_null = null_val.cast_to(TypeId::Integer).unwrap();
+        
+        assert!(cast_null.is_null());
+        assert_eq!(cast_null.get_type_id(), TypeId::Integer);
+    }
+
+    #[test]
+    fn test_invalid_casts() {
+        let int_val = Value::new(42);
+        assert!(int_val.cast_to(TypeId::Boolean).is_err());
+        
+        let str_val = Value::new("test");
+        assert!(str_val.cast_to(TypeId::Integer).is_err());
     }
 }

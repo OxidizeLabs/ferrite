@@ -176,8 +176,14 @@ pub enum ExpressionError {
     InvalidColumnIndex(usize),
     #[error("Invalid Column Reference error: {0}")]
     InvalidColumnReference(String),
-    #[error("Type mismatch error")]
+    #[error("TypeMismatch")]
     TypeMismatch { expected: TypeId, actual: TypeId },
+    #[error("CastError: {0}")]
+    CastError(String),
+    #[error("InvalidCast")]
+    InvalidCast { from: TypeId, to: TypeId },
+    #[error("InvalidType: {0}")]
+    InvalidType(String)
 }
 
 #[derive(Debug, Error)]

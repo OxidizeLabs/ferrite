@@ -1,12 +1,10 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
-use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
-use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error, trace};
@@ -33,7 +31,6 @@ impl SeqScanExecutor {
             let context_guard = context.read();
             let catalog = context_guard.get_catalog();
             let catalog_guard = catalog.read();
-            let txn_ctx = context_guard.get_transaction_context();
 
             // Use table OID to get the table info
             let table_oid = plan.get_table_oid();
@@ -156,7 +153,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use tempfile::TempDir;
-    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
