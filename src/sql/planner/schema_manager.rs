@@ -1,3 +1,4 @@
+use log::debug;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -6,6 +7,7 @@ use crate::types_db::type_id::TypeId;
 use sqlparser::ast::{ColumnDef, DataType, Expr};
 use std::collections::HashSet;
 use std::sync::Arc;
+use log;
 
 /// 2. Responsible for schema-related operations
 pub struct SchemaManager {}
@@ -17,16 +19,21 @@ impl SchemaManager {
 
     pub fn create_aggregation_output_schema(
         &self,
-        group_bys: &[&Expression],
-        aggregates: &[Arc<Expression>],
+        group_by_exprs: &[&Expression],
+        agg_exprs: &[Arc<Expression>],
         has_group_by: bool,
     ) -> Schema {
+        debug!("Creating aggregation schema:");
+        debug!("  Group by expressions: {:?}", group_by_exprs);
+        debug!("  Aggregate expressions: {:?}", agg_exprs);
+        debug!("  Has GROUP BY: {}", has_group_by);
+
         let mut columns = Vec::new();
         let mut seen_columns = HashSet::new();
 
         // Add group by columns first if we have them
         if has_group_by {
-            for expr in group_bys {
+            for expr in group_by_exprs {
                 let col_name = expr.get_return_type().get_name().to_string();
                 if seen_columns.insert(col_name.clone()) {
                     columns.push(expr.get_return_type().clone());
@@ -35,28 +42,13 @@ impl SchemaManager {
         }
 
         // Add aggregate columns
-        for agg_expr in aggregates {
+        for agg_expr in agg_exprs {
             match agg_expr.as_ref() {
                 Expression::Aggregate(agg) => {
-                    let col_name = match agg.get_agg_type() {
-                        AggregationType::CountStar => "COUNT(*)".to_string(),
-                        _ => format!(
-                            "{}({})",
-                            agg.get_agg_type().to_string(),
-                            agg.get_arg().get_return_type().get_name()
-                        ),
-                    };
-
+                    // Use the alias if provided, otherwise generate a name
+                    let col_name = agg.get_return_type().get_name().to_string();
                     if seen_columns.insert(col_name.clone()) {
-                        let col_type = match agg.get_agg_type() {
-                            AggregationType::Count | AggregationType::CountStar => TypeId::BigInt,
-                            AggregationType::Sum => agg.get_arg().get_return_type().get_type(),
-                            AggregationType::Avg => TypeId::Decimal,
-                            AggregationType::Min | AggregationType::Max => {
-                                agg.get_arg().get_return_type().get_type()
-                            }
-                        };
-                        columns.push(Column::new(&col_name, col_type));
+                        columns.push(agg.get_return_type().clone());
                     }
                 }
                 _ => {
