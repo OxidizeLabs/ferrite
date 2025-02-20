@@ -183,4 +183,104 @@ mod unit_tests {
         assert_eq!(default_schema.get_inlined_storage_size(), 0);
         assert!(default_schema.is_inlined());
     }
+
+    #[test]
+    fn test_schema_merge() {
+        let left_columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ];
+        let right_columns = vec![
+            Column::new("age", TypeId::Integer),
+            Column::new("email", TypeId::VarChar),
+        ];
+
+        let left_schema = Schema::new(left_columns);
+        let right_schema = Schema::new(right_columns);
+        let merged_schema = Schema::merge(&left_schema, &right_schema);
+
+        assert_eq!(merged_schema.get_column_count(), 4);
+        assert_eq!(merged_schema.get_column_index("id"), Some(0));
+        assert_eq!(merged_schema.get_column_index("email"), Some(3));
+    }
+
+    #[test]
+    fn test_schema_column_operations() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ];
+        let schema = Schema::new(columns);
+
+        // Test column retrieval
+        assert_eq!(schema.get_column(0).unwrap().get_name(), "id");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "name");
+        assert!(schema.get_column(5).is_none());
+
+        // Test column index lookup
+        assert_eq!(schema.get_column_index("age"), Some(2));
+        assert_eq!(schema.get_column_index("nonexistent"), None);
+
+        // Test inlined status
+        assert!(!schema.is_inlined()); // Because VarChar is not inlined
+        assert_eq!(schema.get_unlined_column_count(), 1); // One VarChar column
+    }
+
+    #[test]
+    fn test_schema_copy() {
+        let original_columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ];
+        let original_schema = Schema::new(original_columns);
+
+        // Copy only id and age columns
+        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+
+        assert_eq!(copied_schema.get_column_count(), 2);
+        assert_eq!(copied_schema.get_column(0).unwrap().get_name(), "id");
+        assert_eq!(copied_schema.get_column(1).unwrap().get_name(), "age");
+    }
+
+    #[test]
+    fn test_schema_display() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ];
+        let schema = Schema::new(columns);
+
+        // Test basic format
+        let basic_format = format!("{}", schema);
+        assert!(basic_format.contains("id"));
+        assert!(basic_format.contains("name"));
+
+        // Test detailed format
+        let detailed_format = format!("{:#}", schema);
+        assert!(detailed_format.contains("NumColumns: 2"));
+        assert!(detailed_format.contains("IsInlined: false"));
+    }
+
+    #[test]
+    fn test_schema_storage_layout() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("flag", TypeId::Boolean),
+            Column::new("name", TypeId::VarChar),
+        ];
+        let schema = Schema::new(columns);
+
+        // Check storage offsets are calculated correctly
+        let columns = schema.get_columns();
+        assert_eq!(columns[0].get_offset(), 0); // id starts at 0
+        assert!(columns[1].get_offset() > columns[0].get_offset()); // flag comes after id
+        assert!(columns[2].get_offset() > columns[1].get_offset()); // name comes after flag
+
+        // Check uninlined columns
+        let uninlined = schema.get_unlined_columns();
+        assert_eq!(uninlined.len(), 1); // Only VarChar is uninlined
+        assert_eq!(uninlined[0], 2); // VarChar is at index 2
+    }
 }
