@@ -2,7 +2,6 @@ use log::debug;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::types_db::type_id::TypeId;
 use sqlparser::ast::{ColumnDef, DataType, Expr};
 use std::collections::HashSet;
@@ -157,5 +156,41 @@ impl SchemaManager {
             },
             _ => Ok(TypeId::Invalid), // Default type for complex expressions
         }
+    }
+
+    pub fn create_join_schema(&self, left_schema: &Schema, right_schema: &Schema) -> Schema {
+        Schema::merge(left_schema, right_schema)
+    }
+
+    pub fn resolve_qualified_column<'a>(
+        &self,
+        table_alias: &str,
+        column_name: &str,
+        left_schema: &'a Schema,
+        right_schema: &'a Schema,
+    ) -> Result<(usize, &'a Column), String> {
+        // Try left schema first
+        for i in 0..left_schema.get_column_count() {
+            let col = left_schema.get_column(i as usize).unwrap();
+            if col.get_name() == column_name {
+                return Ok((i as usize, col));
+            }
+        }
+
+        // Then try right schema
+        for i in 0..right_schema.get_column_count() {
+            let col = right_schema.get_column(i as usize).unwrap();
+            if col.get_name() == column_name {
+                return Ok((
+                    (left_schema.get_column_count() + i) as usize,
+                    col
+                ));
+            }
+        }
+
+        Err(format!(
+            "Column {}.{} not found in schema",
+            table_alias, column_name
+        ))
     }
 }

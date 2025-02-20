@@ -150,6 +150,13 @@ impl NestedIndexJoinExecutor {
             })
             .expect("No suitable index found for join");
 
+        // Create a dummy executor for the index scan
+        let dummy_executor = Box::new(DummyExecutor {
+            initialized: false,
+            schema: right_schema.clone(),
+            context: self.context.clone(),
+        });
+
         // Create and execute index scan
         let index_scan_plan = Arc::new(IndexScanNode::new(
             right_schema,
@@ -160,8 +167,13 @@ impl NestedIndexJoinExecutor {
             predicate_keys,
         ));
 
-        // Store the new executor and get first result
-        let mut index_scan_executor = IndexScanExecutor::new(self.context.clone(), index_scan_plan);
+        // Create new executor with dummy child
+        let mut index_scan_executor = IndexScanExecutor::new(
+            dummy_executor,
+            self.context.clone(), 
+            index_scan_plan
+        );
+        
         index_scan_executor.init();
         self.current_index_executor = Some(index_scan_executor);
 
@@ -169,6 +181,31 @@ impl NestedIndexJoinExecutor {
         self.current_index_executor
             .as_mut()
             .and_then(|exec| exec.next())
+    }
+}
+
+// Add DummyExecutor struct for index scan
+struct DummyExecutor {
+    initialized: bool,
+    schema: Schema,
+    context: Arc<RwLock<ExecutionContext>>,
+}
+
+impl AbstractExecutor for DummyExecutor {
+    fn init(&mut self) {
+        self.initialized = true;
+    }
+
+    fn next(&mut self) -> Option<(Tuple, RID)> {
+        None
+    }
+
+    fn get_output_schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
+        self.context.clone()
     }
 }
 
