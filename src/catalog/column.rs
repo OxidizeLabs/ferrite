@@ -20,8 +20,7 @@ impl Column {
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar | TypeId::Char => length,
             TypeId::Vector => length * size_of::<f64>(),
-            TypeId::Invalid => 0,
-            _ => panic!("Cannot get size of invalid type"),
+            TypeId::Invalid => 0
         }
     }
 
@@ -406,7 +405,7 @@ mod unit_tests {
             TypeId::BigInt
         ];
         
-        let mut col = Column::new("test", types[0]);
+        let col = Column::new("test", types[0]);
         let mut last_size = col.get_storage_size();
         
         // Verify size increases as we move to larger types
