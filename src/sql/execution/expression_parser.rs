@@ -21,9 +21,10 @@ use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
-use sqlparser::ast::{BinaryOperator, DuplicateTreatment, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, Select, SelectItem, TableFactor, UnaryOperator};
+use sqlparser::ast::{BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, Select, SelectItem, TableFactor, UnaryOperator};
 use std::sync::Arc;
 use log::debug;
+use crate::common::config::TableOidT;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -733,22 +734,48 @@ impl ExpressionParser {
         }
     }
 
-    fn get_single_argument<'a>(&self, func: &'a Function) -> Result<&'a Expr, String> {
-        match &func.args {
-            FunctionArguments::List(list) => {
-                if list.args.len() != 1 {
-                    return Err(format!(
-                        "Function {} requires exactly one argument",
-                        func.name
-                    ));
+    pub fn get_table_schema(&self, table_name: &str) -> Result<Schema, String> {
+        let catalog = self.catalog.read();
+        catalog
+            .get_table_schema(table_name)
+            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))
+    }
+
+    pub fn get_table_oid(&self, table_name: &str) -> Result<TableOidT, String> {
+        let catalog = self.catalog.read();
+        catalog
+            .get_table(table_name)
+            .map(|table| table.get_table_oidt())
+            .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))
+    }
+
+    pub fn parse_join_condition(
+        &self,
+        expr: &Expr,
+        left_schema: &Schema,
+        right_schema: &Schema,
+    ) -> Result<Expression, String> {
+        // Create a combined schema for parsing the join condition
+        let combined_schema = Schema::merge(left_schema, right_schema);
+
+        // Parse the expression using the combined schema
+        let parsed_expr = self.parse_expression(expr, &combined_schema)?;
+
+        // Verify the expression is a valid join condition (should be a comparison)
+        match &parsed_expr {
+            Expression::Comparison(_) => Ok(parsed_expr),
+            Expression::Logic(logic_expr) => {
+                // Allow AND of multiple comparisons
+                let children = logic_expr.get_children();
+                for child in children {
+                    match child.as_ref() {
+                        Expression::Comparison(_) => (),
+                        _ => return Err("Join condition must be a comparison or AND of comparisons".to_string()),
+                    }
                 }
-                match &list.args[0] {
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Ok(expr),
-                    _ => Err("Expected unnamed expression argument".to_string()),
-                }
+                Ok(parsed_expr)
             }
-            FunctionArguments::None => Err("Function requires an argument".to_string()),
-            FunctionArguments::Subquery(_) => Err("Subquery not supported as argument".to_string()),
+            _ => Err("Join condition must be a comparison expression".to_string()),
         }
     }
 }
@@ -771,7 +798,6 @@ mod tests {
     use sqlparser::parser::Parser;
     use std::collections::HashMap;
     use tempfile::TempDir;
-    use crate::sql::planner::query_planner::QueryPlanner;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -823,8 +849,6 @@ mod tests {
                 HashMap::new(),
                 transaction_manager.clone(),
             )));
-
-            let planner = QueryPlanner::new(catalog.clone());
 
             Self {
                 catalog,

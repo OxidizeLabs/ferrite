@@ -648,8 +648,8 @@ impl LogicalPlan {
         right_schema: Schema,
         predicate: Arc<Expression>,
         join_type: JoinOperator,
-        left: Box<LogicalPlan>,
-        right: Box<LogicalPlan>,
+        left_child: Box<LogicalPlan>,
+        right_child: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::NestedLoopJoin {
@@ -658,7 +658,7 @@ impl LogicalPlan {
                 predicate,
                 join_type,
             },
-            vec![left, right],
+            vec![left_child, right_child],
         ))
     }
 
@@ -739,7 +739,6 @@ impl LogicalPlan {
 
     pub fn get_schema(&self) -> Schema {
         match &self.plan_type {
-            // Plans with explicit schemas
             LogicalPlanType::CreateTable { schema, .. } => schema.clone(),
             LogicalPlanType::CreateIndex { .. } => self.children[0].get_schema(),
             LogicalPlanType::MockScan { schema, .. } => schema.clone(),
@@ -750,31 +749,19 @@ impl LogicalPlan {
             LogicalPlanType::Values { schema, .. } => schema.clone(),
             LogicalPlanType::Delete { schema, .. } => schema.clone(),
             LogicalPlanType::Update { schema, .. } => schema.clone(),
-
-            // For joins, combine schemas from both inputs
-            LogicalPlanType::NestedLoopJoin {
-                left_schema,
-                right_schema,
-                ..
-            } => Schema::merge(left_schema, right_schema),
-            LogicalPlanType::NestedIndexJoin {
-                left_schema,
-                right_schema,
-                ..
-            } => Schema::merge(left_schema, right_schema),
-            LogicalPlanType::HashJoin {
-                left_schema,
-                right_schema,
-                ..
-            } => Schema::merge(left_schema, right_schema),
-
-            // Plans that propagate schema from child
+            LogicalPlanType::NestedLoopJoin { left_schema, right_schema, .. } => {
+                Schema::merge(left_schema, right_schema)
+            }
+            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
+                Schema::merge(left_schema, right_schema)
+            }
+            LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
+                Schema::merge(left_schema, right_schema)
+            }
             LogicalPlanType::Filter { .. } => self.children[0].get_schema(),
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
-
-            // Plans that modify schema structure
             LogicalPlanType::Aggregate { schema, .. } => schema.clone(),
             LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
             LogicalPlanType::Window { schema, .. } => schema.clone(),
