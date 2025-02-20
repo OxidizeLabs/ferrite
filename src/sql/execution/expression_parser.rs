@@ -146,6 +146,10 @@ impl ExpressionParser {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
 
+                // Add type checking for operands
+                let left_type = left_expr.get_return_type().get_type();
+                let right_type = right_expr.get_return_type().get_type();
+
                 match op {
                     BinaryOperator::Eq
                     | BinaryOperator::NotEq
@@ -153,6 +157,14 @@ impl ExpressionParser {
                     | BinaryOperator::Lt
                     | BinaryOperator::GtEq
                     | BinaryOperator::LtEq => {
+                        // Check if types are compatible for comparison
+                        if !Self::are_types_comparable(left_type, right_type) {
+                            return Err(format!(
+                                "Cannot compare values of types {:?} and {:?}",
+                                left_type, right_type
+                            ));
+                        }
+
                         let comparison_type = match op {
                             BinaryOperator::Eq => ComparisonType::Equal,
                             BinaryOperator::NotEq => ComparisonType::NotEqual,
@@ -167,7 +179,7 @@ impl ExpressionParser {
                             left_expr.clone(),
                             right_expr.clone(),
                             comparison_type,
-                            vec![left_expr.clone(), right_expr.clone()], // Add both expressions as children
+                            vec![left_expr.clone(), right_expr.clone()],
                         )))
                     }
 
@@ -242,30 +254,32 @@ impl ExpressionParser {
             }
 
             Expr::IsNull(expr) => {
-                let inner_expr = self.parse_expression(expr, schema)?;
-                Ok(Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(inner_expr),
-                    Arc::new(Expression::Constant(ConstantExpression::new(
-                        Value::new(Val::Null),
-                        Column::new("const", TypeId::Invalid),
-                        vec![],
-                    ))),
-                    ComparisonType::Equal,
+                let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
+                let null_const = Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(Val::Null),
+                    Column::new("const", TypeId::Invalid),
                     vec![],
+                )));
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    inner_expr.clone(),
+                    null_const.clone(),
+                    ComparisonType::Equal,
+                    vec![inner_expr, null_const],
                 )))
             }
 
             Expr::IsNotNull(expr) => {
-                let inner_expr = self.parse_expression(expr, schema)?;
-                Ok(Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(inner_expr),
-                    Arc::new(Expression::Constant(ConstantExpression::new(
-                        Value::new(Val::Null),
-                        Column::new("const", TypeId::Invalid),
-                        vec![],
-                    ))),
-                    ComparisonType::NotEqual,
+                let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
+                let null_const = Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(Val::Null),
+                    Column::new("const", TypeId::Invalid),
                     vec![],
+                )));
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    inner_expr.clone(),
+                    null_const.clone(),
+                    ComparisonType::NotEqual,
+                    vec![inner_expr, null_const],
                 )))
             }
 
@@ -275,43 +289,30 @@ impl ExpressionParser {
                 low,
                 high,
             } => {
-                let expr = self.parse_expression(expr, schema)?;
-                let low = self.parse_expression(low, schema)?;
-                let high = self.parse_expression(high, schema)?;
+                let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let low = Arc::new(self.parse_expression(low, schema)?);
+                let high = Arc::new(self.parse_expression(high, schema)?);
 
                 let low_compare = Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(expr.clone()),
-                    Arc::new(low),
-                    ComparisonType::GreaterThanOrEqual,
-                    vec![],
+                    expr.clone(),
+                    low.clone(),
+                    if *negated { ComparisonType::LessThan } else { ComparisonType::GreaterThanOrEqual },
+                    vec![expr.clone(), low],
                 ));
 
                 let high_compare = Expression::Comparison(ComparisonExpression::new(
-                    Arc::new(expr),
-                    Arc::new(high),
-                    ComparisonType::LessThanOrEqual,
-                    vec![],
+                    expr.clone(),
+                    high.clone(),
+                    if *negated { ComparisonType::GreaterThan } else { ComparisonType::LessThanOrEqual },
+                    vec![expr.clone(), high],
                 ));
 
-                let mut result = Expression::Logic(LogicExpression::new(
-                    Arc::new(low_compare),
-                    Arc::new(high_compare),
-                    LogicType::And,
-                    vec![],
+                let result = Expression::Logic(LogicExpression::new(
+                    Arc::new(low_compare.clone()),
+                    Arc::new(high_compare.clone()),
+                    { LogicType::And },
+                    vec![Arc::new(low_compare), Arc::new(high_compare)],
                 ));
-
-                if *negated {
-                    result = Expression::Logic(LogicExpression::new(
-                        Arc::new(result),
-                        Arc::new(Expression::Constant(ConstantExpression::new(
-                            Value::new(true),
-                            Column::new("const", TypeId::Boolean),
-                            vec![],
-                        ))),
-                        LogicType::And, // Using AND with true is effectively NOT
-                        vec![],
-                    ));
-                }
 
                 Ok(result)
             }
@@ -414,6 +415,11 @@ impl ExpressionParser {
                 Ok(Expression::Cast(CastExpression::new(inner_expr, target_type)))
             }
 
+            Expr::Nested(expr) => {
+                // For nested expressions, just parse the inner expression
+                self.parse_expression(expr, schema)
+            }
+
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
@@ -443,7 +449,12 @@ impl ExpressionParser {
                                 ).with_return_type(agg_col)))
                             }
                             FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                // Parse the inner expression and check it's not an aggregate
                                 let inner_expr = self.parse_expression(expr, schema)?;
+                                if let Expression::Aggregate(_) = inner_expr {
+                                    return Err("Nested aggregate functions are not allowed".to_string());
+                                }
+                                
                                 let agg_col = Column::new("count", TypeId::BigInt);
                                 Ok(Expression::Aggregate(AggregateExpression::new(
                                     AggregationType::Count,
@@ -457,44 +468,7 @@ impl ExpressionParser {
                     _ => Err("COUNT requires an argument".to_string()),
                 }
             }
-            "SUM" => {
-                match &func.args {
-                    FunctionArguments::List(list) => {
-                        if list.args.len() != 1 {
-                            return Err("SUM requires exactly one argument".to_string());
-                        }
-                        match &list.args[0] {
-                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                // Parse the inner expression using the input schema
-                                let inner_expr = self.parse_expression(expr, schema)?;
-                                let ret_type = match inner_expr.get_return_type().get_type() {
-                                    TypeId::Integer | TypeId::BigInt | TypeId::Decimal => inner_expr.get_return_type().get_type(),
-                                    _ => return Err("SUM requires numeric argument".to_string()),
-                                };
-                                
-                                // Create a new column for the aggregate result
-                                let agg_col = Column::new("total_sales", ret_type);
-                                
-                                Ok(Expression::Aggregate(AggregateExpression::new(
-                                    AggregationType::Sum,
-                                    Arc::new(inner_expr),
-                                    vec![],
-                                ).with_return_type(agg_col)))
-                            }
-                            _ => Err("Invalid SUM argument".to_string()),
-                        }
-                    }
-                    _ => Err("SUM requires an argument".to_string()),
-                }
-            }
-            "MIN" | "MAX" | "AVG" => {
-                let agg_type = match func_name.as_str() {
-                    "MIN" => AggregationType::Min,
-                    "MAX" => AggregationType::Max,
-                    "AVG" => AggregationType::Avg,
-                    _ => unreachable!(),
-                };
-
+            "SUM" | "AVG" | "MIN" | "MAX" => {
                 match &func.args {
                     FunctionArguments::List(list) => {
                         if list.args.len() != 1 {
@@ -502,8 +476,23 @@ impl ExpressionParser {
                         }
                         match &list.args[0] {
                             FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                // Parse the inner expression and check it's not an aggregate
                                 let inner_expr = self.parse_expression(expr, schema)?;
+                                if let Expression::Aggregate(_) = inner_expr {
+                                    return Err("Nested aggregate functions are not allowed".to_string());
+                                }
+                                
+                                let agg_type = match func_name.as_str() {
+                                    "SUM" => AggregationType::Sum,
+                                    "AVG" => AggregationType::Avg,
+                                    "MIN" => AggregationType::Min,
+                                    "MAX" => AggregationType::Max,
+                                    _ => unreachable!(),
+                                };
+                                
+                                // All aggregate functions preserve input type
                                 let ret_type = inner_expr.get_return_type().get_type();
+                                
                                 let agg_col = Column::new(&format!("{}({})", func_name, expr), ret_type);
                                 
                                 Ok(Expression::Aggregate(AggregateExpression::new(
@@ -776,6 +765,27 @@ impl ExpressionParser {
                 Ok(parsed_expr)
             }
             _ => Err("Join condition must be a comparison expression".to_string()),
+        }
+    }
+
+    fn are_types_comparable(left: TypeId, right: TypeId) -> bool {
+        match (left, right) {
+            // Same types are always comparable
+            (a, b) if a == b => true,
+            
+            // Numeric types can be compared with each other
+            (TypeId::Integer | TypeId::BigInt | TypeId::Decimal, 
+             TypeId::Integer | TypeId::BigInt | TypeId::Decimal) => true,
+            
+            // String types can be compared with each other
+            (TypeId::Char | TypeId::VarChar,
+             TypeId::Char | TypeId::VarChar) => true,
+            
+            // All types can be compared with NULL
+            (_, TypeId::Invalid) | (TypeId::Invalid, _) => true,
+            
+            // Other type combinations are not comparable
+            _ => false,
         }
     }
 }
@@ -1202,6 +1212,188 @@ mod tests {
                 "Complex expression '{}' should return {:?}",
                 expr_str,
                 expected_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_aggregate_functions() {
+        let ctx = TestContext::new("test_parse_aggregate_functions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            ("COUNT(*)", AggregationType::CountStar, TypeId::BigInt),
+            ("COUNT(id)", AggregationType::Count, TypeId::BigInt),
+            ("SUM(salary)", AggregationType::Sum, TypeId::Decimal),
+            ("AVG(age)", AggregationType::Avg, TypeId::Integer),
+            ("MIN(salary)", AggregationType::Min, TypeId::Decimal),
+            ("MAX(age)", AggregationType::Max, TypeId::Integer),
+        ];
+
+        for (expr_str, expected_type, expected_return_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::Aggregate(agg) => {
+                    assert_eq!(
+                        *agg.get_agg_type(),
+                        expected_type,
+                        "Aggregate function '{}' should be {:?}",
+                        expr_str,
+                        expected_type
+                    );
+                    assert_eq!(
+                        agg.get_return_type().get_type(),
+                        expected_return_type,
+                        "Aggregate function '{}' should return {:?}",
+                        expr_str,
+                        expected_return_type
+                    );
+                }
+                _ => panic!("Expected Aggregate expression for '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_between_expressions() {
+        let ctx = TestContext::new("test_parse_between_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            "age BETWEEN 20 AND 30",
+            "salary BETWEEN 30000 AND 50000",
+            "age NOT BETWEEN 10 AND 18",
+        ];
+
+        for expr_str in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::Logic(logic) => {
+                    assert_eq!(
+                        logic.get_logic_type(),
+                        LogicType::And,
+                        "BETWEEN expression '{}' should use AND",
+                        expr_str
+                    );
+
+                    let children = logic.get_children();
+                    assert_eq!(
+                        children.len(),
+                        2,
+                        "BETWEEN expression '{}' should have 2 comparison parts",
+                        expr_str
+                    );
+                }
+                _ => panic!("Expected Logic expression for BETWEEN '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_expressions() {
+        let ctx = TestContext::new("test_parse_nested_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            // Nested arithmetic and comparison
+            ("(age + 5) * 2 > salary / 1000", TypeId::Boolean),
+            // Nested functions and CASE
+            ("UPPER(CASE WHEN age < 18 THEN 'Minor' ELSE LOWER(name) END)", TypeId::VarChar),
+            // Complex logical expression
+            ("(age BETWEEN 20 AND 30) AND (LOWER(name) = 'john' OR salary > 50000)", TypeId::Boolean),
+            // Nested aggregates with arithmetic
+            ("SUM(salary) / COUNT(id) > 50000", TypeId::Boolean),
+            // Multiple conditions with parentheses
+            ("(age > 20 AND salary >= 30000) OR (age > 30 AND salary >= 50000)", TypeId::Boolean),
+        ];
+
+        for (expr_str, expected_type) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            assert_eq!(
+                expr.get_return_type().get_type(),
+                expected_type,
+                "Nested expression '{}' should return {:?}",
+                expr_str,
+                expected_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_null_expressions() {
+        let ctx = TestContext::new("test_parse_null_expressions");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            "name IS NULL",
+            "age IS NOT NULL",
+            "salary IS NULL AND age > 20",
+            "name IS NOT NULL OR salary < 50000",
+        ];
+
+        for expr_str in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &schema, ctx.catalog())
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+
+            match expr {
+                Expression::Comparison(comp) => {
+                    // For simple IS NULL / IS NOT NULL
+                    let children = comp.get_children();
+                    assert_eq!(children.len(), 2, "NULL check should have 2 operands");
+                    
+                    // Verify second operand is NULL constant
+                    match children[1].as_ref() {
+                        Expression::Constant(c) => {
+                            assert!(matches!(c.get_value().get_val(), Val::Null));
+                        }
+                        _ => {
+                            // For compound expressions with AND/OR, we don't check the structure
+                            // as it's already covered by other tests
+                        }
+                    }
+                }
+                Expression::Logic(_) => {
+                    // For compound expressions with AND/OR, just verify it parsed successfully
+                }
+                _ => panic!("Expected Comparison or Logic expression for '{}'", expr_str),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_error_cases() {
+        let ctx = TestContext::new("test_parse_error_cases");
+        let schema = ctx.setup_test_schema();
+
+        let test_cases = vec![
+            // Invalid column reference
+            "invalid_column > 10",
+            // Invalid function
+            "INVALID_FUNCTION(age)",
+            // Invalid CAST
+            "CAST(age AS INVALID_TYPE)",
+            // Mismatched types
+            "name > 10",
+            // Invalid aggregate usage
+            "COUNT(COUNT(*))",
+        ];
+
+        for expr_str in test_cases {
+            let result = ctx.parse_expression(expr_str, &schema, ctx.catalog());
+            assert!(
+                result.is_err(),
+                "Expected error for invalid expression '{}', but got success",
+                expr_str
             );
         }
     }
