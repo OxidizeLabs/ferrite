@@ -10,58 +10,117 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InOperand {
+    List(Arc<Expression>),          // For IN (val1, val2, ...)
+    Subquery(Arc<Expression>),      // For IN (SELECT ...)
+    Unnest(Arc<Expression>),        // For IN UNNEST(array_expr)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InExpression {
     expr: Arc<Expression>,
-    subquery: Arc<Expression>,
+    operand: InOperand,
     negated: bool,
     return_type: Column,
+    children: Vec<Arc<Expression>>, // Store all child expressions
 }
 
 impl InExpression {
-    pub fn new(
+    pub fn new_list(
+        expr: Arc<Expression>,
+        list: Arc<Expression>,
+        negated: bool,
+        return_type: Column,
+    ) -> Self {
+        let children = vec![expr.clone(), list.clone()];
+        Self {
+            expr,
+            operand: InOperand::List(list),
+            negated,
+            return_type,
+            children,
+        }
+    }
+
+    pub fn new_subquery(
         expr: Arc<Expression>,
         subquery: Arc<Expression>,
         negated: bool,
         return_type: Column,
     ) -> Self {
+        let children = vec![expr.clone(), subquery.clone()];
         Self {
             expr,
-            subquery,
+            operand: InOperand::Subquery(subquery),
             negated,
             return_type,
+            children,
         }
     }
-}
 
-impl ExpressionOps for InExpression {
-    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
-        let value = self.expr.evaluate(tuple, schema)?;
-        let subquery_result = self.subquery.evaluate(tuple, schema)?;
+    pub fn new_unnest(
+        expr: Arc<Expression>,
+        array_expr: Arc<Expression>,
+        negated: bool,
+        return_type: Column,
+    ) -> Self {
+        let children = vec![expr.clone(), array_expr.clone()];
+        Self {
+            expr,
+            operand: InOperand::Unnest(array_expr),
+            negated,
+            return_type,
+            children,
+        }
+    }
 
-        // Handle NULL values
+    fn evaluate_list(&self, value: &Value, list_result: Value) -> Result<Value, ExpressionError> {
+        // Get the list values as a vector
+        let list_values = match list_result.get_val() {
+            Val::Vector(values) => values,
+            // If single value, wrap in vector
+            _ => &vec![list_result],
+        };
+
+        self.check_value_in_list(value, list_values)
+    }
+
+    fn evaluate_subquery(&self, value: &Value, subquery_result: Value) -> Result<Value, ExpressionError> {
+        // Handle subquery results
+        match subquery_result.get_val() {
+            Val::Vector(values) => self.check_value_in_list(value, values),
+            _ => self.check_value_in_list(value, &vec![subquery_result]),
+        }
+    }
+
+    fn evaluate_unnest(&self, value: &Value, unnest_result: Value) -> Result<Value, ExpressionError> {
+        // Handle UNNEST results - should be a vector
+        match unnest_result.get_val() {
+            Val::Vector(values) => self.check_value_in_list(value, values),
+            _ => Err(ExpressionError::InvalidOperation(
+                "UNNEST must return an array".to_string(),
+            )),
+        }
+    }
+
+    fn check_value_in_list(&self, value: &Value, list: &[Value]) -> Result<Value, ExpressionError> {
+        // Handle NULL value
         if value.is_null() {
             return Ok(Value::new(Val::Null));
         }
 
-        // Get the subquery results as a vector
-        let subquery_values = match subquery_result.get_val() {
-            Val::Vector(values) => values,
-            // If single value, wrap in vector
-            _ => &vec![subquery_result],
-        };
-
-        // Check if value exists in subquery results
         let mut found = false;
         let mut has_null = false;
 
-        for sub_value in subquery_values {
-            if sub_value.is_null() {
+        for list_value in list {
+            if list_value.is_null() {
                 has_null = true;
                 continue;
             }
 
-            match value.compare_equals(&sub_value) {
+            match value.compare_equals(list_value) {
                 CmpBool::CmpTrue => {
                     found = true;
                     break;
@@ -73,10 +132,6 @@ impl ExpressionOps for InExpression {
             }
         }
 
-        // Handle NULL results according to three-valued logic:
-        // - If found, return true/false based on negation
-        // - If not found but has nulls, return NULL
-        // - If not found and no nulls, return false/true based on negation
         let result = if found {
             !self.negated
         } else if has_null {
@@ -86,6 +141,27 @@ impl ExpressionOps for InExpression {
         };
 
         Ok(Value::new(result))
+    }
+}
+
+impl ExpressionOps for InExpression {
+    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        let value = self.expr.evaluate(tuple, schema)?;
+
+        match &self.operand {
+            InOperand::List(list_expr) => {
+                let list_result = list_expr.evaluate(tuple, schema)?;
+                self.evaluate_list(&value, list_result)
+            }
+            InOperand::Subquery(subquery_expr) => {
+                let subquery_result = subquery_expr.evaluate(tuple, schema)?;
+                self.evaluate_subquery(&value, subquery_result)
+            }
+            InOperand::Unnest(array_expr) => {
+                let unnest_result = array_expr.evaluate(tuple, schema)?;
+                self.evaluate_unnest(&value, unnest_result)
+            }
+        }
     }
 
     fn evaluate_join(
@@ -95,69 +171,30 @@ impl ExpressionOps for InExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let value = self
-            .expr
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let subquery_result =
-            self.subquery
-                .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let value = self.expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
-        // Handle NULL values
-        if value.is_null() {
-            return Ok(Value::new(Val::Null));
-        }
-
-        // Get the subquery results as a vector
-        let subquery_values = match subquery_result.get_val() {
-            Val::Vector(values) => values,
-            // If single value, wrap in vector
-            _ => &vec![subquery_result],
-        };
-
-        // Check if value exists in subquery results
-        let mut found = false;
-        let mut has_null = false;
-
-        for sub_value in subquery_values {
-            if sub_value.is_null() {
-                has_null = true;
-                continue;
+        match &self.operand {
+            InOperand::List(list_expr) => {
+                let list_result = list_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                self.evaluate_list(&value, list_result)
             }
-
-            match value.compare_equals(&sub_value) {
-                CmpBool::CmpTrue => {
-                    found = true;
-                    break;
-                }
-                CmpBool::CmpNull => {
-                    has_null = true;
-                }
-                CmpBool::CmpFalse => {}
+            InOperand::Subquery(subquery_expr) => {
+                let subquery_result = subquery_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                self.evaluate_subquery(&value, subquery_result)
+            }
+            InOperand::Unnest(array_expr) => {
+                let unnest_result = array_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                self.evaluate_unnest(&value, unnest_result)
             }
         }
-
-        let result = if found {
-            !self.negated
-        } else if has_null {
-            return Ok(Value::new(Val::Null));
-        } else {
-            self.negated
-        };
-
-        Ok(Value::new(result))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        match child_idx {
-            0 => &self.expr,
-            1 => &self.subquery,
-            _ => panic!("Invalid child index {} for IN expression", child_idx),
-        }
+        &self.children[child_idx]
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {
@@ -168,28 +205,49 @@ impl ExpressionOps for InExpression {
         if children.len() != 2 {
             panic!("IN expression requires exactly 2 children");
         }
-        Arc::new(Expression::In(InExpression::new(
-            children[0].clone(),
-            children[1].clone(),
-            self.negated,
-            self.return_type.clone(),
-        )))
+
+        let new_in = match &self.operand {
+            InOperand::List(_) => InExpression::new_list(
+                children[0].clone(),
+                children[1].clone(),
+                self.negated,
+                self.return_type.clone(),
+            ),
+            InOperand::Subquery(_) => InExpression::new_subquery(
+                children[0].clone(),
+                children[1].clone(),
+                self.negated,
+                self.return_type.clone(),
+            ),
+            InOperand::Unnest(_) => InExpression::new_unnest(
+                children[0].clone(),
+                children[1].clone(),
+                self.negated,
+                self.return_type.clone(),
+            ),
+        };
+
+        Arc::new(Expression::In(new_in))
     }
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
-        // Validate the expression and subquery
-        self.expr.validate(schema)?;
-        self.subquery.validate(schema)?;
+        // Validate all children
+        for child in &self.children {
+            child.validate(schema)?;
+        }
 
         // Verify the types are comparable
         let expr_type = self.expr.get_return_type().get_type();
-        let subquery_type = self.subquery.get_return_type().get_type();
+        let operand_type = match &self.operand {
+            InOperand::List(list) => list.get_return_type().get_type(),
+            InOperand::Subquery(subquery) => subquery.get_return_type().get_type(),
+            InOperand::Unnest(array) => array.get_return_type().get_type(),
+        };
 
-        // Check if types are compatible for comparison
-        if !are_types_comparable(expr_type, subquery_type) {
+        if !are_types_comparable(expr_type, operand_type) {
             return Err(ExpressionError::InvalidOperation(format!(
                 "Cannot compare values of types {:?} and {:?} in IN expression",
-                expr_type, subquery_type
+                expr_type, operand_type
             )));
         }
 
@@ -227,7 +285,7 @@ impl Display for InExpression {
             "{} {}IN ({})",
             self.expr,
             if self.negated { "NOT " } else { "" },
-            self.subquery
+            self.children[1]
         )
     }
 }
@@ -272,7 +330,7 @@ mod tests {
             vec![],
         )));
 
-        let in_expr = InExpression::new(
+        let in_expr = InExpression::new_list(
             column_expr,
             list_expr,
             false,
@@ -303,7 +361,7 @@ mod tests {
             vec![],
         )));
 
-        let in_expr = InExpression::new(
+        let in_expr = InExpression::new_list(
             column_expr,
             list_expr,
             true, // negated
@@ -334,7 +392,7 @@ mod tests {
             vec![],
         )));
 
-        let in_expr = InExpression::new(
+        let in_expr = InExpression::new_list(
             column_expr,
             list_expr,
             false,
@@ -364,7 +422,7 @@ mod tests {
             vec![],
         )));
 
-        let in_expr = InExpression::new(
+        let in_expr = InExpression::new_list(
             null_expr,
             list_expr,
             false,
@@ -373,5 +431,65 @@ mod tests {
 
         let result = in_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(Val::Null));
+    }
+
+    #[test]
+    fn test_in_subquery() {
+        let schema = create_test_schema();
+        let tuple = create_test_tuple(1, "test");
+
+        // Create a mock subquery that returns (1, 2, 3)
+        let subquery = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
+            Column::new("subquery", TypeId::Vector),
+            vec![],
+        )));
+
+        let column_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )));
+
+        let in_expr = InExpression::new_subquery(
+            column_expr,
+            subquery,
+            false,
+            Column::new("result", TypeId::Boolean),
+        );
+
+        let result = in_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(true));
+    }
+
+    #[test]
+    fn test_in_unnest() {
+        let schema = create_test_schema();
+        let tuple = create_test_tuple(1, "test");
+
+        // Create an array expression that contains [1, 2, 3]
+        let array_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
+            Column::new("array", TypeId::Vector),
+            vec![],
+        )));
+
+        let column_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )));
+
+        let in_expr = InExpression::new_unnest(
+            column_expr,
+            array_expr,
+            false,
+            Column::new("result", TypeId::Boolean),
+        );
+
+        let result = in_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(true));
     }
 }
