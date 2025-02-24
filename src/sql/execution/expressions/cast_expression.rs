@@ -1,22 +1,23 @@
-use crate::types_db::value::Val;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
+use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Val;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::common::rid::RID;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CastExpression {
     expr: Arc<Expression>,
     target_type: TypeId,
     ret_type: Column,
+    format: Option<String>,
     children: Vec<Arc<Expression>>,
 }
 
@@ -27,12 +28,38 @@ impl CastExpression {
             TypeId::Char => Column::new_varlen("<cast>", target_type, 255), // Default size for CHAR
             _ => Column::new("<cast>", target_type),
         };
-        
+
         Self {
             expr: expr.clone(),
             target_type,
             ret_type,
+            format: None,
             children: vec![expr.clone()],
+        }
+    }
+
+    pub fn with_format(mut self, format: String) -> Self {
+        self.format = Some(format);
+        self
+    }
+
+    fn apply_format(&self, value: Value) -> Result<Value, ExpressionError> {
+        if let Some(format_str) = &self.format {
+            match (value.get_type_id(), self.target_type) {
+                (TypeId::Timestamp, TypeId::VarChar) => {
+                    if let Val::Timestamp(ts) = value.get_val() {
+                        Ok(Value::new(format!("{}", ts)))
+                    } else {
+                        Err(ExpressionError::CastError("Invalid timestamp value".to_string()))
+                    }
+                }
+                (TypeId::Integer | TypeId::Decimal | TypeId::BigInt, TypeId::VarChar) => {
+                    Ok(Value::new(value.to_string()))
+                }
+                _ => Ok(value)
+            }
+        } else {
+            Ok(value)
         }
     }
 }
@@ -40,13 +67,13 @@ impl CastExpression {
 impl ExpressionOps for CastExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let value = self.expr.evaluate(tuple, schema)?;
-        
+
         // Handle NULL values first - return NULL of target type
         if value.is_null() {
             return Ok(Value::new_with_type(Val::Null, self.target_type));
         }
-        
-        match (value.get_type_id(), self.target_type) {
+
+        let cast_result = match (value.get_type_id(), self.target_type) {
             // Decimal to Integer casting
             (TypeId::Decimal, TypeId::Integer) => {
                 if let Val::Decimal(d) = value.get_val() {
@@ -54,8 +81,8 @@ impl ExpressionOps for CastExpression {
                 } else {
                     Err(ExpressionError::CastError("Invalid value for decimal to integer cast".to_string()))
                 }
-            },
-            
+            }
+
             // Integer to Decimal casting
             (TypeId::Integer, TypeId::Decimal) => {
                 if let Val::Integer(i) = value.get_val() {
@@ -63,8 +90,8 @@ impl ExpressionOps for CastExpression {
                 } else {
                     Err(ExpressionError::CastError("Invalid value for integer to decimal cast".to_string()))
                 }
-            },
-            
+            }
+
             // Integer to BigInt casting
             (TypeId::Integer, TypeId::BigInt) => {
                 if let Val::Integer(i) = value.get_val() {
@@ -72,8 +99,8 @@ impl ExpressionOps for CastExpression {
                 } else {
                     Err(ExpressionError::CastError("Invalid value for integer to bigint cast".to_string()))
                 }
-            },
-            
+            }
+
             // VarChar to Char casting
             (TypeId::VarChar, TypeId::Char) => {
                 if let Val::VarLen(s) = value.get_val() {
@@ -81,8 +108,8 @@ impl ExpressionOps for CastExpression {
                 } else {
                     Err(ExpressionError::CastError("Invalid value for varchar to char cast".to_string()))
                 }
-            },
-            
+            }
+
             // Char to VarChar casting
             (TypeId::Char, TypeId::VarChar) => {
                 if let Val::ConstLen(s) = value.get_val() {
@@ -90,17 +117,19 @@ impl ExpressionOps for CastExpression {
                 } else {
                     Err(ExpressionError::CastError("Invalid value for char to varchar cast".to_string()))
                 }
-            },
-            
+            }
+
             // Same type - return as is
             (source, target) if source == target => Ok(value),
-            
+
             // Invalid cast
             (source, target) => Err(ExpressionError::InvalidCast {
                 from: source,
                 to: target,
             }),
-        }
+        }?;
+
+        self.apply_format(cast_result)
     }
 
     fn evaluate_join(
@@ -140,7 +169,7 @@ impl ExpressionOps for CastExpression {
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Validate the inner expression
         self.expr.validate(schema)?;
-        
+
         // Check if the cast is valid
         let from_type = self.expr.get_return_type().get_type();
         if !is_valid_cast(from_type, self.target_type) {
@@ -172,19 +201,19 @@ fn is_valid_cast(from: TypeId, to: TypeId) -> bool {
         (Integer, Decimal) | (Decimal, Integer) => true,
         (Integer, BigInt) | (BigInt, Integer) => true,
         (BigInt, Decimal) | (Decimal, BigInt) => true,
-        
+
         // String conversions
         (VarChar, Char) | (Char, VarChar) => true,
-        
+
         // Same type is always valid
         (a, b) if a == b => true,
-        
+
         // NULL can be cast to any type
         (Invalid, _) => true,
-        
+
         // String to numeric conversions are not allowed
         (VarChar | Char, Integer | BigInt | Decimal) => false,
-        
+
         // All other conversions are invalid
         _ => false,
     }
@@ -192,8 +221,8 @@ fn is_valid_cast(from: TypeId, to: TypeId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::logger::initialize_logger;
     use super::*;
+    use crate::common::logger::initialize_logger;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::value::Val;
 
@@ -372,10 +401,10 @@ mod tests {
         )));
 
         let cast_expr = CastExpression::new(col_expr, TypeId::Decimal);
-        
+
         // Test normal display format
         assert_eq!(format!("{}", cast_expr), "CAST(int_col AS Decimal)");
-        
+
         // Test alternate display format
         assert_eq!(format!("{:#}", cast_expr), "CAST(Col#0.0 AS Decimal)");
     }
@@ -383,7 +412,7 @@ mod tests {
     #[test]
     fn test_cast_expression_validation() {
         let schema = create_test_schema();
-        
+
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0, 0,
             Column::new("int_col", TypeId::Integer),
