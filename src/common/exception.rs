@@ -190,6 +190,8 @@ pub enum ExpressionError {
     IndexOutOfBounds { idx: usize, size: usize },
     #[error("KeyNotFound: {0}")]
     KeyNotFound(String),
+    #[error("InvalidReturnType: {0}")]
+    InvalidReturnType(String),
 }
 
 #[derive(Debug, Error)]
