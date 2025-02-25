@@ -139,17 +139,9 @@ impl Display for LiteralValueExpression {
             Val::Decimal(d) => write!(f, "{}", d),
             Val::Timestamp(ts) => write!(f, "TIMESTAMP '{}'", ts),
             Val::VarLen(s) | Val::ConstLen(s) => write!(f, "'{}'", s),
-            Val::Vector(v) => {
-                write!(f, "[")?;
-                for (i, val) in v.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", val)?;
-                }
-                write!(f, "]")
-            }
+            Val::Vector(v) => write!(f, "{:?}", v),
             Val::Null => write!(f, "NULL"),
+            Val::Struct => write!(f, "STRUCT"),
         }
     }
 }

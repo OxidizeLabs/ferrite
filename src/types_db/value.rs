@@ -18,6 +18,7 @@ pub enum Val {
     ConstLen(String),
     Vector(Vec<Value>),
     Null,
+    Struct,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, PartialOrd)]
@@ -28,10 +29,11 @@ pub enum Size {
 
 #[derive(Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Value {
-    pub(crate) value_: Val,
-    pub(crate) size_: Size,
-    pub(crate) manage_data_: bool,
-    pub(crate) type_id_: TypeId,
+    pub value_: Val,
+    pub size_: Size,
+    pub manage_data_: bool,
+    pub type_id_: TypeId,
+    pub struct_data: Option<Vec<Value>>,
 }
 
 impl Value {
@@ -48,12 +50,14 @@ impl Value {
             Val::VarLen(_) | Val::ConstLen(_) => TypeId::VarChar,
             Val::Vector(_) => TypeId::Vector,
             Val::Null => TypeId::Invalid,
+            Val::Struct => TypeId::Struct,
         };
         Value {
             value_: val,
             size_: Size::Length(get_type_size(type_id) as usize),
             manage_data_: false,
             type_id_: type_id,
+            struct_data: None,
         }
     }
 
@@ -68,6 +72,7 @@ impl Value {
             size_: Size::Length(vec.len()),
             manage_data_: false,
             type_id_: TypeId::Vector,
+            struct_data: None,
         }
     }
 
@@ -87,6 +92,7 @@ impl Value {
             Val::VarLen(s) | Val::ConstLen(s) => s.len() as u32,
             Val::Vector(v) => 4 + v.len() as u32 * 4,
             Val::Null => 1,
+            Val::Struct => 8, // Pointer size for struct
         }
     }
 
@@ -107,6 +113,7 @@ impl Value {
                 }
             }
             Val::Null => bytes.extend_from_slice(&[0u8]),
+            Val::Struct => bytes.extend_from_slice(&[0u8]), // Placeholder for struct
         }
         bytes
     }
@@ -133,6 +140,7 @@ impl Value {
             size_: type_id.get_value().size_,
             manage_data_: false,
             type_id_: type_id,
+            struct_data: None,
         }
     }
 
@@ -197,7 +205,7 @@ impl Value {
     }
 
     /// Deserializes a Value from a byte slice according to the provided TypeId.
-    pub fn deserialize_from(data: &[u8], column_type: crate::types_db::type_id::TypeId) -> Self {
+    pub fn deserialize_from(data: &[u8], column_type: TypeId) -> Self {
         use crate::types_db::type_id::TypeId::*;
         match column_type {
             Boolean => {
@@ -287,6 +295,93 @@ impl Value {
             // Invalid conversions
             _ => Err(format!("Cannot cast from {:?} to {:?}", self.type_id_, target_type))
         }
+    }
+
+    /// Creates a new struct value with the given field names and values
+    pub fn new_struct<I, S>(field_names: Vec<S>, values: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<Value>,
+        S: Into<String>,
+    {
+        let values: Vec<Value> = values.into_iter().map(Into::into).collect();
+        
+        // Store the field names in the first element of the vector
+        let field_names_value = Value::new_vector(
+            field_names.into_iter()
+                .map(|name| Value::new(name.into()))
+                .collect::<Vec<_>>()
+        );
+        
+        // Create a vector with field names as first element, followed by values
+        let mut struct_vec = Vec::with_capacity(values.len() + 1);
+        struct_vec.push(field_names_value);
+        struct_vec.extend(values);
+        
+        Value {
+            value_: Val::Struct,
+            size_: Size::Length(struct_vec.len()),
+            manage_data_: false,
+            type_id_: TypeId::Struct,
+            struct_data: Some(struct_vec),
+        }
+    }
+    
+    /// Gets a field from a struct by name
+    pub fn get_struct_field(&self, field_name: &str) -> Option<&Value> {
+        if let Some(struct_data) = &self.struct_data {
+            if struct_data.is_empty() {
+                return None;
+            }
+            
+            // First element contains field names
+            if let Val::Vector(field_names) = &struct_data[0].value_ {
+                // Find the index of the field name
+                for (i, name_value) in field_names.iter().enumerate() {
+                    if let Val::VarLen(name) | Val::ConstLen(name) = &name_value.value_ {
+                        if name == field_name {
+                            // Return the value at the corresponding index (offset by 1)
+                            return struct_data.get(i + 1);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    /// Checks if this value is a struct
+    pub fn is_struct(&self) -> bool {
+        self.type_id_ == TypeId::Struct && self.struct_data.is_some()
+    }
+
+    /// Gets all field names of the struct
+    pub fn get_struct_field_names(&self) -> Vec<String> {
+        if let Some(struct_data) = &self.struct_data {
+            if let Some(first) = struct_data.first() {
+                if let Val::Vector(field_names) = &first.value_ {
+                    return field_names.iter()
+                        .filter_map(|v| {
+                            if let Val::VarLen(name) | Val::ConstLen(name) = &v.value_ {
+                                Some(name.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// Gets all field values of the struct
+    pub fn get_struct_values(&self) -> Vec<&Value> {
+        if let Some(struct_data) = &self.struct_data {
+            // Skip the first element (field names) and return all values
+            return struct_data.iter().skip(1).collect();
+        }
+        Vec::new()
     }
 }
 
@@ -608,6 +703,7 @@ impl From<TypeId> for Val {
             TypeId::Char => Val::ConstLen(String::new()),
             TypeId::Vector => Val::Vector(Vec::new()),
             TypeId::Invalid => Val::Null,
+            TypeId::Struct => Val::Struct, // Create an empty struct value
         }
     }
 }
@@ -690,7 +786,29 @@ impl<T: Into<Val>> From<T> for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.get_val() {
+        match &self.value_ {
+            Val::Struct => {
+                if let Some(struct_data) = &self.struct_data {
+                    let mut result = String::from("{");
+                    
+                    if !struct_data.is_empty() {
+                        let field_names = self.get_struct_field_names();
+                        let values = self.get_struct_values();
+                        
+                        for (i, (name, value)) in field_names.iter().zip(values.iter()).enumerate() {
+                            if i > 0 {
+                                result.push_str(", ");
+                            }
+                            result.push_str(&format!("{}: {}", name, value));
+                        }
+                    }
+                    
+                    result.push('}');
+                    write!(f, "{}", result)
+                } else {
+                    write!(f, "INVALID_STRUCT")
+                }
+            }
             Val::Vector(v) => {
                 // Format vector values using explicit ToString trait
                 let values: Vec<String> = v.iter()
@@ -713,7 +831,7 @@ impl Display for Value {
                 let hours = (secs / 3600) % 24;
                 let days = secs / 86400;
                 write!(f, "{} days {}:{}:{} UTC", days, hours, minutes, seconds)
-            }
+            },
             Val::Null => write!(f, "NULL"),
         }
     }
@@ -722,8 +840,8 @@ impl Display for Value {
 // Add Debug implementation to show full type information
 impl Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?} }}",
-               self.value_, self.size_, self.manage_data_, self.type_id_)
+        write!(f, "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?}, struct_data: {:?} }}",
+               self.value_, self.size_, self.manage_data_, self.type_id_, self.struct_data)
     }
 }
 
@@ -731,6 +849,13 @@ impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.type_id_.hash(state);
         match &self.value_ {
+            Val::Struct => {
+                if let Some(struct_data) = &self.struct_data {
+                    for value in struct_data {
+                        value.hash(state);
+                    }
+                }
+            }
             Val::Boolean(b) => b.hash(state),
             Val::TinyInt(i) => i.hash(state),
             Val::SmallInt(i) => i.hash(state),
@@ -896,6 +1021,7 @@ mod unit_tests {
             size_: Size::Length(4),
             manage_data_: false,
             type_id_: TypeId::Integer,
+            struct_data: None,
         };
         let serialized = bincode::serialize(&value).expect("Serialization failed");
 
@@ -948,6 +1074,7 @@ mod unit_tests {
             size_: Size::Length(4),
             manage_data_: false,
             type_id_: TypeId::Integer, // Replace with an appropriate variant
+            struct_data: None,
         };
         let serialized = bincode::serialize(&value).expect("Serialization failed");
         let deserialized_value: Value =
@@ -963,6 +1090,7 @@ mod unit_tests {
             size_: Size::Length(8),
             manage_data_: true,
             type_id_: TypeId::Decimal, // Replace with an appropriate variant
+            struct_data: None,
         };
         let serialized = bincode::serialize(&original_value).expect("Serialization failed");
         let deserialized: Value =
