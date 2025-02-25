@@ -10,7 +10,6 @@ use crate::types_db::value::Val;
 use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
 pub struct FilterExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -153,6 +152,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

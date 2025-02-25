@@ -15,7 +15,6 @@ use std::sync::Arc;
 use log;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Value, Val};
-use sqlparser::ast::{Expr, Function, FunctionArg, FunctionArguments, FunctionArgExpr, Ident};
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,

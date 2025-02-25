@@ -1,14 +1,12 @@
 use crate::common::config::{PageId, INVALID_PAGE_ID};
-use crate::common::logger::initialize_logger;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::table::table_heap::{TableHeap, TableInfo};
+use crate::storage::table::table_heap::TableInfo;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use log::{debug, error};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// An iterator over the tuples in a table.
 #[derive(Debug)]
@@ -288,6 +286,7 @@ impl Iterator for TableIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -303,6 +302,8 @@ mod tests {
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::table::table_heap::TableHeap;
 
     /// Helper struct for test setup and common operations
     struct TestContext {
