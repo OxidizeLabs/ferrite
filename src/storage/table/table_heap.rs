@@ -19,7 +19,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use crate::common::exception::PageError;
 use crate::concurrency::transaction::IsolationLevel;
-use std::collections::HashSet;
 
 // Page Management
 pub struct TablePageManager {
@@ -928,6 +927,7 @@ impl Clone for TableHeap {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;

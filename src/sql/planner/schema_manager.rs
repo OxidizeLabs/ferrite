@@ -7,8 +7,7 @@ use sqlparser::ast::{ColumnDef, DataType, Expr};
 use std::collections::HashSet;
 use std::sync::Arc;
 use log;
-use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
-use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+
 
 /// 2. Responsible for schema-related operations
 pub struct SchemaManager {}
@@ -210,6 +209,7 @@ impl SchemaManager {
 mod tests {
     use super::*;
     use sqlparser::ast::{Value, ColumnDef, DataType, Ident};
+    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]

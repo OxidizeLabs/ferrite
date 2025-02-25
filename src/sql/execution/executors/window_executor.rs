@@ -1,12 +1,10 @@
-use crate::catalog::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::sql::execution::plans::window_plan::{WindowFunctionType, WindowNode};
+use crate::sql::execution::plans::window_plan::WindowNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use log::debug;
@@ -240,7 +238,7 @@ mod tests {
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
-    use crate::sql::execution::plans::window_plan::WindowFunction;
+    use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType};
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -249,6 +247,8 @@ mod tests {
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
+    use crate::catalog::catalog::Catalog;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
