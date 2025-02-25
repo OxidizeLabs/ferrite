@@ -44,6 +44,7 @@ use crate::sql::execution::expressions::overlay_expression::OverlayExpression;
 use crate::storage::table::tuple::Tuple;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -136,36 +137,7 @@ impl ExpressionParser {
             }
 
             Expr::Value(value) => {
-                let (val, type_id) = match value {
-                    sqlparser::ast::Value::Number(n, _) => {
-                        if n.contains('.') {
-                            // Parse as decimal if it contains a decimal point
-                            (
-                                Value::from(n.parse::<f64>().map_err(|e| e.to_string())?),
-                                TypeId::Decimal,
-                            )
-                        } else {
-                            // Parse as integer otherwise
-                            (
-                                Value::from(n.parse::<i32>().map_err(|e| e.to_string())?),
-                                TypeId::Integer,
-                            )
-                        }
-                    }
-                    sqlparser::ast::Value::SingleQuotedString(s)
-                    | sqlparser::ast::Value::DoubleQuotedString(s) => {
-                        (Value::from(s.as_str()), TypeId::VarChar)
-                    }
-                    sqlparser::ast::Value::Boolean(b) => (Value::from(*b), TypeId::Boolean),
-                    sqlparser::ast::Value::Null => (Value::new(Val::Null), TypeId::Invalid),
-                    _ => return Err(format!("Unsupported value type: {:?}", value)),
-                };
-
-                Ok(Expression::Constant(ConstantExpression::new(
-                    val,
-                    Column::new("const", type_id),
-                    vec![],
-                )))
+                Ok(Expression::Literal(LiteralValueExpression::new(*value)?))
             }
 
             Expr::BinaryOp { left, op, right } => {

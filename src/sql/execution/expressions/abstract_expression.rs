@@ -69,6 +69,7 @@ use crate::sql::execution::expressions::ceil_floor_expression::CeilFloorExpressi
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::convert_expression::ConvertExpression;
 use crate::sql::execution::expressions::substring_expression::SubstringExpression;
+use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -135,6 +136,7 @@ pub enum Expression {
     Convert(ConvertExpression),
     CeilFloor(CeilFloorExpression),
     Substring(SubstringExpression),
+    Literal(LiteralValueExpression),
 }
 
 pub trait ExpressionOps {
@@ -219,6 +221,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.evaluate(tuple, schema),
             Self::CeilFloor(expr) => expr.evaluate(tuple, schema),
             Self::Substring(expr) => expr.evaluate(tuple, schema),
+            Self::Literal(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -324,6 +327,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.evaluate(left_tuple, left_schema),
             Self::CeilFloor(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Substring(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
+            Self::Literal(expr) => expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema),
         }
     }
 
@@ -392,6 +396,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.get_child_at(child_idx),
             Self::CeilFloor(expr) => expr.get_child_at(child_idx),
             Self::Substring(expr) => expr.get_child_at(child_idx),
+            Self::Literal(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -460,6 +465,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.get_children(),
             Self::CeilFloor(expr) => expr.get_children(),
             Self::Substring(expr) => expr.get_children(),
+            Self::Literal(expr) => expr.get_children(),
         }
     }
 
@@ -528,6 +534,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.get_return_type(),
             Self::CeilFloor(expr) => expr.get_return_type(),
             Self::Substring(expr) => expr.get_return_type(),
+            Self::Literal(expr) => expr.get_return_type(),
         }
     }
 
@@ -596,6 +603,7 @@ impl ExpressionOps for Expression {
             Self::Convert(expr) => expr.clone_with_children(children),
             Self::CeilFloor(expr) => expr.clone_with_children(children),
             Self::Substring(expr) => expr.clone_with_children(children),
+            Self::Literal(expr) => expr.clone_with_children(children),
         }
     }
 
@@ -847,6 +855,7 @@ impl Display for Expression {
             Self::Convert(expr) => write!(f, "{}", expr),
             Self::CeilFloor(expr) => write!(f, "{}", expr),
             Self::Substring(expr) => write!(f, "{}", expr),
+            Self::Literal(expr) => write!(f, "{}", expr),
         }
     }
 }
