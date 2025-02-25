@@ -186,6 +186,10 @@ pub enum ExpressionError {
     InvalidType(String),
     #[error("Invalid Seed: {0}")]
     InvalidSeed(String),
+    #[error("IndexOutOfBounds")]
+    IndexOutOfBounds { idx: usize, size: usize },
+    #[error("KeyNotFound: {0}")]
+    KeyNotFound(String),
 }
 
 #[derive(Debug, Error)]
