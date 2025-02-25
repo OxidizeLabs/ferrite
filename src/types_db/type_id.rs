@@ -16,6 +16,7 @@ pub enum TypeId {
     Char,
     Vector,
     Invalid,
+    Struct,
 }
 
 // Implement the Default trait for TypeId
@@ -50,6 +51,7 @@ impl TypeId {
             TypeId::Char => Value::new(Val::ConstLen(String::new())),
             TypeId::Vector => Value::new(Val::Vector(Vec::new())),
             TypeId::Invalid => Value::new(Val::Null),
+            TypeId::Struct => Value::new(Val::Null),
         }
     }
 
@@ -66,6 +68,7 @@ impl TypeId {
             Val::ConstLen(_) => TypeId::Char,
             Val::Vector(_) => TypeId::Vector,
             Val::Null => TypeId::Invalid,
+            Val::Struct => TypeId::Struct,
         }
     }
 }

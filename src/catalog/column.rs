@@ -2,6 +2,7 @@ use crate::types_db::type_id::TypeId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::mem::size_of;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -20,7 +21,8 @@ impl Column {
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar | TypeId::Char => length,
             TypeId::Vector => length * size_of::<f64>(),
-            TypeId::Invalid => 0
+            TypeId::Invalid => 0,
+            TypeId::Struct => length  // Struct size is determined by its fields' total size
         }
     }
 

@@ -12,6 +12,7 @@ use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type;
 use crate::types_db::vector_type;
+use crate::types_db::struct_type;
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -66,6 +67,7 @@ pub trait Type {
                     | TypeId::VarChar
             ),
             TypeId::Vector => matches!(type_id, TypeId::Vector),
+            TypeId::Struct => matches!(type_id, TypeId::Struct),
         }
     }
     fn get_min_value(type_id: TypeId) -> Value
@@ -190,6 +192,7 @@ pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
         TypeId::Vector => &vector_type::VECTOR_TYPE_INSTANCE,
         TypeId::Invalid => &invalid_type::INVALID_TYPE_INSTANCE,
         TypeId::Char => &const_len_type::CHAR_TYPE_INSTANCE,
+        TypeId::Struct => &struct_type::STRUCT_TYPE_INSTANCE,
     }
 }
 
@@ -202,6 +205,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::VarChar | TypeId::Invalid => 0,
         TypeId::Vector => size_of::<Arc<Vec<Value>>>() as u64,
         TypeId::Char => 0,
+        TypeId::Struct => 8, // Pointer size for struct
     }
 }
 
@@ -218,6 +222,7 @@ pub fn type_id_to_string(type_id: TypeId) -> String {
         TypeId::Vector => "Vector".to_string(),
         TypeId::Invalid => "Invalid".to_string(),
         TypeId::Char => "Char".to_string(),
+        TypeId::Struct => "Struct".to_string(),
     }
 }
 
