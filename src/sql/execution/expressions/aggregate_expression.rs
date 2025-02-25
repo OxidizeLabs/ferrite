@@ -11,12 +11,31 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggregationType {
-    CountStar, // COUNT(*)
-    Count,     // COUNT(expr)
-    Sum,       // SUM(expr)
-    Min,       // MIN(expr)
-    Max,       // MAX(expr)
-    Avg,       // AVG(expr)
+    CountStar,
+    Count,
+    Sum,
+    Min,
+    Max,
+    Avg,
+    CovarPop,
+    CovarSamp,
+    Correlation,
+    RegrSlope,
+    RegrIntercept,
+    RegrCount,
+    RegrR2,
+    RegrAvgX,
+    RegrAvgY,
+    RegrSXX,
+    RegrSYY,
+    RegrSXY,
+    ListAgg,
+    PercentileDisc,
+    Rank,
+    DenseRank,
+    PercentRank,
+    CumeDist,
+    PercentileCont,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +82,7 @@ impl AggregateExpression {
                 // Average always returns Decimal
                 Column::new("avg_result", TypeId::Decimal)
             }
+            _ => {}
         };
 
         // Set the formatted name for the return type
@@ -163,6 +183,25 @@ impl Display for AggregationType {
             AggregationType::Min => write!(f, "MIN"),
             AggregationType::Max => write!(f, "MAX"),
             AggregationType::Avg => write!(f, "AVG"),
+            AggregationType::CovarPop => write!(f, "COVARPOP"),
+            AggregationType::CovarSamp => write!(f, "COVARSAMP"),
+            AggregationType::Correlation => write!(f, "CORRELATION"),
+            AggregationType::RegrSlope => write!(f, "REGR SLOPE"),
+            AggregationType::RegrIntercept => write!(f, "REGR INTERCEPT"),
+            AggregationType::RegrCount => write!(f, "REGR COUNT"),
+            AggregationType::RegrR2 => write!(f, "REGR R2"),
+            AggregationType::RegrAvgX => write!(f, "REGR AVG X"),
+            AggregationType::RegrAvgY => write!(f, "REGR AVG Y"),
+            AggregationType::RegrSXX => write!(f, "REGR SXX"),
+            AggregationType::RegrSYY => write!(f, "REGR SYY"),
+            AggregationType::RegrSXY => write!(f, "REGR SXY"),
+            AggregationType::ListAgg => write!(f, "LISTAGG"),
+            AggregationType::PercentileDisc => write!(f, "PERCENTILE DISC"),
+            AggregationType::Rank => write!(f, "RANK"),
+            AggregationType::DenseRank => write!(f, "DENSE RANK"),
+            AggregationType::PercentRank => write!(f, "PERCENT RANK"),
+            AggregationType::CumeDist => write!(f, "CUM DIST"),
+            AggregationType::PercentileCont => write!(f, "PERCENTILE CONT"),
         }
     }
 }

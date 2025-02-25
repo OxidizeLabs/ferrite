@@ -81,10 +81,10 @@ impl ComparisonExpression {
             ComparisonType::LessThanOrEqual => Ok(lhs.compare_less_than_equals(rhs)),
             ComparisonType::GreaterThan => Ok(lhs.compare_greater_than(rhs)),
             ComparisonType::GreaterThanOrEqual => Ok(lhs.compare_greater_than_equals(rhs)),
-            ComparisonType::IsNotNull => Ok(if lhs.is_null() { 
-                CmpBool::CmpFalse 
-            } else { 
-                CmpBool::CmpTrue 
+            ComparisonType::IsNotNull => Ok(if lhs.is_null() {
+                CmpBool::CmpFalse
+            } else {
+                CmpBool::CmpTrue
             }),
         }
     }
