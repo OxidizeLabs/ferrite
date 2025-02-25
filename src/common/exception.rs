@@ -202,6 +202,8 @@ pub enum ArrayExpressionError {
     ChildEvaluationError(String),
     #[error("Failed to convert float to integer: {0}")]
     FloatToIntConversionError(f64),
+    #[error("TypeMismatch: {0}")]
+    TypeMismatch(String),
 }
 
 #[derive(Debug, Error)]
