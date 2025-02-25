@@ -221,6 +221,7 @@ impl Display for LikeExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
 
@@ -255,7 +256,7 @@ mod tests {
     fn test_basic_like() {
         let expr = create_test_expression("hello", "hello", None, false, true);
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         match result.get_val() {
@@ -281,7 +282,7 @@ mod tests {
         ];
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         for (value, pattern, expected) in test_cases {
             let expr = create_test_expression(value, pattern, None, false, true);
@@ -310,7 +311,7 @@ mod tests {
         ];
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         for (value, pattern, expected) in test_cases {
             let expr = create_test_expression(value, pattern, Some('\\'), false, true);
@@ -338,7 +339,7 @@ mod tests {
         ];
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         for (value, pattern, case_insensitive, expected) in test_cases {
             let expr = create_test_expression(value, pattern, None, false, !case_insensitive);
@@ -364,7 +365,7 @@ mod tests {
         ];
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         for (value, pattern, negated, expected) in test_cases {
             let expr = create_test_expression(value, pattern, None, negated, true);
@@ -390,7 +391,7 @@ mod tests {
         ];
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         for (value, pattern, expected) in test_cases {
             let expr = create_test_expression(value, pattern, None, false, true);

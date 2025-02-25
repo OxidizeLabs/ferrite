@@ -38,7 +38,7 @@ impl ArithmeticExpression {
         // This allows construction to succeed but validation will fail later
         let return_type = Self::infer_return_type(
             left.get_return_type(),
-            right.get_return_type()
+            right.get_return_type(),
         ).unwrap_or_else(|_| Column::new("arithmetic_result", TypeId::Integer));
 
         Self {
@@ -104,7 +104,7 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    },
+                    }
                 };
                 result
                     .map(Value::from)
@@ -120,7 +120,7 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    },
+                    }
                 };
                 result
                     .map(Value::from)
@@ -563,7 +563,7 @@ mod unit_tests {
 
         // Default format should use column names
         assert_eq!(format!("{}", expr), "(a + b)");
-        
+
         // Alternate format should use tuple/column indices
         assert_eq!(format!("{:#}", expr), "(Col#0.0 + Col#0.1)");
     }

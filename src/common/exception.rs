@@ -183,7 +183,9 @@ pub enum ExpressionError {
     #[error("InvalidCast")]
     InvalidCast { from: TypeId, to: TypeId },
     #[error("InvalidType: {0}")]
-    InvalidType(String)
+    InvalidType(String),
+    #[error("Invalid Seed: {0}")]
+    InvalidSeed(String),
 }
 
 #[derive(Debug, Error)]

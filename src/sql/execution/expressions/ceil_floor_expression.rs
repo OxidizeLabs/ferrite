@@ -203,8 +203,8 @@ impl ExpressionOps for CeilFloorExpression {
         &self,
         left_tuple: &Tuple,
         left_schema: &Schema,
-        right_tuple: &Tuple,
-        right_schema: &Schema,
+        _right_tuple: &Tuple,
+        _right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         // For join evaluation, we'll just evaluate against the left tuple and schema
         self.evaluate(left_tuple, left_schema)

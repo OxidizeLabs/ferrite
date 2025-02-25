@@ -11,15 +11,15 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {
-    children: Vec<Arc<Expression>>,
-    ret_type: Column,
+    elements: Vec<Arc<Expression>>,
+    return_type: Column,
 }
 
 impl ArrayExpression {
-    pub fn new(children: Vec<Arc<Expression>>) -> Self {
+    pub fn new(elements: Vec<Arc<Expression>>, return_type: Column) -> Self {
         Self {
-            ret_type: Column::new("<val>", TypeId::Vector),
-            children,
+            elements,
+            return_type,
         }
     }
 
@@ -29,7 +29,7 @@ impl ArrayExpression {
     {
         // Collect the evaluated values into a Vec<Value>
         let values: Result<Vec<Value>, ArrayExpressionError> = self
-            .children
+            .elements
             .iter()
             .map(|expr| {
                 let val = eval_func(expr)
@@ -70,27 +70,27 @@ impl ExpressionOps for ArrayExpression {
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        &self.children[child_idx]
+        &self.elements[child_idx]
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        &self.children
+        &self.elements
     }
 
     fn get_return_type(&self) -> &Column {
-        &self.ret_type
+        &self.return_type
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         Arc::new(Expression::Array(ArrayExpression {
-            ret_type: self.ret_type.clone(),
-            children,
+            return_type: self.return_type.clone(),
+            elements: children,
         }))
     }
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Validate all child expressions
-        for child in &self.children {
+        for child in &self.elements {
             child.validate(schema)?;
 
             // Check that each child returns a decimal type since we're converting to integers
@@ -106,15 +106,12 @@ impl ExpressionOps for ArrayExpression {
 
 impl Display for ArrayExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        let mut iter = self.children.iter();
-        if let Some(first) = iter.next() {
-            write!(f, "{}", first)?;
-            for child in iter {
-                write!(f, ", {}", child)?;
-            }
-        }
-        write!(f, "]")
+        write!(f, "ARRAY[{}]",
+               self.elements.iter()
+                   .map(|e| e.to_string())
+                   .collect::<Vec<_>>()
+                   .join(", ")
+        )
     }
 }
 
@@ -143,7 +140,7 @@ mod tests {
                 vec![],
             ))),
         ];
-        let expr = Expression::Array(ArrayExpression::new(children));
+        let expr = Expression::Array(ArrayExpression::new(children, Column::new("<val>", TypeId::Vector)));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
@@ -177,7 +174,7 @@ mod tests {
                 vec![],
             ))),
         ];
-        let expr = Expression::Array(ArrayExpression::new(children));
+        let expr = Expression::Array(ArrayExpression::new(children, Column::new("<val>", TypeId::Vector)));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
