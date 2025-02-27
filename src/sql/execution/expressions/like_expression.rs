@@ -91,6 +91,8 @@ impl LikeExpression {
                     pattern_chars.next(); // Consume pattern character
                     match value_chars.next() {
                         Some(value_ch) => {
+                            // If we're escaping or if the pattern character is not a wildcard,
+                            // do a literal match
                             let matches = if self.case_sensitive {
                                 value_ch == pattern_ch
                             } else {
@@ -301,13 +303,22 @@ mod tests {
     #[test]
     fn test_escape_character() {
         let test_cases = vec![
-            ("hello%world", "hello\\%world", true),
-            ("hello_world", "hello\\_world", true),
-            ("hello%", "hello\\%", true),
-            ("hello_", "hello\\_", true),
-            ("hello\\world", "hello\\\\world", true),
-            ("hello%world", "hello%world", false),
-            ("hello_world", "hello_world", false),
+            // Test escaping special characters in pattern
+            ("hello%world", "hello\\%world", true),   // Escaped % in pattern matches literal % in value
+            ("hello_world", "hello\\_world", true),   // Escaped _ in pattern matches literal _ in value
+            ("hello%", "hello\\%", true),            // Escaped % at end
+            ("hello_", "hello\\_", true),            // Escaped _ at end
+            ("hello\\world", "hello\\\\world", true), // Escaped backslash
+            
+            // Test unescaped wildcards in pattern
+            ("hello%world", "hello%world", true),     // % in pattern matches % in value
+            ("helloXworld", "hello%world", true),     // % in pattern matches any character
+            ("hello_world", "hello_world", true),     // _ in pattern matches _ in value
+            ("helloXworld", "hello_world", true),     // _ in pattern matches any character
+            
+            // Test literal matches
+            ("hello\\%world", "hello\\\\%world", true), // Escaped backslash followed by %
+            ("hello\\_world", "hello\\\\_world", true), // Escaped backslash followed by _
         ];
 
         let schema = Schema::new(vec![]);
@@ -330,12 +341,12 @@ mod tests {
     #[test]
     fn test_case_sensitivity() {
         let test_cases = vec![
-            ("HELLO", "hello", false, true), // Case-sensitive, should not match
-            ("HELLO", "hello", true, false), // Case-insensitive, should match
-            ("Hello", "HELLO", false, true), // Case-sensitive, should not match
-            ("Hello", "HELLO", true, false), // Case-insensitive, should match
-            ("hello", "HELLO", false, true), // Case-sensitive, should not match
-            ("hello", "HELLO", true, false), // Case-insensitive, should match
+            ("HELLO", "hello", false, false), // Case-sensitive, should not match
+            ("HELLO", "hello", true, true),   // Case-insensitive, should match
+            ("Hello", "HELLO", false, false), // Case-sensitive, should not match
+            ("Hello", "HELLO", true, true),   // Case-insensitive, should match
+            ("hello", "HELLO", false, false), // Case-sensitive, should not match
+            ("hello", "HELLO", true, true),   // Case-insensitive, should match
         ];
 
         let schema = Schema::new(vec![]);
