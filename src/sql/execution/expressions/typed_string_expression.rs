@@ -107,11 +107,10 @@ impl ExpressionOps for TypedStringExpression {
             },
             // For other data types, we'll return the string value and let the caller handle conversion
             _ => {
-                // For other types, return as string and let the caller handle conversion
-                let value = Value::new(self.value.clone());
-                
+                // Create value with the correct return type directly
+                let value = Value::new_with_type(Val::VarLen(self.value.clone()), self.return_type.get_type());
                 // Try to cast to the return type if needed
-                if self.return_type.get_type() != TypeId::VarChar {
+                if value.get_type_id() != self.return_type.get_type() {
                     value.cast_to(self.return_type.get_type())
                         .map_err(|e| ExpressionError::InvalidOperation(
                             format!("Failed to cast '{}' to {}: {}", self.value, self.data_type, e)
