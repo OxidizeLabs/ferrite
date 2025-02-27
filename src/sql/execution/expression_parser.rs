@@ -8,8 +8,7 @@ use crate::sql::execution::expressions::aggregate_expression::{
 };
 use crate::sql::execution::expressions::all_expression::AllExpression;
 use crate::sql::execution::expressions::any_expression::AnyExpression;
-use crate::sql::execution::expressions::arithmetic_expression::ArithmeticExpression;
-use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
+use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
 use crate::sql::execution::expressions::at_timezone_expression::AtTimeZoneExpression;
 use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
 use crate::sql::execution::expressions::case_expression::CaseExpression;
@@ -29,7 +28,7 @@ use crate::sql::execution::expressions::exists_expression::ExistsExpression;
 use crate::sql::execution::expressions::extract_expression::ExtractExpression;
 use crate::sql::execution::expressions::extract_expression::ExtractField;
 use crate::sql::execution::expressions::function_expression::FunctionExpression;
-use crate::sql::execution::expressions::in_expression::InExpression;
+use crate::sql::execution::expressions::in_expression::{InExpression, InOperand};
 use crate::sql::execution::expressions::is_check_expression::{IsCheckExpression, IsCheckType};
 use crate::sql::execution::expressions::is_distinct_expression::IsDistinctExpression;
 use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
@@ -68,6 +67,7 @@ use crate::sql::execution::expressions::grouping_sets_expression::{GroupingSetsE
 use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
 use crate::sql::execution::expressions::subscript_expression::{SubscriptExpression, Subscript};
+use crate::sql::execution::expressions::array_expression::ArrayExpression;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1184,7 +1184,43 @@ impl ExpressionParser {
                     },
                 }
             }
-            Expr::Array(_) => Err("Array expressions are not yet supported".to_string()),
+            Expr::Array(array) => {
+                // Parse each element in the array
+                let mut elements = Vec::new();
+                let mut element_type = TypeId::Invalid;
+
+                // Parse each element expression
+                for elem in &array.elem {
+                    let parsed_elem = Arc::new(self.parse_expression(elem, schema)?);
+                    
+                    // If this is the first element, use its type as the element type
+                    if element_type == TypeId::Invalid {
+                        element_type = parsed_elem.get_return_type().get_type();
+                    } else {
+                        // Check that all elements have compatible types
+                        let curr_type = parsed_elem.get_return_type().get_type();
+                        let type_instance = crate::types_db::types::get_instance(element_type);
+                        if !type_instance.is_coercible_from(curr_type) {
+                            return Err(format!(
+                                "Array element type mismatch: cannot mix {:?} and {:?}",
+                                element_type, curr_type
+                            ));
+                        }
+                    }
+                    
+                    elements.push(parsed_elem);
+                }
+
+                // If array is empty, default to integer array type
+                if element_type == TypeId::Invalid {
+                    element_type = TypeId::Integer;
+                }
+
+                Ok(Expression::Array(ArrayExpression::new(
+                    elements,
+                    Column::new("array", TypeId::Vector),
+                )))
+            },
             Expr::Interval(_) => Err("Interval expressions are not yet supported".to_string()),
             Expr::Wildcard(_) => Err("Wildcard expressions are not yet supported".to_string()),
             Expr::QualifiedWildcard(_, _) => {
