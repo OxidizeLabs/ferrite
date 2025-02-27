@@ -511,8 +511,8 @@ mod tests {
         
         let agg_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            agg_arg,
-            vec![]
+            vec![agg_arg],
+            agg_col
         ));
         
         let schema = manager.create_aggregation_output_schema(
@@ -563,8 +563,8 @@ mod tests {
         
         let count_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            count_arg,
-            vec![]
+            vec![count_arg],
+            count_col
         ));
         
         let schema = manager.create_aggregation_output_schema(
@@ -594,8 +594,8 @@ mod tests {
         )));
         let count_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            count_arg,
-            vec![]
+            vec![count_arg],
+            count_col
         ));
         
         // Create SUM aggregate
@@ -605,8 +605,8 @@ mod tests {
         )));
         let sum_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            sum_arg,
-            vec![]
+            vec![sum_arg],
+            sum_col
         ));
         
         let schema = manager.create_aggregation_output_schema(

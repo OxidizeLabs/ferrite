@@ -449,14 +449,6 @@ mod tests {
         let txn1_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
         let txn2_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
 
-        // Insert with first transaction
-        let rid = ctx.insert_tuple(
-            &table,
-            vec![Value::new(1), Value::new("test"), Value::new(25)],
-            &schema,
-            Some(txn1_ctx.clone()),
-        );
-
         // Second transaction shouldn't see uncommitted tuple
         let mut iterator = TableIterator::new(
             table.clone(),

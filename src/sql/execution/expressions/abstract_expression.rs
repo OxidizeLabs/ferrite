@@ -18,7 +18,7 @@ use crate::sql::execution::expressions::column_value_expression::ColumnRefExpres
 use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::convert_expression::ConvertExpression;
-use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
+// use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
 use crate::sql::execution::expressions::exists_expression::ExistsExpression;
 use crate::sql::execution::expressions::extract_expression::ExtractExpression;
 use crate::sql::execution::expressions::filter_expression::FilterExpression;
@@ -79,7 +79,7 @@ pub enum Expression {
     Extract(ExtractExpression),
     Exists(ExistsExpression),
     Regex(RegexExpression),
-    DateTime(DateTimeExpression),
+    // DateTime(DateTimeExpression),
     Coalesce(CoalesceExpression),
     Random(RandomExpression),
     Trim(TrimExpression),
@@ -150,7 +150,7 @@ impl ExpressionOps for Expression {
             Self::Extract(expr) => expr.evaluate(tuple, schema),
             Self::Exists(expr) => expr.evaluate(tuple, schema),
             Self::Regex(expr) => expr.evaluate(tuple, schema),
-            Self::DateTime(expr) => expr.evaluate(tuple, schema),
+            // Self::DateTime(expr) => expr.evaluate(tuple, schema),
             Self::Coalesce(expr) => expr.evaluate(tuple, schema),
             Self::Random(expr) => expr.evaluate(tuple, schema),
             Self::Trim(expr) => expr.evaluate(tuple, schema),
@@ -240,7 +240,7 @@ impl ExpressionOps for Expression {
             }
             Self::Exists(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Regex(expr) => expr.evaluate(left_tuple, left_schema),
-            Self::DateTime(expr) => expr.evaluate(left_tuple, left_schema),
+            // Self::DateTime(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Coalesce(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Random(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Trim(expr) => expr.evaluate(left_tuple, left_schema),
@@ -301,7 +301,7 @@ impl ExpressionOps for Expression {
             Self::Extract(expr) => expr.get_child_at(child_idx),
             Self::Exists(expr) => expr.get_child_at(child_idx),
             Self::Regex(expr) => expr.get_child_at(child_idx),
-            Self::DateTime(expr) => expr.get_child_at(child_idx),
+            // Self::DateTime(expr) => expr.get_child_at(child_idx),
             Self::Coalesce(expr) => expr.get_child_at(child_idx),
             Self::Random(expr) => expr.get_child_at(child_idx),
             Self::Trim(expr) => expr.get_child_at(child_idx),
@@ -356,7 +356,7 @@ impl ExpressionOps for Expression {
             Self::Extract(expr) => expr.get_children(),
             Self::Exists(expr) => expr.get_children(),
             Self::Regex(expr) => expr.get_children(),
-            Self::DateTime(expr) => expr.get_children(),
+            // Self::DateTime(expr) => expr.get_children(),
             Self::Coalesce(expr) => expr.get_children(),
             Self::Random(expr) => expr.get_children(),
             Self::Trim(expr) => expr.get_children(),
@@ -411,7 +411,7 @@ impl ExpressionOps for Expression {
             Self::Extract(expr) => expr.get_return_type(),
             Self::Exists(expr) => expr.get_return_type(),
             Self::Regex(expr) => expr.get_return_type(),
-            Self::DateTime(expr) => expr.get_return_type(),
+            // Self::DateTime(expr) => expr.get_return_type(),
             Self::Coalesce(expr) => expr.get_return_type(),
             Self::Random(expr) => expr.get_return_type(),
             Self::Trim(expr) => expr.get_return_type(),
@@ -466,7 +466,7 @@ impl ExpressionOps for Expression {
             Self::Extract(expr) => expr.clone_with_children(children),
             Self::Exists(expr) => expr.clone_with_children(children),
             Self::Regex(expr) => expr.clone_with_children(children),
-            Self::DateTime(expr) => expr.clone_with_children(children),
+            // Self::DateTime(expr) => expr.clone_with_children(children),
             Self::Coalesce(expr) => expr.clone_with_children(children),
             Self::Random(expr) => expr.clone_with_children(children),
             Self::Trim(expr) => expr.clone_with_children(children),
@@ -662,13 +662,13 @@ impl Display for Expression {
                     write!(f, "{}", expr)
                 }
             }
-            Self::DateTime(expr) => {
-                if f.alternate() {
-                    write!(f, "{:#}", expr)
-                } else {
-                    write!(f, "{}", expr)
-                }
-            }
+            // Self::DateTime(expr) => {
+            //     if f.alternate() {
+            //         write!(f, "{:#}", expr)
+            //     } else {
+            //         write!(f, "{}", expr)
+            //     }
+            // }
             Self::Coalesce(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)

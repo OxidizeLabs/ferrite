@@ -119,6 +119,7 @@ impl ValueRow {
                     size_: Size::Length(1),
                     manage_data_: false,
                     type_id_: col.get_type(),
+                    struct_data: None,
                 })
                 .collect();
 
