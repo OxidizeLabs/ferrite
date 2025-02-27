@@ -70,6 +70,8 @@ use crate::sql::execution::expressions::subscript_expression::{SubscriptExpressi
 use crate::sql::execution::expressions::array_expression::ArrayExpression;
 use crate::sql::execution::expressions::interval_expression::IntervalExpression;
 use crate::sql::execution::expressions::interval_expression::IntervalField;
+use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
+use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1245,10 +1247,22 @@ impl ExpressionParser {
                     Column::new("interval", TypeId::Struct),
                 )))
             },
-            Expr::Wildcard(_) => Err("Wildcard expressions are not yet supported".to_string()),
-            Expr::QualifiedWildcard(_, _) => {
-                Err("Qualified wildcard expressions are not yet supported".to_string())
-            }
+            Expr::Wildcard(token) => {
+                // Create a wildcard expression that will return all columns as a vector
+                Ok(Expression::Wildcard(WildcardExpression::new(
+                    Column::new("*", TypeId::Vector)
+                )))
+            },
+            Expr::QualifiedWildcard(name, _) => {
+                // Extract the qualifier parts (e.g., ["schema", "table"] from schema.table.*)
+                let qualifier: Vec<String> = name.0.iter().map(|i| i.value.clone()).collect();
+                
+                // Create a qualified wildcard expression
+                Ok(Expression::QualifiedWildcard(QualifiedWildcardExpression::new(
+                    qualifier,
+                    Column::new(&format!("{}.*", name.0.iter().map(|i| i.value.as_str()).collect::<Vec<_>>().join(".")), TypeId::Vector)
+                )))
+            },
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
