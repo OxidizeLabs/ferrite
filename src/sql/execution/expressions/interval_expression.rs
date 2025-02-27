@@ -91,8 +91,8 @@ impl ExpressionOps for IntervalExpression {
         &self,
         left_tuple: &Tuple,
         left_schema: &Schema,
-        right_tuple: &Tuple,
-        right_schema: &Schema,
+        _right_tuple: &Tuple,
+        _right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         // For join evaluation, we can just evaluate using the left tuple and schema
         // since interval expressions don't depend on join context

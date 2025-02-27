@@ -2,51 +2,67 @@ use crate::catalog::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
-use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::{
     AggregateExpression, AggregationType,
 };
 use crate::sql::execution::expressions::all_expression::AllExpression;
 use crate::sql::execution::expressions::any_expression::AnyExpression;
+use crate::sql::execution::expressions::arithmetic_expression::ArithmeticExpression;
+use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
 use crate::sql::execution::expressions::at_timezone_expression::AtTimeZoneExpression;
 use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
 use crate::sql::execution::expressions::case_expression::CaseExpression;
 use crate::sql::execution::expressions::cast_expression::CastExpression;
 use crate::sql::execution::expressions::ceil_floor_expression::{
-    CeilFloorExpression, CeilFloorOperation, DateTimeField,
+    CeilFloorExpression, CeilFloorOperation,
 };
+use crate::sql::execution::expressions::collate_expression::CollateExpression;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::comparison_expression::{
     ComparisonExpression, ComparisonType,
 };
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::convert_expression::ConvertExpression;
+use crate::sql::execution::expressions::datetime_expression::DateTimeField;
+use crate::sql::execution::expressions::exists_expression::ExistsExpression;
+use crate::sql::execution::expressions::extract_expression::ExtractExpression;
+use crate::sql::execution::expressions::extract_expression::ExtractField;
+use crate::sql::execution::expressions::function_expression::FunctionExpression;
+use crate::sql::execution::expressions::in_expression::InExpression;
 use crate::sql::execution::expressions::is_check_expression::{IsCheckExpression, IsCheckType};
+use crate::sql::execution::expressions::is_distinct_expression::IsDistinctExpression;
 use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
+use crate::sql::execution::expressions::map_access_expression::{
+    MapAccessExpression, MapAccessKey,
+};
+use crate::sql::execution::expressions::method_expression::MethodExpression;
 use crate::sql::execution::expressions::overlay_expression::OverlayExpression;
 use crate::sql::execution::expressions::position_expression::PositionExpression;
 use crate::sql::execution::expressions::regex_expression::{RegexExpression, RegexOperator};
-use crate::sql::execution::expressions::string_expression::{
-    StringExpression, StringExpressionType,
-};
+use crate::sql::execution::expressions::subquery_expression::SubqueryExpression;
+use crate::sql::execution::expressions::subquery_expression::SubqueryType;
 use crate::sql::execution::expressions::substring_expression::SubstringExpression;
 use crate::sql::execution::expressions::trim_expression::{TrimExpression, TrimType};
+use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::{
-    CastFormat, CeilFloorKind, DataType, DuplicateTreatment, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause, FunctionArgumentList,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ListAggOnOverflow, NullTreatment,
-    ObjectName, Query, Select, SelectItem, TableFactor,
+    BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function,
+    FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause
+    , FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator
+    , ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
 };
-use std::fmt;
 use std::sync::Arc;
+use crate::sql::binder::expressions::bound_window::BoundWindow;
+use crate::sql::binder::bound_expression::{BoundExpression, ExpressionType};
+use crate::sql::binder::expressions::bound_constant::BoundConstant;
+use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -138,18 +154,51 @@ impl ExpressionParser {
                 )))
             }
 
-            Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(*value)?)),
+            Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
+                value.clone(),
+            )?)),
 
             Expr::BinaryOp { left, op, right } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
 
-                Ok(Expression::BinaryOp(BinaryOpExpression::new(
-                    left_expr.clone(),
-                    right_expr.clone(),
-                    op.clone(),
-                    vec![left_expr, right_expr],
-                )?))
+                // Convert arithmetic binary operators to ArithmeticExpression
+                match op {
+                    BinaryOperator::Plus => Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                        left_expr.clone(),
+                        right_expr.clone(),
+                        ArithmeticOp::Add,
+                        vec![left_expr, right_expr],
+                    ))),
+                    BinaryOperator::Minus => Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                        left_expr.clone(),
+                        right_expr.clone(),
+                        ArithmeticOp::Subtract,
+                        vec![left_expr, right_expr],
+                    ))),
+                    BinaryOperator::Multiply => {
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            left_expr.clone(),
+                            right_expr.clone(),
+                            ArithmeticOp::Multiply,
+                            vec![left_expr, right_expr],
+                        )))
+                    }
+                    BinaryOperator::Divide => {
+                        Ok(Expression::Arithmetic(ArithmeticExpression::new(
+                            left_expr.clone(),
+                            right_expr.clone(),
+                            ArithmeticOp::Divide,
+                            vec![left_expr, right_expr],
+                        )))
+                    }
+                    _ => Ok(Expression::BinaryOp(BinaryOpExpression::new(
+                        left_expr.clone(),
+                        right_expr.clone(),
+                        op.clone(),
+                        vec![left_expr, right_expr],
+                    )?)),
+                }
             }
 
             Expr::UnaryOp { op, expr } => {
@@ -274,44 +323,7 @@ impl ExpressionParser {
                 Ok(result)
             }
 
-            Expr::Function(func) => {
-                let name = func.name.to_string().to_uppercase();
-                match name.as_str() {
-                    "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" => {
-                        // Handle aggregate functions in HAVING clause
-                        self.parse_aggregate_function(&func, schema)
-                    }
-                    "LOWER" | "UPPER" => {
-                        // Get the argument
-                        let arg = match &func.args {
-                            FunctionArguments::List(list) if list.args.len() == 1 => {
-                                match &list.args[0] {
-                                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                        Arc::new(self.parse_expression(expr, schema)?)
-                                    }
-                                    _ => return Err("Invalid string function argument".to_string()),
-                                }
-                            }
-                            _ => return Err(format!("{}() requires exactly one argument", name)),
-                        };
-
-                        let expr_type = match name.as_str() {
-                            "LOWER" => StringExpressionType::Lower,
-                            "UPPER" => StringExpressionType::Upper,
-                            _ => unreachable!(),
-                        };
-
-                        Ok(Expression::String(StringExpression::new(
-                            arg.clone(),
-                            expr_type,
-                            vec![arg],
-                        )))
-                    }
-                    "SUBSTRING" => self.parse_substring_function(&func, schema),
-                    "TRIM" | "LTRIM" | "RTRIM" => self.parse_trim_function(&func, schema),
-                    _ => Err(format!("Unsupported function: {}", name)),
-                }
-            }
+            Expr::Function(func) => self.parse_function(func, schema),
 
             Expr::Case {
                 operand,
@@ -383,12 +395,9 @@ impl ExpressionParser {
                         CastFormat::Value(format_str) => {
                             cast_expr = cast_expr.with_format(format_str.to_string());
                         }
-                        CastFormat::Expr(format_expr) => {
-                            // Parse format expression and evaluate it
-                            let format_value = self.parse_expression(format_expr, schema)?;
-                            // TODO: Evaluate format expression to get format string
-                            // For now just use default format
-                            cast_expr = cast_expr.with_format("default".to_string());
+                        CastFormat::ValueAtTimeZone(format_str, timezone) => {
+                            // For now, ignore timezone and just use the format string
+                            cast_expr = cast_expr.with_format(format_str.to_string());
                         }
                     }
                 }
@@ -404,7 +413,7 @@ impl ExpressionParser {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => self.parse_at_timezone(timestamp, time_zone, schema),
+            } => Ok(self.parse_at_timezone(timestamp, time_zone, schema)?),
 
             Expr::SimilarTo {
                 negated,
@@ -412,12 +421,12 @@ impl ExpressionParser {
                 pattern,
                 escape_char,
             } => {
-                let expr = Arc::new(self.parse_expression(expr, schema)?);
-                let pattern = Arc::new(self.parse_expression(pattern, schema)?);
+                let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
+                let parsed_pattern = Arc::new(self.parse_expression(pattern, schema)?);
 
                 Ok(Expression::Regex(RegexExpression::new(
-                    expr,
-                    pattern,
+                    parsed_expr,
+                    parsed_pattern,
                     if *negated {
                         RegexOperator::NotSimilarTo
                     } else {
@@ -511,7 +520,7 @@ impl ExpressionParser {
                 };
 
                 // Parse the character set if specified
-                let charset_str = charset.map(|name| name.to_string());
+                let charset_str = charset.clone().map(|name| name.to_string());
 
                 // Parse style expressions
                 let style_exprs = styles
@@ -535,7 +544,7 @@ impl ExpressionParser {
                     inner_expr,
                     target_type,
                     charset_str,
-                    is_try,
+                    *is_try,
                     style_exprs,
                     return_type,
                 )))
@@ -545,24 +554,51 @@ impl ExpressionParser {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
 
                 let datetime_field = match field {
-                    Some(CeilFloorKind::DateTimeField(field)) => Some(match field {
-                        DateTimeField::Year => DateTimeField::Year,
-                        DateTimeField::Month => DateTimeField::Month,
-                        DateTimeField::Day => DateTimeField::Day,
-                        DateTimeField::Hour => DateTimeField::Hour,
-                        DateTimeField::Minute => DateTimeField::Minute,
-                        DateTimeField::Second => DateTimeField::Second,
+                    CeilFloorKind::DateTimeField(field) => Some(match field {
+                        sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
+                        sqlparser::ast::DateTimeField::Month => DateTimeField::Month,
+                        sqlparser::ast::DateTimeField::Day => DateTimeField::Day,
+                        sqlparser::ast::DateTimeField::Hour => DateTimeField::Hour,
+                        sqlparser::ast::DateTimeField::Minute => DateTimeField::Minute,
+                        sqlparser::ast::DateTimeField::Second => DateTimeField::Second,
+                        sqlparser::ast::DateTimeField::Week(weekday) => {
+                            DateTimeField::Week(Some(weekday.clone().unwrap().value))
+                        }
+                        sqlparser::ast::DateTimeField::DayOfWeek => DateTimeField::DayOfWeek,
+                        sqlparser::ast::DateTimeField::DayOfYear => DateTimeField::DayOfYear,
+                        sqlparser::ast::DateTimeField::Quarter => DateTimeField::Quarter,
+                        sqlparser::ast::DateTimeField::Century => DateTimeField::Century,
+                        sqlparser::ast::DateTimeField::Decade => DateTimeField::Decade,
+                        sqlparser::ast::DateTimeField::Dow => DateTimeField::Dow,
+                        sqlparser::ast::DateTimeField::Doy => DateTimeField::Doy,
+                        sqlparser::ast::DateTimeField::Epoch => DateTimeField::Epoch,
+                        sqlparser::ast::DateTimeField::Isodow => DateTimeField::Isodow,
+                        sqlparser::ast::DateTimeField::Isoyear => DateTimeField::Isoyear,
+                        sqlparser::ast::DateTimeField::Julian => DateTimeField::Julian,
+                        sqlparser::ast::DateTimeField::Microsecond => DateTimeField::Microsecond,
+                        sqlparser::ast::DateTimeField::Microseconds => DateTimeField::Microseconds,
+                        sqlparser::ast::DateTimeField::Millennium => DateTimeField::Millennium,
+                        sqlparser::ast::DateTimeField::Millisecond => DateTimeField::Millisecond,
+                        sqlparser::ast::DateTimeField::Milliseconds => DateTimeField::Milliseconds,
+                        sqlparser::ast::DateTimeField::Nanosecond => DateTimeField::Nanosecond,
+                        sqlparser::ast::DateTimeField::Nanoseconds => DateTimeField::Nanoseconds,
+                        sqlparser::ast::DateTimeField::Timezone => DateTimeField::Timezone,
+                        sqlparser::ast::DateTimeField::TimezoneHour => DateTimeField::TimezoneHour,
+                        sqlparser::ast::DateTimeField::TimezoneMinute => {
+                            DateTimeField::TimezoneMinute
+                        }
+                        _ => return Err("Unsupported datetime field".to_string()),
                     }),
-                    Some(CeilFloorKind::Scale(scale_expr)) => {
-                        let scale = Arc::new(self.parse_expression(scale_expr, schema)?);
+                    CeilFloorKind::Scale(scale_expr) => {
+                        let scale_expr = Expr::Value(scale_expr.clone());
+                        let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
-                            CeilFloorOperation::Ceil,
+                            CeilFloorOperation::Floor,
                             inner_expr,
                             Some(scale),
                             None,
                         )?));
                     }
-                    None => None,
                 };
 
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
@@ -577,16 +613,44 @@ impl ExpressionParser {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
 
                 let datetime_field = match field {
-                    Some(CeilFloorKind::DateTimeField(field)) => Some(match field {
-                        DateTimeField::Year => DateTimeField::Year,
-                        DateTimeField::Month => DateTimeField::Month,
-                        DateTimeField::Day => DateTimeField::Day,
-                        DateTimeField::Hour => DateTimeField::Hour,
-                        DateTimeField::Minute => DateTimeField::Minute,
-                        DateTimeField::Second => DateTimeField::Second,
+                    CeilFloorKind::DateTimeField(field) => Some(match field {
+                        sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
+                        sqlparser::ast::DateTimeField::Month => DateTimeField::Month,
+                        sqlparser::ast::DateTimeField::Day => DateTimeField::Day,
+                        sqlparser::ast::DateTimeField::Hour => DateTimeField::Hour,
+                        sqlparser::ast::DateTimeField::Minute => DateTimeField::Minute,
+                        sqlparser::ast::DateTimeField::Second => DateTimeField::Second,
+                        sqlparser::ast::DateTimeField::Week(weekday) => {
+                            DateTimeField::Week(Some(weekday.clone().unwrap().value))
+                        }
+                        sqlparser::ast::DateTimeField::DayOfWeek => DateTimeField::DayOfWeek,
+                        sqlparser::ast::DateTimeField::DayOfYear => DateTimeField::DayOfYear,
+                        sqlparser::ast::DateTimeField::Quarter => DateTimeField::Quarter,
+                        sqlparser::ast::DateTimeField::Century => DateTimeField::Century,
+                        sqlparser::ast::DateTimeField::Decade => DateTimeField::Decade,
+                        sqlparser::ast::DateTimeField::Dow => DateTimeField::Dow,
+                        sqlparser::ast::DateTimeField::Doy => DateTimeField::Doy,
+                        sqlparser::ast::DateTimeField::Epoch => DateTimeField::Epoch,
+                        sqlparser::ast::DateTimeField::Isodow => DateTimeField::Isodow,
+                        sqlparser::ast::DateTimeField::Isoyear => DateTimeField::Isoyear,
+                        sqlparser::ast::DateTimeField::Julian => DateTimeField::Julian,
+                        sqlparser::ast::DateTimeField::Microsecond => DateTimeField::Microsecond,
+                        sqlparser::ast::DateTimeField::Microseconds => DateTimeField::Microseconds,
+                        sqlparser::ast::DateTimeField::Millennium => DateTimeField::Millennium,
+                        sqlparser::ast::DateTimeField::Millisecond => DateTimeField::Millisecond,
+                        sqlparser::ast::DateTimeField::Milliseconds => DateTimeField::Milliseconds,
+                        sqlparser::ast::DateTimeField::Nanosecond => DateTimeField::Nanosecond,
+                        sqlparser::ast::DateTimeField::Nanoseconds => DateTimeField::Nanoseconds,
+                        sqlparser::ast::DateTimeField::Timezone => DateTimeField::Timezone,
+                        sqlparser::ast::DateTimeField::TimezoneHour => DateTimeField::TimezoneHour,
+                        sqlparser::ast::DateTimeField::TimezoneMinute => {
+                            DateTimeField::TimezoneMinute
+                        }
+                        _ => return Err("Unsupported datetime field".to_string()),
                     }),
-                    Some(CeilFloorKind::Scale(scale_expr)) => {
-                        let scale = Arc::new(self.parse_expression(scale_expr, schema)?);
+                    CeilFloorKind::Scale(scale_expr) => {
+                        let scale_expr = Expr::Value(scale_expr.clone());
+                        let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
                             CeilFloorOperation::Floor,
                             inner_expr,
@@ -594,7 +658,6 @@ impl ExpressionParser {
                             None,
                         )?));
                     }
-                    None => None,
                 };
 
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
@@ -660,7 +723,316 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
+            Expr::IsDistinctFrom(left, right) => {
+                let left_expr = Arc::new(self.parse_expression(left, schema)?);
+                let right_expr = Arc::new(self.parse_expression(right, schema)?);
+                Ok(Expression::IsDistinct(IsDistinctExpression::new(
+                    left_expr,
+                    right_expr,
+                    true,
+                    Column::new("is_distinct", TypeId::Boolean),
+                )))
+            }
+            Expr::IsNotDistinctFrom(left, right) => {
+                let left_expr = Arc::new(self.parse_expression(left, schema)?);
+                let right_expr = Arc::new(self.parse_expression(right, schema)?);
+                Ok(Expression::IsDistinct(IsDistinctExpression::new(
+                    left_expr,
+                    right_expr,
+                    false,
+                    Column::new("is_not_distinct", TypeId::Boolean),
+                )))
+            }
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
+                let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let mut list_exprs = Vec::new();
+                for item in list {
+                    list_exprs.push(Arc::new(self.parse_expression(item, schema)?));
+                }
+                // Create a vector expression from the list
+                let list_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_vector(list_exprs.iter().map(|e| Value::new(Val::Null))),
+                    Column::new("list", TypeId::Vector),
+                    list_exprs,
+                )));
+                Ok(Expression::In(InExpression::new_list(
+                    expr,
+                    list_expr,
+                    *negated,
+                    Column::new("in_list", TypeId::Boolean),
+                )))
+            }
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => {
+                let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let subquery = Arc::new(self.parse_subquery(subquery, schema)?);
+                Ok(Expression::In(InExpression::new_subquery(
+                    expr,
+                    subquery,
+                    *negated,
+                    Column::new("in_list", TypeId::Boolean),
+                )))
+            }
+            Expr::InUnnest {
+                expr,
+                array_expr,
+                negated,
+            } => {
+                let parsed_expr = self.parse_expression(expr, schema)?;
+                let parsed_array = self.parse_expression(array_expr, schema)?;
+                Ok(Expression::In(InExpression::new_unnest(
+                    Arc::new(parsed_expr),
+                    Arc::new(parsed_array),
+                    *negated,
+                    Column::new("in_unnest", TypeId::Boolean),
+                )))
+            }
+            Expr::Like {
+                negated,
+                any,
+                expr,
+                pattern,
+                escape_char,
+            } => Ok(Expression::Regex(RegexExpression::new(
+                Arc::new(self.parse_expression(expr, schema)?),
+                Arc::new(self.parse_expression(pattern, schema)?),
+                RegexOperator::RLike,
+                escape_char.clone(),
+                Column::new("like", TypeId::Boolean),
+            ))),
+            Expr::ILike {
+                negated,
+                any,
+                expr,
+                pattern,
+                escape_char,
+            } => Ok(Expression::Regex(RegexExpression::new(
+                Arc::new(self.parse_expression(expr, schema)?),
+                Arc::new(self.parse_expression(pattern, schema)?),
+                RegexOperator::RLike,
+                escape_char.clone(),
+                Column::new("ilike", TypeId::Boolean),
+            ))),
+            Expr::Extract {
+                field,
+                syntax,
+                expr,
+            } => {
+                let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let field = match field {
+                    sqlparser::ast::DateTimeField::Year => ExtractField::Year,
+                    sqlparser::ast::DateTimeField::Month => ExtractField::Month,
+                    sqlparser::ast::DateTimeField::Day => ExtractField::Day,
+                    sqlparser::ast::DateTimeField::Hour => ExtractField::Hour,
+                    sqlparser::ast::DateTimeField::Minute => ExtractField::Minute,
+                    sqlparser::ast::DateTimeField::Second => ExtractField::Second,
+                    sqlparser::ast::DateTimeField::Timezone => ExtractField::Timezone,
+                    sqlparser::ast::DateTimeField::Quarter => ExtractField::Quarter,
+                    sqlparser::ast::DateTimeField::Week(weekday) => ExtractField::Week,
+                    sqlparser::ast::DateTimeField::Dow => ExtractField::DayOfWeek,
+                    sqlparser::ast::DateTimeField::Doy => ExtractField::DayOfYear,
+                    sqlparser::ast::DateTimeField::Epoch => ExtractField::Epoch,
+                    _ => return Err(format!("Unsupported EXTRACT field: {:?}", field)),
+                };
+                Ok(Expression::Extract(ExtractExpression::new(
+                    field,
+                    expr,
+                    Column::new("extract", TypeId::Integer),
+                )))
+            }
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+                special,
+            } => {
+                let string_expr = Arc::new(self.parse_expression(expr, schema)?);
 
+                // Parse the FROM expression
+                let from_expr = match substring_from {
+                    Some(from) => Arc::new(self.parse_expression(from, schema)?),
+                    None => return Err("SUBSTRING requires FROM clause".to_string()),
+                };
+
+                // Parse the optional FOR expression
+                let for_expr = match substring_for {
+                    Some(for_expr) => Some(Arc::new(self.parse_expression(for_expr, schema)?)),
+                    None => None,
+                };
+
+                Ok(Expression::Substring(SubstringExpression::new(
+                    string_expr,
+                    from_expr,
+                    for_expr,
+                )))
+            }
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+                trim_characters,
+            } => {
+                let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
+                let trim_type = match trim_where {
+                    Some(sqlparser::ast::TrimWhereField::Leading) => TrimType::Leading,
+                    Some(sqlparser::ast::TrimWhereField::Trailing) => TrimType::Trailing,
+                    Some(sqlparser::ast::TrimWhereField::Both) => TrimType::Both,
+                    None => TrimType::Both,
+                };
+
+                // Create the children vector with the main expression first
+                let mut children = vec![parsed_expr];
+
+                // Add trim characters if specified
+                if let Some(chars) = trim_characters {
+                    // If there are multiple trim characters, concatenate them into a single string
+                    if chars.len() > 1 {
+                        // Create a string literal expression that concatenates all trim characters
+                        let concat_chars = chars
+                            .iter()
+                            .map(|expr| {
+                                match expr {
+                                    Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) => {
+                                        s.clone()
+                                    }
+                                    _ => String::new(), // Skip non-string literals
+                                }
+                            })
+                            .collect::<String>();
+
+                        children.push(Arc::new(self.parse_expression(
+                            &Expr::Value(sqlparser::ast::Value::SingleQuotedString(concat_chars)),
+                            schema,
+                        )?));
+                    } else if let Some(first_char) = chars.first() {
+                        // If there's only one expression, parse it directly
+                        children.push(Arc::new(self.parse_expression(first_char, schema)?));
+                    }
+                }
+
+                Ok(Expression::Trim(TrimExpression::new(
+                    trim_type,
+                    children,
+                    Column::new("trim", TypeId::VarChar),
+                )))
+            }
+            Expr::Collate { expr, collation } => {
+                let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let collation_str = collation.to_string();
+                Ok(Expression::Collate(CollateExpression::new(
+                    expr,
+                    collation_str,
+                    Column::new("collate", TypeId::VarChar),
+                )))
+            }
+            Expr::TypedString { data_type, value } => {
+                Ok(Expression::TypedString(TypedStringExpression::new(
+                    data_type.to_string(),
+                    value.to_string(),
+                    Column::new(
+                        "typed_string",
+                        match data_type {
+                            DataType::Timestamp(_, _) => TypeId::Timestamp,
+                            DataType::Date => TypeId::Timestamp,
+                            DataType::Time(_, _) => TypeId::Timestamp,
+                            _ => TypeId::VarChar,
+                        },
+                    ),
+                )))
+            }
+            Expr::MapAccess { column, keys } => {
+                let parsed_column = self.parse_expression(column, schema)?;
+                let mut path = Vec::new();
+                for key in keys {
+                    // Parse the key expression
+                    match &key.key {
+                        Expr::Value(SQLValue::SingleQuotedString(s))
+                        | Expr::Value(SQLValue::DoubleQuotedString(s)) => {
+                            path.push(MapAccessKey::String(s.to_string()))
+                        }
+                        Expr::Value(SQLValue::Number(n, _)) => {
+                            if let Ok(num) = n.parse::<i64>() {
+                                path.push(MapAccessKey::Number(num))
+                            } else {
+                                return Err(format!("Invalid numeric key: {}", n));
+                            }
+                        }
+                        _ => return Err(format!("Unsupported map access key type")),
+                    }
+                }
+                Ok(Expression::MapAccess(MapAccessExpression::new(
+                    Arc::new(parsed_column),
+                    path,
+                    Column::new("map_access", TypeId::VarChar), // Using VarChar as default type since map access typically returns string-like data
+                )))
+            }
+            Expr::Method(method) => {
+                let obj_expr = Arc::new(self.parse_expression(&method.expr, schema)?);
+                let parsed_args = Vec::new();
+
+                for func in &method.method_chain {
+                    // Parse each function's arguments
+                    self.parse_function(func, schema);
+                }
+
+                // Get the method name from the last function in the chain
+                let method_name = if let Some(last_func) = method.method_chain.last() {
+                    last_func
+                        .name
+                        .0
+                        .last()
+                        .map(|i| i.value.clone())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                // Determine return type based on method name
+                let return_type = match method_name.as_str() {
+                    "length" | "size" | "count" => Column::new(&method_name, TypeId::Integer),
+                    "value" => Column::new(&method_name, TypeId::VarChar),
+                    _ => Column::new(&method_name, TypeId::VarChar), // Default to VarChar
+                };
+
+                Ok(Expression::Method(MethodExpression::new(
+                    obj_expr,
+                    method_name,
+                    parsed_args,
+                    return_type,
+                )))
+            }
+            Expr::Exists { subquery, negated } => {
+                let subquery_expr = Arc::new(self.parse_subquery(subquery, schema)?);
+                Ok(Expression::Exists(ExistsExpression::new(
+                    subquery_expr,
+                    *negated,
+                    Column::new("exists", TypeId::Boolean),
+                )))
+            }
+            Expr::Subquery(query) => self.parse_subquery(query, schema),
+            Expr::GroupingSets(_) => {
+                Err("GROUPING SETS expressions are not yet supported".to_string())
+            }
+            Expr::Cube(_) => Err("CUBE expressions are not yet supported".to_string()),
+            Expr::Rollup(_) => Err("ROLLUP expressions are not yet supported".to_string()),
+            Expr::Tuple(_) => Err("Tuple expressions are not yet supported".to_string()),
+            Expr::Struct { .. } => Err("Struct expressions are not yet supported".to_string()),
+            Expr::Subscript { .. } => {
+                Err("Subscript expressions are not yet supported".to_string())
+            }
+            Expr::Array(_) => Err("Array expressions are not yet supported".to_string()),
+            Expr::Interval(_) => Err("Interval expressions are not yet supported".to_string()),
+            Expr::Wildcard(_) => Err("Wildcard expressions are not yet supported".to_string()),
+            Expr::QualifiedWildcard(_, _) => {
+                Err("Qualified wildcard expressions are not yet supported".to_string())
+            }
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
@@ -670,637 +1042,61 @@ impl ExpressionParser {
         timestamp: &Expr,
         timezone: &Expr,
         schema: &Schema,
-    ) -> Result<Arc<Expression>, String> {
-        let timestamp_expr = self.parse_expression(timestamp, schema)?;
-        let timezone_expr = self.parse_expression(timezone, schema)?;
+    ) -> Result<Expression, String> {
+        // For typed string timestamps, we need to ensure they output RFC3339 format
+        let timestamp_expr = match timestamp {
+            Expr::TypedString { data_type, value } => {
+                // Only allow TIMESTAMP typed strings
+                if !matches!(data_type, DataType::Timestamp(_, _)) {
+                    return Err(format!(
+                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
+                        data_type
+                    ));
+                }
+                // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
+                Arc::new(Expression::TypedString(TypedStringExpression::new(
+                    "TIMESTAMP".to_string(),
+                    value.to_string(),
+                    Column::new("timestamp", TypeId::VarChar),
+                )))
+            }
+            _ => {
+                // For non-TypedString expressions, parse and validate timestamp type
+                let expr = Arc::new(self.parse_expression(timestamp, schema)?);
+                let expr_type = expr.get_return_type().get_type();
+                if expr_type != TypeId::Timestamp {
+                    return Err(format!(
+                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
+                        expr_type
+                    ));
+                }
+                expr
+            }
+        };
 
-        // Validate that timestamp expression returns a timestamp type
-        let timestamp_type = timestamp_expr.get_return_type().get_type();
-        if !matches!(timestamp_type, TypeId::Timestamp) {
-            return Err(ExpressionError::InvalidOperation(format!(
-                "AT TIME ZONE requires timestamp input, got {:?}",
-                timestamp_type
-            ))
-            .to_string());
-        }
+        let timezone_expr = Arc::new(self.parse_expression(timezone, schema)?);
 
         // Validate that timezone expression returns a string type
         let timezone_type = timezone_expr.get_return_type().get_type();
-        if !matches!(timezone_type, TypeId::VarChar) {
-            return Err(ExpressionError::InvalidOperation(format!(
-                "AT TIME ZONE requires string timezone, got {:?}",
+        if !matches!(timezone_type, TypeId::VarChar | TypeId::Char) {
+            return Err(format!(
+                "AT TIME ZONE timezone must be a string type, got {:?}",
                 timezone_type
-            ))
-            .to_string());
+            ));
         }
 
-        // Create AtTimeZoneExpression
-        Ok(Arc::new(Expression::AtTimeZone(AtTimeZoneExpression::new(
-            Arc::from(timestamp_expr),
-            Arc::from(timezone_expr),
-            // Return type is always timestamp
-            Column::new("at_timezone", TypeId::Timestamp),
-        ))))
-    }
+        // Create return type column - result is always a timestamp
+        let return_type = Column::new("at_timezone", TypeId::Timestamp);
 
-    fn parse_aggregate_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        match func_name.as_str() {
-            "AVG" | "MAX" | "MIN" | "SUM" | "EVERY" | "ANY" | "SOME" | "COUNT" | "STDDEV_POP"
-            | "STDDEV_SAMP" | "VAR_SAMP" | "VAR_POP" | "COLLECT" | "FUSION" | "INTERSECTION" => {
-                self.parse_general_set_function(&func, schema)
-            }
-            "COVAR_POP" | "COVAR_SAMP" | "CORR" | "REGR_SLOPE" | "REGR_INTERCEPT"
-            | "REGR_COUNT" | "REGR_R2" | "REGR_AVGX" | "REGR_AVGY" | "REGR_SXX" | "REGR_SYY"
-            | "REGR_SXY" => self.parse_binary_set_function(&func, schema),
-            "RANK" | "DENSE_RANK" | "PERCENT_RANK" | "CUME_DIST" | "PERCENTILE_CONT"
-            | "PERCENTILE_DISC" | "LISTAGG" => self.parse_ordered_set_function(&func, schema),
-            "ARRAY_AGG" => self.parse_array_aggregate_function(&func, schema),
-            _ => Err(format!("Unsupported aggregate function: {}", func_name)),
-        }
-    }
-
-    /// Parse function arguments and return a vector of parsed expressions along with their metadata
-    fn parse_function_arguments(
-        &self,
-        args: &FunctionArgumentList,
-        schema: &Schema,
-    ) -> Result<Vec<FunctionArgInfo>, String> {
-        let mut parsed_args = Vec::new();
-
-        // Handle DISTINCT/ALL modifier if present
-        let is_distinct = matches!(args.duplicate_treatment, Some(DuplicateTreatment::Distinct));
-
-        // Parse each argument
-        for arg in &args.args {
-            let arg_info = self.parse_function_arg(arg, schema)?;
-            parsed_args.push(arg_info);
-        }
-
-        // Handle additional clauses
-        self.handle_function_clauses(&args.clauses, schema)?;
-
-        Ok(parsed_args)
-    }
-
-    /// Parse a single function argument with its metadata
-    fn parse_function_arg(
-        &self,
-        arg: &FunctionArg,
-        schema: &Schema,
-    ) -> Result<FunctionArgInfo, String> {
-        match arg {
-            FunctionArg::Named {
-                name,
-                arg,
-                operator,
-            } => {
-                let parsed_expr = self.parse_function_arg_expr(arg, schema)?;
-                Ok(FunctionArgInfo {
-                    expr: parsed_expr,
-                    name: Some(name.value.clone()),
-                    operator: Some(operator.clone()),
-                    is_named: true,
-                })
-            }
-            FunctionArg::ExprNamed {
-                name,
-                arg,
-                operator,
-            } => {
-                let parsed_expr = self.parse_function_arg_expr(arg, schema)?;
-                let name_expr = self.parse_expression(name, schema)?;
-
-                // For ExprNamed, we evaluate the name expression to get the parameter name
-                let name_str = match &name_expr {
-                    Expression::Constant(c) => c.get_value().to_string(),
-                    Expression::ColumnRef(c) => c.get_return_type().get_name().to_string(),
-                    _ => {
-                        return Err(
-                            "Function parameter name must be a constant or column reference"
-                                .to_string(),
-                        )
-                    }
-                };
-
-                Ok(FunctionArgInfo {
-                    expr: parsed_expr,
-                    name: Some(name_str),
-                    operator: Some(operator.clone()),
-                    is_named: true,
-                })
-            }
-            FunctionArg::Unnamed(arg_expr) => {
-                let parsed_expr = self.parse_function_arg_expr(arg_expr, schema)?;
-                Ok(FunctionArgInfo {
-                    expr: parsed_expr,
-                    name: None,
-                    operator: None,
-                    is_named: false,
-                })
-            }
-        }
-    }
-
-    /// Handle function argument operators
-    fn handle_function_arg_operator(
-        &self,
-        operator: &FunctionArgOperator,
-        value: Expression,
-    ) -> Result<Expression, String> {
-        match operator {
-            FunctionArgOperator::Equals => {
-                // Simple assignment, return the value as is
-                Ok(value)
-            }
-            FunctionArgOperator::RightArrow => {
-                // Arrow operator might have special semantics in some contexts
-                Ok(value)
-            }
-            FunctionArgOperator::Assignment => {
-                // := operator, similar to equals but might have different precedence
-                Ok(value)
-            }
-            FunctionArgOperator::Colon => {
-                // : operator might indicate type casting or special handling
-                Ok(value)
-            }
-            FunctionArgOperator::Value => {
-                // VALUE keyword might have special meaning in some contexts
-                Ok(value)
-            }
-        }
-    }
-
-    /// Handle additional function argument clauses
-    fn handle_function_clauses(
-        &self,
-        clauses: &[FunctionArgumentClause],
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        // If no clauses, return a null constant to indicate no special handling needed
-        if clauses.is_empty() {
-            return Ok(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Null),
-                Column::new("clause", TypeId::Invalid),
-                vec![],
-            )));
-        }
-
-        let mut clause_exprs = Vec::new();
-
-        for clause in clauses {
-            let clause_expr = match clause {
-                FunctionArgumentClause::IgnoreOrRespectNulls(null_treatment) => {
-                    // Create a constant expression to represent the null treatment
-                    let value = match null_treatment {
-                        NullTreatment::IgnoreNulls => "IGNORE NULLS",
-                        NullTreatment::RespectNulls => "RESPECT NULLS",
-                    };
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new(value),
-                        Column::new("null_treatment", TypeId::VarChar),
-                        vec![],
-                    ))
-                }
-                FunctionArgumentClause::OrderBy(order_by_exprs) => {
-                    // Parse each ORDER BY expression
-                    let mut order_exprs = Vec::new();
-                    for order_expr in order_by_exprs {
-                        let expr = self.parse_expression(&order_expr.expr, schema)?;
-                        order_exprs.push(Arc::new(expr));
-                    }
-                    // Create a mock expression to hold the ORDER BY info
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new("ORDER BY"),
-                        Column::new("order_by", TypeId::VarChar),
-                        order_exprs,
-                    ))
-                }
-                FunctionArgumentClause::Limit(limit_expr) => {
-                    // Parse the LIMIT expression
-                    let expr = self.parse_expression(limit_expr, schema)?;
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new("LIMIT"),
-                        Column::new("limit", TypeId::VarChar),
-                        vec![Arc::new(expr)],
-                    ))
-                }
-                FunctionArgumentClause::OnOverflow(overflow_behavior) => match overflow_behavior {
-                    ListAggOnOverflow::Error => Expression::Constant(ConstantExpression::new(
-                        Value::new("ON OVERFLOW ERROR"),
-                        Column::new("overflow", TypeId::VarChar),
-                        vec![],
-                    )),
-                    ListAggOnOverflow::Truncate { filler, with_count } => {
-                        let mut children = Vec::new();
-                        if let Some(filler_expr) = filler {
-                            let expr = self.parse_expression(filler_expr, schema)?;
-                            children.push(Arc::new(expr));
-                        }
-                        Expression::Constant(ConstantExpression::new(
-                            Value::new(if *with_count {
-                                "ON OVERFLOW TRUNCATE WITH COUNT"
-                            } else {
-                                "ON OVERFLOW TRUNCATE"
-                            }),
-                            Column::new("overflow", TypeId::VarChar),
-                            children,
-                        ))
-                    }
-                },
-                FunctionArgumentClause::Having(having_bound) => {
-                    // Store having bound information as a constant
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new(format!("HAVING {:?}", having_bound)),
-                        Column::new("having", TypeId::VarChar),
-                        vec![],
-                    ))
-                }
-                FunctionArgumentClause::Separator(separator_value) => {
-                    // Store separator value as a constant
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new(separator_value.to_string()),
-                        Column::new("separator", TypeId::VarChar),
-                        vec![],
-                    ))
-                }
-                FunctionArgumentClause::JsonNullClause(json_null_clause) => {
-                    // Store JSON NULL clause information as a constant
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new(format!("JSON NULL {:?}", json_null_clause)),
-                        Column::new("json_null", TypeId::VarChar),
-                        vec![],
-                    ))
-                }
-            };
-            clause_exprs.push(Arc::new(clause_expr));
-        }
-
-        // If there's only one clause, return it directly
-        if clause_exprs.len() == 1 {
-            return Ok((*clause_exprs[0]).clone());
-        }
-
-        // If multiple clauses, combine them using a mock expression
-        Ok(Expression::Constant(ConstantExpression::new(
-            Value::new("CLAUSES"),
-            Column::new("clauses", TypeId::VarChar),
-            clause_exprs,
+        Ok(Expression::AtTimeZone(AtTimeZoneExpression::new(
+            timestamp_expr,
+            timezone_expr,
+            return_type,
         )))
-    }
-
-    /// Update the general set function parsing to use the new argument handling
-    fn parse_general_set_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let parsed_args = self.parse_function_arguments(arg_list, schema)?;
-
-                if parsed_args.is_empty() {
-                    return Err(format!("{} requires at least one argument", func_name));
-                }
-
-                let is_distinct = matches!(
-                    arg_list.duplicate_treatment,
-                    Some(DuplicateTreatment::Distinct)
-                );
-
-                // Get the first argument's expression
-                let first_arg = &parsed_args[0].expr;
-
-                let agg_type = match func_name.as_str() {
-                    "COUNT" => {
-                        if matches!(
-                            arg_list.args.first(),
-                            Some(FunctionArg::Unnamed(FunctionArgExpr::Wildcard))
-                        ) {
-                            AggregationType::CountStar
-                        } else {
-                            AggregationType::Count
-                        }
-                    }
-                    "SUM" => AggregationType::Sum,
-                    "AVG" => AggregationType::Avg,
-                    "MIN" => AggregationType::Min,
-                    "MAX" => AggregationType::Max,
-                    _ => return Err(format!("Unsupported aggregate function: {}", func_name)),
-                };
-
-                let return_type = match agg_type {
-                    AggregationType::Count | AggregationType::CountStar => TypeId::BigInt,
-                    _ => first_arg.get_return_type().get_type(),
-                };
-
-                let mut agg_expr =
-                    AggregateExpression::new(agg_type, Arc::new(first_arg.clone()), vec![])
-                        .with_return_type(Column::new(&func_name, return_type));
-
-                // Handle DISTINCT if present
-                if is_distinct {
-                    agg_expr = agg_expr.with_distinct(true);
-                }
-
-                Ok(Expression::Aggregate(agg_expr))
-            }
-            _ => Err(format!("{} requires arguments", func_name)),
-        }
-    }
-
-    /// Parse binary set functions like COVAR_POP, CORR, etc.
-    fn parse_binary_set_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let parsed_args = self.parse_function_arguments(arg_list, schema)?;
-
-                // Binary set functions require exactly 2 arguments
-                if parsed_args.len() != 2 {
-                    return Err(format!("{} requires exactly two arguments", func_name));
-                }
-
-                let first_arg = Arc::new(parsed_args[0].expr.clone());
-                let second_arg = Arc::new(parsed_args[1].expr.clone());
-
-                // Determine return type based on function
-                let return_type = match func_name.as_str() {
-                    "COVAR_POP" | "COVAR_SAMP" | "CORR" | "REGR_SLOPE" | "REGR_INTERCEPT"
-                    | "REGR_R2" => TypeId::Decimal,
-                    "REGR_COUNT" => TypeId::BigInt,
-                    "REGR_AVGX" | "REGR_AVGY" | "REGR_SXX" | "REGR_SYY" | "REGR_SXY" => {
-                        TypeId::Decimal
-                    }
-                    _ => return Err(format!("Unsupported binary set function: {}", func_name)),
-                };
-
-                let agg_type = match func_name.as_str() {
-                    "COVAR_POP" => AggregationType::CovarPop,
-                    "COVAR_SAMP" => AggregationType::CovarSamp,
-                    "CORR" => AggregationType::Correlation,
-                    "REGR_SLOPE" => AggregationType::RegrSlope,
-                    "REGR_INTERCEPT" => AggregationType::RegrIntercept,
-                    "REGR_COUNT" => AggregationType::RegrCount,
-                    "REGR_R2" => AggregationType::RegrR2,
-                    "REGR_AVGX" => AggregationType::RegrAvgX,
-                    "REGR_AVGY" => AggregationType::RegrAvgY,
-                    "REGR_SXX" => AggregationType::RegrSXX,
-                    "REGR_SYY" => AggregationType::RegrSYY,
-                    "REGR_SXY" => AggregationType::RegrSXY,
-                    _ => return Err(format!("Unsupported binary set function: {}", func_name)),
-                };
-
-                Ok(Expression::Aggregate(
-                    AggregateExpression::new(
-                        agg_type,
-                        first_arg.clone(),
-                        vec![first_arg, second_arg],
-                    )
-                    .with_return_type(Column::new(&func_name, return_type)),
-                ))
-            }
-            _ => Err(format!("{} requires a list of arguments", func_name)),
-        }
-    }
-
-    /// Parse ordered set functions like RANK, DENSE_RANK, etc.
-    fn parse_ordered_set_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let parsed_args = self.parse_function_arguments(arg_list, schema)?;
-
-                if parsed_args.is_empty() {
-                    return Err(format!("{} requires at least one argument", func_name));
-                }
-
-                let first_arg = Arc::new(parsed_args[0].expr.clone());
-                let mut children = vec![first_arg.clone()];
-
-                // Add additional arguments if present
-                for arg in parsed_args.iter().skip(1) {
-                    children.push(Arc::new(arg.expr.clone()));
-                }
-
-                let return_type = match func_name.as_str() {
-                    "RANK" | "DENSE_RANK" => TypeId::BigInt,
-                    "PERCENT_RANK" | "CUME_DIST" => TypeId::Decimal,
-                    "PERCENTILE_CONT" | "PERCENTILE_DISC" => first_arg.get_return_type().get_type(),
-                    "LISTAGG" => TypeId::VarChar,
-                    _ => return Err(format!("Unsupported ordered set function: {}", func_name)),
-                };
-
-                let agg_type = match func_name.as_str() {
-                    "RANK" => AggregationType::Rank,
-                    "DENSE_RANK" => AggregationType::DenseRank,
-                    "PERCENT_RANK" => AggregationType::PercentRank,
-                    "CUME_DIST" => AggregationType::CumeDist,
-                    "PERCENTILE_CONT" => AggregationType::PercentileCont,
-                    "PERCENTILE_DISC" => AggregationType::PercentileDisc,
-                    "LISTAGG" => AggregationType::ListAgg,
-                    _ => return Err(format!("Unsupported ordered set function: {}", func_name)),
-                };
-
-                Ok(Expression::Aggregate(
-                    AggregateExpression::new(agg_type, first_arg, children)
-                        .with_return_type(Column::new(&func_name, return_type)),
-                ))
-            }
-            _ => Err(format!("{} requires a list of arguments", func_name)),
-        }
-    }
-
-    /// Parse array aggregate functions
-    fn parse_array_aggregate_function(
-        &self,
-        func: &Function,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
-
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let parsed_args = self.parse_function_arguments(arg_list, schema)?;
-
-                if parsed_args.is_empty() {
-                    return Err(format!("{} requires at least one argument", func_name));
-                }
-
-                let first_arg = Arc::new(parsed_args[0].expr.clone());
-                let mut children = vec![first_arg.clone()];
-
-                // Add additional arguments if present
-                for arg in parsed_args.iter().skip(1) {
-                    children.push(Arc::new(arg.expr.clone()));
-                }
-
-                // Array aggregate functions return a vector of the input type
-                let element_type = first_arg.get_return_type().get_type();
-
-                Ok(Expression::Aggregate(
-                    AggregateExpression::new(AggregationType::ArrayAgg, first_arg, children)
-                        .with_return_type(Column::new(&func_name, TypeId::Vector))
-                        .with_element_type(element_type),
-                ))
-            }
-            _ => Err(format!("{} requires a list of arguments", func_name)),
-        }
     }
 
     pub fn parse_query(query: Query) -> Result<Expression, String> {
         todo!()
-    }
-
-    pub fn parse_aggregates(
-        &self,
-        projection: &[SelectItem],
-        schema: &Schema,
-    ) -> Result<(Vec<Arc<Expression>>, Vec<AggregationType>), String> {
-        let mut agg_exprs = Vec::new();
-        let mut agg_types = Vec::new();
-
-        for item in projection {
-            match item {
-                SelectItem::UnnamedExpr(Expr::Function(func)) => {
-                    let expr = self.parse_aggregate_function(&func, schema)?;
-                    if let Expression::Aggregate(agg_expr) = &expr {
-                        agg_types.push(agg_expr.get_agg_type().clone());
-                        agg_exprs.push(Arc::new(expr));
-                    }
-                }
-                SelectItem::ExprWithAlias {
-                    expr: Expr::Function(func),
-                    alias,
-                } => {
-                    let expr = self.parse_aggregate_function(&func, schema)?;
-                    if let Expression::Aggregate(agg_expr) = &expr {
-                        // Create new aggregate expression with aliased column
-                        let orig_type = agg_expr.get_return_type().get_type();
-                        let new_col = Column::new(&alias.value, orig_type);
-                        let new_agg = AggregateExpression::new(
-                            agg_expr.get_agg_type().clone(),
-                            agg_expr.get_arg().clone(),
-                            vec![],
-                        )
-                        .with_return_type(new_col);
-                        agg_exprs.push(Arc::new(Expression::Aggregate(new_agg)));
-                        agg_types.push(agg_expr.get_agg_type().clone());
-                    }
-                }
-                SelectItem::Wildcard(_) => {
-                    // Handle COUNT(*) case
-                    if projection.len() == 1 {
-                        let count_star = Expression::Aggregate(AggregateExpression::new(
-                            AggregationType::CountStar,
-                            Arc::new(Expression::Constant(ConstantExpression::new(
-                                Value::new(1),
-                                Column::new("count", TypeId::BigInt),
-                                vec![],
-                            ))),
-                            vec![],
-                        ));
-                        agg_exprs.push(Arc::new(count_star));
-                        agg_types.push(AggregationType::CountStar);
-                    }
-                }
-                SelectItem::QualifiedWildcard(_, _) => {
-                    // Handle qualified wildcard similar to regular wildcard
-                    if projection.len() == 1 {
-                        let count_star = Expression::Aggregate(AggregateExpression::new(
-                            AggregationType::CountStar,
-                            Arc::new(Expression::Constant(ConstantExpression::new(
-                                Value::new(1),
-                                Column::new("count", TypeId::BigInt),
-                                vec![],
-                            ))),
-                            vec![],
-                        ));
-                        agg_exprs.push(Arc::new(count_star));
-                        agg_types.push(AggregationType::CountStar);
-                    }
-                }
-                // Add handling for non-aggregate columns in projection
-                SelectItem::UnnamedExpr(_) | SelectItem::ExprWithAlias { .. } => {
-                    // For non-aggregate expressions, just skip them
-                    // They will be handled by the projection plan
-                    continue;
-                }
-            }
-        }
-
-        debug!("Parsed aggregate expressions: {:?}", agg_exprs);
-        debug!("Parsed aggregate types: {:?}", agg_types);
-
-        Ok((agg_exprs, agg_types))
-    }
-
-    pub fn has_aggregate_functions(&self, projection: &Vec<SelectItem>) -> bool {
-        projection.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.is_aggregate_function(expr)
-            }
-            _ => false,
-        })
-    }
-
-    fn is_aggregate_function(&self, expr: &Expr) -> bool {
-        if let Expr::Function(func) = expr {
-            let name = func.name.to_string().to_uppercase();
-            matches!(name.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX")
-        } else {
-            false
-        }
-    }
-
-    pub fn determine_group_by_expressions(
-        &self,
-        select: &Box<Select>,
-        base_schema: &Schema,
-        has_group_by: bool,
-    ) -> Result<Vec<Expression>, String> {
-        if !has_group_by {
-            return Ok(Vec::new());
-        }
-
-        match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => exprs
-                .iter()
-                .map(|expr| self.parse_expression(expr, base_schema))
-                .collect(),
-            GroupByExpr::All(_) => {
-                // If GROUP BY ALL, use all columns from the input schema
-                (0..base_schema.get_column_count())
-                    .map(|i| {
-                        let col = base_schema.get_column(i as usize).unwrap();
-                        Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                            0,
-                            i as usize,
-                            col.clone(),
-                            vec![],
-                        )))
-                    })
-                    .collect()
-            }
-        }
     }
 
     pub fn prepare_table_scan(
@@ -1474,396 +1270,401 @@ impl ExpressionParser {
         }
     }
 
-    /// Parse a single function argument expression
-    fn parse_function_arg_expr(
+    fn parse_subquery(&self, query: &Query, schema: &Schema) -> Result<Expression, String> {
+        // Extract the body of the query
+        let body = &query.body;
+
+        // For now, we only support SELECT expressions
+        match body.as_ref() {
+            SetExpr::Select(select) => {
+                // Parse the SELECT statement
+                let select_expr = Arc::new(self.parse_select_statement(select, schema)?);
+
+                // Create a SubqueryExpression with appropriate type and return type
+                Ok(Expression::Subquery(SubqueryExpression::new(
+                    select_expr,
+                    SubqueryType::Scalar, // Default to scalar for now
+                    Column::new("subquery", TypeId::Vector), // Default to Vector type
+                )))
+            }
+            SetExpr::Values(_) => {
+                Err("VALUES expressions in subqueries are not yet supported".to_string())
+            }
+            SetExpr::SetOperation { .. } => {
+                Err("Set operations in subqueries are not yet supported".to_string())
+            }
+            SetExpr::Insert(_) => {
+                Err("INSERT expressions in subqueries are not yet supported".to_string())
+            }
+            SetExpr::Query(_) => {
+                Err("Nested queries in subqueries are not yet supported".to_string())
+            }
+            SetExpr::Table(_) => {
+                Err("TABLE expressions in subqueries are not yet supported".to_string())
+            }
+            _ => Err("Unsupported subquery type".to_string()),
+        }
+    }
+
+    fn parse_select_statement(
         &self,
-        arg_expr: &FunctionArgExpr,
+        select: &Box<Select>,
         schema: &Schema,
     ) -> Result<Expression, String> {
-        match arg_expr {
-            FunctionArgExpr::Expr(expr) => {
-                // Regular expression argument - parse using existing expression parser
-                self.parse_expression(expr, schema)
+        // For now, just handle the first projection item
+        if let Some(item) = select.projection.first() {
+            match item {
+                SelectItem::UnnamedExpr(expr) => self.parse_expression(expr, schema),
+                SelectItem::ExprWithAlias { expr, .. } => self.parse_expression(expr, schema),
+                _ => Err("Only simple expressions are supported in subqueries".to_string()),
             }
-            FunctionArgExpr::QualifiedWildcard(object_name) => {
-                // Handle qualified wildcard (table.*)
-                // For aggregate functions like COUNT(table.*), we want to count all columns
-                // from the specified table
+        } else {
+            Err("Empty SELECT statement in subquery".to_string())
+        }
+    }
 
-                // Get the table name/alias
-                let table_name = object_name.to_string();
+    fn parse_order_by_expressions(
+        &self,
+        order_exprs: &[OrderByExpr],
+        schema: &Schema,
+    ) -> Result<Vec<Arc<Expression>>, String> {
+        let mut expressions = Vec::new();
+        for order_expr in order_exprs {
+            let parsed_expr = self.parse_expression(&order_expr.expr, schema)?;
+            expressions.push(Arc::new(parsed_expr));
+        }
+        Ok(expressions)
+    }
 
-                // Look up the table in the catalog
-                let catalog = self.catalog.read();
-                if let Some(_table) = catalog.get_table(&table_name) {
-                    // For COUNT(*), return a constant 1 that will be counted
-                    Ok(Expression::Constant(ConstantExpression::new(
-                        Value::new(1),
-                        Column::new(&format!("{}.* ", table_name), TypeId::Integer),
+    fn parse_function_arguments(
+        &self,
+        args: &FunctionArguments,
+        schema: &Schema,
+    ) -> Result<Vec<Arc<Expression>>, String> {
+        let mut children = Vec::new();
+
+        match args {
+            FunctionArguments::None => {}
+            FunctionArguments::Subquery(query) => {
+                let parsed_expr = self.parse_subquery(query, schema)?;
+                children.push(Arc::new(parsed_expr));
+            }
+            FunctionArguments::List(list) => {
+                // Parse function arguments
+                for arg in &list.args {
+                    match arg {
+                        FunctionArg::Named { arg, .. } | FunctionArg::ExprNamed { arg, .. } => {
+                            match arg {
+                                FunctionArgExpr::Expr(expr) => {
+                                    let parsed_expr = self.parse_expression(expr, schema)?;
+                                    children.push(Arc::new(parsed_expr));
+                                }
+                                FunctionArgExpr::QualifiedWildcard(_) => {
+                                    return Err("Qualified wildcard in function arguments not yet supported".to_string());
+                                }
+                                FunctionArgExpr::Wildcard => {
+                                    return Err("Wildcard in function arguments not yet supported"
+                                        .to_string());
+                                }
+                            }
+                        }
+                        FunctionArg::Unnamed(arg) => {
+                            match arg {
+                                FunctionArgExpr::Expr(expr) => {
+                                    let parsed_expr = self.parse_expression(expr, schema)?;
+                                    children.push(Arc::new(parsed_expr));
+                                }
+                                FunctionArgExpr::QualifiedWildcard(_) => {
+                                    return Err("Qualified wildcard in function arguments not yet supported".to_string());
+                                }
+                                FunctionArgExpr::Wildcard => {
+                                    return Err("Wildcard in function arguments not yet supported"
+                                        .to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Handle additional clauses
+                for clause in &list.clauses {
+                    match clause {
+                        FunctionArgumentClause::OrderBy(order_exprs) => {
+                            children.extend(self.parse_order_by_expressions(order_exprs, schema)?);
+                        }
+                        FunctionArgumentClause::Limit(expr) => {
+                            let parsed_expr = self.parse_expression(expr, schema)?;
+                            children.push(Arc::new(parsed_expr));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(children)
+    }
+
+    fn parse_sql_window_specification(
+        &self,
+        spec: &WindowType,
+        schema: &Schema,
+    ) -> Result<Vec<Arc<Expression>>, String> {
+        let mut children = Vec::new();
+
+        // Extract the WindowSpec from WindowType
+        let window_spec = match spec {
+            WindowType::WindowSpec(spec) => spec,
+            WindowType::NamedWindow(_) => return Err("Named windows are not supported yet".to_string()),
+        };
+
+        // Handle PARTITION BY
+        for partition_expr in &window_spec.partition_by {
+            let parsed_expr = self.parse_expression(partition_expr, schema)?;
+            children.push(Arc::new(parsed_expr));
+        }
+
+        // Handle ORDER BY
+        if !window_spec.order_by.is_empty() {
+            children.extend(self.parse_order_by_expressions(&window_spec.order_by, schema)?);
+        }
+
+        // Handle window frame
+        if let Some(frame) = &window_spec.window_frame {
+            match &frame.start_bound {
+                WindowFrameBound::CurrentRow => {}
+                WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => {
+                    if let Some(expr) = expr {
+                        let parsed_expr = self.parse_expression(expr, schema)?;
+                        children.push(Arc::new(parsed_expr));
+                    }
+                }
+            }
+
+            if let Some(end_bound) = &frame.end_bound {
+                match end_bound {
+                    WindowFrameBound::CurrentRow => {}
+                    WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => {
+                        if let Some(expr) = expr {
+                            let parsed_expr = self.parse_expression(expr, schema)?;
+                            children.push(Arc::new(parsed_expr));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(children)
+    }
+
+    fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
+        // First check if this is an aggregate function
+        let name = func.name.to_string().to_uppercase();
+        if matches!(
+            name.as_str(),
+            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE"
+        ) {
+            let args = self.parse_function_arguments(&func.args, schema)?;
+            let agg_type = match name.as_str() {
+                "COUNT" => AggregationType::Count,
+                "SUM" => AggregationType::Sum,
+                "AVG" => AggregationType::Avg,
+                "MIN" => AggregationType::Min,
+                "MAX" => AggregationType::Max,
+                "STDDEV" => AggregationType::StdDev,
+                "VARIANCE" => AggregationType::Variance,
+                _ => return Err("Unknown aggregate function".to_string()),
+            };
+
+            let return_type = match agg_type {
+                AggregationType::Count => Column::new(&name, TypeId::BigInt),
+                AggregationType::Avg => Column::new(&name, TypeId::Decimal),
+                _ if !args.is_empty() => {
+                    let child_type = args[0].get_return_type().get_type();
+                    Column::new(&name, child_type)
+                }
+                _ => return Err("Aggregate function requires arguments".to_string()),
+            };
+
+            return Ok(Expression::Aggregate(AggregateExpression::new(
+                agg_type,
+                    args,
+                return_type,
+            )));
+        }
+
+        // If not an aggregate, handle as a regular function
+        let mut children = Vec::new();
+
+        // Parse function arguments
+        children.extend(self.parse_function_arguments(&func.args, schema)?);
+
+        // Handle WITHIN GROUP clause if present
+        if !func.within_group.is_empty() {
+            children.extend(self.parse_order_by_expressions(&func.within_group, schema)?);
+        }
+
+        // Handle FILTER clause if present
+        if let Some(filter_expr) = &func.filter {
+            let parsed_expr = self.parse_expression(filter_expr, schema)?;
+            children.push(Arc::new(parsed_expr));
+        }
+
+        // Handle OVER clause if present
+        if let Some(spec) = &func.over {
+            children.extend(self.parse_sql_window_specification(spec, schema)?);
+        }
+
+        // Create and return the regular function expression
+        let return_type = FunctionExpression::infer_return_type(&func.name.to_string(), &children)?;
+        Ok(Expression::Function(FunctionExpression::new(
+            func.name.to_string(),
+            children,
+            return_type,
+        )))
+    }
+
+    fn parse_window_expr(&self, expr: &Expr, schema: &Schema) -> Option<Arc<Expression>> {
+        match self.parse_expression(expr, schema) {
+            Ok(parsed_expr) => Some(Arc::new(parsed_expr)),
+            Err(_) => None,
+        }
+    }
+
+    pub fn has_aggregate_functions(&self, projection: &[SelectItem]) -> bool {
+        projection.iter().any(|item| match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                self.contains_aggregate_function(expr)
+            }
+            _ => false,
+        })
+    }
+
+    fn contains_aggregate_function(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Function(func) => {
+                let name = func.name.to_string().to_uppercase();
+                matches!(
+                    name.as_str(),
+                    "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE"
+                )
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                self.contains_aggregate_function(left) || self.contains_aggregate_function(right)
+            }
+            Expr::UnaryOp { expr, .. } => self.contains_aggregate_function(expr),
+            Expr::Nested(expr) => self.contains_aggregate_function(expr),
+            _ => false,
+        }
+    }
+
+    pub fn determine_group_by_expressions(
+        &self,
+        select: &Box<Select>,
+        schema: &Schema,
+        has_group_by: bool,
+    ) -> Result<Vec<Expression>, String> {
+        if !has_group_by {
+            return Ok(Vec::new());
+        }
+
+        match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => {
+                let mut group_by_exprs = Vec::new();
+                for expr in exprs {
+                    let parsed_expr = self.parse_expression(expr, schema)?;
+                    group_by_exprs.push(parsed_expr);
+                }
+                Ok(group_by_exprs)
+            }
+            GroupByExpr::All(_) => {
+                // For GROUP BY ALL, include all non-aggregate columns
+                let mut group_by_exprs = Vec::new();
+                for i in 0..schema.get_column_count() {
+                    let col = schema.get_column(i as usize).unwrap();
+                    group_by_exprs.push(Expression::ColumnRef(ColumnRefExpression::new(
+                        0,
+                        i as usize,
+                        col.clone(),
                         vec![],
-                    )))
-                } else {
-                    // Try looking up as alias in the schema
-                    let matching_columns: Vec<_> = (0..schema.get_column_count())
-                        .filter_map(|i| {
-                            let col = schema.get_column(i as usize).unwrap();
-                            if col.get_name().starts_with(&format!("{}.", table_name)) {
-                                Some(i)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    if matching_columns.is_empty() {
-                        Err(format!("Table or alias '{}' not found", table_name))
-                    } else {
-                        // For COUNT(*), return a constant 1 that will be counted
-                        Ok(Expression::Constant(ConstantExpression::new(
-                            Value::new(1),
-                            Column::new(&format!("{}.* ", table_name), TypeId::Integer),
-                            vec![],
-                        )))
-                    }
+                    )));
                 }
-            }
-            FunctionArgExpr::Wildcard => {
-                // Handle unqualified wildcard (*)
-                // For aggregate functions like COUNT(*), we want to count all rows
-                // Return a constant 1 that will be counted
-                Ok(Expression::Constant(ConstantExpression::new(
-                    Value::new(1),
-                    Column::new("*", TypeId::Integer),
-                    vec![],
-                )))
+                Ok(group_by_exprs)
             }
         }
     }
 
-    fn parse_substring_function(
+    pub fn parse_aggregates(
         &self,
-        func: &Function,
+        projection: &[SelectItem],
         schema: &Schema,
-    ) -> Result<Expression, String> {
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let args = &arg_list.args;
+    ) -> Result<(Vec<Arc<Expression>>, Vec<String>), String> {
+        let mut agg_exprs = Vec::new();
+        let mut agg_names = Vec::new();
 
-                // Check if we have at least one argument
-                if args.is_empty() {
-                    return Err("SUBSTRING requires at least one argument".to_string());
-                }
-
-                // Parse the string expression (first argument)
-                let string_expr = match &args[0] {
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                        Arc::new(self.parse_expression(expr, schema)?)
-                    }
-                    _ => return Err("Invalid first argument for SUBSTRING".to_string()),
-                };
-
-                // Check if we're using the SQL standard syntax with FROM/FOR keywords
-                let mut from_expr = None;
-                let mut for_expr = None;
-                let mut is_standard_syntax = false;
-
-                // Process remaining arguments
-                for i in 1..args.len() {
-                    match &args[i] {
-                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                            // For the comma-separated syntax: SUBSTRING(str, start, length)
-                            if is_standard_syntax {
-                                return Err(
-                                    "Cannot mix standard and non-standard SUBSTRING syntax"
-                                        .to_string(),
-                                );
-                            }
-
-                            if i == 1 {
-                                // This is the start position
-                                from_expr = Some(Arc::new(self.parse_expression(expr, schema)?));
-                            } else if i == 2 {
-                                // This is the length
-                                for_expr = Some(Arc::new(self.parse_expression(expr, schema)?));
-                            } else {
-                                return Err("Too many arguments for SUBSTRING".to_string());
-                            }
-                        }
-                        FunctionArg::Named { name, arg, .. } => {
-                            // For the standard syntax: SUBSTRING(str FROM start FOR length)
-                            is_standard_syntax = true;
-
-                            match name.value.to_uppercase().as_str() {
-                                "FROM" => {
-                                    if let FunctionArgExpr::Expr(expr) = arg {
-                                        from_expr =
-                                            Some(Arc::new(self.parse_expression(expr, schema)?));
-                                    } else {
-                                        return Err(
-                                            "Invalid FROM argument for SUBSTRING".to_string()
-                                        );
-                                    }
-                                }
-                                "FOR" => {
-                                    if let FunctionArgExpr::Expr(expr) = arg {
-                                        for_expr =
-                                            Some(Arc::new(self.parse_expression(expr, schema)?));
-                                    } else {
-                                        return Err(
-                                            "Invalid FOR argument for SUBSTRING".to_string()
-                                        );
-                                    }
-                                }
-                                _ => {
-                                    return Err(format!(
-                                        "Unknown named argument '{}' for SUBSTRING",
-                                        name.value
-                                    ))
-                                }
-                            }
-                        }
-                        _ => return Err("Invalid argument for SUBSTRING".to_string()),
+        for item in projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_names.push(expr.to_string());
                     }
                 }
-
-                // Ensure we have a FROM expression
-                let from_expr =
-                    from_expr.ok_or_else(|| "SUBSTRING requires a start position".to_string())?;
-
-                // Create the SUBSTRING expression
-                Ok(Expression::Substring(SubstringExpression::new(
-                    string_expr,
-                    from_expr,
-                    for_expr,
-                )))
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_names.push(alias.value.clone());
+                    }
+                }
+                _ => {}
             }
-            _ => Err("SUBSTRING requires arguments".to_string()),
         }
+
+        Ok((agg_exprs, agg_names))
     }
 
-    fn parse_trim_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
-        let func_name = func.name.to_string().to_uppercase();
+    fn try_parse_aggregate(
+        &self,
+        expr: &Expr,
+        schema: &Schema,
+    ) -> Result<Option<Expression>, String> {
+        match expr {
+            Expr::Function(func) => {
+                let name = func.name.to_string().to_uppercase();
+                match name.as_str() {
+                    "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE" => {
+                        let args = self.parse_function_arguments(&func.args, schema)?;
+                        let agg_type = match name.as_str() {
+                            "COUNT" => AggregationType::Count,
+                            "SUM" => AggregationType::Sum,
+                            "AVG" => AggregationType::Avg,
+                            "MIN" => AggregationType::Min,
+                            "MAX" => AggregationType::Max,
+                            "STDDEV" => AggregationType::StdDev,
+                            "VARIANCE" => AggregationType::Variance,
+                            _ => return Ok(None),
+                        };
 
-        match &func.args {
-            FunctionArguments::List(arg_list) => {
-                let args = &arg_list.args;
-
-                // Check if we have at least one argument
-                if args.is_empty() {
-                    return Err("TRIM requires at least one argument".to_string());
-                }
-
-                // Default trim type based on function name
-                let mut trim_type = match func_name.as_str() {
-                    "TRIM" => TrimType::Both,
-                    "LTRIM" => TrimType::Leading,
-                    "RTRIM" => TrimType::Trailing,
-                    _ => return Err(format!("Unsupported trim function: {}", func_name)),
-                };
-
-                // Check for SQL standard syntax: TRIM([BOTH|LEADING|TRAILING] [chars FROM] string)
-                if func_name == "TRIM" && args.len() >= 1 {
-                    // Check if the first argument is a named argument specifying the trim type
-                    if let FunctionArg::Named { name, arg, .. } = &args[0] {
-                        match name.value.to_uppercase().as_str() {
-                            "BOTH" => {
-                                trim_type = TrimType::Both;
-
-                                // The next argument should be either the string or "FROM string"
-                                if args.len() < 2 {
-                                    return Err("TRIM BOTH requires a string argument".to_string());
-                                }
-
-                                // Parse the string expression
-                                let string_expr = match &args[1] {
-                                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                        Arc::new(self.parse_expression(expr, schema)?)
-                                    }
-                                    FunctionArg::Named { name, arg, .. }
-                                        if name.value.to_uppercase() == "FROM" =>
-                                    {
-                                        if let FunctionArgExpr::Expr(expr) = arg {
-                                            Arc::new(self.parse_expression(expr, schema)?)
-                                        } else {
-                                            return Err(
-                                                "Invalid FROM argument for TRIM".to_string()
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(
-                                            "Invalid argument after BOTH for TRIM".to_string()
-                                        )
-                                    }
-                                };
-
-                                // Create the TRIM expression with default whitespace characters
-                                let return_type = Column::new("trim_result", TypeId::VarChar);
-                                return Ok(Expression::Trim(TrimExpression::new(
-                                    trim_type,
-                                    vec![string_expr],
-                                    return_type,
-                                )));
+                        let return_type = match agg_type {
+                            AggregationType::Count => Column::new(&name, TypeId::BigInt),
+                            AggregationType::Avg => Column::new(&name, TypeId::Decimal),
+                            _ if !args.is_empty() => {
+                                let child_type = args[0].get_return_type().get_type();
+                                Column::new(&name, child_type)
                             }
-                            "LEADING" => {
-                                trim_type = TrimType::Leading;
+                            _ => return Err("Aggregate function requires arguments".to_string()),
+                        };
 
-                                // The next argument should be either the string or "FROM string"
-                                if args.len() < 2 {
-                                    return Err(
-                                        "TRIM LEADING requires a string argument".to_string()
-                                    );
-                                }
-
-                                // Parse the string expression
-                                let string_expr = match &args[1] {
-                                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                        Arc::new(self.parse_expression(expr, schema)?)
-                                    }
-                                    FunctionArg::Named { name, arg, .. }
-                                        if name.value.to_uppercase() == "FROM" =>
-                                    {
-                                        if let FunctionArgExpr::Expr(expr) = arg {
-                                            Arc::new(self.parse_expression(expr, schema)?)
-                                        } else {
-                                            return Err(
-                                                "Invalid FROM argument for TRIM".to_string()
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(
-                                            "Invalid argument after LEADING for TRIM".to_string()
-                                        )
-                                    }
-                                };
-
-                                // Create the TRIM expression with default whitespace characters
-                                let return_type = Column::new("trim_result", TypeId::VarChar);
-                                return Ok(Expression::Trim(TrimExpression::new(
-                                    trim_type,
-                                    vec![string_expr],
-                                    return_type,
-                                )));
-                            }
-                            "TRAILING" => {
-                                trim_type = TrimType::Trailing;
-
-                                // The next argument should be either the string or "FROM string"
-                                if args.len() < 2 {
-                                    return Err(
-                                        "TRIM TRAILING requires a string argument".to_string()
-                                    );
-                                }
-
-                                // Parse the string expression
-                                let string_expr = match &args[1] {
-                                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                        Arc::new(self.parse_expression(expr, schema)?)
-                                    }
-                                    FunctionArg::Named { name, arg, .. }
-                                        if name.value.to_uppercase() == "FROM" =>
-                                    {
-                                        if let FunctionArgExpr::Expr(expr) = arg {
-                                            Arc::new(self.parse_expression(expr, schema)?)
-                                        } else {
-                                            return Err(
-                                                "Invalid FROM argument for TRIM".to_string()
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(
-                                            "Invalid argument after TRAILING for TRIM".to_string()
-                                        )
-                                    }
-                                };
-
-                                // Create the TRIM expression with default whitespace characters
-                                let return_type = Column::new("trim_result", TypeId::VarChar);
-                                return Ok(Expression::Trim(TrimExpression::new(
-                                    trim_type,
-                                    vec![string_expr],
-                                    return_type,
-                                )));
-                            }
-                            "FROM" => {
-                                // This is the "TRIM(chars FROM string)" syntax
-                                if let FunctionArgExpr::Expr(chars_expr) = arg {
-                                    // Parse the characters to trim
-                                    let chars =
-                                        Arc::new(self.parse_expression(chars_expr, schema)?);
-
-                                    // The next argument should be the string
-                                    if args.len() < 2 {
-                                        return Err(
-                                            "TRIM FROM requires a string argument".to_string()
-                                        );
-                                    }
-
-                                    // Parse the string expression
-                                    let string_expr = match &args[1] {
-                                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                                            Arc::new(self.parse_expression(expr, schema)?)
-                                        }
-                                        _ => {
-                                            return Err(
-                                                "Invalid string argument for TRIM FROM".to_string()
-                                            )
-                                        }
-                                    };
-
-                                    // Create the TRIM expression with specified characters
-                                    let return_type = Column::new("trim_result", TypeId::VarChar);
-                                    return Ok(Expression::Trim(TrimExpression::new(
-                                        trim_type,
-                                        vec![string_expr, chars],
-                                        return_type,
-                                    )));
-                                } else {
-                                    return Err("Invalid FROM argument for TRIM".to_string());
-                                }
-                            }
-                            _ => return Err(format!("Unsupported TRIM option: {}", name.value)),
-                        }
+                        Ok(Some(Expression::Aggregate(AggregateExpression::new(
+                            agg_type,
+                            args,
+                            return_type,
+                        ))))
                     }
+                    _ => Ok(None),
                 }
-
-                // Simple syntax: TRIM(string [, chars])
-                // Parse the string expression (first argument)
-                let string_expr = match &args[0] {
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                        Arc::new(self.parse_expression(expr, schema)?)
-                    }
-                    _ => return Err("Invalid first argument for TRIM".to_string()),
-                };
-
-                // Check if we have a second argument for characters to trim
-                let mut children = vec![string_expr];
-
-                if args.len() > 1 {
-                    // Parse the characters to trim
-                    let chars_expr = match &args[1] {
-                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                            Arc::new(self.parse_expression(expr, schema)?)
-                        }
-                        _ => return Err("Invalid second argument for TRIM".to_string()),
-                    };
-
-                    children.push(chars_expr);
-                }
-
-                // Create the return type (always a string)
-                let return_type = Column::new("trim_result", TypeId::VarChar);
-
-                // Create the TRIM expression
-                Ok(Expression::Trim(TrimExpression::new(
-                    trim_type,
-                    children,
-                    return_type,
-                )))
             }
-            _ => Err("TRIM requires arguments".to_string()),
+            _ => Ok(None),
         }
     }
 }
@@ -2505,58 +2306,44 @@ mod tests {
 
     #[test]
     fn test_parse_at_timezone() {
-        let catalog = Arc::new(RwLock::new(Catalog::new()));
-        let parser = ExpressionParser::new(catalog);
-        let schema = Schema::new(vec![]);
+        let ctx = TestContext::new("test_parse_at_timezone");
+        let schema = ctx.setup_test_schema();
 
-        // Create test expressions
-        let timestamp = Expr::Value(SQLValue::Timestamp("2024-01-01 12:00:00".to_string()));
-        let timezone = Expr::Value(SQLValue::SingleQuotedString("UTC".to_string()));
+        let test_cases = vec![
+            // Test valid timestamp AT TIME ZONE expressions
+            "timestamp '2020-01-01 12:00:00' AT TIME ZONE 'UTC'",
+            "timestamp '2020-01-01 12:00:00' AT TIME ZONE 'GMT'",
+        ];
 
-        let expr = Expr::AtTimeZone {
-            timestamp: Box::new(timestamp),
-            time_zone: Box::new(timezone),
-        };
-
-        // Parse expression
-        let result = parser.parse_expression(&expr, &schema);
-        assert!(result.is_ok());
-
-        // Verify the parsed expression
-        match result.unwrap() {
-            Expression::AtTimeZone(at_tz) => {
-                assert_eq!(at_tz.get_return_type().get_type(), TypeId::Timestamp);
-            }
-            _ => panic!("Expected AtTimeZone expression"),
+        for expr_str in test_cases {
+            let result = ctx.parse_expression(expr_str, &schema, ctx.catalog());
+            assert!(
+                result.is_ok(),
+                "Failed to parse '{}': {:?}",
+                expr_str,
+                result.err()
+            );
         }
     }
 
     #[test]
     fn test_parse_at_timezone_invalid_types() {
-        let catalog = Arc::new(RwLock::new(Catalog::new()));
-        let parser = ExpressionParser::new(catalog);
-        let schema = Schema::new(vec![]);
+        let ctx = TestContext::new("test_parse_at_timezone_invalid_types");
+        let schema = ctx.setup_test_schema();
 
-        // Test with non-timestamp input
-        let invalid_timestamp = Expr::Value(SQLValue::Number("123".to_string()));
-        let timezone = Expr::Value(SQLValue::SingleQuotedString("UTC".to_string()));
+        let test_cases = vec![
+            // Test invalid timestamp expressions
+            "123 AT TIME ZONE 'UTC'", // Invalid timestamp literal
+            "'not a timestamp' AT TIME ZONE 'UTC'", // Invalid timestamp string
+        ];
 
-        let expr = Expr::AtTimeZone {
-            timestamp: Box::new(invalid_timestamp),
-            time_zone: Box::new(timezone),
-        };
-
-        assert!(parser.parse_expression(&expr, &schema).is_err());
-
-        // Test with non-string timezone
-        let timestamp = Expr::Value(SQLValue::Timestamp("2024-01-01 12:00:00".to_string()));
-        let invalid_timezone = Expr::Value(SQLValue::Number("123".to_string()));
-
-        let expr = Expr::AtTimeZone {
-            timestamp: Box::new(timestamp),
-            time_zone: Box::new(invalid_timezone),
-        };
-
-        assert!(parser.parse_expression(&expr, &schema).is_err());
+        for expr_str in test_cases {
+            let result = ctx.parse_expression(expr_str, &schema, ctx.catalog());
+            assert!(
+                result.is_err(),
+                "Expected error for invalid expression: {}",
+                expr_str
+            );
+        }
     }
 }

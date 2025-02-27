@@ -8,7 +8,7 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime, Timelike};
+use chrono::{NaiveDate, NaiveTime, NaiveDateTime, Timelike, DateTime};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypedStringExpression {
@@ -37,7 +37,7 @@ impl TypedStringExpression {
                     .ok_or_else(|| ExpressionError::InvalidOperation(
                         format!("Failed to convert date '{}' to timestamp", date_str)
                     ))?
-                    .timestamp() as u64;
+                    .and_utc().timestamp() as u64;
                 Ok(Value::new_with_type(Val::Timestamp(timestamp), TypeId::Timestamp))
             },
             Err(e) => Err(ExpressionError::InvalidOperation(
@@ -74,9 +74,9 @@ impl TypedStringExpression {
         
         match NaiveDateTime::parse_from_str(timestamp_str, format) {
             Ok(dt) => {
-                // Convert to timestamp (seconds since epoch)
-                let timestamp = dt.timestamp() as u64;
-                Ok(Value::new_with_type(Val::Timestamp(timestamp), TypeId::Timestamp))
+                // Convert to UTC DateTime and format as RFC3339
+                let utc_dt = dt.and_utc();
+                Ok(Value::new(utc_dt.to_rfc3339()))
             },
             Err(e) => Err(ExpressionError::InvalidOperation(
                 format!("Invalid timestamp format '{}': {}", timestamp_str, e)
@@ -91,7 +91,20 @@ impl ExpressionOps for TypedStringExpression {
         match self.data_type.to_uppercase().as_str() {
             "DATE" => self.parse_date(&self.value),
             "TIME" => self.parse_time(&self.value),
-            "TIMESTAMP" => self.parse_timestamp(&self.value),
+            "TIMESTAMP" => {
+                let result = self.parse_timestamp(&self.value)?;
+                // If the return type is VarChar (for AT TIME ZONE), return as is
+                // Otherwise convert to timestamp
+                if self.return_type.get_type() == TypeId::VarChar {
+                    Ok(result)
+                } else {
+                    // Parse the RFC3339 string back to a timestamp value
+                    match DateTime::parse_from_rfc3339(&result.to_string()) {
+                        Ok(dt) => Ok(Value::new_with_type(Val::Timestamp(dt.timestamp() as u64), TypeId::Timestamp)),
+                        Err(e) => Err(ExpressionError::InvalidOperation(format!("Failed to convert to timestamp: {}", e)))
+                    }
+                }
+            },
             // For other data types, we'll return the string value and let the caller handle conversion
             _ => {
                 // For other types, return as string and let the caller handle conversion

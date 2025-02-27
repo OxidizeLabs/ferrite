@@ -15,6 +15,7 @@ use std::sync::Arc;
 use log;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Value, Val};
+use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -273,7 +274,12 @@ impl LogicalPlanBuilder {
             debug!("Aggregation schema: {:?}", agg_schema);
 
             // Create the aggregate plan node
-            current_plan = LogicalPlan::aggregate(group_by_exprs, agg_exprs.clone(), agg_schema.clone(), current_plan);
+            current_plan = LogicalPlan::aggregate(
+                group_by_exprs,
+                agg_exprs,
+                agg_schema.clone(),
+                current_plan
+            );
 
             // Handle HAVING clause if present
             if let Some(having) = &select.having {
@@ -289,8 +295,7 @@ impl LogicalPlanBuilder {
                     current_plan,
                 );
             }
-            }
-
+        }
 
         current_plan = self.build_projection_plan(&select.projection, current_plan)?;
 

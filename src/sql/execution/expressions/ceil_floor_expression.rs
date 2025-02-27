@@ -9,21 +9,12 @@ use crate::types_db::value::{Val, Value};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::sql::execution::expressions::datetime_expression::DateTimeField;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CeilFloorOperation {
     Ceil,
     Floor,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DateTimeField {
-    Year,
-    Month,
-    Day,
-    Hour,
-    Minute,
-    Second,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,6 +165,9 @@ impl ExpressionOps for CeilFloorExpression {
                                         date_to_timestamp(year + 1, 1, 1, 0, 0, 0)
                                     }
                                 }
+                            }
+                            _ => {
+                                return Err(ExpressionError::InvalidOperation(format!("Unsupported DateTimeField: {:?}", field)))
                             }
                         };
 

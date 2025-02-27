@@ -6,6 +6,21 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
+impl Display for AggregationType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            AggregationType::Sum => write!(f, "SUM"),
+            AggregationType::Count => write!(f, "COUNT"),
+            AggregationType::CountStar => write!(f, "COUNT"),
+            AggregationType::Min => write!(f, "MIN"),
+            AggregationType::Max => write!(f, "MAX"),
+            AggregationType::Avg => write!(f, "AVG"),
+            AggregationType::StdDev => write!(f, "STDDEV"),
+            AggregationType::Variance => write!(f, "VARIANCE"),
+        }
+    }
+}
+
 /// Plan node for aggregation operations
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregationPlanNode {
@@ -201,12 +216,12 @@ mod tests {
         // Create a COUNT(*) aggregate
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
-            Arc::new(Expression::Constant(ConstantExpression::new(
+            vec![Arc::new(Expression::Constant(ConstantExpression::new(
                 Value::new(1),
                 Column::new("count", TypeId::BigInt),
-                vec![],
-            ))),
-            vec![],
+                vec![]
+            )))],
+            Column::new("count", TypeId::BigInt),
         )));
 
         let agg_node = AggregationPlanNode::new(
@@ -240,37 +255,24 @@ mod tests {
             vec![],
         )));
 
+        let col2_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            col2.clone(),
+            vec![],
+        )));
+
         // Create proper aggregate expressions
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                1,
-                col2.clone(),
-                vec![],
-            ))),
-            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                1,
-                col2.clone(),
-                vec![],
-            )))],
+            vec![col2_ref.clone()],
+            Column::new("SUM(col2)", TypeId::Integer),
         )));
 
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                1,
-                col2.clone(),
-                vec![],
-            ))),
-            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                1,
-                col2.clone(),
-                vec![],
-            )))],
+            vec![col2_ref.clone()],
+            Column::new("COUNT(col2)", TypeId::BigInt),
         )));
 
         let agg_node = AggregationPlanNode::new(
@@ -297,19 +299,19 @@ mod tests {
         )));
 
         let age_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, age_col, vec![],
+            0, 1, age_col.clone(), vec![],
         )));
 
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            age_ref.clone(),
             vec![age_ref.clone()],
+            Column::new("SUM(age)", TypeId::Integer),
         )));
 
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            age_ref.clone(),
-            vec![age_ref],
+            vec![age_ref.clone()],
+            Column::new("COUNT(age)", TypeId::BigInt),
         )));
 
         // Create plan node
@@ -341,19 +343,21 @@ mod tests {
     fn test_output_schema_no_group_by() {
         let value_col = Column::new("value", TypeId::Integer);
         let value_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, value_col, vec![],
+            0, 0, value_col.clone(), vec![],
         )));
 
+        // Create MIN aggregate
         let min_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Min,
-            value_ref.clone(),
             vec![value_ref.clone()],
+            Column::new("MIN(value)", TypeId::Integer),
         )));
 
+        // Create MAX aggregate
         let max_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Max,
-            value_ref.clone(),
-            vec![value_ref],
+            vec![value_ref.clone()],
+            Column::new("MAX(value)", TypeId::Integer),
         )));
 
         let agg_plan = AggregationPlanNode::new(
@@ -376,12 +380,12 @@ mod tests {
     fn test_output_schema_count_star() {
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
-            Arc::new(Expression::Constant(ConstantExpression::new(
+            vec![Arc::new(Expression::Constant(ConstantExpression::new(
                 Value::new(1),
                 Column::new("count", TypeId::Integer),
                 vec![],
-            ))),
-            vec![],
+            )))],
+            Column::new("count", TypeId::BigInt),
         )));
 
         let agg_plan = AggregationPlanNode::new(
@@ -411,13 +415,13 @@ mod tests {
             0, 1, dept_col, vec![],
         )));
         let salary_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2, salary_col, vec![],
+            0, 2, salary_col.clone(), vec![],
         )));
 
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            salary_ref.clone(),
-            vec![salary_ref],
+            vec![salary_ref.clone()],
+            Column::new("SUM(salary)", TypeId::Integer),
         )));
 
         let agg_plan = AggregationPlanNode::new(

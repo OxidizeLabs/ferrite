@@ -7,6 +7,9 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::common::exception::ExpressionError::InvalidType;
+use crate::types_db::types::Type;
+use crate::types_db::value::Val::Null;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FilterExpression {
@@ -27,11 +30,11 @@ impl FilterExpression {
 
 impl ExpressionOps for FilterExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
-        let pred_result = self.predicate.evaluate(tuple, schema)?;
-        if pred_result.as_bool()? {
+        let pred_result = self.predicate.evaluate(tuple, schema);
+        if pred_result.is_ok() {
             self.aggregate.evaluate(tuple, schema)
         } else {
-            Ok(Value::new_null())
+            Ok(Value::new(Null))
         }
     }
 
