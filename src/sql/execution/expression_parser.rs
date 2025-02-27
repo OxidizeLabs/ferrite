@@ -50,14 +50,7 @@ use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
-use sqlparser::ast::{
-    BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function,
-    FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator,
-    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
-    TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
-    Subscript as SQLSubscript,
-};
+use sqlparser::ast::{BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, Value as SQLValue, WindowFrameBound, WindowType, Subscript as SQLSubscript, FunctionArgumentList};
 use std::sync::Arc;
 use crate::sql::binder::expressions::bound_window::BoundWindow;
 use crate::sql::binder::bound_expression::{BoundExpression, ExpressionType};
@@ -72,6 +65,7 @@ use crate::sql::execution::expressions::interval_expression::IntervalExpression;
 use crate::sql::execution::expressions::interval_expression::IntervalField;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
 use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
+use crate::sql::execution::expressions::string_expression::{StringExpression, StringExpressionType};
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -195,6 +189,99 @@ impl ExpressionParser {
                             vec![left_expr, right_expr],
                         )))
                     }
+                    // Handle logical operators
+                    BinaryOperator::And => {
+                        // Validate that both operands are boolean
+                        let left_type = left_expr.get_return_type().get_type();
+                        let right_type = right_expr.get_return_type().get_type();
+                        
+                        if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
+                            return Err(format!(
+                                "AND operator requires boolean operands, got {:?} AND {:?}",
+                                left_type, right_type
+                            ));
+                        }
+                        
+                        Ok(Expression::Logic(LogicExpression::new(
+                            left_expr.clone(),
+                            right_expr.clone(),
+                            LogicType::And,
+                            vec![left_expr, right_expr],
+                        )))
+                    }
+                    BinaryOperator::Or => {
+                        // Validate that both operands are boolean
+                        let left_type = left_expr.get_return_type().get_type();
+                        let right_type = right_expr.get_return_type().get_type();
+                        
+                        if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
+                            return Err(format!(
+                                "OR operator requires boolean operands, got {:?} OR {:?}",
+                                left_type, right_type
+                            ));
+                        }
+                        
+                        Ok(Expression::Logic(LogicExpression::new(
+                            left_expr.clone(),
+                            right_expr.clone(),
+                            LogicType::Or,
+                            vec![left_expr, right_expr],
+                        )))
+                    }
+                    // Handle comparison operators
+                    BinaryOperator::Eq | BinaryOperator::NotEq | BinaryOperator::Lt | BinaryOperator::LtEq |
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        // Validate that the types are comparable
+                        let left_type = left_expr.get_return_type().get_type();
+                        let right_type = right_expr.get_return_type().get_type();
+                        
+                        match (left_type, right_type) {
+                            (TypeId::Integer, TypeId::Integer)
+                            | (TypeId::Decimal, TypeId::Decimal)
+                            | (TypeId::VarChar, TypeId::VarChar)
+                            | (TypeId::Char, TypeId::Char)
+                            | (TypeId::Boolean, TypeId::Boolean)
+                            | (TypeId::Integer, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::Integer)
+                            | (TypeId::BigInt, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::BigInt) => {
+                                let comp_type = match op {
+                                    BinaryOperator::Eq => ComparisonType::Equal,
+                                    BinaryOperator::NotEq => ComparisonType::NotEqual,
+                                    BinaryOperator::Lt => ComparisonType::LessThan,
+                                    BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
+                                    BinaryOperator::Gt => ComparisonType::GreaterThan,
+                                    BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
+                                    _ => unreachable!(),
+                                };
+
+                                // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
+                                let right_expr = match right_expr.as_ref() {
+                                    Expression::Literal(lit) => Arc::new(Expression::Constant(ConstantExpression::new(
+                                        lit.get_value().clone(),
+                                        lit.get_return_type().clone(),
+                                        vec![],
+                                    ))),
+                                    _ => right_expr,
+                                };
+
+                                Ok(Expression::Comparison(ComparisonExpression::new(
+                                    left_expr.clone(),
+                                    right_expr.clone(),
+                                    comp_type,
+                                    vec![left_expr, right_expr],
+                                )))
+                            }
+                            _ => Err(format!(
+                                "Cannot compare values of types {:?} and {:?}",
+                                left_type, right_type
+                            )),
+                        }
+                    }
+                    // Handle other binary operators
                     _ => Ok(Expression::BinaryOp(BinaryOpExpression::new(
                         left_expr.clone(),
                         right_expr.clone(),
@@ -216,7 +303,7 @@ impl ExpressionParser {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
                     inner_expr,
-                    IsCheckType::Unknown { negated: false },
+                    IsCheckType::Null { negated: false },
                     Column::new("is_null", TypeId::Boolean),
                 )))
             }
@@ -225,7 +312,7 @@ impl ExpressionParser {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
                     inner_expr,
-                    IsCheckType::Unknown { negated: true },
+                    IsCheckType::Null { negated: true },
                     Column::new("is_not_null", TypeId::Boolean),
                 )))
             }
@@ -1754,12 +1841,53 @@ impl ExpressionParser {
     }
 
     fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
-        // First check if this is an aggregate function
+        // First check if this is a string function
         let name = func.name.to_string().to_uppercase();
+        match name.as_str() {
+            "LOWER" | "UPPER" => {
+                // Parse the single argument
+                let args = self.parse_function_arguments(&func.args, schema)?;
+                if args.len() != 1 {
+                    return Err(format!("{} function requires exactly one argument", name));
+                }
+                
+                let expr_type = match name.as_str() {
+                    "LOWER" => StringExpressionType::Lower,
+                    "UPPER" => StringExpressionType::Upper,
+                    _ => unreachable!(),
+                };
+                
+                return Ok(Expression::String(StringExpression::new(
+                    args[0].clone(),
+                    expr_type,
+                    args,
+                )));
+            }
+            _ => {}
+        }
+
+        // Then check if this is an aggregate function
         if matches!(
             name.as_str(),
             "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE"
         ) {
+            // Special handling for COUNT(*)
+            if name == "COUNT" {
+                if let FunctionArguments::List(arg_list) = &func.args {
+                    if arg_list.args.len() == 1 {
+                        if let FunctionArg::Unnamed(expr) = &arg_list.args[0] {
+                            if matches!(expr, FunctionArgExpr::Wildcard) {
+                                return Ok(Expression::Aggregate(AggregateExpression::new(
+                                    AggregationType::CountStar,
+                                    vec![],
+                                    Column::new(&name, TypeId::BigInt),
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+
             let args = self.parse_function_arguments(&func.args, schema)?;
             let agg_type = match name.as_str() {
                 "COUNT" => AggregationType::Count,
@@ -1774,7 +1902,11 @@ impl ExpressionParser {
 
             let return_type = match agg_type {
                 AggregationType::Count => Column::new(&name, TypeId::BigInt),
-                AggregationType::Avg => Column::new(&name, TypeId::Decimal),
+                AggregationType::Avg if !args.is_empty() => {
+                    // For AVG, use the same type as the input
+                    let child_type = args[0].get_return_type().get_type();
+                    Column::new(&name, child_type)
+                }
                 _ if !args.is_empty() => {
                     let child_type = args[0].get_return_type().get_type();
                     Column::new(&name, child_type)
@@ -1784,7 +1916,7 @@ impl ExpressionParser {
 
             return Ok(Expression::Aggregate(AggregateExpression::new(
                 agg_type,
-                    args,
+                args,
                 return_type,
             )));
         }
@@ -2344,7 +2476,7 @@ mod tests {
             ("COUNT(*)", AggregationType::CountStar, TypeId::BigInt),
             ("COUNT(id)", AggregationType::Count, TypeId::BigInt),
             ("SUM(salary)", AggregationType::Sum, TypeId::Decimal),
-            ("AVG(age)", AggregationType::Avg, TypeId::Integer),
+            ("AVG(age)", AggregationType::Avg, TypeId::Decimal),
             ("MIN(salary)", AggregationType::Min, TypeId::Decimal),
             ("MAX(age)", AggregationType::Max, TypeId::Integer),
         ];
@@ -2474,26 +2606,28 @@ mod tests {
                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
 
             match expr {
-                Expression::Comparison(comp) => {
+                Expression::IsCheck(check) => {
                     // For simple IS NULL / IS NOT NULL
-                    let children = comp.get_children();
-                    assert_eq!(children.len(), 2, "NULL check should have 2 operands");
+                    let children = check.get_children();
+                    assert_eq!(children.len(), 1, "NULL check should have 1 operand");
 
-                    // Verify second operand is NULL constant
-                    match children[1].as_ref() {
-                        Expression::Constant(c) => {
-                            assert!(matches!(c.get_value().get_val(), Val::Null));
+                    // Verify it's using IsCheckType::Null
+                    match check.check_type() {
+                        IsCheckType::Null { negated } => {
+                            // negated should be true for IS NOT NULL, false for IS NULL
+                            if expr_str.contains("NOT") {
+                                assert!(negated, "Expected negated=true for IS NOT NULL");
+                            } else {
+                                assert!(!negated, "Expected negated=false for IS NULL");
+                            }
                         }
-                        _ => {
-                            // For compound expressions with AND/OR, we don't check the structure
-                            // as it's already covered by other tests
-                        }
+                        _ => panic!("Expected IsCheckType::Null for '{}'", expr_str),
                     }
                 }
                 Expression::Logic(_) => {
                     // For compound expressions with AND/OR, just verify it parsed successfully
                 }
-                _ => panic!("Expected Comparison or Logic expression for '{}'", expr_str),
+                _ => panic!("Expected IsCheck or Logic expression for '{}'", expr_str),
             }
         }
     }
