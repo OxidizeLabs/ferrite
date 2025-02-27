@@ -972,9 +972,22 @@ mod unit_tests {
         assert_eq!(
             serialized_vector,
             vec![
-                9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0,
-                0, 0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0,
-                0, 0, 3, 0, 0, 0
+                9, 0, 0, 0,                 // Vector variant index
+                2, 0, 0, 0, 0, 0, 0, 0,     // Vector length (2)
+                3, 0, 0, 0,                 // First Value: Integer variant index
+                1, 0, 0, 0,                 // First Value: value (1)
+                0, 0, 0, 0,                 // First Value: Size::Length variant index
+                4, 0, 0, 0, 0, 0, 0, 0,     // First Value: size value (4)
+                0,                          // First Value: manage_data_ (false)
+                3, 0, 0, 0,                 // First Value: type_id_ (Integer)
+                0,                          // First Value: struct_data (None)
+                3, 0, 0, 0,                 // Second Value: Integer variant index
+                2, 0, 0, 0,                 // Second Value: value (2)
+                0, 0, 0, 0,                 // Second Value: Size::Length variant index
+                4, 0, 0, 0, 0, 0, 0, 0,     // Second Value: size value (4)
+                0,                          // Second Value: manage_data_ (false)
+                3, 0, 0, 0,                 // Second Value: type_id_ (Integer)
+                0                           // Second Value: struct_data (None)
             ]
         );
     }
@@ -1052,12 +1065,16 @@ mod unit_tests {
             // TypeId variant index for Integer is 3 (u32)
             type_id_bytes.extend(&3u32.to_le_bytes());
 
+            // Serialize struct_data: None
+            let struct_data_bytes: Vec<u8> = vec![0x00]; // None variant
+
             // Combine all bytes
             let mut expected: Vec<u8> = Vec::new();
             expected.extend(value_bytes);
             expected.extend(size_bytes);
             expected.extend(manage_data_bytes);
             expected.extend(type_id_bytes);
+            expected.extend(struct_data_bytes);
 
             expected
         };
@@ -1127,12 +1144,12 @@ mod unit_tests {
 
         assert_eq!(
             format!("{:?}", int_value),
-            "Value { value_: Integer(42), size_: Length(4), manage_data_: false, type_id_: Integer }"
+            "Value { value_: Integer(42), size_: Length(4), manage_data_: false, type_id_: Integer, struct_data: None }"
         );
 
         assert_eq!(
             format!("{:?}", string_value),
-            "Value { value_: VarLen(\"Hello\"), size_: Length(0), manage_data_: false, type_id_: VarChar }"
+            "Value { value_: VarLen(\"Hello\"), size_: Length(0), manage_data_: false, type_id_: VarChar, struct_data: None }"
         );
 
         // For vector values, just verify it contains the expected Debug format
