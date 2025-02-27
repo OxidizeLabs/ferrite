@@ -356,7 +356,12 @@ impl ExpressionOps for SubscriptExpression {
 
 impl Display for SubscriptExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.expr)?;
+        // For constant expressions containing vectors, display the column name
+        if let Expression::Constant(const_expr) = &*self.expr {
+            write!(f, "{}", const_expr.get_return_type().get_name())?;
+        } else {
+            write!(f, "{}", self.expr)?;
+        }
         match &self.subscript {
             Subscript::Single(idx) => write!(f, "[{}]", idx),
             Subscript::Range { start, end } => {
