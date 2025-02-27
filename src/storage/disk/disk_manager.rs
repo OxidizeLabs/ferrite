@@ -174,6 +174,26 @@ impl FileDiskManager {
             buffer_size, db_file, log_file
         );
 
+        // Ensure parent directories exist for both files
+        if let Some(db_parent) = Path::new(&db_file).parent() {
+            if let Err(e) = std::fs::create_dir_all(db_parent) {
+                error!(
+                    target: "tkdb::storage",
+                    "Failed to create parent directory for database file: {}", e
+                );
+                panic!("Failed to create database directory: {}", e);
+            }
+        }
+        if let Some(log_parent) = Path::new(&log_file).parent() {
+            if let Err(e) = std::fs::create_dir_all(log_parent) {
+                error!(
+                    target: "tkdb::storage",
+                    "Failed to create parent directory for log file: {}", e
+                );
+                panic!("Failed to create log directory: {}", e);
+            }
+        }
+
         let db_io = OpenOptions::new()
             .read(true)
             .write(true)
@@ -184,7 +204,7 @@ impl FileDiskManager {
                     target: "tkdb::storage",
                     "Failed to open database file {}: {}", db_file, e
                 );
-                panic!("Database file initialization failed")
+                panic!("Failed to open database file {}: {}", db_file, e)
             });
 
         let log_io = OpenOptions::new()
@@ -192,7 +212,13 @@ impl FileDiskManager {
             .write(true)
             .create(true)
             .open(log_file.clone())
-            .unwrap();
+            .unwrap_or_else(|e| {
+                error!(
+                    target: "tkdb::storage",
+                    "Failed to open log file {}: {}", log_file, e
+                );
+                panic!("Failed to open log file {}: {}", log_file, e)
+            });
 
         // Create separate read buffers
         let db_read = OpenOptions::new().read(true).open(db_file).unwrap();

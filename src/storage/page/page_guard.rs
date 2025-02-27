@@ -147,6 +147,10 @@ mod tests {
             const K: usize = 2;
 
             let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            
+            // Create tests/data directory if it doesn't exist
+            std::fs::create_dir_all("tests/data").expect("Failed to create tests/data directory");
+            
             let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
             let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
