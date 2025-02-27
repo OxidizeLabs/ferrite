@@ -63,6 +63,7 @@ use crate::sql::binder::expressions::bound_window::BoundWindow;
 use crate::sql::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::sql::binder::expressions::bound_constant::BoundConstant;
 use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
+use crate::sql::execution::expressions::grouping_sets_expression::{GroupingSetsExpression, GroupingType};
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -154,9 +155,11 @@ impl ExpressionParser {
                 )))
             }
 
-            Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
-                value.clone(),
-            )?)),
+            Expr::Value(value) => {
+                Ok(Expression::Literal(LiteralValueExpression::new(
+                    value.clone(),
+                )?))
+            },
 
             Expr::BinaryOp { left, op, right } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
@@ -800,26 +803,30 @@ impl ExpressionParser {
                 expr,
                 pattern,
                 escape_char,
-            } => Ok(Expression::Regex(RegexExpression::new(
-                Arc::new(self.parse_expression(expr, schema)?),
-                Arc::new(self.parse_expression(pattern, schema)?),
-                RegexOperator::RLike,
-                escape_char.clone(),
-                Column::new("like", TypeId::Boolean),
-            ))),
+            } => {
+                Ok(Expression::Regex(RegexExpression::new(
+                    Arc::new(self.parse_expression(expr, schema)?),
+                    Arc::new(self.parse_expression(pattern, schema)?),
+                    RegexOperator::RLike,
+                    escape_char.clone(),
+                    Column::new("like", TypeId::Boolean),
+                )))
+            },
             Expr::ILike {
                 negated,
                 any,
                 expr,
                 pattern,
                 escape_char,
-            } => Ok(Expression::Regex(RegexExpression::new(
-                Arc::new(self.parse_expression(expr, schema)?),
-                Arc::new(self.parse_expression(pattern, schema)?),
-                RegexOperator::RLike,
-                escape_char.clone(),
-                Column::new("ilike", TypeId::Boolean),
-            ))),
+            } => {
+                Ok(Expression::Regex(RegexExpression::new(
+                    Arc::new(self.parse_expression(expr, schema)?),
+                    Arc::new(self.parse_expression(pattern, schema)?),
+                    RegexOperator::RLike,
+                    escape_char.clone(),
+                    Column::new("ilike", TypeId::Boolean),
+                )))
+            },
             Expr::Extract {
                 field,
                 syntax,
@@ -1017,11 +1024,51 @@ impl ExpressionParser {
                 )))
             }
             Expr::Subquery(query) => self.parse_subquery(query, schema),
-            Expr::GroupingSets(_) => {
-                Err("GROUPING SETS expressions are not yet supported".to_string())
+            Expr::GroupingSets(groups) => {
+                let mut parsed_groups = Vec::new();
+                for group in groups {
+                    let mut parsed_group = Vec::new();
+                    for expr in group {
+                        parsed_group.push(Arc::new(self.parse_expression(expr, schema)?));
+                    }
+                    parsed_groups.push(parsed_group);
+                }
+                Ok(Expression::GroupingSets(GroupingSetsExpression::new(
+                    GroupingType::GroupingSets,
+                    parsed_groups,
+                    Column::new("grouping_sets", TypeId::Vector),
+                )))
             }
-            Expr::Cube(_) => Err("CUBE expressions are not yet supported".to_string()),
-            Expr::Rollup(_) => Err("ROLLUP expressions are not yet supported".to_string()),
+            Expr::Cube(groups) => {
+                let mut parsed_groups = Vec::new();
+                for group in groups {
+                    let mut parsed_group = Vec::new();
+                    for expr in group {
+                        parsed_group.push(Arc::new(self.parse_expression(expr, schema)?));
+                    }
+                    parsed_groups.push(parsed_group);
+                }
+                Ok(Expression::GroupingSets(GroupingSetsExpression::new(
+                    GroupingType::Cube,
+                    parsed_groups,
+                    Column::new("cube", TypeId::Vector),
+                )))
+            }
+            Expr::Rollup(groups) => {
+                let mut parsed_groups = Vec::new();
+                for group in groups {
+                    let mut parsed_group = Vec::new();
+                    for expr in group {
+                        parsed_group.push(Arc::new(self.parse_expression(expr, schema)?));
+                    }
+                    parsed_groups.push(parsed_group);
+                }
+                Ok(Expression::GroupingSets(GroupingSetsExpression::new(
+                    GroupingType::Rollup,
+                    parsed_groups,
+                    Column::new("rollup", TypeId::Vector),
+                )))
+            }
             Expr::Tuple(_) => Err("Tuple expressions are not yet supported".to_string()),
             Expr::Struct { .. } => Err("Struct expressions are not yet supported".to_string()),
             Expr::Subscript { .. } => {
@@ -1035,64 +1082,6 @@ impl ExpressionParser {
             }
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
-    }
-
-    fn parse_at_timezone(
-        &self,
-        timestamp: &Expr,
-        timezone: &Expr,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        // For typed string timestamps, we need to ensure they output RFC3339 format
-        let timestamp_expr = match timestamp {
-            Expr::TypedString { data_type, value } => {
-                // Only allow TIMESTAMP typed strings
-                if !matches!(data_type, DataType::Timestamp(_, _)) {
-                    return Err(format!(
-                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
-                        data_type
-                    ));
-                }
-                // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
-                Arc::new(Expression::TypedString(TypedStringExpression::new(
-                    "TIMESTAMP".to_string(),
-                    value.to_string(),
-                    Column::new("timestamp", TypeId::VarChar),
-                )))
-            }
-            _ => {
-                // For non-TypedString expressions, parse and validate timestamp type
-                let expr = Arc::new(self.parse_expression(timestamp, schema)?);
-                let expr_type = expr.get_return_type().get_type();
-                if expr_type != TypeId::Timestamp {
-                    return Err(format!(
-                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
-                        expr_type
-                    ));
-                }
-                expr
-            }
-        };
-
-        let timezone_expr = Arc::new(self.parse_expression(timezone, schema)?);
-
-        // Validate that timezone expression returns a string type
-        let timezone_type = timezone_expr.get_return_type().get_type();
-        if !matches!(timezone_type, TypeId::VarChar | TypeId::Char) {
-            return Err(format!(
-                "AT TIME ZONE timezone must be a string type, got {:?}",
-                timezone_type
-            ));
-        }
-
-        // Create return type column - result is always a timestamp
-        let return_type = Column::new("at_timezone", TypeId::Timestamp);
-
-        Ok(Expression::AtTimeZone(AtTimeZoneExpression::new(
-            timestamp_expr,
-            timezone_expr,
-            return_type,
-        )))
     }
 
     pub fn parse_query(query: Query) -> Result<Expression, String> {
@@ -1246,6 +1235,138 @@ impl ExpressionParser {
             }
             _ => Err("Join condition must be a comparison expression".to_string()),
         }
+    }
+
+    pub fn has_aggregate_functions(&self, projection: &[SelectItem]) -> bool {
+        projection.iter().any(|item| match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                self.contains_aggregate_function(expr)
+            }
+            _ => false,
+        })
+    }
+
+    pub fn determine_group_by_expressions(
+        &self,
+        select: &Box<Select>,
+        schema: &Schema,
+        has_group_by: bool,
+    ) -> Result<Vec<Expression>, String> {
+        if !has_group_by {
+            return Ok(Vec::new());
+        }
+
+        match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => {
+                let mut group_by_exprs = Vec::new();
+                for expr in exprs {
+                    let parsed_expr = self.parse_expression(expr, schema)?;
+                    group_by_exprs.push(parsed_expr);
+                }
+                Ok(group_by_exprs)
+            }
+            GroupByExpr::All(_) => {
+                // For GROUP BY ALL, include all non-aggregate columns
+                let mut group_by_exprs = Vec::new();
+                for i in 0..schema.get_column_count() {
+                    let col = schema.get_column(i as usize).unwrap();
+                    group_by_exprs.push(Expression::ColumnRef(ColumnRefExpression::new(
+                        0,
+                        i as usize,
+                        col.clone(),
+                        vec![],
+                    )));
+                }
+                Ok(group_by_exprs)
+            }
+        }
+    }
+
+    pub fn parse_aggregates(
+        &self,
+        projection: &[SelectItem],
+        schema: &Schema,
+    ) -> Result<(Vec<Arc<Expression>>, Vec<String>), String> {
+        let mut agg_exprs = Vec::new();
+        let mut agg_names = Vec::new();
+
+        for item in projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_names.push(expr.to_string());
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
+                        agg_exprs.push(Arc::new(agg_expr));
+                        agg_names.push(alias.value.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok((agg_exprs, agg_names))
+    }
+
+    fn parse_at_timezone(
+        &self,
+        timestamp: &Expr,
+        timezone: &Expr,
+        schema: &Schema,
+    ) -> Result<Expression, String> {
+        // For typed string timestamps, we need to ensure they output RFC3339 format
+        let timestamp_expr = match timestamp {
+            Expr::TypedString { data_type, value } => {
+                // Only allow TIMESTAMP typed strings
+                if !matches!(data_type, DataType::Timestamp(_, _)) {
+                    return Err(format!(
+                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
+                        data_type
+                    ));
+                }
+                // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
+                Arc::new(Expression::TypedString(TypedStringExpression::new(
+                    "TIMESTAMP".to_string(),
+                    value.to_string(),
+                    Column::new("timestamp", TypeId::VarChar),
+                )))
+            }
+            _ => {
+                // For non-TypedString expressions, parse and validate timestamp type
+                let expr = Arc::new(self.parse_expression(timestamp, schema)?);
+                let expr_type = expr.get_return_type().get_type();
+                if expr_type != TypeId::Timestamp {
+                    return Err(format!(
+                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
+                        expr_type
+                    ));
+                }
+                expr
+            }
+        };
+
+        let timezone_expr = Arc::new(self.parse_expression(timezone, schema)?);
+
+        // Validate that timezone expression returns a string type
+        let timezone_type = timezone_expr.get_return_type().get_type();
+        if !matches!(timezone_type, TypeId::VarChar | TypeId::Char) {
+            return Err(format!(
+                "AT TIME ZONE timezone must be a string type, got {:?}",
+                timezone_type
+            ));
+        }
+
+        // Create return type column - result is always a timestamp
+        let return_type = Column::new("at_timezone", TypeId::Timestamp);
+
+        Ok(Expression::AtTimeZone(AtTimeZoneExpression::new(
+            timestamp_expr,
+            timezone_expr,
+            return_type,
+        )))
     }
 
     fn are_types_comparable(left: TypeId, right: TypeId) -> bool {
@@ -1531,15 +1652,6 @@ impl ExpressionParser {
         }
     }
 
-    pub fn has_aggregate_functions(&self, projection: &[SelectItem]) -> bool {
-        projection.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.contains_aggregate_function(expr)
-            }
-            _ => false,
-        })
-    }
-
     fn contains_aggregate_function(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Function(func) => {
@@ -1556,71 +1668,6 @@ impl ExpressionParser {
             Expr::Nested(expr) => self.contains_aggregate_function(expr),
             _ => false,
         }
-    }
-
-    pub fn determine_group_by_expressions(
-        &self,
-        select: &Box<Select>,
-        schema: &Schema,
-        has_group_by: bool,
-    ) -> Result<Vec<Expression>, String> {
-        if !has_group_by {
-            return Ok(Vec::new());
-        }
-
-        match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => {
-                let mut group_by_exprs = Vec::new();
-                for expr in exprs {
-                    let parsed_expr = self.parse_expression(expr, schema)?;
-                    group_by_exprs.push(parsed_expr);
-                }
-                Ok(group_by_exprs)
-            }
-            GroupByExpr::All(_) => {
-                // For GROUP BY ALL, include all non-aggregate columns
-                let mut group_by_exprs = Vec::new();
-                for i in 0..schema.get_column_count() {
-                    let col = schema.get_column(i as usize).unwrap();
-                    group_by_exprs.push(Expression::ColumnRef(ColumnRefExpression::new(
-                        0,
-                        i as usize,
-                        col.clone(),
-                        vec![],
-                    )));
-                }
-                Ok(group_by_exprs)
-            }
-        }
-    }
-
-    pub fn parse_aggregates(
-        &self,
-        projection: &[SelectItem],
-        schema: &Schema,
-    ) -> Result<(Vec<Arc<Expression>>, Vec<String>), String> {
-        let mut agg_exprs = Vec::new();
-        let mut agg_names = Vec::new();
-
-        for item in projection {
-            match item {
-                SelectItem::UnnamedExpr(expr) => {
-                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_names.push(expr.to_string());
-                    }
-                }
-                SelectItem::ExprWithAlias { expr, alias } => {
-                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_names.push(alias.value.clone());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        Ok((agg_exprs, agg_names))
     }
 
     fn try_parse_aggregate(
