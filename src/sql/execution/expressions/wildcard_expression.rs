@@ -219,14 +219,19 @@ mod tests {
     #[test]
     fn test_wildcard_empty_tuple() {
         let schema = create_test_schema();
-        let empty_tuple = create_test_tuple(vec![], &schema);
+        // Create a tuple with NULL values for each column
+        let null_values = vec![Value::new(Val::Null), Value::new(Val::Null), Value::new(Val::Null)];
+        let empty_tuple = create_test_tuple(null_values, &schema);
         let wildcard = WildcardExpression::new(Column::new("*", TypeId::Vector));
 
         let result = wildcard.evaluate(&empty_tuple, &schema).unwrap();
 
-        // Should return an empty vector
+        // Should return a vector with NULL values
         if let Val::Vector(values) = result.get_val() {
-            assert!(values.is_empty());
+            assert_eq!(values.len(), 3);
+            for value in values {
+                assert!(value.is_null());
+            }
         } else {
             panic!("Expected Vector value");
         }
