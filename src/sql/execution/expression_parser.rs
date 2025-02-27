@@ -68,6 +68,8 @@ use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
 use crate::sql::execution::expressions::subscript_expression::{SubscriptExpression, Subscript};
 use crate::sql::execution::expressions::array_expression::ArrayExpression;
+use crate::sql::execution::expressions::interval_expression::IntervalExpression;
+use crate::sql::execution::expressions::interval_expression::IntervalField;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1221,7 +1223,28 @@ impl ExpressionParser {
                     Column::new("array", TypeId::Vector),
                 )))
             },
-            Expr::Interval(_) => Err("Interval expressions are not yet supported".to_string()),
+            Expr::Interval(interval) => {
+                // Parse the interval value expression
+                let value_expr = self.parse_expression(&interval.value, schema)?;
+                
+                // Convert sqlparser::ast::DateTimeField to our IntervalField
+                let field = match &interval.leading_field {
+                    Some(sqlparser::ast::DateTimeField::Year) => IntervalField::Year,
+                    Some(sqlparser::ast::DateTimeField::Month) => IntervalField::Month,
+                    Some(sqlparser::ast::DateTimeField::Day) => IntervalField::Day,
+                    Some(sqlparser::ast::DateTimeField::Hour) => IntervalField::Hour,
+                    Some(sqlparser::ast::DateTimeField::Minute) => IntervalField::Minute,
+                    Some(sqlparser::ast::DateTimeField::Second) => IntervalField::Second,
+                    _ => return Err("Unsupported interval field".to_string()),
+                };
+
+                // Create interval expression
+                Ok(Expression::Interval(IntervalExpression::new(
+                    field,
+                    Arc::new(value_expr),
+                    Column::new("interval", TypeId::Struct),
+                )))
+            },
             Expr::Wildcard(_) => Err("Wildcard expressions are not yet supported".to_string()),
             Expr::QualifiedWildcard(_, _) => {
                 Err("Qualified wildcard expressions are not yet supported".to_string())
