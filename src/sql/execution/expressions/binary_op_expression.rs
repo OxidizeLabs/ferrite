@@ -235,13 +235,19 @@ impl ExpressionOps for BinaryOpExpression {
             self.right
                 .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
+        // Create a schema that matches our values
+        let temp_schema = Schema::new(vec![
+            Column::new("left_val", left_val.get_type_id()),
+            Column::new("right_val", right_val.get_type_id()),
+        ]);
+
         self.evaluate(
             &Tuple::new(
                 &[left_val, right_val],
-                Schema::new(vec![]),
+                temp_schema.clone(),
                 left_tuple.get_rid(),
             ),
-            &Schema::new(vec![]),
+            &temp_schema,
         )
     }
 
@@ -346,7 +352,16 @@ mod tests {
     #[test]
     fn test_arithmetic_operations() {
         let schema = create_test_schema();
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(
+            &[
+                Value::new(0),         // int_col
+                Value::new(0.0),       // decimal_col
+                Value::new(false),     // bool_col
+                Value::new(""),        // string_col
+            ],
+            schema.clone(),
+            RID::new(0, 0)
+        );
 
         // Test integer arithmetic
         let test_cases = vec![
@@ -398,7 +413,16 @@ mod tests {
     #[test]
     fn test_comparison_operations() {
         let schema = create_test_schema();
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(
+            &[
+                Value::new(0),         // int_col
+                Value::new(0.0),       // decimal_col
+                Value::new(false),     // bool_col
+                Value::new(""),        // string_col
+            ],
+            schema.clone(),
+            RID::new(0, 0)
+        );
 
         let test_cases = vec![
             (5, 3, BinaryOperator::Gt, true),
@@ -428,7 +452,16 @@ mod tests {
     #[test]
     fn test_logical_operations() {
         let schema = create_test_schema();
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(
+            &[
+                Value::new(0),         // int_col
+                Value::new(0.0),       // decimal_col
+                Value::new(false),     // bool_col
+                Value::new(""),        // string_col
+            ],
+            schema.clone(),
+            RID::new(0, 0)
+        );
 
         let test_cases = vec![
             (true, true, BinaryOperator::And, true),
@@ -456,7 +489,16 @@ mod tests {
     #[test]
     fn test_string_concatenation() {
         let schema = create_test_schema();
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(
+            &[
+                Value::new(0),         // int_col
+                Value::new(0.0),       // decimal_col
+                Value::new(false),     // bool_col
+                Value::new(""),        // string_col
+            ],
+            schema.clone(),
+            RID::new(0, 0)
+        );
 
         let left_expr = create_constant_expr(Value::new("Hello"), TypeId::VarChar);
         let right_expr = create_constant_expr(Value::new("World"), TypeId::VarChar);
@@ -502,7 +544,16 @@ mod tests {
     #[test]
     fn test_division_by_zero() {
         let schema = create_test_schema();
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(
+            &[
+                Value::new(0),         // int_col
+                Value::new(0.0),       // decimal_col
+                Value::new(false),     // bool_col
+                Value::new(""),        // string_col
+            ],
+            schema.clone(),
+            RID::new(0, 0)
+        );
 
         let left_expr = create_constant_expr(Value::new(10), TypeId::Integer);
         let right_expr = create_constant_expr(Value::new(0), TypeId::Integer);
