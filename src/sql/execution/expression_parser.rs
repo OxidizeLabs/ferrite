@@ -65,6 +65,7 @@ use crate::sql::binder::expressions::bound_constant::BoundConstant;
 use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
 use crate::sql::execution::expressions::grouping_sets_expression::{GroupingSetsExpression, GroupingType};
 use crate::sql::execution::expressions::tuple_expression::TupleExpression;
+use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1086,7 +1087,52 @@ impl ExpressionParser {
                     ))
                 })
             }
-            Expr::Struct { .. } => Err("Struct expressions are not yet supported".to_string()),
+            Expr::Struct { values, fields } => {
+                // Parse each value expression
+                let mut parsed_values = Vec::new();
+                for value in values {
+                    parsed_values.push(Arc::new(self.parse_expression(value, schema)?));
+                }
+
+                // Convert SQLParser StructField to our StructField
+                let mut struct_fields = Vec::new();
+                for field in fields {
+                    let field_name = field.field_name.as_ref()
+                        .map(|ident| ident.value.clone())
+                        .unwrap_or_else(|| String::from(""));
+
+                    // Convert SQL DataType to our TypeId
+                    let type_id = match field.field_type {
+                        DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
+                        DataType::BigInt(_) => TypeId::BigInt,
+                        DataType::SmallInt(_) => TypeId::SmallInt,
+                        DataType::TinyInt(_) => TypeId::TinyInt,
+                        DataType::Float(_) | DataType::Double | DataType::Decimal(_) => TypeId::Decimal,
+                        DataType::Char(_) => TypeId::Char,
+                        DataType::Varchar(_) | DataType::Text => TypeId::VarChar,
+                        DataType::Boolean => TypeId::Boolean,
+                        DataType::Date | DataType::Time(_, _) | DataType::Timestamp(_, _) => TypeId::Timestamp,
+                        DataType::Array(_) => TypeId::Vector,
+                        DataType::Struct(_, _) => TypeId::Struct,
+                        _ => return Err(format!("Unsupported struct field type: {:?}", field.field_type)),
+                    };
+
+                    struct_fields.push(StructField::new(
+                        field_name.clone(),
+                        Column::new(&field_name, type_id),
+                    ));
+                }
+
+                // Create return type for the struct
+                let return_type = Column::new("struct", TypeId::Struct);
+
+                // Create and return the StructExpression
+                Ok(Expression::Struct(StructExpression::new(
+                    parsed_values.clone(),
+                    struct_fields,
+                    return_type,
+                )))
+            },
             Expr::Subscript { .. } => {
                 Err("Subscript expressions are not yet supported".to_string())
             }
