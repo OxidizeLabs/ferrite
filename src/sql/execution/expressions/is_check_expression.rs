@@ -21,15 +21,21 @@ pub struct IsCheckExpression {
     expr: Arc<Expression>,
     check_type: IsCheckType,
     return_type: Column,
+    children: Vec<Arc<Expression>>,
 }
 
 impl IsCheckExpression {
     pub fn new(expr: Arc<Expression>, check_type: IsCheckType, return_type: Column) -> Self {
         Self {
-            expr,
+            expr: expr.clone(),
             check_type,
             return_type,
+            children: vec![expr],
         }
+    }
+
+    pub fn check_type(&self) -> &IsCheckType {
+        &self.check_type
     }
 }
 
@@ -153,16 +159,11 @@ impl ExpressionOps for IsCheckExpression {
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        if child_idx == 0 {
-            &self.expr
-        } else {
-            panic!("IsCheckExpression has only one child")
-        }
+        &self.children[child_idx]
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {
