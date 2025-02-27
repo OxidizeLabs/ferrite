@@ -53,10 +53,11 @@ use crate::types_db::value::{Val, Value};
 use parking_lot::RwLock;
 use sqlparser::ast::{
     BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function,
-    FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause
-    , FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator
-    , ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    FunctionArg, FunctionArgExpr, FunctionArgOperator, FunctionArgumentClause,
+    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator,
+    ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
     TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
+    Subscript as SQLSubscript,
 };
 use std::sync::Arc;
 use crate::sql::binder::expressions::bound_window::BoundWindow;
@@ -66,6 +67,7 @@ use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
 use crate::sql::execution::expressions::grouping_sets_expression::{GroupingSetsExpression, GroupingType};
 use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
+use crate::sql::execution::expressions::subscript_expression::{SubscriptExpression, Subscript};
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1133,8 +1135,54 @@ impl ExpressionParser {
                     return_type,
                 )))
             },
-            Expr::Subscript { .. } => {
-                Err("Subscript expressions are not yet supported".to_string())
+            Expr::Subscript { expr, subscript } => {
+                let base_expr = Arc::new(self.parse_expression(&expr, schema)?);
+                
+                match &**subscript {
+                    SQLSubscript::Index { index } => {
+                        let idx_expr = Arc::new(self.parse_expression(index, schema)?);
+                        
+                        // The return type will be the element type of the vector
+                        let return_type = match base_expr.get_return_type().get_type() {
+                            TypeId::Vector => {
+                                // For now, assuming vectors contain integers. In future, we should get the element type from the vector type
+                                Column::new("subscript_result", TypeId::Integer)
+                            },
+                            _ => return Err(format!("Cannot perform subscript operation on non-vector type: {:?}", 
+                                base_expr.get_return_type().get_type())),
+                        };
+
+                        Ok(Expression::Subscript(SubscriptExpression::new(
+                            base_expr,
+                            Subscript::Single(idx_expr),
+                            return_type,
+                        )))
+                    },
+                    SQLSubscript::Slice { lower_bound, upper_bound, stride } => {
+                        if stride.is_some() {
+                            return Err("Stride in array slices is not yet supported".to_string());
+                        }
+
+                        let start = match lower_bound {
+                            Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
+                            None => None,
+                        };
+
+                        let end = match upper_bound {
+                            Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
+                            None => None,
+                        };
+
+                        // For slices, the return type is always a vector since we're returning a subset
+                        let return_type = Column::new("slice_result", TypeId::Vector);
+
+                        Ok(Expression::Subscript(SubscriptExpression::new(
+                            base_expr,
+                            Subscript::Range { start, end },
+                            return_type,
+                        )))
+                    },
+                }
             }
             Expr::Array(_) => Err("Array expressions are not yet supported".to_string()),
             Expr::Interval(_) => Err("Interval expressions are not yet supported".to_string()),
