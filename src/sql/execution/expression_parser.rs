@@ -176,29 +176,21 @@ impl ExpressionParser {
                 // Convert arithmetic binary operators to ArithmeticExpression
                 match op {
                     BinaryOperator::Plus => Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                        left_expr.clone(),
-                        right_expr.clone(),
                         ArithmeticOp::Add,
                         vec![left_expr, right_expr],
                     ))),
                     BinaryOperator::Minus => Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                        left_expr.clone(),
-                        right_expr.clone(),
                         ArithmeticOp::Subtract,
                         vec![left_expr, right_expr],
                     ))),
                     BinaryOperator::Multiply => {
                         Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                            left_expr.clone(),
-                            right_expr.clone(),
                             ArithmeticOp::Multiply,
                             vec![left_expr, right_expr],
                         )))
                     }
                     BinaryOperator::Divide => {
                         Ok(Expression::Arithmetic(ArithmeticExpression::new(
-                            left_expr.clone(),
-                            right_expr.clone(),
                             ArithmeticOp::Divide,
                             vec![left_expr, right_expr],
                         )))

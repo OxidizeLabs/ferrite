@@ -86,7 +86,11 @@ impl ExpressionOps for ConstantExpression {
 impl Display for ConstantExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Always just display the value, regardless of format
-        write!(f, "{}", self.value)
+        if f.alternate() {
+            write!(f, "Constant({:#})", self.value)
+        } else {
+            write!(f, "{}", self.value)
+        }
     }
 }
 

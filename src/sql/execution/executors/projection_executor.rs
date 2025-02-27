@@ -667,8 +667,6 @@ mod tests {
 
         // Create total = price * quantity expression
         let total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            price_expr.clone(),
-            quantity_expr.clone(),
             ArithmeticOp::Multiply,
             vec![price_expr.clone(), quantity_expr.clone()],
         )));
@@ -680,8 +678,6 @@ mod tests {
             vec![],
         )));
         let discounted_total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            total_expr.clone(),
-            discount_const.clone(),
             ArithmeticOp::Multiply,
             vec![total_expr.clone(), discount_const.clone()],
         )));

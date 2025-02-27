@@ -20,8 +20,6 @@ pub enum ArithmeticOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArithmeticExpression {
-    left: Arc<Expression>,
-    right: Arc<Expression>,
     op: ArithmeticOp,
     return_type: Column,
     children: Vec<Arc<Expression>>,
@@ -29,21 +27,17 @@ pub struct ArithmeticExpression {
 
 impl ArithmeticExpression {
     pub fn new(
-        left: Arc<Expression>,
-        right: Arc<Expression>,
         op: ArithmeticOp,
         children: Vec<Arc<Expression>>,
     ) -> Self {
         // Infer return type, defaulting to Integer if inference fails
         // This allows construction to succeed but validation will fail later
         let return_type = Self::infer_return_type(
-            left.get_return_type(),
-            right.get_return_type(),
+            children[0].get_return_type(),
+            children[1].get_return_type(),
         ).unwrap_or_else(|_| Column::new("arithmetic_result", TypeId::Integer));
 
         Self {
-            left,
-            right,
             op,
             return_type,
             children,
@@ -51,11 +45,11 @@ impl ArithmeticExpression {
     }
 
     pub fn get_left(&self) -> &Arc<Expression> {
-        &self.left
+        &self.children[0]
     }
 
     pub fn get_right(&self) -> &Arc<Expression> {
-        &self.right
+        &self.children[1]
     }
 
     pub fn get_op(&self) -> ArithmeticOp {
@@ -90,8 +84,8 @@ impl ArithmeticExpression {
 
 impl ExpressionOps for ArithmeticExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
-        let left_value = self.left.evaluate(tuple, schema)?;
-        let right_value = self.right.evaluate(tuple, schema)?;
+        let left_value = self.get_left().evaluate(tuple, schema)?;
+        let right_value = self.get_right().evaluate(tuple, schema)?;
 
         match (left_value.get_val(), right_value.get_val()) {
             (Val::Integer(l), Val::Integer(r)) => {
@@ -187,11 +181,11 @@ impl ExpressionOps for ArithmeticExpression {
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         let left_value = self
-            .left
+            .get_left()
             .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             .unwrap();
         let right_value = self
-            .right
+            .get_right()
             .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             .unwrap();
 
@@ -289,8 +283,6 @@ impl ExpressionOps for ArithmeticExpression {
         }
 
         Arc::new(Expression::Arithmetic(ArithmeticExpression {
-            left: children[0].clone(),
-            right: children[1].clone(),
             op: self.op,
             return_type: self.return_type.clone(),
             children,
@@ -299,12 +291,12 @@ impl ExpressionOps for ArithmeticExpression {
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Validate left and right child expressions
-        self.left.validate(schema)?;
-        self.right.validate(schema)?;
+        self.get_left().validate(schema)?;
+        self.get_right().validate(schema)?;
 
         // Check if the types are compatible for arithmetic operations
-        let left_type = self.left.get_return_type().get_type();
-        let right_type = self.right.get_return_type().get_type();
+        let left_type = self.get_left().get_return_type().get_type();
+        let right_type = self.get_right().get_return_type().get_type();
 
         match (left_type, right_type) {
             (TypeId::Integer, TypeId::Integer)
@@ -340,10 +332,9 @@ impl Display for ArithmeticExpression {
         };
 
         if f.alternate() {
-            // Use parentheses to ensure proper operator precedence
-            write!(f, "({:#} {} {:#})", self.left, op_str, self.right)
+            write!(f, "({:#} {} {:#})", self.get_left(), op_str, self.get_right())
         } else {
-            write!(f, "({} {} {})", self.left, op_str, self.right)
+            write!(f, "({} {} {})", self.get_left(), op_str, self.get_right())
         }
     }
 }
@@ -378,20 +369,16 @@ mod unit_tests {
         )));
 
         let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
-            col1.clone(),
-            col2.clone(),
             ArithmeticOp::Add,
-            vec![],
+            vec![col1.clone(),col2.clone()],
         ));
 
         let result = add_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(7.5));
 
         let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
-            col1,
-            col2,
             ArithmeticOp::Multiply,
-            vec![],
+            vec![col1,col2],
         ));
 
         let result = mul_expr.evaluate(&tuple, &schema).unwrap();
@@ -424,10 +411,8 @@ mod unit_tests {
 
         for (op, expected) in ops {
             let expr = Expression::Arithmetic(ArithmeticExpression::new(
-                const5.clone(),
-                const3.clone(),
                 op,
-                vec![],
+                vec![const5.clone(), const3.clone()],
             ));
             let result = expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -459,10 +444,8 @@ mod unit_tests {
 
         for (op, expected) in ops {
             let expr = Expression::Arithmetic(ArithmeticExpression::new(
-                const5_5.clone(),
-                const2_5.clone(),
                 op,
-                vec![],
+                vec![const5_5.clone(), const2_5.clone()],
             ));
             let result = expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -494,10 +477,8 @@ mod unit_tests {
 
         for (op, expected) in ops {
             let expr = Expression::Arithmetic(ArithmeticExpression::new(
-                int_val.clone(),
-                decimal_val.clone(),
                 op,
-                vec![],
+                vec![int_val.clone(), decimal_val.clone()],
             ));
             let result = expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -521,10 +502,8 @@ mod unit_tests {
         )));
 
         let expr = Expression::Arithmetic(ArithmeticExpression::new(
-            const5,
-            const0,
             ArithmeticOp::Divide,
-            vec![],
+            vec![const5, const0],
         ));
 
         let result = expr.evaluate(&tuple, &schema);
@@ -555,10 +534,8 @@ mod unit_tests {
         )));
 
         let expr = Expression::Arithmetic(ArithmeticExpression::new(
-            col_a,
-            col_b,
             ArithmeticOp::Add,
-            vec![],
+            vec![col_a,col_b],
         ));
 
         // Default format should use column names
@@ -611,35 +588,33 @@ mod unit_tests {
 
         // Valid arithmetic expression
         let valid_expr = ArithmeticExpression::new(
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            ArithmeticOp::Add,
+            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                 0, 0,
                 Column::new("a", TypeId::Integer),
                 vec![],
             ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(5),
-                Column::new("const", TypeId::Integer),
-                vec![],
-            ))),
-            ArithmeticOp::Add,
-            vec![],
+                 Arc::new(Expression::Constant(ConstantExpression::new(
+                     Value::new(5),
+                     Column::new("const", TypeId::Integer),
+                     vec![],
+                 ))),],
         );
         assert!(valid_expr.validate(&schema).is_ok());
 
         // Invalid type combination
         let invalid_expr = ArithmeticExpression::new(
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            ArithmeticOp::Add,
+            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                 0, 0,
                 Column::new("a", TypeId::Integer),
                 vec![],
             ))),
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 1,
-                Column::new("b", TypeId::VarChar),
-                vec![],
-            ))),
-            ArithmeticOp::Add,
-            vec![],
+                 Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                     0, 1,
+                     Column::new("b", TypeId::VarChar),
+                     vec![],
+                 ))),],
         );
         assert!(invalid_expr.validate(&schema).is_err());
     }
@@ -662,10 +637,8 @@ mod unit_tests {
         )));
 
         let overflow_expr = Expression::Arithmetic(ArithmeticExpression::new(
-            max_int,
-            one,
             ArithmeticOp::Add,
-            vec![],
+            vec![max_int, one],
         ));
 
         let result = overflow_expr.evaluate(&tuple, &schema);
@@ -695,17 +668,13 @@ mod unit_tests {
         )));
 
         let inner_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            two,
-            three,
             ArithmeticOp::Add,
-            vec![],
+            vec![two, three],
         )));
 
         let outer_expr = Expression::Arithmetic(ArithmeticExpression::new(
-            inner_expr,
-            four,
             ArithmeticOp::Multiply,
-            vec![],
+            vec![inner_expr, four],
         ));
 
         let result = outer_expr.evaluate(&tuple, &schema).unwrap();
@@ -738,17 +707,13 @@ mod unit_tests {
         )));
 
         let mul_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            col_a,
-            col_b,
             ArithmeticOp::Multiply,
-            vec![],
+            vec![col_a, col_b],
         )));
 
         let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
-            mul_expr,
-            col_c,
             ArithmeticOp::Add,
-            vec![],
+            vec![mul_expr, col_c],
         ));
 
         assert_eq!(format!("{}", add_expr), "((a * b) + c)");

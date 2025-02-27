@@ -577,7 +577,13 @@ impl Display for Expression {
                     write!(f, "{}", expr)
                 }
             }
-            Self::Mock(expr) => write!(f, "{}", expr),
+            Self::Mock(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
             Self::Aggregate(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
@@ -662,13 +668,6 @@ impl Display for Expression {
                     write!(f, "{}", expr)
                 }
             }
-            // Self::DateTime(expr) => {
-            //     if f.alternate() {
-            //         write!(f, "{:#}", expr)
-            //     } else {
-            //         write!(f, "{}", expr)
-            //     }
-            // }
             Self::Coalesce(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
@@ -683,33 +682,195 @@ impl Display for Expression {
                     write!(f, "{}", expr)
                 }
             }
-            Self::Trim(expr) => write!(f, "{}", expr),
-            Self::Interval(expr) => write!(f, "{}", expr),
-            Self::GroupingSets(expr) => write!(f, "{}", expr),
-            Self::Filter(expr) => write!(f, "{}", expr),
-            Self::IsDistinct(expr) => write!(f, "{}", expr),
-            Self::Position(expr) => write!(f, "{}", expr),
-            Self::Method(expr) => write!(f, "{}", expr),
-            Self::Struct(expr) => write!(f, "{}", expr),
-            Self::Overlay(expr) => write!(f, "{}", expr),
-            Self::Collate(expr) => write!(f, "{}", expr),
-            Self::AtTimeZone(expr) => write!(f, "{}", expr),
-            Self::MapAccess(expr) => write!(f, "{}", expr),
-            Self::Tuple(expr) => write!(f, "{}", expr),
-            Self::Wildcard(expr) => write!(f, "{}", expr),
-            Self::QualifiedWildcard(expr) => write!(f, "{}", expr),
-            Self::TypedString(expr) => write!(f, "{}", expr),
-            Self::Subscript(expr) => write!(f, "{}", expr),
-            Self::Nested(expr) => write!(f, "{}", expr),
-            Self::IsCheck(expr) => write!(f, "{}", expr),
-            Self::BinaryOp(expr) => write!(f, "{}", expr),
-            Self::Any(expr) => write!(f, "{}", expr),
-            Self::All(expr) => write!(f, "{}", expr),
-            Self::UnaryOp(expr) => write!(f, "{}", expr),
-            Self::Convert(expr) => write!(f, "{}", expr),
-            Self::CeilFloor(expr) => write!(f, "{}", expr),
-            Self::Substring(expr) => write!(f, "{}", expr),
-            Self::Literal(expr) => write!(f, "{}", expr),
+            Self::Trim(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Interval(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::GroupingSets(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Filter(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::IsDistinct(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Position(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Method(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Struct(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Overlay(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Collate(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::AtTimeZone(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::MapAccess(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Tuple(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Wildcard(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::QualifiedWildcard(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::TypedString(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Subscript(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Nested(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::IsCheck(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::BinaryOp(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Any(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::All(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::UnaryOp(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Convert(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::CeilFloor(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Substring(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Literal(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
         }
     }
 }

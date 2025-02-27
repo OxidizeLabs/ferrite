@@ -582,7 +582,7 @@ mod tests {
         ).unwrap();
 
         assert_eq!(format!("{}", binary_expr), "(5 + 3)");
-        assert_eq!(format!("{:#}", binary_expr), "(5 + 3)");
+        assert_eq!(format!("{:#}", binary_expr), "(Constant(5) + Constant(3))");
     }
 
     #[test]
