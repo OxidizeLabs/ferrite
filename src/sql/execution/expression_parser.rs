@@ -64,6 +64,7 @@ use crate::sql::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::sql::binder::expressions::bound_constant::BoundConstant;
 use crate::sql::binder::expressions::bound_column_ref::BoundColumnRef;
 use crate::sql::execution::expressions::grouping_sets_expression::{GroupingSetsExpression, GroupingType};
+use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -1069,7 +1070,22 @@ impl ExpressionParser {
                     Column::new("rollup", TypeId::Vector),
                 )))
             }
-            Expr::Tuple(_) => Err("Tuple expressions are not yet supported".to_string()),
+            Expr::Tuple(exprs) => {
+                // Parse each expression in the tuple
+                let parsed_exprs: Result<Vec<Arc<Expression>>, String> = exprs
+                    .iter()
+                    .map(|expr| self.parse_expression(expr, schema))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|exprs| exprs.into_iter().map(Arc::new).collect());
+
+                // Create the tuple expression with the parsed expressions
+                parsed_exprs.map(|exprs| {
+                    Expression::Tuple(TupleExpression::new(
+                        exprs,
+                        Column::new("tuple", TypeId::Vector),
+                    ))
+                })
+            }
             Expr::Struct { .. } => Err("Struct expressions are not yet supported".to_string()),
             Expr::Subscript { .. } => {
                 Err("Subscript expressions are not yet supported".to_string())
