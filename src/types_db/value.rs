@@ -289,6 +289,13 @@ impl Value {
             (Val::VarLen(s), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type)),
             (Val::ConstLen(s), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type)),
             
+            // Integer to String conversions
+            (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::SmallInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::TinyInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::Decimal(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
+            
             // Same type (should be handled by first check, but just in case)
             (val, _) if self.type_id_ == target_type => Ok(Value::new_with_type(val.clone(), target_type)),
             
