@@ -16,13 +16,19 @@ impl Type for StructType {
 
         // For structs, we compare the underlying vector values
         if let Val::Vector(values) = other.get_val() {
-            if values.is_empty() {
+            // A valid struct must have at least two elements:
+            // 1. The field names vector
+            // 2. At least one field value
+            if values.len() < 2 {
                 return CmpBool::CmpFalse;
             }
 
             // First element should be a vector of field names
-            if let Val::Vector(_field_names) = &values[0].value_ {
-                // For now, just check if it's a valid struct format
+            if let Val::Vector(field_names) = &values[0].value_ {
+                // Check that we have field names and corresponding values
+                if field_names.is_empty() || values.len() != field_names.len() + 1 {
+                    return CmpBool::CmpFalse;
+                }
                 return CmpBool::CmpTrue;
             }
         }
