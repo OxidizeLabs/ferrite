@@ -216,10 +216,15 @@ impl ExpressionOps for MethodExpression {
             )?);
         }
 
-        // Delegate to the regular evaluate method with the evaluated object and arguments
-        // This avoids duplicating the method call logic
+        // Create a merged schema and tuple with values from both tuples
         let temp_schema = Schema::merge(left_schema, right_schema);
-        let temp_tuple = Tuple::new(&[], temp_schema.clone(), RID::new(0, 0));
+        
+        // Create values array for the merged tuple by combining values from both tuples
+        let mut temp_values = Vec::new();
+        temp_values.extend(left_tuple.get_values().iter().cloned());
+        temp_values.extend(right_tuple.get_values().iter().cloned());
+
+        let temp_tuple = Tuple::new(&temp_values, temp_schema.clone(), RID::new(0, 0));
 
         // Create a temporary expression that just returns the already evaluated object
         let temp_expr = Expression::Constant(ConstantExpression::new(
