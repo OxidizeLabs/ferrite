@@ -1566,7 +1566,8 @@ impl ExpressionParser {
                         agg_names.push(alias.value.clone());
                     }
                 }
-                _ => {}
+                SelectItem::QualifiedWildcard(_, _) => {}
+                SelectItem::Wildcard(_) => {} // Skip standalone wildcards (SELECT *) - COUNT(*) is handled in parse_function
             }
         }
 
@@ -1727,29 +1728,18 @@ impl ExpressionParser {
         let mut children = Vec::new();
 
         match args {
-            FunctionArguments::None => {}
-            FunctionArguments::Subquery(query) => {
-                let parsed_expr = self.parse_subquery(query, schema)?;
-                children.push(Arc::new(parsed_expr));
+            FunctionArguments::None => {
+                // No arguments, return empty vector
+                Ok(children)
+            }
+            FunctionArguments::Subquery(_) => {
+                return Err("Subquery function arguments not yet supported".to_string());
             }
             FunctionArguments::List(list) => {
-                // Parse function arguments
                 for arg in &list.args {
                     match arg {
-                        FunctionArg::Named { arg, .. } | FunctionArg::ExprNamed { arg, .. } => {
-                            match arg {
-                                FunctionArgExpr::Expr(expr) => {
-                                    let parsed_expr = self.parse_expression(expr, schema)?;
-                                    children.push(Arc::new(parsed_expr));
-                                }
-                                FunctionArgExpr::QualifiedWildcard(_) => {
-                                    return Err("Qualified wildcard in function arguments not yet supported".to_string());
-                                }
-                                FunctionArgExpr::Wildcard => {
-                                    return Err("Wildcard in function arguments not yet supported"
-                                        .to_string());
-                                }
-                            }
+                        FunctionArg::Named { name: _, arg, operator: _ } => {
+                            return Err("Named function arguments not yet supported".to_string());
                         }
                         FunctionArg::Unnamed(arg) => {
                             match arg {
@@ -1761,10 +1751,13 @@ impl ExpressionParser {
                                     return Err("Qualified wildcard in function arguments not yet supported".to_string());
                                 }
                                 FunctionArgExpr::Wildcard => {
-                                    return Err("Wildcard in function arguments not yet supported"
-                                        .to_string());
+                                    // Allow wildcard for COUNT(*), it will be handled specially in parse_function
+                                    continue;
                                 }
                             }
+                        }
+                        FunctionArg::ExprNamed { name: _, arg, operator: _ } => {
+                            return Err("Named function arguments not yet supported".to_string());
                         }
                     }
                 }
@@ -1782,10 +1775,10 @@ impl ExpressionParser {
                         _ => {}
                     }
                 }
+
+                Ok(children)
             }
         }
-
-        Ok(children)
     }
 
     fn parse_sql_window_specification(
