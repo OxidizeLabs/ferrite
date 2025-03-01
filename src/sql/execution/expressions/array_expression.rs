@@ -3,8 +3,8 @@ use crate::catalog::schema::Schema;
 use crate::common::exception::{ArrayExpressionError, ExpressionError};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
+use crate::types_db::types;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -12,14 +12,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayExpression {
     children: Vec<Arc<Expression>>,
-    ret_type: Column,
+    return_type: Column,
 }
 
 impl ArrayExpression {
-    pub fn new(children: Vec<Arc<Expression>>) -> Self {
+    pub fn new(elements: Vec<Arc<Expression>>, return_type: Column) -> Self {
         Self {
-            ret_type: Column::new("<val>", TypeId::Vector),
-            children,
+            children: elements,
+            return_type,
         }
     }
 
@@ -32,16 +32,8 @@ impl ArrayExpression {
             .children
             .iter()
             .map(|expr| {
-                let val = eval_func(expr)
-                    .map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))?;
-                match val.get_val() {
-                    Val::Decimal(d) => {
-                        // Convert f64 to i32, handling potential loss of precision
-                        let rounded_value = d.round() as i32;
-                        Ok(Value::new(Val::Integer(rounded_value))) // Convert to Val::Integer
-                    }
-                    _ => Err(ArrayExpressionError::NonDecimalType),
-                }
+                eval_func(expr)
+                    .map_err(|e| ArrayExpressionError::ChildEvaluationError(e.to_string()))
             })
             .collect();
 
@@ -78,12 +70,12 @@ impl ExpressionOps for ArrayExpression {
     }
 
     fn get_return_type(&self) -> &Column {
-        &self.ret_type
+        &self.return_type
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         Arc::new(Expression::Array(ArrayExpression {
-            ret_type: self.ret_type.clone(),
+            return_type: self.return_type.clone(),
             children,
         }))
     }
@@ -93,10 +85,20 @@ impl ExpressionOps for ArrayExpression {
         for child in &self.children {
             child.validate(schema)?;
 
-            // Check that each child returns a decimal type since we're converting to integers
+            // Check that all children have compatible types
             let child_type = child.get_return_type().get_type();
-            if child_type != TypeId::Decimal {
-                return Err(ExpressionError::Array(ArrayExpressionError::NonDecimalType));
+            let return_type = self.return_type.get_type();
+            
+            // Get the type instance to check coercibility
+            let type_instance = types::get_instance(return_type);
+            if !type_instance.is_coercible_from(child_type) {
+                return Err(ExpressionError::Array(ArrayExpressionError::TypeMismatch(
+                    format!(
+                        "Array element type {:?} is not compatible with array type {:?}",
+                        child_type,
+                        return_type
+                    ),
+                )));
             }
         }
 
@@ -106,15 +108,12 @@ impl ExpressionOps for ArrayExpression {
 
 impl Display for ArrayExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        let mut iter = self.children.iter();
-        if let Some(first) = iter.next() {
-            write!(f, "{}", first)?;
-            for child in iter {
-                write!(f, ", {}", child)?;
-            }
-        }
-        write!(f, "]")
+        write!(f, "ARRAY[{}]",
+               self.children.iter()
+                   .map(|e| e.to_string())
+                   .collect::<Vec<_>>()
+                   .join(", ")
+        )
     }
 }
 
@@ -123,68 +122,99 @@ mod tests {
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
-    fn array_expression() {
+    fn test_array_expression_mixed_types() {
         let children = vec![
             Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Decimal(1.0)),
-                Column::new("const", TypeId::Decimal),
+                Value::new(Val::Integer(1)),
+                Column::new("const", TypeId::Integer),
                 vec![],
             ))),
             Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Decimal(2.0)),
-                Column::new("const", TypeId::Decimal),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Decimal(3.0)),
-                Column::new("const", TypeId::Decimal),
+                Value::new(Val::VarLen("hello".to_string())),
+                Column::new("const", TypeId::VarChar),
                 vec![],
             ))),
         ];
-        let expr = Expression::Array(ArrayExpression::new(children));
+        let expr = Expression::Array(ArrayExpression::new(
+            children,
+            Column::new("<val>", TypeId::Vector),
+        ));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
-        let result = expr
-            .evaluate(&tuple, &schema)
-            .expect("Evaluation should succeed");
+        let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
+        
         if let Val::Vector(vec) = result.get_val() {
-            assert_eq!(vec.len(), 3);
+            assert_eq!(vec.len(), 2);
             assert_eq!(vec[0].get_val(), &Val::Integer(1));
-            assert_eq!(vec[1].get_val(), &Val::Integer(2));
-            assert_eq!(vec[2].get_val(), &Val::Integer(3));
+            assert_eq!(vec[1].get_val(), &Val::VarLen("hello".to_string()));
         } else {
             panic!("Expected Vector value");
         }
     }
 
     #[test]
-    fn array_expression_invalid_type() {
-        let children = vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Decimal(1.0)),
-                Column::new("const", TypeId::Decimal),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(Val::Integer(2)),
-                Column::new("const", TypeId::Integer),
-                vec![],
-            ))),
-        ];
-        let expr = Expression::Array(ArrayExpression::new(children));
+    fn test_empty_array() {
+        let expr = Expression::Array(ArrayExpression::new(
+            vec![],
+            Column::new("<val>", TypeId::Vector),
+        ));
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
-        let result = expr.evaluate(&tuple, &schema);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ExpressionError::Array(_)));
+        let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
+        assert_eq!(result.get_type_id(), TypeId::Vector);
+        
+        if let Val::Vector(vec) = result.get_val() {
+            assert_eq!(vec.len(), 0);
+        } else {
+            panic!("Expected Vector value");
+        }
+    }
+
+    #[test]
+    fn test_nested_arrays() {
+        let inner_array = Arc::new(Expression::Array(ArrayExpression::new(
+            vec![Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(Val::Integer(1)),
+                Column::new("const", TypeId::Integer),
+                vec![],
+            )))],
+            Column::new("<val>", TypeId::Vector),
+        )));
+
+        let outer_array = Expression::Array(ArrayExpression::new(
+            vec![inner_array],
+            Column::new("<val>", TypeId::Vector),
+        ));
+
+        let schema = Schema::new(vec![]);
+        let rid = RID::new(0, 0);
+        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+
+        let result = outer_array
+            .evaluate(&tuple, &schema)
+            .expect("Evaluation should succeed");
+        assert_eq!(result.get_type_id(), TypeId::Vector);
+
+        if let Val::Vector(outer_vec) = result.get_val() {
+            assert_eq!(outer_vec.len(), 1);
+            if let Val::Vector(inner_vec) = outer_vec[0].get_val() {
+                assert_eq!(inner_vec.len(), 1);
+                assert_eq!(inner_vec[0].get_val(), &Val::Integer(1));
+            } else {
+                panic!("Expected inner Vector value");
+            }
+        } else {
+            panic!("Expected outer Vector value");
+        }
     }
 }

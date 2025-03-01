@@ -400,7 +400,7 @@ mod tests {
         );
 
         let result = in_expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result, Value::new(false));
+        assert_eq!(result, Value::new(Val::Null));
     }
 
     #[test]

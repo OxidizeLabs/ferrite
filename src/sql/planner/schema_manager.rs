@@ -7,8 +7,7 @@ use sqlparser::ast::{ColumnDef, DataType, Expr};
 use std::collections::HashSet;
 use std::sync::Arc;
 use log;
-use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
-use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+
 
 /// 2. Responsible for schema-related operations
 pub struct SchemaManager {}
@@ -210,6 +209,7 @@ impl SchemaManager {
 mod tests {
     use super::*;
     use sqlparser::ast::{Value, ColumnDef, DataType, Ident};
+    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]
@@ -501,7 +501,7 @@ mod tests {
         ));
         
         // Create test aggregate expression
-        let agg_col = Column::new("sum_amount", TypeId::Integer);
+        let agg_col = Column::new("amount", TypeId::Integer);
         let agg_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
             1,
@@ -511,8 +511,9 @@ mod tests {
         
         let agg_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            agg_arg,
-            vec![]
+            vec![agg_arg],
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         ));
         
         let schema = manager.create_aggregation_output_schema(
@@ -523,7 +524,7 @@ mod tests {
         
         assert_eq!(schema.get_column_count(), 2);
         assert_eq!(schema.get_column(0).unwrap().get_name(), "category");
-        assert_eq!(schema.get_column(1).unwrap().get_name(), "SUM(sum_amount)");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "SUM(amount)");
     }
 
     #[test]
@@ -563,8 +564,9 @@ mod tests {
         
         let count_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            count_arg,
-            vec![]
+            vec![count_arg],
+            count_col,
+            "COUNT".to_string(),
         ));
         
         let schema = manager.create_aggregation_output_schema(
@@ -581,44 +583,40 @@ mod tests {
     fn test_create_aggregation_output_schema_multiple_aggregates() {
         let manager = SchemaManager::new();
         
-        // Create group by expression
+        // Create test columns for group by
         let group_by_col = Column::new("category", TypeId::VarChar);
         let group_by_expr = Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, group_by_col, vec![]
+            0,  // tuple_index
+            0,  // column_index
+            group_by_col,
+            vec![]  // no children
         ));
         
-        // Create COUNT aggregate
-        let count_col = Column::new("count_all", TypeId::BigInt);
-        let count_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, count_col.clone(), vec![]
-        )));
-        let count_expr = Expression::Aggregate(AggregateExpression::new(
-            AggregationType::Count,
-            count_arg,
+        // Create test aggregate expression
+        let agg_col = Column::new("amount", TypeId::Integer);
+        let agg_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            agg_col.clone(),
             vec![]
-        ));
-        
-        // Create SUM aggregate
-        let sum_col = Column::new("amount", TypeId::Integer);
-        let sum_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2, sum_col.clone(), vec![]
         )));
-        let sum_expr = Expression::Aggregate(AggregateExpression::new(
+        
+        let agg_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            sum_arg,
-            vec![]
+            vec![agg_arg],
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         ));
         
         let schema = manager.create_aggregation_output_schema(
             &[&group_by_expr],
-            &[Arc::new(count_expr), Arc::new(sum_expr)],
+            &[Arc::new(agg_expr)],
             true
         );
         
-        assert_eq!(schema.get_column_count(), 3);
+        assert_eq!(schema.get_column_count(), 2);
         assert_eq!(schema.get_column(0).unwrap().get_name(), "category");
-        assert_eq!(schema.get_column(1).unwrap().get_name(), "COUNT(count_all)");
-        assert_eq!(schema.get_column(2).unwrap().get_name(), "SUM(amount)");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "SUM(amount)");
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub enum IsCheckType {
     True { negated: bool },
     False { negated: bool },
     Unknown { negated: bool },
+    Null { negated: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -20,15 +21,21 @@ pub struct IsCheckExpression {
     expr: Arc<Expression>,
     check_type: IsCheckType,
     return_type: Column,
+    children: Vec<Arc<Expression>>,
 }
 
 impl IsCheckExpression {
     pub fn new(expr: Arc<Expression>, check_type: IsCheckType, return_type: Column) -> Self {
         Self {
-            expr,
+            expr: expr.clone(),
             check_type,
             return_type,
+            children: vec![expr],
         }
+    }
+
+    pub fn check_type(&self) -> &IsCheckType {
+        &self.check_type
     }
 }
 
@@ -74,6 +81,14 @@ impl ExpressionOps for IsCheckExpression {
                     !is_unknown
                 } else {
                     is_unknown
+                }
+            }
+            IsCheckType::Null { negated } => {
+                let is_null = value.is_null();
+                if negated {
+                    !is_null
+                } else {
+                    is_null
                 }
             }
         };
@@ -131,21 +146,24 @@ impl ExpressionOps for IsCheckExpression {
                     is_unknown
                 }
             }
+            IsCheckType::Null { negated } => {
+                let is_null = value.is_null();
+                if negated {
+                    !is_null
+                } else {
+                    is_null
+                }
+            }
         };
         Ok(Value::new(result))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        if child_idx == 0 {
-            &self.expr
-        } else {
-            panic!("IsCheckExpression has only one child")
-        }
+        &self.children[child_idx]
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {
@@ -191,6 +209,12 @@ impl Display for IsCheckExpression {
                     write!(f, "NOT ")?
                 }
                 write!(f, "UNKNOWN")
+            }
+            IsCheckType::Null { negated } => {
+                if negated {
+                    write!(f, "NOT ")?
+                }
+                write!(f, "NULL")
             }
         }
     }
@@ -487,5 +511,67 @@ mod tests {
             }
             _ => panic!("Expected IsCheck expression"),
         }
+    }
+
+    #[test]
+    fn test_is_null() {
+        let (tuple, schema) = create_test_tuple();
+
+        // Test NULL value
+        let null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Null),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let is_null = IsCheckExpression::new(
+            null_expr.clone(),
+            IsCheckType::Null { negated: false },
+            Column::new("result", TypeId::Boolean),
+        );
+        assert_eq!(is_null.evaluate(&tuple, &schema).unwrap(), Value::new(true));
+
+        // Test non-NULL value
+        let non_null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let is_null = IsCheckExpression::new(
+            non_null_expr,
+            IsCheckType::Null { negated: false },
+            Column::new("result", TypeId::Boolean),
+        );
+        assert_eq!(is_null.evaluate(&tuple, &schema).unwrap(), Value::new(false));
+    }
+
+    #[test]
+    fn test_is_not_null() {
+        let (tuple, schema) = create_test_tuple();
+
+        // Test NULL value
+        let null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Null),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let is_not_null = IsCheckExpression::new(
+            null_expr.clone(),
+            IsCheckType::Null { negated: true },
+            Column::new("result", TypeId::Boolean),
+        );
+        assert_eq!(is_not_null.evaluate(&tuple, &schema).unwrap(), Value::new(false));
+
+        // Test non-NULL value
+        let non_null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let is_not_null = IsCheckExpression::new(
+            non_null_expr,
+            IsCheckType::Null { negated: true },
+            Column::new("result", TypeId::Boolean),
+        );
+        assert_eq!(is_not_null.evaluate(&tuple, &schema).unwrap(), Value::new(true));
     }
 }

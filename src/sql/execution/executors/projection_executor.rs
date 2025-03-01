@@ -12,7 +12,6 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
@@ -208,6 +207,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
     use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
+    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     struct TestContext {
@@ -667,8 +667,6 @@ mod tests {
 
         // Create total = price * quantity expression
         let total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            price_expr.clone(),
-            quantity_expr.clone(),
             ArithmeticOp::Multiply,
             vec![price_expr.clone(), quantity_expr.clone()],
         )));
@@ -680,8 +678,6 @@ mod tests {
             vec![],
         )));
         let discounted_total_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            total_expr.clone(),
-            discount_const.clone(),
             ArithmeticOp::Multiply,
             vec![total_expr.clone(), discount_const.clone()],
         )));

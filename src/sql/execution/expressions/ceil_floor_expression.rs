@@ -9,21 +9,12 @@ use crate::types_db::value::{Val, Value};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::sql::execution::expressions::datetime_expression::DateTimeField;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CeilFloorOperation {
     Ceil,
     Floor,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DateTimeField {
-    Year,
-    Month,
-    Day,
-    Hour,
-    Minute,
-    Second,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,6 +166,9 @@ impl ExpressionOps for CeilFloorExpression {
                                     }
                                 }
                             }
+                            _ => {
+                                return Err(ExpressionError::InvalidOperation(format!("Unsupported DateTimeField: {:?}", field)))
+                            }
                         };
 
                         Ok(Value::new_with_type(
@@ -203,8 +197,8 @@ impl ExpressionOps for CeilFloorExpression {
         &self,
         left_tuple: &Tuple,
         left_schema: &Schema,
-        right_tuple: &Tuple,
-        right_schema: &Schema,
+        _right_tuple: &Tuple,
+        _right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         // For join evaluation, we'll just evaluate against the left tuple and schema
         self.evaluate(left_tuple, left_schema)

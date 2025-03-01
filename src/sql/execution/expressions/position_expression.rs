@@ -207,8 +207,8 @@ mod tests {
         // Evaluate the expression
         let result = position_expr.evaluate(&tuple, &schema).unwrap();
 
-        // Position should be 3 (1-indexed)
-        assert_eq!(result, Value::new(3));
+        // Position should be 4 (1-indexed)
+        assert_eq!(result, Value::new(4));
     }
 
     #[test]

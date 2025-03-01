@@ -81,28 +81,13 @@ impl ExpressionOps for TrimExpression {
         // Perform the trim operation based on the trim type
         let result = match self.trim_type {
             TrimType::Both => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from both ends
-                for c in chars_to_trim.chars() {
-                    result = result.trim_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_matches(|c| chars_to_trim.contains(c)).to_string()
             }
             TrimType::Leading => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from the start
-                for c in chars_to_trim.chars() {
-                    result = result.trim_start_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_start_matches(|c| chars_to_trim.contains(c)).to_string()
             }
             TrimType::Trailing => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from the end
-                for c in chars_to_trim.chars() {
-                    result = result.trim_end_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_end_matches(|c| chars_to_trim.contains(c)).to_string()
             }
         };
 
@@ -169,28 +154,13 @@ impl ExpressionOps for TrimExpression {
         // Perform the trim operation based on the trim type
         let result = match self.trim_type {
             TrimType::Both => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from both ends
-                for c in chars_to_trim.chars() {
-                    result = result.trim_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_matches(|c| chars_to_trim.contains(c)).to_string()
             }
             TrimType::Leading => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from the start
-                for c in chars_to_trim.chars() {
-                    result = result.trim_start_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_start_matches(|c| chars_to_trim.contains(c)).to_string()
             }
             TrimType::Trailing => {
-                let mut result = string_to_trim.clone();
-                // Trim characters from the end
-                for c in chars_to_trim.chars() {
-                    result = result.trim_end_matches(c).to_string();
-                }
-                result
+                string_to_trim.trim_end_matches(|c| chars_to_trim.contains(c)).to_string()
             }
         };
 

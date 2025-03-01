@@ -32,7 +32,12 @@ impl MockExpression {
             TypeId::VarChar => Value::new(name.clone()),
             TypeId::Vector => Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
             TypeId::Invalid => Value::new(Val::Null),
-            TypeId::Char => Value::new(name.clone())
+            TypeId::Char => Value::new(name.clone()),
+            TypeId::Struct => {
+                let field_names = vec!["field1", "field2"];
+                let values = vec![Value::new(42), Value::new("test")];
+                Value::new_struct(field_names, values)
+            }
         });
 
         Self {
@@ -154,6 +159,7 @@ mod tests {
             (TypeId::Timestamp, "0 days 0:0:42 UTC"),
             (TypeId::VarChar, "test"),
             (TypeId::Vector, "[1, 2, 3]"),
+            (TypeId::Struct, "{field1: 42, field2: test}"),
         ];
 
         for (type_id, expected_str) in test_cases {

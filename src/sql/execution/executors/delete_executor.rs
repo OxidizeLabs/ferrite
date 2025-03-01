@@ -10,11 +10,6 @@ use crate::storage::table::tuple::Tuple;
 use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::concurrency::transaction::{Transaction, TransactionState};
-use crate::concurrency::transaction_manager::TransactionManager;
-use crate::concurrency::lock_manager::LockManager;
-use crate::sql::execution::transaction_context::TransactionContext;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 
 pub struct DeleteExecutor {
@@ -193,7 +188,7 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::concurrency::transaction::IsolationLevel;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::sql::execution::expressions::abstract_expression::Expression::Constant;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::values_plan::ValuesNode;
@@ -203,7 +198,11 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

@@ -20,7 +20,16 @@ pub struct UnaryOpExpression {
 impl UnaryOpExpression {
     pub fn new(expr: Arc<Expression>, op: UnaryOperator) -> Result<Self, String> {
         let return_type = match op {
-            UnaryOperator::Not => Column::new("unary_not", TypeId::Boolean),
+            UnaryOperator::Not => {
+                let type_id = expr.get_return_type().get_type();
+                if type_id != TypeId::Boolean && type_id != TypeId::Invalid {
+                    return Err(format!(
+                        "Cannot apply NOT operator to type {:?}, expected Boolean",
+                        type_id
+                    ));
+                }
+                Column::new("unary_not", TypeId::Boolean)
+            }
             UnaryOperator::Plus | UnaryOperator::Minus => {
                 let type_id = expr.get_return_type().get_type();
                 if !matches!(
@@ -30,13 +39,14 @@ impl UnaryOpExpression {
                         | TypeId::Integer
                         | TypeId::BigInt
                         | TypeId::Decimal
+                        | TypeId::Invalid
                 ) {
                     return Err(format!(
                         "Cannot apply unary operator {:?} to type {:?}",
                         op, type_id
                     ));
                 }
-                Column::new("unary_numeric", type_id)
+                Column::new("unary_numeric", if type_id == TypeId::Invalid { TypeId::Integer } else { type_id })
             }
             _ => return Err(format!("Unsupported unary operator: {:?}", op)),
         };
@@ -272,7 +282,7 @@ mod tests {
     fn test_null_handling() {
         let null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Null),
-            Column::new("const", TypeId::Boolean),
+            Column::new("const", TypeId::Invalid),
             vec![],
         )));
 

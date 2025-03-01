@@ -13,7 +13,6 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::cmp::Ordering;
-use crate::catalog::catalog::Catalog;
 use crate::types_db::value::Value;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
@@ -196,6 +195,7 @@ mod tests {
     use tempfile::TempDir;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use std::collections::HashMap;
+    use crate::catalog::catalog::Catalog;
     use crate::sql::execution::expressions::abstract_expression::Expression;
 
     struct TestContext {

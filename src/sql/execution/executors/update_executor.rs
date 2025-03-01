@@ -463,10 +463,8 @@ mod tests {
         )));
 
         let update_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
-            col_expr,
-            const_expr,
             ArithmeticOp::Add,
-            vec![],
+            vec![col_expr, const_expr],
         )));
 
         // Create update plan with both the target column and the update expression

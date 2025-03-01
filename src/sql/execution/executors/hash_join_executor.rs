@@ -1,16 +1,13 @@
-use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
 use crate::container::hash_function::HashFunction;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::hash_join_plan::HashJoinNode;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -180,6 +177,9 @@ mod tests {
     use sqlparser::ast::{JoinConstraint, JoinOperator};
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use crate::catalog::column::Column;
+    use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::types_db::value::Value;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

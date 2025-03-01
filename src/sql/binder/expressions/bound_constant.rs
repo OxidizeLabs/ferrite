@@ -61,6 +61,7 @@ impl Display for BoundConstant {
             Val::VarLen(s) | Val::ConstLen(s) => write!(f, "\"{}\"", s.replace("\"", "\\\"")),
             Val::Vector(v) => write!(f, "{:?}", v),
             Val::Null => write!(f, "Null"),
+            Val::Struct => write!(f, "STRUCT"),
         }
     }
 }
