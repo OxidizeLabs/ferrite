@@ -300,8 +300,6 @@ mod tests {
     use crate::sql::execution::executors::mock_executor::MockExecutor;
     use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -426,6 +424,7 @@ mod tests {
             AggregationType::CountStar,
             vec![], // No child expressions for COUNT(*)
             Column::new("count", TypeId::BigInt), // Use BigInt for count
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -488,6 +487,7 @@ mod tests {
             AggregationType::Sum,
             vec![value_expr.clone()],
             Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -564,6 +564,7 @@ mod tests {
             AggregationType::Min,
             vec![value_expr.clone()],
             Column::new("min", TypeId::Integer),
+            "MIN".to_string(),
         )));
 
         // Create MAX aggregate
@@ -571,6 +572,7 @@ mod tests {
             AggregationType::Max,
             vec![value_expr.clone()],
             Column::new("max", TypeId::Integer),
+            "MAX".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -642,6 +644,7 @@ mod tests {
             AggregationType::Min,
             vec![value_expr.clone()],
             Column::new("min", TypeId::Integer),
+            "MIN".to_string(),
         )));
 
         // Create MAX aggregate
@@ -649,6 +652,7 @@ mod tests {
             AggregationType::Max,
             vec![value_expr.clone()],
             Column::new("max", TypeId::Integer),
+            "MAX".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -717,6 +721,7 @@ mod tests {
             AggregationType::Sum,
             vec![value_expr.clone()],
             Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         // Create COUNT aggregate
@@ -724,6 +729,7 @@ mod tests {
             AggregationType::Count,
             vec![value_expr.clone()],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -781,6 +787,7 @@ mod tests {
             AggregationType::CountStar,
             vec![], // No child expressions for COUNT(*)
             Column::new("count", TypeId::BigInt), // Use BigInt for count
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -839,7 +846,8 @@ mod tests {
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
             vec![value_expr],
-            Column::new("sum", TypeId::Integer)
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -928,18 +936,21 @@ mod tests {
             AggregationType::Sum,
             vec![int_col.clone()],
             Column::new("sum_int", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let sum_big = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
             vec![big_col.clone()],
             Column::new("sum_big", TypeId::BigInt),
+            "SUM".to_string(),
         )));
 
         let count_star = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
             vec![],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         // Create aggregation plan
@@ -1047,6 +1058,7 @@ mod tests {
             AggregationType::Sum,
             vec![age_col.clone()],
             Column::new("SUM(age)", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         // Create aggregation plan

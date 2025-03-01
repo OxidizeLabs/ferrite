@@ -1,6 +1,7 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
+use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
@@ -26,6 +27,8 @@ pub struct AggregateExpression {
     agg_type: AggregationType,
     children: Vec<Arc<Expression>>,
     return_type: Column,
+    alias: Option<String>,
+    function_name: String,
 }
 
 impl AggregateExpression {
@@ -33,57 +36,54 @@ impl AggregateExpression {
         agg_type: AggregationType,
         children: Vec<Arc<Expression>>,
         return_type: Column,
+        function_name: String,
     ) -> Self {
-        // When creating a new AggregateExpression, ensure the return_type is correct based on the agg_type
-        let actual_return_type = match agg_type {
-            AggregationType::Count | AggregationType::CountStar => {
-                Column::new("count", TypeId::BigInt)
-            }
-            AggregationType::Sum => {
-                if children.is_empty() {
-                    Column::new("sum", TypeId::BigInt)
-                } else {
-                    let child_type = children[0].get_return_type().get_type();
-                    match child_type {
-                        TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
-                            Column::new("sum", TypeId::BigInt)
-                        }
-                        TypeId::Decimal => Column::new("sum", TypeId::Decimal),
-                        _ => Column::new("sum", TypeId::BigInt),
-                    }
-                }
-            }
-            AggregationType::Min | AggregationType::Max => {
-                if children.is_empty() {
-                    Column::new(
-                        if matches!(agg_type, AggregationType::Min) {
-                            "min"
-                        } else {
-                            "max"
-                        },
-                        TypeId::BigInt,
-                    )
-                } else {
-                    let child_type = children[0].get_return_type().get_type();
-                    Column::new(
-                        if matches!(agg_type, AggregationType::Min) {
-                            "min"
-                        } else {
-                            "max"
-                        },
-                        child_type,
-                    )
-                }
-            }
-            AggregationType::Avg => Column::new("avg", TypeId::Decimal),
-            AggregationType::StdDev => Column::new("stddev", TypeId::Decimal),
-            AggregationType::Variance => Column::new("variance", TypeId::Decimal),
-        };
-
         Self {
             agg_type,
             children,
-            return_type: actual_return_type,
+            return_type,
+            alias: None,
+            function_name,
+        }
+    }
+
+    pub fn with_alias(mut self, alias: String) -> Self {
+        self.alias = Some(alias);
+        self
+    }
+
+    pub fn get_column_name(&self) -> String {
+        if let Some(alias) = &self.alias {
+            return alias.clone();
+        }
+
+        // If no alias, generate name based on convention
+        match self.agg_type {
+            AggregationType::CountStar => "COUNT(*)".to_string(),
+            _ if self.children.is_empty() => self.function_name.clone(),
+            _ => {
+                let arg = self.get_arg();
+                match arg.as_ref() {
+                    Expression::ColumnRef(col_ref) => {
+                        let col_name = col_ref.get_return_type().get_name();
+                        // Check if it's a qualified column name (contains a dot)
+                        if col_name.contains('.') {
+                            let parts: Vec<&str> = col_name.split('.').collect();
+                            format!("{}({}.{})",
+                                self.function_name,
+                                parts[0], // table name
+                                parts[1]  // column name
+                            )
+                        } else {
+                            format!("{}({})",
+                                self.function_name,
+                                col_name
+                            )
+                        }
+                    }
+                    _ => format!("{}(expr)", self.function_name),
+                }
+            }
         }
     }
 
@@ -190,19 +190,18 @@ impl ExpressionOps for AggregateExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        // For aggregate expressions in a join context, we evaluate each child in the join context
-        let mut child_values = Vec::new();
-        for child in &self.children {
-            child_values.push(child.evaluate_join(
-                left_tuple,
-                left_schema,
-                right_tuple,
-                right_schema,
-            )?);
-        }
+        // Create a merged schema and tuple with values from both tuples
+        let merged_schema = Schema::merge(left_schema, right_schema);
+        
+        // Create values array for the merged tuple by combining values from both tuples
+        let mut merged_values = Vec::new();
+        merged_values.extend(left_tuple.get_values().iter().cloned());
+        merged_values.extend(right_tuple.get_values().iter().cloned());
 
-        // Then evaluate the aggregate using the child values
-        self.evaluate(left_tuple, left_schema)
+        let merged_tuple = Tuple::new(&merged_values, merged_schema.clone(), RID::new(0, 0));
+
+        // Evaluate the aggregate using the merged tuple and schema
+        self.evaluate(&merged_tuple, &merged_schema)
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -222,6 +221,7 @@ impl ExpressionOps for AggregateExpression {
             self.agg_type.clone(),
             children,
             self.return_type.clone(),
+            self.function_name.clone(),
         )))
     }
 
@@ -273,6 +273,7 @@ mod tests {
             AggregationType::Count,
             vec![],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         );
 
         assert_eq!(
@@ -290,6 +291,7 @@ mod tests {
                 vec![],
             )))],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         );
 
         assert_eq!(
@@ -311,6 +313,7 @@ mod tests {
                 vec![],
             )))],
             Column::new("sum", TypeId::Decimal),
+            "SUM".to_string(),
         );
 
         assert_eq!(

@@ -83,7 +83,7 @@ impl FunctionExpression {
                     children[0].get_return_type().get_type(),
                 ))
             }
-            _ => Ok(Column::new(func_name, TypeId::VarChar)), // Default to VARCHAR for unknown functions
+            _ => Err(format!("Unknown function: {}", func_name)),
         }
     }
 }

@@ -7,8 +7,6 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::common::exception::ExpressionError::InvalidType;
-use crate::types_db::types::Type;
 use crate::types_db::value::Val::Null;
 
 #[derive(Clone, Debug, PartialEq)]
