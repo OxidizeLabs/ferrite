@@ -135,7 +135,7 @@ impl LogicalPlanBuilder {
     pub fn build_select_plan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
         debug!("=== Starting Join Planning ===");
         debug!("From clause: {:?}", select.from);
-        
+
         // Get the base table and any joins
         let mut current_plan = if let Some(table_with_joins) = select.from.first() {
             // Get the base table scan
@@ -143,7 +143,7 @@ impl LogicalPlanBuilder {
                 TableFactor::Table { name, .. } => name.to_string(),
                 _ => return Err("Only simple table references are supported".to_string()),
             };
-            
+
             let mut current_plan = LogicalPlan::table_scan(
                 table_name.clone(),
                 self.expression_parser.get_table_schema(&table_name)?,
@@ -157,7 +157,7 @@ impl LogicalPlanBuilder {
                     TableFactor::Table { name, .. } => name.to_string(),
                     _ => return Err("Only simple table joins are supported".to_string()),
                 };
-                
+
                 let right_plan = LogicalPlan::table_scan(
                     right_table.clone(),
                     self.expression_parser.get_table_schema(&right_table)?,
@@ -166,7 +166,7 @@ impl LogicalPlanBuilder {
 
                 // Create join predicate
                 let join_predicate = match &join.join_operator {
-                    JoinOperator::Inner(constraint) | 
+                    JoinOperator::Inner(constraint) |
                     JoinOperator::LeftOuter(constraint) |
                     JoinOperator::RightOuter(constraint) => {
                         match constraint {
@@ -242,7 +242,7 @@ impl LogicalPlanBuilder {
             debug!("=== Starting Aggregation Planning ===");
             debug!("Input schema: {:?}", schema);
             debug!("Has GROUP BY: {}, Has Aggregates: {}", has_group_by, has_aggregates);
-            
+
             // Parse group by expressions
             let group_by_exprs: Vec<_> = self
                 .expression_parser
@@ -253,7 +253,7 @@ impl LogicalPlanBuilder {
 
             debug!("Group by expressions: {:?}", group_by_exprs);
 
-            // Parse aggregates
+            // Parse aggregates using the input schema
             let (agg_exprs, _) = self
                 .expression_parser
                 .parse_aggregates(&select.projection, &schema)?;
@@ -273,23 +273,30 @@ impl LogicalPlanBuilder {
             debug!("Aggregation schema: {:?}", agg_schema);
 
             // Create the aggregate plan node
-            current_plan = LogicalPlan::aggregate(group_by_exprs, agg_exprs.clone(), agg_schema.clone(), current_plan);
+            current_plan = LogicalPlan::aggregate(
+                group_by_exprs,
+                agg_exprs,
+                agg_schema.clone(),
+                current_plan
+            );
 
             // Handle HAVING clause if present
             if let Some(having) = &select.having {
                 let predicate = Arc::new(
                     self.expression_parser
-                        .parse_expression(having, &schema)?, // Use input schema for HAVING clause
+                        .parse_expression(having, &agg_schema)?, // Use aggregation schema for HAVING clause
                 );
                 current_plan = LogicalPlan::filter(
-                    agg_schema.clone(),      // Use aggregation schema since we're filtering after aggregation
-                    String::new(),           // No single table name for aggregates
-                    0,                       // No single table OID for aggregates
+                    agg_schema.clone(),
+                    String::new(),
+                    0,
                     predicate,
                     current_plan,
                 );
             }
         }
+
+        current_plan = self.build_projection_plan(&select.projection, current_plan)?;
 
         // Handle ORDER BY
         if !select.sort_by.is_empty() {
@@ -304,9 +311,6 @@ impl LogicalPlanBuilder {
 
             current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
         }
-
-        // Build the projection
-        current_plan = self.build_projection_plan(&select.projection, current_plan)?;
 
         Ok(current_plan)
     }
@@ -452,17 +456,16 @@ impl LogicalPlanBuilder {
         debug!("Input schema: {:?}", input_schema);
         debug!("Projection items: {:?}", projection);
         
-        // Convert projection items to expressions
         let mut projection_exprs = Vec::new();
         let mut output_columns = Vec::new();
-        
+
         for (i, item) in projection.iter().enumerate() {
             debug!("Processing projection item {}: {:?}", i, item);
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     let parsed_expr = self.expression_parser.parse_expression(expr, &input_schema)?;
                     debug!("Parsed expression: {:?}", parsed_expr);
-                    
+
                     // Use the column name from the expression
                     let col_name = match expr {
                         Expr::CompoundIdentifier(parts) => {
@@ -471,14 +474,17 @@ impl LogicalPlanBuilder {
                             debug!("Using qualified name: {}", name);
                             name
                         }
+                        Expr::Function(func) => {
+                            // For function calls without alias, use the function name
+                            func.name.to_string()
+                        }
                         _ => {
                             let name = parsed_expr.get_return_type().get_name().to_string();
                             debug!("Using unqualified name: {}", name);
                             name
                         }
                     };
-                    
-                    // Create a new column with the proper name but same type
+
                     let output_col = Column::new(
                         &col_name,
                         parsed_expr.get_return_type().get_type(),
@@ -499,7 +505,7 @@ impl LogicalPlanBuilder {
                     output_columns.push(output_col);
                     projection_exprs.push(Arc::new(parsed_expr));
                 }
-                SelectItem::Wildcard(_) => {
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
                     debug!("Processing wildcard");
                     for i in 0..input_schema.get_column_count() {
                         let col = input_schema.get_column(i as usize).unwrap();
@@ -513,7 +519,6 @@ impl LogicalPlanBuilder {
                         ))));
                     }
                 }
-                _ => return Err("Unsupported projection type".to_string()),
             }
         }
 

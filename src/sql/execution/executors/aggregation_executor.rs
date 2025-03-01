@@ -300,8 +300,6 @@ mod tests {
     use crate::sql::execution::executors::mock_executor::MockExecutor;
     use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -424,18 +422,16 @@ mod tests {
         // Create COUNT(*) expression properly
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("count", TypeId::BigInt), // Use BigInt for count
-                vec![],
-            ))),
             vec![], // No child expressions for COUNT(*)
+            Column::new("count", TypeId::BigInt), // Use BigInt for count
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
             vec![],
             vec![], // No group by
-            vec![count_expr]));
+            vec![count_expr],
+        ));
 
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();
@@ -473,7 +469,7 @@ mod tests {
             Arc::from(mock_scan_plan),
             0,
             mock_tuples,
-            input_schema,
+            input_schema.clone(),
         ));
 
         // Create group by expression
@@ -489,8 +485,9 @@ mod tests {
         // Create SUM aggregate expression
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            value_expr.clone(),
-            vec![value_expr],
+            vec![value_expr.clone()],
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -520,11 +517,11 @@ mod tests {
 
         // Check first group (group_id = 1)
         assert_eq!(*results[0].get_value(0), Value::new(Integer(1)));  // Group ID as Integer
-        assert_eq!(*results[0].get_value(1), Value::new(Integer(30))); // Sum as BigInt
+        assert_eq!(*results[0].get_value(1), Value::new(Integer(30))); // Sum as Integer
 
         // Check second group (group_id = 2)
         assert_eq!(*results[1].get_value(0), Value::new(Integer(2)));  // Group ID as Integer
-        assert_eq!(*results[1].get_value(1), Value::new(Integer(70))); // Sum as BigInt
+        assert_eq!(*results[1].get_value(1), Value::new(Integer(70))); // Sum as Integer
     }
 
     #[test]
@@ -565,15 +562,17 @@ mod tests {
         // Create MIN aggregate
         let min_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Min,
-            value_expr.clone(),
             vec![value_expr.clone()],
+            Column::new("min", TypeId::Integer),
+            "MIN".to_string(),
         )));
 
         // Create MAX aggregate
         let max_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Max,
-            value_expr.clone(),
-            vec![value_expr],
+            vec![value_expr.clone()],
+            Column::new("max", TypeId::Integer),
+            "MAX".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -643,20 +642,22 @@ mod tests {
         // Create MIN aggregate
         let min_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Min,
-            value_expr.clone(),
             vec![value_expr.clone()],
+            Column::new("min", TypeId::Integer),
+            "MIN".to_string(),
         )));
 
         // Create MAX aggregate
         let max_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Max,
-            value_expr.clone(),
-            vec![value_expr],
+            vec![value_expr.clone()],
+            Column::new("max", TypeId::Integer),
+            "MAX".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
-            vec![],
             vec![], // No group by
+            vec![],
             vec![min_expr, max_expr],
         ));
 
@@ -708,30 +709,31 @@ mod tests {
             vec![],
         )));
 
+        // Create value expression
+        let value_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1,
+            Column::new("value", TypeId::Integer),
+            vec![],
+        )));
+
         // Create SUM aggregate
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 1,
-                Column::new("value", TypeId::Integer),
-                vec![],
-            ))),
-            vec![],
+            vec![value_expr.clone()],
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         // Create COUNT aggregate
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 1,
-                Column::new("value", TypeId::Integer),
-                vec![],
-            ))),
-            vec![],
+            vec![value_expr.clone()],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
-            vec![PlanNode::MockScan(MockScanNode::new(input_schema, "test_multiple_aggregates".to_string(), vec![]))],
+            vec![],
             vec![group_by_expr],
             vec![sum_expr, count_expr],
         ));
@@ -783,12 +785,9 @@ mod tests {
         // Create COUNT(*) expression properly
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("count", TypeId::BigInt), // Use BigInt for count
-                vec![],
-            ))),
             vec![], // No child expressions for COUNT(*)
+            Column::new("count", TypeId::BigInt), // Use BigInt for count
+            "COUNT".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -846,8 +845,9 @@ mod tests {
         // Create SUM aggregate
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            value_expr.clone(),
             vec![value_expr],
+            Column::new("sum", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let agg_plan = Arc::new(AggregationPlanNode::new(
@@ -916,7 +916,7 @@ mod tests {
             input_schema.clone(),
             "test_aggregation_with_types".to_string(),
             vec![],
-        ).with_tuples(mock_tuples.clone());
+        );
 
         // Create expressions
         let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
@@ -934,33 +934,36 @@ mod tests {
         // Create aggregates
         let sum_int = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            int_col.clone(),
             vec![int_col.clone()],
+            Column::new("sum_int", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let sum_big = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            big_col.clone(),
             vec![big_col.clone()],
-        )));  // Explicitly set BigInt type
+            Column::new("sum_big", TypeId::BigInt),
+            "SUM".to_string(),
+        )));
 
         let count_star = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::CountStar,
-            int_col.clone(),
             vec![],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         // Create aggregation plan
-        let agg_plan = AggregationPlanNode::new(
-            vec![PlanNode::MockScan(mock_scan_plan.clone())],
+        let agg_plan = Arc::new(AggregationPlanNode::new(
+            vec![],
             vec![group_expr],
             vec![sum_int, sum_big, count_star],
-        );
+        ));
 
         // Create and execute the aggregation
         let mut executor = AggregationExecutor::new(
             exec_ctx.clone(),
-            Arc::new(agg_plan),
+            agg_plan,
             Box::new(MockExecutor::new(
                 exec_ctx,
                 Arc::new(mock_scan_plan),
@@ -1039,7 +1042,7 @@ mod tests {
             input_schema.clone(),
             "test_aggregation_column_names".to_string(),
             vec![],
-        ).with_tuples(mock_tuples.clone());
+        );
 
         // Create expressions
         let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
@@ -1053,21 +1056,22 @@ mod tests {
         // Create SUM aggregate
         let sum_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
-            age_col.clone(),
             vec![age_col.clone()],
+            Column::new("SUM(age)", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         // Create aggregation plan
-        let agg_plan = AggregationPlanNode::new(
-            vec![PlanNode::MockScan(mock_scan_plan.clone())],
+        let agg_plan = Arc::new(AggregationPlanNode::new(
+            vec![],
             vec![group_expr],
             vec![sum_expr],
-        );
+        ));
 
         // Create and execute the aggregation
         let mut executor = AggregationExecutor::new(
             exec_ctx.clone(),
-            Arc::new(agg_plan),
+            agg_plan,
             Box::new(MockExecutor::new(
                 exec_ctx,
                 Arc::new(mock_scan_plan),

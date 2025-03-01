@@ -114,7 +114,7 @@ impl ExpressionOps for OverlayExpression {
                     )))
                 }
             },
-            None => overlay_text.len(), // Default to length of overlay string if FOR is not specified
+            None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string
         };
 
         // Perform the overlay operation
@@ -123,15 +123,17 @@ impl ExpressionOps for OverlayExpression {
             format!("{}{}", base_text, overlay_text)
         } else {
             // Calculate the end position for replacement
-            let end_pos = std::cmp::min(start_pos + replace_len, base_text.len());
-
-            // Construct the result string
+            let end_pos = if replace_len == 0 {
+                start_pos // When replace_len is 0, we don't remove any characters
+            } else {
+                std::cmp::min(start_pos + replace_len, base_text.len())
+            };
             format!(
-                "{}{}{}",
-                &base_text[0..start_pos],
-                overlay_text,
-                &base_text[end_pos..]
-            )
+                    "{}{}{}",
+                    &base_text[0..start_pos],
+                    overlay_text,
+                    &base_text[end_pos..]
+                )
         };
 
         Ok(Value::new(result))
@@ -218,7 +220,7 @@ impl ExpressionOps for OverlayExpression {
                     )))
                 }
             },
-            None => overlay_text.len(), // Default to length of overlay string if FOR is not specified
+            None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string
         };
 
         // Perform the overlay operation
@@ -227,7 +229,11 @@ impl ExpressionOps for OverlayExpression {
             format!("{}{}", base_text, overlay_text)
         } else {
             // Calculate the end position for replacement
-            let end_pos = std::cmp::min(start_pos + replace_len, base_text.len());
+            let end_pos = if replace_len == 0 {
+                start_pos // When replace_len is 0, we don't remove any characters
+            } else {
+                std::cmp::min(start_pos + replace_len, base_text.len())
+            };
 
             // Construct the result string
             format!(
@@ -387,7 +393,7 @@ mod tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result.to_string(), "axyzdef");
+        assert_eq!(result.to_string(), "axyzef");
     }
 
     #[test]
@@ -433,7 +439,7 @@ mod tests {
     #[test]
     fn test_overlay_for_zero() {
         // Test: OVERLAY('abcdef' PLACING 'xyz' FROM 2 FOR 0)
-        // Expected: 'axyzdef' (insert without replacing)
+        // Expected: 'axyzbcdef' (insert without replacing)
 
         let expr = OverlayExpression::new(
             create_string_expr("abcdef"),
@@ -447,7 +453,7 @@ mod tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        assert_eq!(result.to_string(), "axyzdef");
+        assert_eq!(result.to_string(), "axyzbcdef");
     }
 
     #[test]

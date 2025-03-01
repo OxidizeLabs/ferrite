@@ -327,7 +327,14 @@ mod tests {
             Column::new("result", TypeId::Boolean),
         );
 
-        let tuple = create_test_tuple(vec![], schema.clone());
+        // Create tuple with dummy values matching schema column count
+        let tuple = create_test_tuple(
+            vec![
+                Value::new("dummy_text"),
+                Value::new("dummy_pattern"),
+            ],
+            schema.clone()
+        );
         let result = regex_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(true));
     }
@@ -364,7 +371,14 @@ mod tests {
                 Column::new("result", TypeId::Boolean),
             );
 
-            let tuple = create_test_tuple(vec![], schema.clone());
+            // Create tuple with dummy values matching schema column count
+            let tuple = create_test_tuple(
+                vec![
+                    Value::new("dummy_text"),
+                    Value::new("dummy_pattern"),
+                ],
+                schema.clone()
+            );
             let result = regex_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
         }
@@ -408,7 +422,14 @@ mod tests {
                 Column::new("result", TypeId::Boolean),
             );
 
-            let tuple = create_test_tuple(vec![], schema.clone());
+            // Create tuple with dummy values matching schema column count
+            let tuple = create_test_tuple(
+                vec![
+                    Value::new("dummy_text"),
+                    Value::new("dummy_pattern"),
+                ],
+                schema.clone()
+            );
             let result = regex_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(
                 result,
@@ -454,7 +475,14 @@ mod tests {
                 Column::new("result", TypeId::Boolean),
             );
 
-            let tuple = create_test_tuple(vec![], schema.clone());
+            // Create tuple with dummy values matching schema column count
+            let tuple = create_test_tuple(
+                vec![
+                    Value::new("dummy_text"),
+                    Value::new("dummy_pattern"),
+                ],
+                schema.clone()
+            );
             let result = regex_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(
                 result,
@@ -490,7 +518,14 @@ mod tests {
             Column::new("result", TypeId::Boolean),
         );
 
-        let tuple = create_test_tuple(vec![], schema.clone());
+        // Create tuple with dummy values matching schema column count
+        let tuple = create_test_tuple(
+            vec![
+                Value::new("dummy_text"),
+                Value::new("dummy_pattern"),
+            ],
+            schema.clone()
+        );
         assert!(regex_expr.evaluate(&tuple, &schema).is_err());
     }
 

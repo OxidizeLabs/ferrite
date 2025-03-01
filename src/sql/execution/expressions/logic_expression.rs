@@ -2,6 +2,7 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool;
@@ -9,7 +10,6 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {
@@ -79,11 +79,11 @@ impl LogicExpression {
         match self.logic_type {
             LogicType::And => Self::perform_and(
                 Self::get_bool_as_cmp_bool(lhs),
-                Self::get_bool_as_cmp_bool(rhs)
+                Self::get_bool_as_cmp_bool(rhs),
             ),
             LogicType::Or => Self::perform_or(
                 Self::get_bool_as_cmp_bool(lhs),
-                Self::get_bool_as_cmp_bool(rhs)
+                Self::get_bool_as_cmp_bool(rhs),
             ),
             LogicType::Not => {
                 match lhs.get_val() {

@@ -183,7 +183,15 @@ pub enum ExpressionError {
     #[error("InvalidCast")]
     InvalidCast { from: TypeId, to: TypeId },
     #[error("InvalidType: {0}")]
-    InvalidType(String)
+    InvalidType(String),
+    #[error("Invalid Seed: {0}")]
+    InvalidSeed(String),
+    #[error("IndexOutOfBounds")]
+    IndexOutOfBounds { idx: usize, size: usize },
+    #[error("KeyNotFound: {0}")]
+    KeyNotFound(String),
+    #[error("InvalidReturnType: {0}")]
+    InvalidReturnType(String),
 }
 
 #[derive(Debug, Error)]
@@ -194,6 +202,8 @@ pub enum ArrayExpressionError {
     ChildEvaluationError(String),
     #[error("Failed to convert float to integer: {0}")]
     FloatToIntConversionError(f64),
+    #[error("TypeMismatch: {0}")]
+    TypeMismatch(String),
 }
 
 #[derive(Debug, Error)]

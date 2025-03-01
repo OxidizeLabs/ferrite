@@ -1,7 +1,7 @@
 use crate::common::config::Timestamp;
 use std::sync::Arc;
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::{LockManager, LockMode};
+use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
@@ -9,10 +9,6 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::common::config::TableOidT;
 use crate::concurrency::transaction::UndoLog;
-use crate::catalog::column::Column;
-use crate::catalog::schema::Schema;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
 use log;
 use crate::common::config::{INVALID_PAGE_ID};
 use crate::storage::table::table_iterator::TableIterator;
@@ -375,6 +371,11 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
 
     struct TestContext {
         txn_heap: Arc<TransactionalTableHeap>,

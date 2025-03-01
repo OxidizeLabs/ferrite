@@ -1,115 +1,207 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
+use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
+use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggregationType {
-    CountStar, // COUNT(*)
-    Count,     // COUNT(expr)
-    Sum,       // SUM(expr)
-    Min,       // MIN(expr)
-    Max,       // MAX(expr)
-    Avg,       // AVG(expr)
+    Count,
+    CountStar,
+    Sum,
+    Min,
+    Max,
+    Avg,
+    StdDev,
+    Variance,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregateExpression {
     agg_type: AggregationType,
-    arg: Arc<Expression>,
-    ret_type: Column,
     children: Vec<Arc<Expression>>,
+    return_type: Column,
+    alias: Option<String>,
+    function_name: String,
 }
 
 impl AggregateExpression {
     pub fn new(
         agg_type: AggregationType,
-        arg: Arc<Expression>,
         children: Vec<Arc<Expression>>,
+        return_type: Column,
+        function_name: String,
     ) -> Self {
-        // Format the column name based on the aggregate function and its argument
-        let col_name = match &agg_type {
-            AggregationType::CountStar => "COUNT(*)".to_string(),
-            _ => format!(
-                "{}({})",
-                agg_type.to_string(),
-                arg.get_return_type().get_name()
-            ),
-        };
-
-        // Determine return type based on aggregation type
-        let mut ret_type = match agg_type {
-            AggregationType::CountStar | AggregationType::Count => {
-                Column::new("count_result", TypeId::BigInt)
-            }
-            AggregationType::Sum => {
-                // Sum returns same type as input for integers, Decimal for floating point
-                match arg.get_return_type().get_type() {
-                    TypeId::Integer | TypeId::BigInt => arg.get_return_type().clone(),
-                    _ => Column::new("sum_result", TypeId::Decimal),
-                }
-            }
-            AggregationType::Min | AggregationType::Max => {
-                // Min/Max return same type as input
-                arg.get_return_type().clone()
-            }
-            AggregationType::Avg => {
-                // Average always returns Decimal
-                Column::new("avg_result", TypeId::Decimal)
-            }
-        };
-
-        // Set the formatted name for the return type
-        ret_type = ret_type.with_name(&col_name);
-
         Self {
             agg_type,
-            arg,
-            ret_type,
             children,
+            return_type,
+            alias: None,
+            function_name,
         }
     }
 
-    pub fn with_return_type(mut self, ret_type: Column) -> Self {
-        self.ret_type = ret_type;
+    pub fn with_alias(mut self, alias: String) -> Self {
+        self.alias = Some(alias);
         self
+    }
+
+    pub fn get_column_name(&self) -> String {
+        if let Some(alias) = &self.alias {
+            return alias.clone();
+        }
+
+        // If no alias, generate name based on convention
+        match self.agg_type {
+            AggregationType::CountStar => "COUNT(*)".to_string(),
+            _ if self.children.is_empty() => self.function_name.clone(),
+            _ => {
+                let arg = self.get_arg();
+                match arg.as_ref() {
+                    Expression::ColumnRef(col_ref) => {
+                        let col_name = col_ref.get_return_type().get_name();
+                        // Check if it's a qualified column name (contains a dot)
+                        if col_name.contains('.') {
+                            let parts: Vec<&str> = col_name.split('.').collect();
+                            format!("{}({}.{})",
+                                self.function_name,
+                                parts[0], // table name
+                                parts[1]  // column name
+                            )
+                        } else {
+                            format!("{}({})",
+                                self.function_name,
+                                col_name
+                            )
+                        }
+                    }
+                    _ => format!("{}(expr)", self.function_name),
+                }
+            }
+        }
+    }
+
+    pub fn get_arg(&self) -> &Arc<Expression> {
+        // For aggregate functions that take an argument (like SUM, AVG, etc.),
+        // return the first child expression
+        &self.children[0]
     }
 
     pub fn get_agg_type(&self) -> &AggregationType {
         &self.agg_type
     }
 
-    pub fn get_arg(&self) -> &Arc<Expression> {
-        &self.arg
+    pub fn get_return_type(&self) -> &Column {
+        &self.return_type
+    }
+
+    pub fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        match &self.agg_type {
+            AggregationType::Count | AggregationType::CountStar => {
+                // For COUNT(*), return 1 for non-NULL tuples
+                if self.children.is_empty() {
+                    return Ok(Value::new(1_i64));
+                }
+
+                // For COUNT(expr), check if the expression evaluates to NULL
+                let value = self.children[0].evaluate(tuple, schema)?;
+                if value.is_null() {
+                    Ok(Value::new(0_i64))
+                } else {
+                    Ok(Value::new(1_i64))
+                }
+            }
+            AggregationType::Sum => {
+                if self.children.is_empty() {
+                    return Ok(Value::new(0_i64));
+                }
+
+                let value = self.children[0].evaluate(tuple, schema)?;
+                if value.is_null() {
+                    Ok(Value::new(0_i64))
+                } else {
+                    Ok(value)
+                }
+            }
+            AggregationType::Min | AggregationType::Max => {
+                if self.children.is_empty() {
+                    return Ok(Value::new(Val::Null));
+                }
+
+                let value = self.children[0].evaluate(tuple, schema)?;
+                Ok(value)
+            }
+            AggregationType::Avg => {
+                if self.children.is_empty() {
+                    return Ok(Value::new(Val::Null));
+                }
+
+                let value = self.children[0].evaluate(tuple, schema)?;
+                if value.is_null() {
+                    Ok(Value::new(Val::Null))
+                } else {
+                    Ok(value)
+                }
+            }
+            AggregationType::StdDev | AggregationType::Variance => {
+                if self.children.is_empty() {
+                    return Ok(Value::new(Val::Null));
+                }
+
+                let value = self.children[0].evaluate(tuple, schema)?;
+                if value.is_null() {
+                    Ok(Value::new(Val::Null))
+                } else {
+                    Ok(value)
+                }
+            }
+        }
+    }
+}
+
+impl Display for AggregateExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}(", self.agg_type)?;
+        for (i, child) in self.children.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", child)?;
+        }
+        write!(f, ")")
     }
 }
 
 impl ExpressionOps for AggregateExpression {
-    fn evaluate(&self, _tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
-        // Individual tuple evaluation doesn't make sense for aggregates
-        // This will be handled by the AggregationExecutor
-        Err(ExpressionError::InvalidOperation(
-            "Cannot evaluate aggregate function on individual tuple".to_string(),
-        ))
+    fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        self.evaluate(tuple, schema)
     }
 
     fn evaluate_join(
         &self,
-        _left_tuple: &Tuple,
-        _left_schema: &Schema,
-        _right_tuple: &Tuple,
-        _right_schema: &Schema,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        // Same as evaluate
-        Err(ExpressionError::InvalidOperation(
-            "Cannot evaluate aggregate function on individual tuple".to_string(),
-        ))
+        // Create a merged schema and tuple with values from both tuples
+        let merged_schema = Schema::merge(left_schema, right_schema);
+        
+        // Create values array for the merged tuple by combining values from both tuples
+        let mut merged_values = Vec::new();
+        merged_values.extend(left_tuple.get_values().iter().cloned());
+        merged_values.extend(right_tuple.get_values().iter().cloned());
+
+        let merged_tuple = Tuple::new(&merged_values, merged_schema.clone(), RID::new(0, 0));
+
+        // Evaluate the aggregate using the merged tuple and schema
+        self.evaluate(&merged_tuple, &merged_schema)
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -121,68 +213,32 @@ impl ExpressionOps for AggregateExpression {
     }
 
     fn get_return_type(&self) -> &Column {
-        &self.ret_type
+        &self.return_type
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        if children.len() != 1 {
-            panic!("AggregateExpression requires exactly one child");
-        }
-
-        Arc::new(Expression::Aggregate(Self::new(
+        Arc::new(Expression::Aggregate(AggregateExpression::new(
             self.agg_type.clone(),
-            children[0].clone(),
             children,
+            self.return_type.clone(),
+            self.function_name.clone(),
         )))
     }
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
-        // For COUNT(*), no need to validate the argument
-        if matches!(self.agg_type, AggregationType::CountStar) {
-            return Ok(());
-        }
-
-        // Validate the argument expression
-        self.arg.validate(schema)?;
-
-        // Validate all child expressions
+        // Validate all child expressions first
         for child in &self.children {
             child.validate(schema)?;
         }
 
-        Ok(())
-    }
-}
-
-impl Display for AggregationType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AggregationType::CountStar => write!(f, "COUNT(*)"),
-            AggregationType::Count => write!(f, "COUNT"),
-            AggregationType::Sum => write!(f, "SUM"),
-            AggregationType::Min => write!(f, "MIN"),
-            AggregationType::Max => write!(f, "MAX"),
-            AggregationType::Avg => write!(f, "AVG"),
-        }
-    }
-}
-
-impl Display for AggregateExpression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if f.alternate() {
-            match self.agg_type {
-                // Special case for COUNT(*) since it doesn't have an argument
-                AggregationType::CountStar => write!(f, "COUNT(*)"),
-                // All other aggregate functions format as: function_name(argument)
-                _ => write!(f, "{}({:#})", self.agg_type, self.arg),
-            }
-        } else {
-            match self.agg_type {
-                // Special case for COUNT(*) since it doesn't have an argument
-                AggregationType::CountStar => write!(f, "COUNT(*)"),
-                // All other aggregate functions format as: function_name(argument)
-                _ => write!(f, "{}({})", self.agg_type, self.arg),
-            }
+        // Then validate aggregate-specific requirements
+        match self.agg_type {
+            AggregationType::Count => Ok(()), // COUNT can take any number of arguments
+            _ if self.children.is_empty() => Err(ExpressionError::InvalidOperation(format!(
+                "{:?} aggregate requires at least one argument",
+                self.agg_type
+            ))),
+            _ => Ok(()),
         }
     }
 }
@@ -190,75 +246,79 @@ impl Display for AggregateExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::rid::RID;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+
+    fn create_test_tuple() -> (Tuple, Schema) {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::Decimal),
+        ]);
+
+        let tuple = Tuple::new(
+            &[Value::new(1), Value::new(10.5)],
+            schema.clone(),
+            RID::new(0, 0),
+        );
+
+        (tuple, schema)
+    }
 
     #[test]
-    fn test_aggregate_expression_display() {
-        // Test COUNT(*)
-        let dummy_arg = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(1),
-            Column::new("dummy", TypeId::Integer),
-            vec![],
-        )));
-        let count_star = Expression::Aggregate(AggregateExpression::new(
-            AggregationType::CountStar,
-            dummy_arg,
-            vec![],
-        ));
+    fn test_count_aggregate() {
+        let (tuple, schema) = create_test_tuple();
 
-        assert_eq!(count_star.to_string(), "COUNT(*)");
-        assert_eq!(format!("{:#}", count_star), "COUNT(*)");
+        // Test COUNT(*)
+        let count_star = AggregateExpression::new(
+            AggregationType::Count,
+            vec![],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
+        );
+
+        assert_eq!(
+            count_star.evaluate(&tuple, &schema).unwrap(),
+            Value::new(1_i64)
+        );
 
         // Test COUNT(column)
-        let col_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
-            0,
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )));
-        let count_expr = Expression::Aggregate(AggregateExpression::new(
+        let count_col = AggregateExpression::new(
             AggregationType::Count,
-            col_arg.clone(),
-            vec![],
-        ));
+            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,
+                0,
+                Column::new("id", TypeId::Integer),
+                vec![],
+            )))],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
+        );
 
-        assert_eq!(count_expr.to_string(), "COUNT(id)");
-        assert_eq!(format!("{:#}", count_expr), "COUNT(Col#0.0)");
+        assert_eq!(
+            count_col.evaluate(&tuple, &schema).unwrap(),
+            Value::new(1_i64)
+        );
+    }
 
-        // Test SUM(column)
-        let sum_expr = Expression::Aggregate(AggregateExpression::new(
+    #[test]
+    fn test_sum_aggregate() {
+        let (tuple, schema) = create_test_tuple();
+
+        let sum_expr = AggregateExpression::new(
             AggregationType::Sum,
-            col_arg.clone(),
-            vec![],
-        ));
+            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,
+                1,
+                Column::new("value", TypeId::Decimal),
+                vec![],
+            )))],
+            Column::new("sum", TypeId::Decimal),
+            "SUM".to_string(),
+        );
 
-        assert_eq!(sum_expr.to_string(), "SUM(id)");
-        assert_eq!(format!("{:#}", sum_expr), "SUM(Col#0.0)");
-
-        // Test AVG(column)
-        let avg_expr = Expression::Aggregate(AggregateExpression::new(
-            AggregationType::Avg,
-            col_arg.clone(),
-            vec![],
-        ));
-
-        assert_eq!(avg_expr.to_string(), "AVG(id)");
-        assert_eq!(format!("{:#}", avg_expr), "AVG(Col#0.0)");
-
-        // Test with constant argument
-        let const_arg = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(42),
-            Column::new("const", TypeId::Integer),
-            vec![],
-        )));
-        let sum_const = Expression::Aggregate(AggregateExpression::new(
-            AggregationType::Sum,
-            const_arg,
-            vec![],
-        ));
-
-        assert_eq!(sum_const.to_string(), "SUM(42)");
-        assert_eq!(format!("{:#}", sum_const), "SUM(Constant(42))");
+        assert_eq!(
+            sum_expr.evaluate(&tuple, &schema).unwrap(),
+            Value::new(10.5)
+        );
     }
 }

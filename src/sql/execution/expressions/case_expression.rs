@@ -188,7 +188,7 @@ impl ExpressionOps for CaseExpression {
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         let mut offset;
-        
+
         // Extract base expression if present
         let (base_expr, base_offset) = match &self.base_expr {
             Some(_) => (Some(children[0].clone()), 1),
@@ -253,7 +253,7 @@ impl ExpressionOps for CaseExpression {
 impl Display for CaseExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "CASE")?;
-        
+
         // Format base expression if present
         if let Some(base) = &self.base_expr {
             if f.alternate() {
@@ -288,8 +288,8 @@ impl Display for CaseExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::common::rid::RID;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     #[test]
     fn test_simple_case() {

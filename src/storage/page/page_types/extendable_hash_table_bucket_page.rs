@@ -6,7 +6,6 @@ use crate::common::rid::RID;
 use std::any::Any;
 use std::fmt::Debug;
 use std::mem::size_of;
-use log;
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;
 pub const BUCKET_HEADER_SIZE: usize = size_of::<PageId>() + size_of::<u16>() * 2;

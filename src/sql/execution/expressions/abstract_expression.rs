@@ -2,22 +2,60 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::aggregate_expression::AggregateExpression;
+use crate::sql::execution::expressions::all_expression::AllExpression;
+use crate::sql::execution::expressions::any_expression::AnyExpression;
 use crate::sql::execution::expressions::arithmetic_expression::ArithmeticExpression;
 use crate::sql::execution::expressions::array_expression::ArrayExpression;
+use crate::sql::execution::expressions::at_timezone_expression::AtTimeZoneExpression;
+use crate::sql::execution::expressions::between_expression::BetweenExpression;
+use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
+use crate::sql::execution::expressions::case_expression::CaseExpression;
+use crate::sql::execution::expressions::cast_expression::CastExpression;
+use crate::sql::execution::expressions::ceil_floor_expression::CeilFloorExpression;
+use crate::sql::execution::expressions::coalesce_expression::CoalesceExpression;
+use crate::sql::execution::expressions::collate_expression::CollateExpression;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+use crate::sql::execution::expressions::convert_expression::ConvertExpression;
+// use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
+use crate::sql::execution::expressions::exists_expression::ExistsExpression;
+use crate::sql::execution::expressions::extract_expression::ExtractExpression;
+use crate::sql::execution::expressions::filter_expression::FilterExpression;
+use crate::sql::execution::expressions::function_expression::FunctionExpression;
+use crate::sql::execution::expressions::grouping_sets_expression::GroupingSetsExpression;
+use crate::sql::execution::expressions::in_expression::InExpression;
+use crate::sql::execution::expressions::interval_expression::IntervalExpression;
+use crate::sql::execution::expressions::is_check_expression::IsCheckExpression;
+use crate::sql::execution::expressions::is_distinct_expression::IsDistinctExpression;
+use crate::sql::execution::expressions::like_expression::LikeExpression;
+use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
 use crate::sql::execution::expressions::logic_expression::LogicExpression;
+use crate::sql::execution::expressions::map_access_expression::MapAccessExpression;
+use crate::sql::execution::expressions::method_expression::MethodExpression;
 use crate::sql::execution::expressions::mock_expression::MockExpression;
+use crate::sql::execution::expressions::nested_expression::NestedExpression;
+use crate::sql::execution::expressions::overlay_expression::OverlayExpression;
+use crate::sql::execution::expressions::position_expression::PositionExpression;
+use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
+use crate::sql::execution::expressions::random_expression::RandomExpression;
+use crate::sql::execution::expressions::regex_expression::RegexExpression;
 use crate::sql::execution::expressions::string_expression::StringExpression;
+use crate::sql::execution::expressions::struct_expression::StructExpression;
+use crate::sql::execution::expressions::subquery_expression::SubqueryExpression;
+use crate::sql::execution::expressions::subscript_expression::SubscriptExpression;
+use crate::sql::execution::expressions::substring_expression::SubstringExpression;
+use crate::sql::execution::expressions::trim_expression::TrimExpression;
+use crate::sql::execution::expressions::tuple_expression::TupleExpression;
+use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
+use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
+use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
 use crate::sql::execution::expressions::window_expression::WindowExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::sql::execution::expressions::case_expression::CaseExpression;
-use crate::sql::execution::expressions::cast_expression::CastExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -33,6 +71,44 @@ pub enum Expression {
     Mock(MockExpression),
     Aggregate(AggregateExpression),
     Window(WindowExpression),
+    Function(FunctionExpression),
+    Subquery(SubqueryExpression),
+    In(InExpression),
+    Between(BetweenExpression),
+    Like(LikeExpression),
+    Extract(ExtractExpression),
+    Exists(ExistsExpression),
+    Regex(RegexExpression),
+    // DateTime(DateTimeExpression),
+    Coalesce(CoalesceExpression),
+    Random(RandomExpression),
+    Trim(TrimExpression),
+    Interval(IntervalExpression),
+    GroupingSets(GroupingSetsExpression),
+    Filter(FilterExpression),
+    IsDistinct(IsDistinctExpression),
+    Position(PositionExpression),
+    Method(MethodExpression),
+    Struct(StructExpression),
+    Overlay(OverlayExpression),
+    Collate(CollateExpression),
+    AtTimeZone(AtTimeZoneExpression),
+    MapAccess(MapAccessExpression),
+    Tuple(TupleExpression),
+    Wildcard(WildcardExpression),
+    QualifiedWildcard(QualifiedWildcardExpression),
+    TypedString(TypedStringExpression),
+    Subscript(SubscriptExpression),
+    Nested(NestedExpression),
+    IsCheck(IsCheckExpression),
+    BinaryOp(BinaryOpExpression),
+    Any(AnyExpression),
+    All(AllExpression),
+    UnaryOp(UnaryOpExpression),
+    Convert(ConvertExpression),
+    CeilFloor(CeilFloorExpression),
+    Substring(SubstringExpression),
+    Literal(LiteralValueExpression),
 }
 
 pub trait ExpressionOps {
@@ -66,6 +142,44 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => expr.evaluate(tuple, schema),
             Self::Cast(expr) => expr.evaluate(tuple, schema),
             Self::Case(expr) => expr.evaluate(tuple, schema),
+            Self::Function(expr) => expr.evaluate(tuple, schema),
+            Self::Subquery(expr) => expr.evaluate(tuple, schema),
+            Self::In(expr) => expr.evaluate(tuple, schema),
+            Self::Between(expr) => expr.evaluate(tuple, schema),
+            Self::Like(expr) => expr.evaluate(tuple, schema),
+            Self::Extract(expr) => expr.evaluate(tuple, schema),
+            Self::Exists(expr) => expr.evaluate(tuple, schema),
+            Self::Regex(expr) => expr.evaluate(tuple, schema),
+            // Self::DateTime(expr) => expr.evaluate(tuple, schema),
+            Self::Coalesce(expr) => expr.evaluate(tuple, schema),
+            Self::Random(expr) => expr.evaluate(tuple, schema),
+            Self::Trim(expr) => expr.evaluate(tuple, schema),
+            Self::Interval(expr) => expr.evaluate(tuple, schema),
+            Self::GroupingSets(expr) => expr.evaluate(tuple, schema),
+            Self::Filter(expr) => expr.evaluate(tuple, schema),
+            Self::IsDistinct(expr) => expr.evaluate(tuple, schema),
+            Self::Position(expr) => expr.evaluate(tuple, schema),
+            Self::Method(expr) => expr.evaluate(tuple, schema),
+            Self::Struct(expr) => expr.evaluate(tuple, schema),
+            Self::Overlay(expr) => expr.evaluate(tuple, schema),
+            Self::Collate(expr) => expr.evaluate(tuple, schema),
+            Self::AtTimeZone(expr) => expr.evaluate(tuple, schema),
+            Self::MapAccess(expr) => expr.evaluate(tuple, schema),
+            Self::Tuple(expr) => expr.evaluate(tuple, schema),
+            Self::Wildcard(expr) => expr.evaluate(tuple, schema),
+            Self::QualifiedWildcard(expr) => expr.evaluate(tuple, schema),
+            Self::TypedString(expr) => expr.evaluate(tuple, schema),
+            Self::Subscript(expr) => expr.evaluate(tuple, schema),
+            Self::Nested(expr) => expr.evaluate(tuple, schema),
+            Self::IsCheck(expr) => expr.evaluate(tuple, schema),
+            Self::BinaryOp(expr) => expr.evaluate(tuple, schema),
+            Self::Any(expr) => expr.evaluate(tuple, schema),
+            Self::All(expr) => expr.evaluate(tuple, schema),
+            Self::UnaryOp(expr) => expr.evaluate(tuple, schema),
+            Self::Convert(expr) => expr.evaluate(tuple, schema),
+            Self::CeilFloor(expr) => expr.evaluate(tuple, schema),
+            Self::Substring(expr) => expr.evaluate(tuple, schema),
+            Self::Literal(expr) => expr.evaluate(tuple, schema),
         }
     }
 
@@ -100,14 +214,68 @@ impl ExpressionOps for Expression {
                 // For mock expressions, we'll just use the regular evaluate
                 expr.evaluate(left_tuple, left_schema)
             }
-            Self::Aggregate(expr) => {
-                expr.evaluate(left_tuple, right_schema)
-            }
+            Self::Aggregate(expr) => expr.evaluate(left_tuple, right_schema),
             Self::Window(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
             Self::Cast(expr) => expr.evaluate(left_tuple, right_schema),
             Self::Case(expr) => expr.evaluate(left_tuple, right_schema),
+            Self::Function(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Subquery(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::In(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Between(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Like(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Extract(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Exists(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Regex(expr) => expr.evaluate(left_tuple, left_schema),
+            // Self::DateTime(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Coalesce(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Random(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Trim(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Interval(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::GroupingSets(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Filter(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::IsDistinct(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Position(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Method(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Struct(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Overlay(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Collate(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::AtTimeZone(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::MapAccess(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Tuple(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Wildcard(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::QualifiedWildcard(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::TypedString(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Subscript(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Nested(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::IsCheck(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::BinaryOp(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Any(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::All(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::UnaryOp(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Convert(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::CeilFloor(expr) => expr.evaluate(left_tuple, left_schema),
+            Self::Substring(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Literal(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
         }
     }
 
@@ -125,6 +293,44 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => expr.get_child_at(child_idx),
             Self::Cast(expr) => expr.get_child_at(child_idx),
             Self::Case(expr) => expr.get_child_at(child_idx),
+            Self::Function(expr) => expr.get_child_at(child_idx),
+            Self::Subquery(expr) => expr.get_child_at(child_idx),
+            Self::In(expr) => expr.get_child_at(child_idx),
+            Self::Between(expr) => expr.get_child_at(child_idx),
+            Self::Like(expr) => expr.get_child_at(child_idx),
+            Self::Extract(expr) => expr.get_child_at(child_idx),
+            Self::Exists(expr) => expr.get_child_at(child_idx),
+            Self::Regex(expr) => expr.get_child_at(child_idx),
+            // Self::DateTime(expr) => expr.get_child_at(child_idx),
+            Self::Coalesce(expr) => expr.get_child_at(child_idx),
+            Self::Random(expr) => expr.get_child_at(child_idx),
+            Self::Trim(expr) => expr.get_child_at(child_idx),
+            Self::Interval(expr) => expr.get_child_at(child_idx),
+            Self::GroupingSets(expr) => expr.get_child_at(child_idx),
+            Self::Filter(expr) => expr.get_child_at(child_idx),
+            Self::IsDistinct(expr) => expr.get_child_at(child_idx),
+            Self::Position(expr) => expr.get_child_at(child_idx),
+            Self::Method(expr) => expr.get_child_at(child_idx),
+            Self::Struct(expr) => expr.get_child_at(child_idx),
+            Self::Overlay(expr) => expr.get_child_at(child_idx),
+            Self::Collate(expr) => expr.get_child_at(child_idx),
+            Self::AtTimeZone(expr) => expr.get_child_at(child_idx),
+            Self::MapAccess(expr) => expr.get_child_at(child_idx),
+            Self::Tuple(expr) => expr.get_child_at(child_idx),
+            Self::Wildcard(expr) => expr.get_child_at(child_idx),
+            Self::QualifiedWildcard(expr) => expr.get_child_at(child_idx),
+            Self::TypedString(expr) => expr.get_child_at(child_idx),
+            Self::Subscript(expr) => expr.get_child_at(child_idx),
+            Self::Nested(expr) => expr.get_child_at(child_idx),
+            Self::IsCheck(expr) => expr.get_child_at(child_idx),
+            Self::BinaryOp(expr) => expr.get_child_at(child_idx),
+            Self::Any(expr) => expr.get_child_at(child_idx),
+            Self::All(expr) => expr.get_child_at(child_idx),
+            Self::UnaryOp(expr) => expr.get_child_at(child_idx),
+            Self::Convert(expr) => expr.get_child_at(child_idx),
+            Self::CeilFloor(expr) => expr.get_child_at(child_idx),
+            Self::Substring(expr) => expr.get_child_at(child_idx),
+            Self::Literal(expr) => expr.get_child_at(child_idx),
         }
     }
 
@@ -142,6 +348,44 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => expr.get_children(),
             Self::Cast(expr) => expr.get_children(),
             Self::Case(expr) => expr.get_children(),
+            Self::Function(expr) => expr.get_children(),
+            Self::Subquery(expr) => expr.get_children(),
+            Self::In(expr) => expr.get_children(),
+            Self::Between(expr) => expr.get_children(),
+            Self::Like(expr) => expr.get_children(),
+            Self::Extract(expr) => expr.get_children(),
+            Self::Exists(expr) => expr.get_children(),
+            Self::Regex(expr) => expr.get_children(),
+            // Self::DateTime(expr) => expr.get_children(),
+            Self::Coalesce(expr) => expr.get_children(),
+            Self::Random(expr) => expr.get_children(),
+            Self::Trim(expr) => expr.get_children(),
+            Self::Interval(expr) => expr.get_children(),
+            Self::GroupingSets(expr) => expr.get_children(),
+            Self::Filter(expr) => expr.get_children(),
+            Self::IsDistinct(expr) => expr.get_children(),
+            Self::Position(expr) => expr.get_children(),
+            Self::Method(expr) => expr.get_children(),
+            Self::Struct(expr) => expr.get_children(),
+            Self::Overlay(expr) => expr.get_children(),
+            Self::Collate(expr) => expr.get_children(),
+            Self::AtTimeZone(expr) => expr.get_children(),
+            Self::MapAccess(expr) => expr.get_children(),
+            Self::Tuple(expr) => expr.get_children(),
+            Self::Wildcard(expr) => expr.get_children(),
+            Self::QualifiedWildcard(expr) => expr.get_children(),
+            Self::TypedString(expr) => expr.get_children(),
+            Self::Subscript(expr) => expr.get_children(),
+            Self::Nested(expr) => expr.get_children(),
+            Self::IsCheck(expr) => expr.get_children(),
+            Self::BinaryOp(expr) => expr.get_children(),
+            Self::Any(expr) => expr.get_children(),
+            Self::All(expr) => expr.get_children(),
+            Self::UnaryOp(expr) => expr.get_children(),
+            Self::Convert(expr) => expr.get_children(),
+            Self::CeilFloor(expr) => expr.get_children(),
+            Self::Substring(expr) => expr.get_children(),
+            Self::Literal(expr) => expr.get_children(),
         }
     }
 
@@ -159,6 +403,44 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => expr.get_return_type(),
             Self::Cast(expr) => expr.get_return_type(),
             Self::Case(expr) => expr.get_return_type(),
+            Self::Function(expr) => expr.get_return_type(),
+            Self::Subquery(expr) => expr.get_return_type(),
+            Self::In(expr) => expr.get_return_type(),
+            Self::Between(expr) => expr.get_return_type(),
+            Self::Like(expr) => expr.get_return_type(),
+            Self::Extract(expr) => expr.get_return_type(),
+            Self::Exists(expr) => expr.get_return_type(),
+            Self::Regex(expr) => expr.get_return_type(),
+            // Self::DateTime(expr) => expr.get_return_type(),
+            Self::Coalesce(expr) => expr.get_return_type(),
+            Self::Random(expr) => expr.get_return_type(),
+            Self::Trim(expr) => expr.get_return_type(),
+            Self::Interval(expr) => expr.get_return_type(),
+            Self::GroupingSets(expr) => expr.get_return_type(),
+            Self::Filter(expr) => expr.get_return_type(),
+            Self::IsDistinct(expr) => expr.get_return_type(),
+            Self::Position(expr) => expr.get_return_type(),
+            Self::Method(expr) => expr.get_return_type(),
+            Self::Struct(expr) => expr.get_return_type(),
+            Self::Overlay(expr) => expr.get_return_type(),
+            Self::Collate(expr) => expr.get_return_type(),
+            Self::AtTimeZone(expr) => expr.get_return_type(),
+            Self::MapAccess(expr) => expr.get_return_type(),
+            Self::Tuple(expr) => expr.get_return_type(),
+            Self::Wildcard(expr) => expr.get_return_type(),
+            Self::QualifiedWildcard(expr) => expr.get_return_type(),
+            Self::TypedString(expr) => expr.get_return_type(),
+            Self::Subscript(expr) => expr.get_return_type(),
+            Self::Nested(expr) => expr.get_return_type(),
+            Self::IsCheck(expr) => expr.get_return_type(),
+            Self::BinaryOp(expr) => expr.get_return_type(),
+            Self::Any(expr) => expr.get_return_type(),
+            Self::All(expr) => expr.get_return_type(),
+            Self::UnaryOp(expr) => expr.get_return_type(),
+            Self::Convert(expr) => expr.get_return_type(),
+            Self::CeilFloor(expr) => expr.get_return_type(),
+            Self::Substring(expr) => expr.get_return_type(),
+            Self::Literal(expr) => expr.get_return_type(),
         }
     }
 
@@ -176,6 +458,44 @@ impl ExpressionOps for Expression {
             Self::Window(expr) => expr.clone_with_children(children),
             Self::Cast(expr) => expr.clone_with_children(children),
             Self::Case(expr) => expr.clone_with_children(children),
+            Self::Function(expr) => expr.clone_with_children(children),
+            Self::Subquery(expr) => expr.clone_with_children(children),
+            Self::In(expr) => expr.clone_with_children(children),
+            Self::Between(expr) => expr.clone_with_children(children),
+            Self::Like(expr) => expr.clone_with_children(children),
+            Self::Extract(expr) => expr.clone_with_children(children),
+            Self::Exists(expr) => expr.clone_with_children(children),
+            Self::Regex(expr) => expr.clone_with_children(children),
+            // Self::DateTime(expr) => expr.clone_with_children(children),
+            Self::Coalesce(expr) => expr.clone_with_children(children),
+            Self::Random(expr) => expr.clone_with_children(children),
+            Self::Trim(expr) => expr.clone_with_children(children),
+            Self::Interval(expr) => expr.clone_with_children(children),
+            Self::GroupingSets(expr) => expr.clone_with_children(children),
+            Self::Filter(expr) => expr.clone_with_children(children),
+            Self::IsDistinct(expr) => expr.clone_with_children(children),
+            Self::Position(expr) => expr.clone_with_children(children),
+            Self::Method(expr) => expr.clone_with_children(children),
+            Self::Struct(expr) => expr.clone_with_children(children),
+            Self::Overlay(expr) => expr.clone_with_children(children),
+            Self::Collate(expr) => expr.clone_with_children(children),
+            Self::AtTimeZone(expr) => expr.clone_with_children(children),
+            Self::MapAccess(expr) => expr.clone_with_children(children),
+            Self::Tuple(expr) => expr.clone_with_children(children),
+            Self::Wildcard(expr) => expr.clone_with_children(children),
+            Self::QualifiedWildcard(expr) => expr.clone_with_children(children),
+            Self::TypedString(expr) => expr.clone_with_children(children),
+            Self::Subscript(expr) => expr.clone_with_children(children),
+            Self::Nested(expr) => expr.clone_with_children(children),
+            Self::IsCheck(expr) => expr.clone_with_children(children),
+            Self::BinaryOp(expr) => expr.clone_with_children(children),
+            Self::Any(expr) => expr.clone_with_children(children),
+            Self::All(expr) => expr.clone_with_children(children),
+            Self::UnaryOp(expr) => expr.clone_with_children(children),
+            Self::Convert(expr) => expr.clone_with_children(children),
+            Self::CeilFloor(expr) => expr.clone_with_children(children),
+            Self::Substring(expr) => expr.clone_with_children(children),
+            Self::Literal(expr) => expr.clone_with_children(children),
         }
     }
 
@@ -257,7 +577,13 @@ impl Display for Expression {
                     write!(f, "{}", expr)
                 }
             }
-            Self::Mock(expr) => write!(f, "{}", expr),
+            Self::Mock(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
             Self::Aggregate(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
@@ -280,6 +606,265 @@ impl Display for Expression {
                 }
             }
             Self::Case(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Function(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Subquery(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::In(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Between(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Like(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Extract(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Exists(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Regex(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Coalesce(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Random(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Trim(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Interval(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::GroupingSets(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Filter(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::IsDistinct(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Position(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Method(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Struct(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Overlay(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Collate(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::AtTimeZone(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::MapAccess(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Tuple(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Wildcard(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::QualifiedWildcard(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::TypedString(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Subscript(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Nested(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::IsCheck(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::BinaryOp(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Any(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::All(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::UnaryOp(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Convert(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::CeilFloor(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Substring(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Literal(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
@@ -333,7 +918,7 @@ mod unit_tests {
         let mock_expr = Arc::new(Expression::Mock(mock));
 
         // Create an array expression with mock child
-        let array_expr = Expression::Array(ArrayExpression::new(vec![mock_expr]));
+        let array_expr = Expression::Array(ArrayExpression::new(vec![mock_expr], Column::new("test", TypeId::Integer)));
 
         assert_eq!(array_expr.get_children().len(), 1);
         match &array_expr.get_children()[0].as_ref() {
