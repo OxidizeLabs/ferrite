@@ -51,21 +51,8 @@ impl AggregationPlanNode {
         for expr in &aggregate_exprs {
             if let Expression::Aggregate(agg) = expr.as_ref() {
                 let col = agg.get_return_type().clone();
-                // Get the actual column name from the aggregate argument
-                let arg_name = match agg.get_arg().as_ref() {
-                    Expression::ColumnRef(col_ref) => col_ref.get_return_type().get_name().to_string(),
-                    _ => "*".to_string(), // Use * for COUNT(*) etc.
-                };
-
-                // Format name as FUNCTION(column)
-                let new_name = if *agg.get_agg_type() == AggregationType::CountStar {
-                    "COUNT(*)".to_string()
-                } else {
-                    format!("{}({})",
-                            agg.get_agg_type().to_string().to_uppercase(),
-                            arg_name)
-                };
-
+                // Use the new column naming convention
+                let new_name = agg.get_column_name();
                 columns.push(col.with_name(&new_name));
             }
         }
@@ -222,6 +209,7 @@ mod tests {
                 vec![]
             )))],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         let agg_node = AggregationPlanNode::new(
@@ -267,12 +255,14 @@ mod tests {
             AggregationType::Sum,
             vec![col2_ref.clone()],
             Column::new("SUM(col2)", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
             vec![col2_ref.clone()],
             Column::new("COUNT(col2)", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         let agg_node = AggregationPlanNode::new(
@@ -306,12 +296,14 @@ mod tests {
             AggregationType::Sum,
             vec![age_ref.clone()],
             Column::new("SUM(age)", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let count_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
             vec![age_ref.clone()],
             Column::new("COUNT(age)", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         // Create plan node
@@ -333,7 +325,7 @@ mod tests {
 
         // Check aggregate columns
         assert_eq!(columns[1].get_name(), "SUM(age)");
-        assert_eq!(columns[1].get_type(), TypeId::Integer);
+        assert_eq!(columns[1].get_type(), TypeId::BigInt);
 
         assert_eq!(columns[2].get_name(), "COUNT(age)");
         assert_eq!(columns[2].get_type(), TypeId::BigInt);
@@ -351,6 +343,7 @@ mod tests {
             AggregationType::Min,
             vec![value_ref.clone()],
             Column::new("MIN(value)", TypeId::Integer),
+            "MIN".to_string(),
         )));
 
         // Create MAX aggregate
@@ -358,6 +351,7 @@ mod tests {
             AggregationType::Max,
             vec![value_ref.clone()],
             Column::new("MAX(value)", TypeId::Integer),
+            "MAX".to_string(),
         )));
 
         let agg_plan = AggregationPlanNode::new(
@@ -386,6 +380,7 @@ mod tests {
                 vec![],
             )))],
             Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
         )));
 
         let agg_plan = AggregationPlanNode::new(
@@ -422,6 +417,7 @@ mod tests {
             AggregationType::Sum,
             vec![salary_ref.clone()],
             Column::new("SUM(salary)", TypeId::Integer),
+            "SUM".to_string(),
         )));
 
         let agg_plan = AggregationPlanNode::new(
@@ -439,6 +435,6 @@ mod tests {
         assert_eq!(columns[1].get_name(), "dept");
         assert_eq!(columns[1].get_type(), TypeId::VarChar);
         assert_eq!(columns[2].get_name(), "SUM(salary)");
-        assert_eq!(columns[2].get_type(), TypeId::Integer);
+        assert_eq!(columns[2].get_type(), TypeId::BigInt);
     }
 }

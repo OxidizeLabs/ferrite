@@ -15,7 +15,6 @@ use std::sync::Arc;
 use log;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Value, Val};
-use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,

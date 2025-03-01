@@ -8,8 +8,6 @@ use crate::types_db::value::{Value, Val};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::common::rid::RID;
-use crate::sql::execution::expressions::mock_expression::MockExpression;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SubqueryType {
@@ -170,7 +168,6 @@ mod tests {
     use crate::types_db::value::Val;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
-    use crate::types_db::types::Type;
 
     // Helper function to create a mock expression that returns a specific value
     fn create_mock_expression(name: String, return_type: TypeId) -> Arc<Expression> {
