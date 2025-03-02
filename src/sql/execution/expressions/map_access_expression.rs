@@ -226,7 +226,6 @@ mod tests {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![])

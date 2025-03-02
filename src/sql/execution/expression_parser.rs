@@ -12,7 +12,6 @@ use crate::sql::execution::expressions::arithmetic_expression::{
     ArithmeticExpression, ArithmeticOp,
 };
 use crate::sql::execution::expressions::array_expression::ArrayExpression;
-use crate::sql::execution::expressions::at_timezone_expression::AtTimeZoneExpression;
 use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
 use crate::sql::execution::expressions::case_expression::CaseExpression;
 use crate::sql::execution::expressions::cast_expression::CastExpression;
@@ -65,16 +64,14 @@ use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
 use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
+use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::{
     BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArgumentClause,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, Subscript as SQLSubscript, TableFactor, Value as SQLValue,
-    WindowFrameBound, WindowType,
+    FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
+    JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    Subscript as SQLSubscript, TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
 };
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
 use std::sync::Arc;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
@@ -84,6 +81,7 @@ pub struct ExpressionParser {
 
 impl ExpressionParser {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+        debug!("Creating new ExpressionParser");
         Self { catalog }
     }
 
@@ -92,8 +90,10 @@ impl ExpressionParser {
     }
 
     pub fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
+        debug!("Parsing expression: {:?}", expr);
         match expr {
             Expr::Identifier(ident) => {
+                debug!("Parsing identifier: {}", ident.value);
                 // Look up column in the provided schema
                 let column_idx = schema
                     .get_column_index(&ident.value)
@@ -103,6 +103,7 @@ impl ExpressionParser {
                     .get_column(column_idx)
                     .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
 
+                debug!("Found column '{}' at index {}", ident.value, column_idx);
                 Ok(Expression::ColumnRef(ColumnRefExpression::new(
                     0, // table index (for single table, it's always 0)
                     column_idx,
@@ -118,10 +119,11 @@ impl ExpressionParser {
 
                 let table_alias = &parts[0].value;
                 let column_name = &parts[1].value;
+                let qualified_name = format!("{}.{}", table_alias, column_name);
 
-                // Try different formats for column lookup
+                // Try to find the column using the qualified name
                 let column_idx = schema
-                    .get_column_index(&format!("{}.{}", table_alias, column_name))
+                    .get_qualified_column_index(&qualified_name)
                     .or_else(|| {
                         // Try looking up the original table name if alias doesn't work
                         let catalog = self.catalog.read();
@@ -130,11 +132,11 @@ impl ExpressionParser {
                         if let Some(table) = catalog.get_table(table_alias) {
                             // Check if column exists in this table
                             let table_schema = table.get_table_schema();
-                            if let Some(_) = table_schema.get_column_index(column_name) {
+                            if table_schema.get_column_index(column_name).is_some() {
                                 // If found in original table, look for it in the schema
                                 // Try both qualified and unqualified names
                                 schema
-                                    .get_column_index(&format!("{}.{}", table_alias, column_name))
+                                    .get_qualified_column_index(&qualified_name)
                                     .or_else(|| schema.get_column_index(column_name))
                             } else {
                                 None
@@ -149,29 +151,18 @@ impl ExpressionParser {
                         format!("Column {}.{} not found in schema", table_alias, column_name)
                     })?;
 
-                let column = schema
-                    .get_column(column_idx)
-                    .ok_or_else(|| format!("Failed to get column at index {}", column_idx))?;
-
-                // Create a new column with the aliased name to preserve the table alias
-                let aliased_column = Column::new(
-                    &format!("{}.{}", table_alias, column_name),
-                    column.get_type(),
-                );
-
+                let column = schema.get_column(column_idx).unwrap().clone();
                 Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                    0, // table index will be handled by the planner/executor
+                    0,
                     column_idx,
-                    aliased_column,
+                    column,
                     vec![],
                 )))
             }
 
-            Expr::Value(value) => {
-                Ok(Expression::Literal(LiteralValueExpression::new(
-                    value.clone(),
-                )?))
-            },
+            Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
+                value.clone(),
+            )?)),
 
             Expr::BinaryOp { left, op, right } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
@@ -179,7 +170,10 @@ impl ExpressionParser {
 
                 // Convert arithmetic binary operators to ArithmeticExpression
                 match op {
-                    BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply | BinaryOperator::Divide => {
+                    BinaryOperator::Plus
+                    | BinaryOperator::Minus
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide => {
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
 
@@ -217,14 +211,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-                        
+
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "AND operator requires boolean operands, got {:?} AND {:?}",
                                 left_type, right_type
                             ));
                         }
-                        
+
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -236,14 +230,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-                        
+
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "OR operator requires boolean operands, got {:?} OR {:?}",
                                 left_type, right_type
                             ));
                         }
-                        
+
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -252,12 +246,16 @@ impl ExpressionParser {
                         )))
                     }
                     // Handle comparison operators
-                    BinaryOperator::Eq | BinaryOperator::NotEq | BinaryOperator::Lt | BinaryOperator::LtEq |
-                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                    BinaryOperator::Eq
+                    | BinaryOperator::NotEq
+                    | BinaryOperator::Lt
+                    | BinaryOperator::LtEq
+                    | BinaryOperator::Gt
+                    | BinaryOperator::GtEq => {
                         // Validate that the types are comparable
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-                        
+
                         match (left_type, right_type) {
                             (TypeId::Integer, TypeId::Integer)
                             | (TypeId::Decimal, TypeId::Decimal)
@@ -283,11 +281,13 @@ impl ExpressionParser {
 
                                 // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
                                 let right_expr = match right_expr.as_ref() {
-                                    Expression::Literal(lit) => Arc::new(Expression::Constant(ConstantExpression::new(
-                                        lit.get_value().clone(),
-                                        lit.get_return_type().clone(),
-                                        vec![],
-                                    ))),
+                                    Expression::Literal(lit) => {
+                                        Arc::new(Expression::Constant(ConstantExpression::new(
+                                            lit.get_value().clone(),
+                                            lit.get_return_type().clone(),
+                                            vec![],
+                                        )))
+                                    }
                                     _ => right_expr,
                                 };
 
@@ -429,7 +429,7 @@ impl ExpressionParser {
                 let result = Expression::Logic(LogicExpression::new(
                     Arc::new(low_compare.clone()),
                     Arc::new(high_compare.clone()),
-                    { LogicType::And },
+                    LogicType::And,
                     vec![Arc::new(low_compare), Arc::new(high_compare)],
                 ));
 
@@ -913,30 +913,26 @@ impl ExpressionParser {
                 expr,
                 pattern,
                 escape_char,
-            } => {
-                Ok(Expression::Regex(RegexExpression::new(
-                    Arc::new(self.parse_expression(expr, schema)?),
-                    Arc::new(self.parse_expression(pattern, schema)?),
-                    RegexOperator::RLike,
-                    escape_char.clone(),
-                    Column::new("like", TypeId::Boolean),
-                )))
-            },
+            } => Ok(Expression::Regex(RegexExpression::new(
+                Arc::new(self.parse_expression(expr, schema)?),
+                Arc::new(self.parse_expression(pattern, schema)?),
+                RegexOperator::RLike,
+                escape_char.clone(),
+                Column::new("like", TypeId::Boolean),
+            ))),
             Expr::ILike {
                 negated,
                 any,
                 expr,
                 pattern,
                 escape_char,
-            } => {
-                Ok(Expression::Regex(RegexExpression::new(
-                    Arc::new(self.parse_expression(expr, schema)?),
-                    Arc::new(self.parse_expression(pattern, schema)?),
-                    RegexOperator::RLike,
-                    escape_char.clone(),
-                    Column::new("ilike", TypeId::Boolean),
-                )))
-            },
+            } => Ok(Expression::Regex(RegexExpression::new(
+                Arc::new(self.parse_expression(expr, schema)?),
+                Arc::new(self.parse_expression(pattern, schema)?),
+                RegexOperator::RLike,
+                escape_char.clone(),
+                Column::new("ilike", TypeId::Boolean),
+            ))),
             Expr::Extract {
                 field,
                 syntax,
@@ -1205,7 +1201,9 @@ impl ExpressionParser {
                 // Convert SQLParser StructField to our StructField
                 let mut struct_fields = Vec::new();
                 for field in fields {
-                    let field_name = field.field_name.as_ref()
+                    let field_name = field
+                        .field_name
+                        .as_ref()
                         .map(|ident| ident.value.clone())
                         .unwrap_or_else(|| String::from(""));
 
@@ -1215,14 +1213,23 @@ impl ExpressionParser {
                         DataType::BigInt(_) => TypeId::BigInt,
                         DataType::SmallInt(_) => TypeId::SmallInt,
                         DataType::TinyInt(_) => TypeId::TinyInt,
-                        DataType::Float(_) | DataType::Double | DataType::Decimal(_) => TypeId::Decimal,
+                        DataType::Float(_) | DataType::Double | DataType::Decimal(_) => {
+                            TypeId::Decimal
+                        }
                         DataType::Char(_) => TypeId::Char,
                         DataType::Varchar(_) | DataType::Text => TypeId::VarChar,
                         DataType::Boolean => TypeId::Boolean,
-                        DataType::Date | DataType::Time(_, _) | DataType::Timestamp(_, _) => TypeId::Timestamp,
+                        DataType::Date | DataType::Time(_, _) | DataType::Timestamp(_, _) => {
+                            TypeId::Timestamp
+                        }
                         DataType::Array(_) => TypeId::Vector,
                         DataType::Struct(_, _) => TypeId::Struct,
-                        _ => return Err(format!("Unsupported struct field type: {:?}", field.field_type)),
+                        _ => {
+                            return Err(format!(
+                                "Unsupported struct field type: {:?}",
+                                field.field_type
+                            ))
+                        }
                     };
 
                     struct_fields.push(StructField::new(
@@ -1240,22 +1247,26 @@ impl ExpressionParser {
                     struct_fields,
                     return_type,
                 )))
-            },
+            }
             Expr::Subscript { expr, subscript } => {
                 let base_expr = Arc::new(self.parse_expression(&expr, schema)?);
-                
+
                 match &**subscript {
                     SQLSubscript::Index { index } => {
                         let idx_expr = Arc::new(self.parse_expression(index, schema)?);
-                        
+
                         // The return type will be the element type of the vector
                         let return_type = match base_expr.get_return_type().get_type() {
                             TypeId::Vector => {
                                 // For now, assuming vectors contain integers. In future, we should get the element type from the vector type
                                 Column::new("subscript_result", TypeId::Integer)
-                            },
-                            _ => return Err(format!("Cannot perform subscript operation on non-vector type: {:?}", 
-                                base_expr.get_return_type().get_type())),
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Cannot perform subscript operation on non-vector type: {:?}",
+                                    base_expr.get_return_type().get_type()
+                                ))
+                            }
                         };
 
                         Ok(Expression::Subscript(SubscriptExpression::new(
@@ -1263,8 +1274,12 @@ impl ExpressionParser {
                             Subscript::Single(idx_expr),
                             return_type,
                         )))
-                    },
-                    SQLSubscript::Slice { lower_bound, upper_bound, stride } => {
+                    }
+                    SQLSubscript::Slice {
+                        lower_bound,
+                        upper_bound,
+                        stride,
+                    } => {
                         if stride.is_some() {
                             return Err("Stride in array slices is not yet supported".to_string());
                         }
@@ -1287,7 +1302,7 @@ impl ExpressionParser {
                             Subscript::Range { start, end },
                             return_type,
                         )))
-                    },
+                    }
                 }
             }
             Expr::Array(array) => {
@@ -1298,7 +1313,7 @@ impl ExpressionParser {
                 // Parse each element expression
                 for elem in &array.elem {
                     let parsed_elem = Arc::new(self.parse_expression(elem, schema)?);
-                    
+
                     // If this is the first element, use its type as the element type
                     if element_type == TypeId::Invalid {
                         element_type = parsed_elem.get_return_type().get_type();
@@ -1313,7 +1328,7 @@ impl ExpressionParser {
                             ));
                         }
                     }
-                    
+
                     elements.push(parsed_elem);
                 }
 
@@ -1326,11 +1341,11 @@ impl ExpressionParser {
                     elements,
                     Column::new("array", TypeId::Vector),
                 )))
-            },
+            }
             Expr::Interval(interval) => {
                 // Parse the interval value expression
                 let value_expr = self.parse_expression(&interval.value, schema)?;
-                
+
                 // Convert sqlparser::ast::DateTimeField to our IntervalField
                 let field = match &interval.leading_field {
                     Some(sqlparser::ast::DateTimeField::Year) => IntervalField::Year,
@@ -1348,32 +1363,45 @@ impl ExpressionParser {
                     Arc::new(value_expr),
                     Column::new("interval", TypeId::Struct),
                 )))
-            },
+            }
             Expr::Wildcard(token) => {
                 // Create a wildcard expression that will return all columns as a vector
-                Ok(Expression::Wildcard(WildcardExpression::new(
-                    Column::new("*", TypeId::Vector)
-                )))
-            },
+                Ok(Expression::Wildcard(WildcardExpression::new(Column::new(
+                    "*",
+                    TypeId::Vector,
+                ))))
+            }
             Expr::QualifiedWildcard(name, _) => {
                 // Extract the qualifier parts (e.g., ["schema", "table"] from schema.table.*)
                 let qualifier: Vec<String> = name.0.iter().map(|i| i.value.clone()).collect();
-                
+
                 // Create a qualified wildcard expression
-                Ok(Expression::QualifiedWildcard(QualifiedWildcardExpression::new(
-                    qualifier,
-                    Column::new(&format!("{}.*", name.0.iter().map(|i| i.value.as_str()).collect::<Vec<_>>().join(".")), TypeId::Vector)
-                )))
-            },
+                Ok(Expression::QualifiedWildcard(
+                    QualifiedWildcardExpression::new(
+                        qualifier,
+                        Column::new(
+                            &format!(
+                                "{}.*",
+                                name.0
+                                    .iter()
+                                    .map(|i| i.value.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(".")
+                            ),
+                            TypeId::Vector,
+                        ),
+                    ),
+                ))
+            }
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
-
 
     pub fn prepare_table_scan(
         &self,
         select: &Box<Select>,
     ) -> Result<(String, Schema, u64), String> {
+        debug!("Preparing table scan for select: {:?}", select);
         if select.from.len() != 1 {
             return Err("Only single table queries are supported".to_string());
         }
@@ -1397,51 +1425,92 @@ impl ExpressionParser {
     }
 
     pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
-        if select.from.len() <= 1 {
+        debug!("Preparing join scan for select: {:?}", select);
+
+        if select.from.len() != 1 {
+            return Err("Only single FROM clause supported".to_string());
+        }
+
+        let from = &select.from[0];
+        if from.joins.is_empty() {
             return self
                 .prepare_table_scan(select)
                 .map(|(name, schema, oid)| LogicalPlan::table_scan(name, schema, oid));
         }
 
+        let mut tables = Vec::new();
+        let mut aliases = Vec::new();
+
+        // Add the main table
+        match &from.relation {
+            TableFactor::Table { name, alias, .. } => {
+                let table_name = name.to_string();
+                let alias_name = alias.as_ref().map(|a| a.name.value.clone());
+                tables.push(table_name);
+                aliases.push(alias_name);
+            }
+            _ => return Err("Only simple table references supported".to_string()),
+        };
+
+        // Add the joined tables
+        for join in &from.joins {
+            match &join.relation {
+                TableFactor::Table { name, alias, .. } => {
+                    let table_name = name.to_string();
+                    let alias_name = alias.as_ref().map(|a| a.name.value.clone());
+                    tables.push(table_name);
+                    aliases.push(alias_name);
+                }
+                _ => return Err("Only simple table references in joins supported".to_string()),
+            }
+        }
+
+        // Create logical plans for each table
         let mut current_plan = None;
         let mut current_schema = None;
+        let mut current_alias = None;
 
-        for (i, table_with_joins) in select.from.iter().enumerate() {
-            let table_factor = &table_with_joins.relation;
-            let table_name = match table_factor {
-                TableFactor::Table { name, .. } => name.to_string(),
-                _ => return Err("Only simple table joins are supported".to_string()),
-            };
-
+        for (i, (table_name, alias)) in tables.iter().zip(aliases.iter()).enumerate() {
             let catalog_guard = self.catalog.read();
             let table_info = catalog_guard
-                .get_table(&table_name)
+                .get_table(table_name)
                 .ok_or_else(|| format!("Table '{}' not found", table_name))?;
 
             let schema = table_info.get_table_schema();
             let table_oid = table_info.get_table_oidt();
-            let table_scan = LogicalPlan::table_scan(table_name, schema.clone(), table_oid);
+            let table_scan = LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
 
             if i == 0 {
                 current_plan = Some(table_scan);
                 current_schema = Some(schema);
+                current_alias = alias.clone();
             } else {
-                for join in &table_with_joins.joins {
-                    let left_plan = current_plan.take().unwrap();
-                    let left_schema = current_schema.take().unwrap();
+                let left_plan = current_plan.take().unwrap();
+                let left_schema = current_schema.take().unwrap();
+                let left_alias = current_alias.take();
+                let right_alias = alias.clone();
 
+                // Process join
+                if let Some(join) = from.joins.get(i - 1) {
                     let join_predicate = match &join.join_operator {
-                        JoinOperator::Inner(constraint) |
-                        JoinOperator::LeftOuter(constraint) |
-                        JoinOperator::RightOuter(constraint) |
-                        JoinOperator::FullOuter(constraint) => match constraint {
-                            JoinConstraint::On(expr) => {
-                                let combined_schema = Schema::merge(&left_schema, &schema);
-                                self.parse_expression(expr, &combined_schema)?
+                        JoinOperator::Inner(constraint) => {
+                            match constraint {
+                                JoinConstraint::On(expr) => {
+                                    // Create a combined schema for parsing the join predicate
+                                    let combined_schema = Schema::merge_with_aliases(
+                                        &left_schema,
+                                        &schema,
+                                        left_alias.as_deref(),
+                                        right_alias.as_deref(),
+                                    );
+                                    self.parse_expression(expr, &combined_schema)?
+                                }
+                                _ => return Err("Only ON join constraints supported".to_string()),
                             }
-                            _ => return Err("Only ON join constraints supported".to_string()),
-                        },
-                        _ => return Err("Only INNER, LEFT OUTER, RIGHT OUTER, and FULL OUTER joins with ON clause are supported".to_string()),
+                        }
+                        _ => {
+                            return Err("Only INNER joins with ON clause are supported".to_string())
+                        }
                     };
 
                     current_plan = Some(match &join.join_operator {
@@ -1451,12 +1520,19 @@ impl ExpressionParser {
                             Arc::new(join_predicate),
                             join.join_operator.clone(),
                             left_plan,
-                            table_scan.clone(),
+                            table_scan,
                         ),
                         _ => return Err("Only INNER JOIN supported".to_string()),
                     });
 
-                    current_schema = Some(Schema::merge(&left_schema, &schema));
+                    // Use merge_with_aliases for the current schema as well
+                    current_schema = Some(Schema::merge_with_aliases(
+                        &left_schema,
+                        &schema,
+                        left_alias.as_deref(),
+                        right_alias.as_deref(),
+                    ));
+                    current_alias = None; // Reset alias after merge
                 }
             }
         }
@@ -1465,6 +1541,7 @@ impl ExpressionParser {
     }
 
     pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
+        debug!("Extracting table name from: {:?}", table_name);
         match table_name {
             ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
             _ => Err("Only single table INSERT statements are supported".to_string()),
@@ -1472,6 +1549,7 @@ impl ExpressionParser {
     }
 
     pub fn get_table_schema(&self, table_name: &str) -> Result<Schema, String> {
+        debug!("Getting schema for table: {}", table_name);
         let catalog = self.catalog.read();
         catalog
             .get_table_schema(table_name)
@@ -1479,6 +1557,7 @@ impl ExpressionParser {
     }
 
     pub fn get_table_oid(&self, table_name: &str) -> Result<TableOidT, String> {
+        debug!("Getting OID for table: {}", table_name);
         let catalog = self.catalog.read();
         catalog
             .get_table(table_name)
@@ -1492,6 +1571,7 @@ impl ExpressionParser {
         left_schema: &Schema,
         right_schema: &Schema,
     ) -> Result<Expression, String> {
+        debug!("Parsing join condition: {:?}", expr);
         // Create a combined schema for parsing the join condition
         let combined_schema = Schema::merge(left_schema, right_schema);
 
@@ -1519,21 +1599,16 @@ impl ExpressionParser {
         }
     }
 
-    pub fn has_aggregate_functions(&self, projection: &[SelectItem]) -> bool {
-        projection.iter().any(|item| match item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.contains_aggregate_function(expr)
-            }
-            _ => false,
-        })
-    }
-
     pub fn determine_group_by_expressions(
         &self,
         select: &Box<Select>,
         schema: &Schema,
         has_group_by: bool,
     ) -> Result<Vec<Expression>, String> {
+        debug!(
+            "Determining group by expressions, has_group_by: {}",
+            has_group_by
+        );
         if !has_group_by {
             return Ok(Vec::new());
         }
@@ -1564,47 +1639,27 @@ impl ExpressionParser {
         }
     }
 
-    pub fn parse_aggregates(
-        &self,
-        projection: &[SelectItem],
-        schema: &Schema,
-    ) -> Result<(Vec<Arc<Expression>>, Vec<String>), String> {
-        let mut agg_exprs = Vec::new();
-        let mut agg_names = Vec::new();
-
-        for item in projection {
-            match item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_names.push(expr.to_string());
-                    }
-                }
-                SelectItem::ExprWithAlias { expr, alias } => {
-                    if let Some(agg_expr) = self.try_parse_aggregate(expr, schema)? {
-                        agg_exprs.push(Arc::new(agg_expr));
-                        agg_names.push(alias.value.clone());
-                    }
-                }
-                SelectItem::QualifiedWildcard(_, _) => {}
-                SelectItem::Wildcard(_) => {} // Skip standalone wildcards (SELECT *) - COUNT(*) is handled in parse_function
-            }
-        }
-
-        Ok((agg_exprs, agg_names))
-    }
-
     fn parse_at_timezone(
         &self,
         timestamp: &Expr,
         timezone: &Expr,
         schema: &Schema,
     ) -> Result<Expression, String> {
+        debug!(
+            "Parsing AT TIME ZONE expression: timestamp={:?}, timezone={:?}",
+            timestamp, timezone
+        );
+
         // For typed string timestamps, we need to ensure they output RFC3339 format
         let timestamp_expr = match timestamp {
             Expr::TypedString { data_type, value } => {
+                debug!(
+                    "Processing typed string timestamp: type={:?}, value={}",
+                    data_type, value
+                );
                 // Only allow TIMESTAMP typed strings
                 if !matches!(data_type, DataType::Timestamp(_, _)) {
+                    debug!("Invalid timestamp data type: {:?}", data_type);
                     return Err(format!(
                         "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
                         data_type
@@ -1613,46 +1668,74 @@ impl ExpressionParser {
                 // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
                 Arc::new(Expression::TypedString(TypedStringExpression::new(
                     "TIMESTAMP".to_string(),
-                    value.to_string(),
-                    Column::new("timestamp", TypeId::VarChar),
+                    value.clone(),
+                    Column::new("timestamp", TypeId::Timestamp),
                 )))
             }
             _ => {
-                // For non-TypedString expressions, parse and validate timestamp type
-                let expr = Arc::new(self.parse_expression(timestamp, schema)?);
-                let expr_type = expr.get_return_type().get_type();
-                if expr_type != TypeId::Timestamp {
+                debug!("Processing regular timestamp expression");
+                // For other expressions, parse normally
+                let expr = self.parse_expression(timestamp, schema)?;
+
+                // Verify the expression returns a timestamp type
+                if expr.get_return_type().get_type() != TypeId::Timestamp {
+                    debug!(
+                        "Invalid timestamp expression type: {:?}",
+                        expr.get_return_type().get_type()
+                    );
                     return Err(format!(
-                        "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
-                        expr_type
+                        "AT TIME ZONE timestamp expression must return timestamp type, got {:?}",
+                        expr.get_return_type().get_type()
                     ));
                 }
-                expr
+
+                Arc::new(expr)
             }
         };
 
-        let timezone_expr = Arc::new(self.parse_expression(timezone, schema)?);
+        // Parse the timezone expression
+        let timezone_expr = match timezone {
+            Expr::Value(sqlparser::ast::Value::SingleQuotedString(tz_str)) => {
+                debug!("Processing timezone string literal: {}", tz_str);
+                // Create a constant expression for the timezone string
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(tz_str.clone()),
+                    Column::new("timezone", TypeId::VarChar),
+                    Vec::new(), // No children for constant expression
+                )))
+            }
+            _ => {
+                debug!("Processing regular timezone expression");
+                // For other expressions, parse normally
+                let expr = self.parse_expression(timezone, schema)?;
 
-        // Validate that timezone expression returns a string type
-        let timezone_type = timezone_expr.get_return_type().get_type();
-        if !matches!(timezone_type, TypeId::VarChar | TypeId::Char) {
-            return Err(format!(
-                "AT TIME ZONE timezone must be a string type, got {:?}",
-                timezone_type
-            ));
-        }
+                // Verify the expression returns a string type
+                if expr.get_return_type().get_type() != TypeId::VarChar {
+                    debug!(
+                        "Invalid timezone expression type: {:?}",
+                        expr.get_return_type().get_type()
+                    );
+                    return Err(format!(
+                        "AT TIME ZONE timezone expression must return string type, got {:?}",
+                        expr.get_return_type().get_type()
+                    ));
+                }
 
-        // Create return type column - result is always a timestamp
-        let return_type = Column::new("at_timezone", TypeId::Timestamp);
+                Arc::new(expr)
+            }
+        };
 
-        Ok(Expression::AtTimeZone(AtTimeZoneExpression::new(
-            timestamp_expr,
-            timezone_expr,
-            return_type,
+        debug!("Creating AT_TIMEZONE function with timestamp and timezone expressions");
+        // Create the AT_TIMEZONE function expression
+        Ok(Expression::Function(FunctionExpression::new(
+            "AT_TIMEZONE".to_string(),
+            vec![timestamp_expr, timezone_expr],
+            Column::new("AT_TIMEZONE", TypeId::Timestamp),
         )))
     }
 
     fn parse_subquery(&self, query: &Query, schema: &Schema) -> Result<Expression, String> {
+        debug!("Parsing subquery: {:?}", query);
         // Extract the body of the query
         let body = &query.body;
 
@@ -1660,7 +1743,7 @@ impl ExpressionParser {
         match body.as_ref() {
             SetExpr::Select(select) => {
                 // Parse the SELECT statement
-                let select_expr = Arc::new(self.parse_select_statement(select, schema)?);
+                let select_expr = Arc::new(self.parse_select_statements(select, schema)?);
 
                 // Create a SubqueryExpression with appropriate type and return type
                 Ok(Expression::Subquery(SubqueryExpression::new(
@@ -1688,20 +1771,29 @@ impl ExpressionParser {
         }
     }
 
-    fn parse_select_statement(
+    pub fn parse_select_statements(
         &self,
         select: &Box<Select>,
         schema: &Schema,
     ) -> Result<Expression, String> {
-        // For now, just handle the first projection item
-        if let Some(item) = select.projection.first() {
-            match item {
-                SelectItem::UnnamedExpr(expr) => self.parse_expression(expr, schema),
-                SelectItem::ExprWithAlias { expr, .. } => self.parse_expression(expr, schema),
-                _ => Err("Only simple expressions are supported in subqueries".to_string()),
+        debug!("Parsing select statements: {:?}", select);
+        // Ensure we have at least one projection item
+        if select.projection.is_empty() {
+            return Err("Empty SELECT statement in subquery".to_string());
+        }
+
+        // For subqueries, we currently only support single-column results
+        if select.projection.len() > 1 {
+            return Err("Subqueries must return exactly one column".to_string());
+        }
+
+        // Parse the first (and only) projection item
+        match &select.projection[0] {
+            SelectItem::UnnamedExpr(expr) => self.parse_expression(expr, schema),
+            SelectItem::ExprWithAlias { expr, .. } => self.parse_expression(expr, schema),
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                Err("Wildcards are not supported in subqueries".to_string())
             }
-        } else {
-            Err("Empty SELECT statement in subquery".to_string())
         }
     }
 
@@ -1710,6 +1802,7 @@ impl ExpressionParser {
         order_exprs: &[OrderByExpr],
         schema: &Schema,
     ) -> Result<Vec<Arc<Expression>>, String> {
+        debug!("Parsing order by expressions: {:?}", order_exprs);
         let mut expressions = Vec::new();
         for order_expr in order_exprs {
             let parsed_expr = self.parse_expression(&order_expr.expr, schema)?;
@@ -1723,6 +1816,7 @@ impl ExpressionParser {
         args: &FunctionArguments,
         schema: &Schema,
     ) -> Result<Vec<Arc<Expression>>, String> {
+        debug!("Parsing function arguments: {:?}", args);
         let mut children = Vec::new();
 
         match args {
@@ -1792,6 +1886,7 @@ impl ExpressionParser {
         spec: &WindowType,
         schema: &Schema,
     ) -> Result<Vec<Arc<Expression>>, String> {
+        debug!("Parsing SQL window specification: {:?}", spec);
         let mut children = Vec::new();
 
         // Extract the WindowSpec from WindowType
@@ -1842,6 +1937,7 @@ impl ExpressionParser {
     }
 
     fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
+        debug!("Parsing function: {:?}", func);
         let function_name = func.name.to_string().to_uppercase();
         let function_type = function_types::get_function_type(&function_name);
 
@@ -1864,6 +1960,10 @@ impl ExpressionParser {
         scalar_type: ScalarFunctionType,
         schema: &Schema,
     ) -> Result<Expression, String> {
+        debug!(
+            "Parsing scalar function: {:?}, type: {:?}",
+            func, scalar_type
+        );
         let args = self.parse_function_arguments(&func.args, schema)?;
         let function_name = func.name.to_string();
         let return_type = self.infer_scalar_return_type(&function_name, &scalar_type, &args)?;
@@ -1881,6 +1981,10 @@ impl ExpressionParser {
         agg_type: AggregateFunctionType,
         schema: &Schema,
     ) -> Result<Expression, String> {
+        debug!(
+            "Parsing aggregate function: {:?}, type: {:?}",
+            func, agg_type
+        );
         let args = self.parse_function_arguments(&func.args, schema)?;
         let function_name = func.name.to_string().to_uppercase();
 
@@ -1921,6 +2025,10 @@ impl ExpressionParser {
         scalar_type: &ScalarFunctionType,
         args: &[Arc<Expression>],
     ) -> Result<Column, String> {
+        debug!(
+            "Inferring scalar return type for function: {}, type: {:?}",
+            func_name, scalar_type
+        );
         match scalar_type {
             ScalarFunctionType::String => Ok(Column::new(func_name, TypeId::VarChar)),
             ScalarFunctionType::Numeric => {
@@ -1947,9 +2055,13 @@ impl ExpressionParser {
         func_name: &str,
         args: &[Arc<Expression>],
     ) -> Result<Column, String> {
+        debug!(
+            "Inferring aggregate return type for function: {}",
+            func_name
+        );
         match func_name.to_uppercase().as_str() {
             "COUNT" => Ok(Column::new(func_name, TypeId::BigInt)),
-            "SUM" | "AVG" => {
+            "SUM" => {
                 if args.is_empty() {
                     return Err(format!("{} requires an argument", func_name));
                 }
@@ -1959,6 +2071,20 @@ impl ExpressionParser {
                         Ok(Column::new(func_name, TypeId::BigInt))
                     }
                     TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
+                    _ => Err(format!("Invalid argument type for {}", func_name)),
+                }
+            }
+            "AVG" => {
+                if args.is_empty() {
+                    return Err(format!("{} requires an argument", func_name));
+                }
+                let arg_type = args[0].get_return_type().get_type();
+                match arg_type {
+                    TypeId::Integer
+                    | TypeId::BigInt
+                    | TypeId::SmallInt
+                    | TypeId::TinyInt
+                    | TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
             }
@@ -1992,90 +2118,10 @@ impl ExpressionParser {
     }
 
     fn parse_window_expr(&self, expr: &Expr, schema: &Schema) -> Option<Arc<Expression>> {
+        debug!("Parsing window expression: {:?}", expr);
         match self.parse_expression(expr, schema) {
             Ok(parsed_expr) => Some(Arc::new(parsed_expr)),
             Err(_) => None,
-        }
-    }
-
-    fn contains_aggregate_function(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Function(func) => {
-                let name = func.name.to_string().to_uppercase();
-                matches!(
-                    name.as_str(),
-                    "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE"
-                )
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                self.contains_aggregate_function(left) || self.contains_aggregate_function(right)
-            }
-            Expr::UnaryOp { expr, .. } => self.contains_aggregate_function(expr),
-            Expr::Nested(expr) => self.contains_aggregate_function(expr),
-            _ => false,
-        }
-    }
-
-    fn try_parse_aggregate(
-        &self,
-        expr: &Expr,
-        schema: &Schema,
-    ) -> Result<Option<Expression>, String> {
-        match expr {
-            Expr::Function(func) => {
-                let name = func.name.to_string().to_uppercase();
-                match name.as_str() {
-                    "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE" => {
-                        let mut args = Vec::new();
-
-                        // Special handling for COUNT(*)
-                        if name == "COUNT" {
-                            if let FunctionArguments::List(arg_list) = &func.args {
-                                if arg_list.args.len() == 1 {
-                                    if let FunctionArg::Unnamed(expr) = &arg_list.args[0] {
-                                        if matches!(expr, FunctionArgExpr::Wildcard) {
-                                            return Ok(Some(self.create_count_star()?));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Parse regular arguments
-                        args.extend(self.parse_function_arguments(&func.args, schema)?);
-
-                        let agg_type = match name.as_str() {
-                            "COUNT" => AggregationType::Count,
-                            "SUM" => AggregationType::Sum,
-                            "AVG" => AggregationType::Avg,
-                            "MIN" => AggregationType::Min,
-                            "MAX" => AggregationType::Max,
-                            "STDDEV" => AggregationType::StdDev,
-                            "VARIANCE" => AggregationType::Variance,
-                            _ => return Ok(None),
-                        };
-
-                        let return_type = match agg_type {
-                            AggregationType::Count => Column::new(&name, TypeId::BigInt),
-                            AggregationType::Avg => Column::new(&name, TypeId::Decimal),
-                            _ if !args.is_empty() => {
-                                let child_type = args[0].get_return_type().get_type();
-                                Column::new(&name, child_type)
-                            }
-                            _ => return Err("Aggregate function requires arguments".to_string()),
-                        };
-
-                        Ok(Some(Expression::Aggregate(AggregateExpression::new(
-                            agg_type,
-                            args,
-                            return_type,
-                            name,
-                        ))))
-                    }
-                    _ => Ok(None),
-                }
-            }
-            _ => Ok(None),
         }
     }
 
@@ -2084,33 +2130,177 @@ impl ExpressionParser {
         table_alias: &str,
         column_name: &str,
         schema: &Schema,
-    ) -> Result<(usize, usize), String> {
-        // Look for the qualified column name in the schema
+    ) -> Result<usize, String> {
+        debug!(
+            "Resolving column reference after join: {}.{}",
+            table_alias, column_name
+        );
+        log::debug!(
+            "Resolving column reference: table_alias='{}', column_name='{}' in schema with {} columns",
+            table_alias,
+            column_name,
+            schema.get_column_count()
+        );
+
+        // Debug: Print all columns in the schema
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            log::debug!(
+                "Schema column {}: name='{}', type={:?}",
+                i,
+                col.get_name(),
+                col.get_type()
+            );
+        }
+
+        // First, try to find a fully qualified column name
         let qualified_name = format!("{}.{}", table_alias, column_name);
+        log::debug!("Looking for qualified name: '{}'", qualified_name);
 
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             if col.get_name() == qualified_name {
-                // For joined tables, tuple_index is 0 since it's a single tuple after join
-                return Ok((0, i));
+                log::debug!("Found qualified column '{}' at index {}", qualified_name, i);
+                return Ok(i);
             }
         }
+        log::debug!("Qualified column '{}' not found", qualified_name);
 
-        // If not found with qualification, try just the column name
+        // Second, try to find any column that starts with the given table alias prefix
+        log::debug!("Looking for columns with prefix: '{}'", table_alias);
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            let col_name = col.get_name();
+            if let Some(dot_pos) = col_name.find('.') {
+                let prefix = &col_name[0..dot_pos];
+                let suffix = &col_name[dot_pos + 1..];
+
+                log::debug!(
+                    "Checking column '{}': prefix='{}', suffix='{}'",
+                    col_name,
+                    prefix,
+                    suffix
+                );
+
+                if prefix == table_alias && suffix == column_name {
+                    log::debug!(
+                        "Found column with matching prefix and suffix at index {}",
+                        i
+                    );
+                    return Ok(i);
+                }
+            }
+        }
+        log::debug!("No column found with prefix '{}'", table_alias);
+
+        // Third, try to find the column by its unqualified name
+        log::debug!("Looking for unqualified column name: '{}'", column_name);
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             if col.get_name() == column_name {
-                return Ok((0, i));
+                log::debug!("Found unqualified column '{}' at index {}", column_name, i);
+                return Ok(i);
             }
         }
+        log::debug!("Unqualified column '{}' not found", column_name);
 
-        Err(format!(
-            "Column {}.{} not found in schema",
-            table_alias, column_name
-        ))
+        // Fourth, check if the table alias refers to an actual table in the catalog
+        log::debug!(
+            "Checking if '{}' is a valid table in the catalog",
+            table_alias
+        );
+        let catalog = self.catalog.read();
+        if let Some(table) = catalog.get_table(table_alias) {
+            log::debug!("Found table '{}' in catalog", table_alias);
+            let table_schema = table.get_table_schema();
+
+            // Debug: Print all columns in the table schema
+            log::debug!(
+                "Table '{}' schema has {} columns:",
+                table_alias,
+                table_schema.get_column_count()
+            );
+            for i in 0..table_schema.get_column_count() as usize {
+                let col = table_schema.get_column(i).unwrap();
+                log::debug!(
+                    "  Table column {}: name='{}', type={:?}",
+                    i,
+                    col.get_name(),
+                    col.get_type()
+                );
+            }
+
+            if let Some(col_idx) = table_schema.get_column_index(column_name) {
+                log::debug!(
+                    "Found column '{}' in table '{}' schema at index {}",
+                    column_name,
+                    table_alias,
+                    col_idx
+                );
+
+                // Now find this column in the joined schema
+                for i in 0..schema.get_column_count() as usize {
+                    let col = schema.get_column(i).unwrap();
+                    let col_name = col.get_name();
+                    log::debug!(
+                        "Checking if schema column '{}' matches table column '{}.{}'",
+                        col_name,
+                        table_alias,
+                        column_name
+                    );
+
+                    if col_name == column_name || col_name == qualified_name {
+                        log::debug!("Found matching column at index {}", i);
+                        return Ok(i);
+                    }
+
+                    if let Some(dot_pos) = col_name.find('.') {
+                        let prefix = &col_name[0..dot_pos];
+                        let suffix = &col_name[dot_pos + 1..];
+
+                        if prefix == table_alias && suffix == column_name {
+                            log::debug!("Found matching column with prefix at index {}", i);
+                            return Ok(i);
+                        }
+                    }
+                }
+            } else {
+                log::debug!(
+                    "Column '{}' not found in table '{}' schema",
+                    column_name,
+                    table_alias
+                );
+            }
+        } else {
+            log::debug!("Table '{}' not found in catalog", table_alias);
+        }
+
+        // Fifth, try to find any column that ends with the column name, regardless of prefix
+        log::debug!("Looking for any column ending with: '{}'", column_name);
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            let col_name = col.get_name();
+            if let Some(dot_pos) = col_name.find('.') {
+                let suffix = &col_name[dot_pos + 1..];
+
+                log::debug!("Checking column '{}': suffix='{}'", col_name, suffix);
+
+                if suffix == column_name {
+                    log::debug!("Found column with matching suffix at index {}", i);
+                    return Ok(i);
+                }
+            }
+        }
+        log::debug!("No column found ending with '{}'", column_name);
+
+        // If we get here, we couldn't find the column
+        let error_msg = format!("Column {}.{} not found in schema", table_alias, column_name);
+        log::debug!("{}", error_msg);
+        Err(error_msg)
     }
 
     fn create_count_star(&self) -> Result<Expression, String> {
+        debug!("Creating COUNT(*) expression");
         // Create a constant expression for COUNT(*)
         let constant = Expression::Constant(ConstantExpression::new(
             Value::new(1),
@@ -2125,9 +2315,7 @@ impl ExpressionParser {
             "COUNT".to_string(),
         )))
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -2142,9 +2330,6 @@ mod tests {
     use crate::sql::execution::expressions::logic_expression::LogicType;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use sqlparser::ast::{SetExpr, Statement};
-    use sqlparser::dialect::GenericDialect;
-    use sqlparser::parser::Parser;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -2232,7 +2417,9 @@ mod tests {
             use sqlparser::parser::Parser;
 
             let dialect = GenericDialect {};
-            let mut parser = Parser::new(&dialect).try_with_sql(expr_str).map_err(|e| e.to_string())?;
+            let mut parser = Parser::new(&dialect)
+                .try_with_sql(expr_str)
+                .map_err(|e| e.to_string())?;
             let expr = parser.parse_expr().map_err(|e| e.to_string())?;
             self.expression_parser().parse_expression(&expr, schema)
         }
@@ -2541,7 +2728,10 @@ mod tests {
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
-            ("CASE WHEN age > 25 AND salary > 50000 THEN 'High' ELSE 'Low' END", "case"),
+            (
+                "CASE WHEN age > 25 AND salary > 50000 THEN 'High' ELSE 'Low' END",
+                "case",
+            ),
             ("(age + 5) * 2", "multiply"),
             ("UPPER(name) = 'JOHN'", "compare"),
         ];
@@ -2633,10 +2823,10 @@ mod tests {
 
         // Test invalid aggregates
         let invalid_cases = vec![
-            "COUNT()", // No arguments
-            "SUM(*)", // Can't sum *
-            "AVG(name)", // Can't average strings
-            "MIN()", // No arguments
+            "COUNT()",             // No arguments
+            "SUM(*)",              // Can't sum *
+            "AVG(name)",           // Can't average strings
+            "MIN()",               // No arguments
             "MAX(invalid_column)", // Invalid column
         ];
 
@@ -2693,7 +2883,10 @@ mod tests {
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
-            ("CASE WHEN (age > 25 AND salary > 50000) THEN 'High' ELSE 'Low' END", TypeId::VarChar),
+            (
+                "CASE WHEN (age > 25 AND salary > 50000) THEN 'High' ELSE 'Low' END",
+                TypeId::VarChar,
+            ),
             ("UPPER(LOWER(name))", TypeId::VarChar),
             ("(age + salary) * 2", TypeId::Decimal),
         ];
@@ -2718,39 +2911,45 @@ mod tests {
         let ctx = TestContext::new("test_parse_null_expressions");
         let schema = ctx.setup_test_schema();
 
-
-        let simple_null_checks = vec![
-            "name IS NULL",
-            "age IS NOT NULL"
-        ];
+        let simple_null_checks = vec!["name IS NULL", "age IS NOT NULL"];
 
         for expr_str in simple_null_checks {
             let expr = ctx.parse_expression(expr_str, &schema)?;
             match expr {
                 Expression::IsCheck(_) => (),
-                _ => return Err(format!("Expected IsCheck expression for {}, got {:?}", expr_str, expr))
+                _ => {
+                    return Err(format!(
+                        "Expected IsCheck expression for {}, got {:?}",
+                        expr_str, expr
+                    ))
+                }
             }
         }
 
         // Test CASE expression with IS NULL check
         let case_expr_str = "CASE WHEN name IS NULL THEN 'Unknown' ELSE name END";
         let expr = ctx.parse_expression(case_expr_str, &schema)?;
-        
+
         // Verify it's a CASE expression
         match &expr {
             Expression::Case(case_expr) => {
                 // Verify return type is VARCHAR
                 assert_eq!(case_expr.get_return_type().get_type(), TypeId::VarChar);
-                
+
                 // Get the first WHEN expression
                 let when_expr = case_expr.get_children()[0].clone();
                 // Verify it's an IS NULL check
                 match *when_expr {
                     Expression::IsCheck(_) => (),
-                    _ => return Err(format!("Expected IsCheck expression for WHEN condition, got {:?}", when_expr))
+                    _ => {
+                        return Err(format!(
+                            "Expected IsCheck expression for WHEN condition, got {:?}",
+                            when_expr
+                        ))
+                    }
                 }
             }
-            _ => return Err(format!("Expected Case expression, got {:?}", expr))
+            _ => return Err(format!("Expected Case expression, got {:?}", expr)),
         }
 
         Ok(())
@@ -2761,11 +2960,7 @@ mod tests {
         let ctx = TestContext::new("test_parse_error_cases");
         let schema = ctx.setup_test_schema();
 
-        let test_cases = vec![
-            "invalid_column > 5",
-            "age + 'string'",
-            "CASE WHEN THEN END",
-        ];
+        let test_cases = vec!["invalid_column > 5", "age + 'string'", "CASE WHEN THEN END"];
 
         for expr_str in test_cases {
             assert!(ctx.parse_expression(expr_str, &schema).is_err());
@@ -2794,10 +2989,7 @@ mod tests {
         let ctx = TestContext::new("test_parse_at_timezone_invalid_types");
         let schema = ctx.setup_test_schema();
 
-        let test_cases = vec![
-            "age AT TIME ZONE 'UTC'",
-            "name AT TIME ZONE '123'",
-        ];
+        let test_cases = vec!["age AT TIME ZONE 'UTC'", "name AT TIME ZONE '123'"];
 
         for expr_str in test_cases {
             assert!(ctx.parse_expression(expr_str, &schema).is_err());

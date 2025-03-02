@@ -750,13 +750,25 @@ impl LogicalPlan {
             LogicalPlanType::Delete { schema, .. } => schema.clone(),
             LogicalPlanType::Update { schema, .. } => schema.clone(),
             LogicalPlanType::NestedLoopJoin { left_schema, right_schema, .. } => {
-                Schema::merge(left_schema, right_schema)
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(left_schema);
+                let right_alias = extract_table_alias_from_schema(right_schema);
+                
+                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
             }
             LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
-                Schema::merge(left_schema, right_schema)
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(left_schema);
+                let right_alias = extract_table_alias_from_schema(right_schema);
+                
+                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
             }
             LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
-                Schema::merge(left_schema, right_schema)
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(left_schema);
+                let right_alias = extract_table_alias_from_schema(right_schema);
+                
+                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
             }
             LogicalPlanType::Filter { .. } => self.children[0].get_schema(),
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
@@ -1252,4 +1264,16 @@ fn extract_join_keys(
     }
 
     Ok((left_keys, right_keys))
+}
+
+// Helper function to extract table alias from schema
+fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
+    // Look at the first column that has a table alias
+    for column in schema.get_columns() {
+        let name = column.get_name();
+        if let Some(dot_pos) = name.find('.') {
+            return Some(name[..dot_pos].to_string());
+        }
+    }
+    None
 }

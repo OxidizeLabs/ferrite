@@ -32,7 +32,6 @@ pub mod is_check_expression;
 pub mod is_distinct_expression;
 pub mod map_access_expression;
 pub mod method_expression;
-pub mod nested_expression;
 pub mod subquery_expression;
 pub mod between_expression;
 pub mod in_expression;
