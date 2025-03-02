@@ -4,7 +4,6 @@ use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use crate::types_db::type_id::TypeId;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -88,6 +87,7 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
     use sqlparser::ast::Value as SQLValue;
+    use crate::types_db::type_id::TypeId;
 
     #[test]
     fn test_tuple_expression_evaluate() {

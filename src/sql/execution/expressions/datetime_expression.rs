@@ -3,7 +3,6 @@ use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
@@ -1024,6 +1023,7 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};

@@ -4,7 +4,6 @@ use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::Display;
@@ -238,6 +237,7 @@ mod tests {
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::types_db::type_id::TypeId;
 
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = Schema::new(vec![

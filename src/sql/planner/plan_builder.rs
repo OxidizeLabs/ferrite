@@ -445,14 +445,10 @@ impl LogicalPlanBuilder {
         }
 
         let output_schema = Schema::new(output_columns);
-        debug!("Final projection schema: {:?}", &output_schema);
+        debug!("Final projection schema: {:?}", output_schema);
         debug!("Projection expressions: {:?}", projection_exprs);
 
-        Ok(LogicalPlan::project(
-            projection_exprs,
-            output_schema,
-            input_plan,
-        ))
+        Ok(LogicalPlan::project(projection_exprs, output_schema, input_plan))
     }
 
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
@@ -626,67 +622,15 @@ impl LogicalPlanBuilder {
                     };
 
                     // For qualified column references (table.column format)
-                    match expr {
-                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
-                            // This is a qualified column reference like "u.name"
-                            let qualified_name = format!("{}.{}", parts[0].value, parts[1].value);
-
-                            // Find the column in the input schema
-                            if let Some(col_idx) =
-                                input_schema.get_qualified_column_index(&qualified_name)
-                            {
-                                let input_col = input_schema.get_column(col_idx).unwrap();
-
-                                // Create output column with the qualified name
-                                let output_col = Column::new(&qualified_name, input_col.get_type());
-                                output_columns.push(output_col);
-
-                                // Create column reference expression
-                                projection_exprs.push(Arc::new(Expression::ColumnRef(
-                                    ColumnRefExpression::new(0, col_idx, input_col.clone(), vec![]),
-                                )));
-                            } else {
-                                return Err(format!(
-                                    "Column {} not found in schema",
-                                    qualified_name
-                                ));
-                            }
-                        }
-                        _ => {
-                            // Use the provided schema for parsing expressions
-                            let parsed_expr = self
-                                .expression_parser
-                                .parse_expression(expr, parse_schema)?;
-
-                            let output_col =
-                                Column::new(&column_name, parsed_expr.get_return_type().get_type());
-                            debug!("Created column: {:?}", output_col);
-                            output_columns.push(output_col);
-
-                            // For aggregate input, use column reference for non-aggregate expressions
-                            if is_aggregate_input
-                                && !matches!(parsed_expr, Expression::Aggregate(_))
-                            {
-                                // Find the column in the input schema
-                                if let Some(col_idx) =
-                                    input_schema.get_qualified_column_index(&column_name)
-                                {
-                                    projection_exprs.push(Arc::new(Expression::ColumnRef(
-                                        ColumnRefExpression::new(
-                                            0,
-                                            col_idx,
-                                            input_schema.get_column(col_idx).unwrap().clone(),
-                                            vec![],
-                                        ),
-                                    )));
-                                } else {
-                                    projection_exprs.push(Arc::new(parsed_expr));
-                                }
-                            } else {
-                                projection_exprs.push(Arc::new(parsed_expr));
-                            }
-                        }
-                    }
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, parse_schema)?;
+                    
+                    // Use the column name from the expression for the output column
+                    let output_col = Column::new(&column_name, parsed_expr.get_return_type().get_type());
+                    debug!("Created column: {:?}", output_col);
+                    output_columns.push(output_col);
+                    projection_exprs.push(Arc::new(parsed_expr));
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     debug!(
@@ -720,22 +664,21 @@ impl LogicalPlanBuilder {
                         projection_exprs.push(Arc::new(col_expr));
                     }
                 }
-                SelectItem::QualifiedWildcard(name, _) => {
-                    debug!("Processing qualified wildcard: {}", name);
-                    // Add columns that match the qualifier
-                    let qualifier = name.to_string();
-
+                SelectItem::QualifiedWildcard(obj_name, _) => {
+                    debug!("Processing qualified wildcard: {:?}", obj_name);
+                    let table_alias = obj_name.to_string();
+                    
+                    // Add all columns from the input schema that match the table alias
+                    let mut found_columns = false;
                     for i in 0..input_schema.get_column_count() {
                         let col = input_schema.get_column(i as usize).unwrap();
                         let col_name = col.get_name();
-
-                        // Check if the column name has the qualifier
-                        if col_name.starts_with(&format!("{}.", qualifier)) || 
-                           // Also check for table aliases in join queries
-                           (col_name.contains('.') && col_name.split('.').next().unwrap() == qualifier)
-                        {
+                        
+                        // Check if the column belongs to the specified table
+                        if col_name.starts_with(&format!("{}.", table_alias)) {
+                            found_columns = true;
                             output_columns.push(col.clone());
-
+                            
                             let col_expr = Expression::ColumnRef(ColumnRefExpression::new(
                                 0,
                                 i as usize,
@@ -745,19 +688,16 @@ impl LogicalPlanBuilder {
                             projection_exprs.push(Arc::new(col_expr));
                         }
                     }
+                    
+                    if !found_columns {
+                        return Err(format!("No columns found for table alias: {}", table_alias));
+                    }
                 }
             }
         }
 
         let output_schema = Schema::new(output_columns);
-        debug!("Final projection schema: {:?}", output_schema);
-        debug!("Projection expressions: {:?}", projection_exprs);
-
-        Ok(LogicalPlan::project(
-            projection_exprs,
-            output_schema,
-            input_plan,
-        ))
+        Ok(LogicalPlan::project(projection_exprs, output_schema, input_plan))
     }
 
     pub fn build_create_table_plan(
@@ -922,7 +862,10 @@ impl LogicalPlanBuilder {
                     let mut aliased_columns = Vec::new();
                     for col in schema.get_columns() {
                         let mut new_col = col.clone();
-                        new_col.set_name(format!("{}.{}", alias_name, col.get_name()));
+                        // Only add alias if the column doesn't already have one
+                        if !col.get_name().contains('.') {
+                            new_col.set_name(format!("{}.{}", alias_name, col.get_name()));
+                        }
                         aliased_columns.push(new_col);
                     }
                     Schema::new(aliased_columns)

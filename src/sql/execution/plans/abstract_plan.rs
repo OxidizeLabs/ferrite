@@ -699,6 +699,7 @@ mod basic_behaviour {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::planner::query_planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -709,7 +710,6 @@ mod basic_behaviour {
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::sql::planner::query_planner::QueryPlanner;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -947,6 +947,7 @@ mod complex_behaviour {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::planner::query_planner::QueryPlanner;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
@@ -957,7 +958,6 @@ mod complex_behaviour {
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::sql::planner::query_planner::QueryPlanner;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1128,10 +1128,10 @@ mod complex_behaviour {
         let test_cases = vec![
             "SELECT id FROM users WHERE age > 25",
             "SELECT id FROM users WHERE age BETWEEN 20 AND 30",
-            // "SELECT id FROM users WHERE name LIKE 'John%'",
+            "SELECT id FROM users WHERE name LIKE 'John%'",
             "SELECT id FROM users WHERE age IN (25, 30, 35)",
-            // "SELECT id FROM users WHERE age > 25 AND name LIKE 'John%'",
-            // "SELECT id FROM users WHERE age > 25 OR name LIKE 'John%'",
+            "SELECT id FROM users WHERE age > 25 AND name LIKE 'John%'",
+            "SELECT id FROM users WHERE age > 25 OR name LIKE 'John%'",
         ];
 
         for sql in test_cases {
@@ -1160,7 +1160,10 @@ mod complex_behaviour {
             info!("Testing SQL: {}", sql);
             let plan = ctx.planner.explain(sql)?;
             assert!(plan.contains("→"), "Plan should use arrow for hierarchy");
-            assert!(plan.contains("NestedLoopJoin"), "Plan should contain NestedLoopJoin operation");
+            assert!(
+                plan.contains("NestedLoopJoin"),
+                "Plan should contain NestedLoopJoin operation"
+            );
         }
 
         Ok(())
@@ -1175,9 +1178,9 @@ mod complex_behaviour {
             "SELECT COUNT(*) FROM users",
             "SELECT age, COUNT(*) FROM users GROUP BY age",
             "SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 5",
-            // "SELECT category, AVG(price) FROM products GROUP BY category",
+            "SELECT category, AVG(price) FROM products GROUP BY category",
             "SELECT user_id, SUM(amount) FROM orders GROUP BY user_id",
-            // "SELECT category, COUNT(*), AVG(price) FROM products GROUP BY category HAVING COUNT(*) > 2",
+            "SELECT category, COUNT(*), AVG(price) FROM products GROUP BY category HAVING COUNT(*) > 2",
         ];
 
         for sql in test_cases {
@@ -1229,26 +1232,26 @@ mod complex_behaviour {
              ORDER BY total_spent DESC
              LIMIT 10",
             // Multiple joins with filtering
-            // "SELECT
-            //     u.name,
-            //     p.name as product_name,
-            //     oi.quantity,
-            //     o.amount
-            //  FROM users u
-            //  JOIN orders o ON u.id = o.user_id
-            //  JOIN order_items oi ON o.id = oi.order_id
-            //  JOIN products p ON p.id = oi.product_id
-            //  WHERE o.status = 'completed'
-            //  AND p.category = 'electronics'",
-            // // Subquery in WHERE clause
-            // "SELECT name, age
-            //  FROM users
-            //  WHERE id IN (
-            //      SELECT user_id
-            //      FROM orders
-            //      GROUP BY user_id
-            //      HAVING SUM(amount) > 1000
-            //  )",
+            "SELECT
+                u.name,
+                p.name as product_name,
+                oi.quantity,
+                o.amount
+             FROM users u
+             JOIN orders o ON u.id = o.user_id
+             JOIN order_items oi ON o.id = oi.order_id
+             JOIN products p ON p.id = oi.product_id
+             WHERE o.status = 'completed'
+             AND p.category = 'electronics'",
+            // Subquery in WHERE clause
+            "SELECT name, age
+             FROM users
+             WHERE id IN (
+                 SELECT user_id
+                 FROM orders
+                 GROUP BY user_id
+                 HAVING SUM(amount) > 1000
+             )",
         ];
 
         for sql in test_cases {
