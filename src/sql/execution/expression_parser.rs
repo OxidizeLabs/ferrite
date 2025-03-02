@@ -71,7 +71,6 @@ use sqlparser::ast::{
     FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
     JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
     Subscript as SQLSubscript, TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
-    Ident,
 };
 use std::sync::Arc;
 
@@ -122,44 +121,33 @@ impl ExpressionParser {
                 let column_name = &parts[1].value;
                 let qualified_name = format!("{}.{}", table_alias, column_name);
 
-                debug!("Parsing compound identifier: {}.{}", table_alias, column_name);
+                debug!("Parsing compound identifier: {}", qualified_name);
                 
                 // First, try to find the column using the qualified name directly
                 if let Some(column_idx) = schema.get_qualified_column_index(&qualified_name) {
                     debug!("Found qualified column '{}' at index {}", qualified_name, column_idx);
                     let column = schema.get_column(column_idx).unwrap().clone();
                     
-                    // If the column name doesn't already include the table alias, add it
-                    let column_with_alias = if !column.get_name().contains('.') {
-                        let mut new_column = column.clone();
-                        new_column.set_name(qualified_name);
-                        new_column
-                    } else {
-                        column
-                    };
-                    
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         column_idx,
-                        column_with_alias,
+                        column,
                         vec![],
                     )));
                 }
                 
                 // Second, try to find any column that matches the pattern table_alias.column_name
-                for i in 0..schema.get_column_count() as usize {
-                    let col = schema.get_column(i).unwrap();
+                for (idx, col) in schema.get_columns().iter().enumerate() {
                     let col_name = col.get_name();
                     
-                    if let Some(dot_pos) = col_name.find('.') {
-                        let prefix = &col_name[0..dot_pos];
-                        let suffix = &col_name[dot_pos + 1..];
-                        
-                        if prefix == table_alias && suffix == column_name {
-                            debug!("Found column with matching prefix and suffix at index {}", i);
+                    // Check if the column name is already qualified with the same table alias
+                    if col_name.starts_with(&format!("{}.", table_alias)) {
+                        let parts: Vec<&str> = col_name.split('.').collect();
+                        if parts.len() == 2 && parts[1] == column_name {
+                            debug!("Found column with matching pattern: '{}' at index {}", col_name, idx);
                             return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                                 0,
-                                i,
+                                idx,
                                 col.clone(),
                                 vec![],
                             )));
@@ -167,81 +155,25 @@ impl ExpressionParser {
                     }
                 }
                 
-                // Third, try to resolve using the catalog
-                let catalog = self.catalog.read();
-                
-                // Try to find the table by alias
-                if let Some(table) = catalog.get_table(table_alias) {
-                    debug!("Found table '{}' in catalog", table_alias);
-                    let table_schema = table.get_table_schema();
+                // Third, if the table alias matches a known alias and the column exists without qualification
+                // This handles cases where the schema has unqualified column names but we're using qualified references
+                let unqualified_idx = schema.get_column_index(column_name);
+                if let Some(idx) = unqualified_idx {
+                    debug!("Found unqualified column '{}' at index {}, will qualify with '{}'", 
+                           column_name, idx, table_alias);
                     
-                    if let Some(col_idx) = table_schema.get_column_index(column_name) {
-                        debug!("Found column '{}' in table '{}' schema", column_name, table_alias);
-                        
-                        // Now try to find this column in the joined schema
-                        for i in 0..schema.get_column_count() as usize {
-                            let col = schema.get_column(i).unwrap();
-                            let col_name = col.get_name();
-                            
-                            // Check for exact match (qualified or unqualified)
-                            if col_name == column_name {
-                                debug!("Found matching column at index {}", i);
-                                
-                                // Create a new column with the qualified name
-                                let mut new_column = col.clone();
-                                new_column.set_name(qualified_name);
-                                
-                                return Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                                    0,
-                                    i,
-                                    new_column,
-                                    vec![],
-                                )));
-                            }
-                            
-                            // Check for qualified match
-                            if let Some(dot_pos) = col_name.find('.') {
-                                let prefix = &col_name[0..dot_pos];
-                                let suffix = &col_name[dot_pos + 1..];
-                                
-                                if (prefix == table_alias && suffix == column_name) || 
-                                   (col_name == qualified_name) {
-                                    debug!("Found matching qualified column at index {}", i);
-                                    return Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                                        0,
-                                        i,
-                                        col.clone(),
-                                        vec![],
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Fourth, try using the resolve_column_ref_after_join method
-                if let Ok(column_idx) = self.resolve_column_ref_after_join(table_alias, column_name, schema) {
-                    debug!("Resolved column reference after join at index {}", column_idx);
-                    let column = schema.get_column(column_idx).unwrap().clone();
-                    
-                    // If the column name doesn't already include the table alias, add it
-                    let column_with_alias = if !column.get_name().contains('.') {
-                        let mut new_column = column.clone();
-                        new_column.set_name(qualified_name);
-                        new_column
-                    } else {
-                        column
-                    };
+                    let mut column = schema.get_column(idx).unwrap().clone();
+                    column.set_name(qualified_name);
                     
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
-                        column_idx,
-                        column_with_alias,
+                        idx,
+                        column,
                         vec![],
                     )));
                 }
                 
-                // If we get here, we couldn't find the column
+                // If we get here, the column wasn't found
                 Err(format!("Column {}.{} not found in schema", table_alias, column_name))
             }
 
@@ -1563,11 +1495,28 @@ impl ExpressionParser {
 
             let schema = table_info.get_table_schema();
             let table_oid = table_info.get_table_oidt();
-            let table_scan = LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
+            
+            // Apply alias to schema if provided
+            let aliased_schema = if let Some(alias_name) = alias {
+                // Create a new schema with the alias applied to all columns
+                let mut aliased_columns = Vec::new();
+                for col in schema.get_columns() {
+                    let mut new_col = col.clone();
+                    if !col.get_name().contains('.') {
+                        new_col.set_name(format!("{}.{}", alias_name, col.get_name()));
+                    }
+                    aliased_columns.push(new_col);
+                }
+                Schema::new(aliased_columns)
+            } else {
+                schema.clone()
+            };
+            
+            let table_scan = LogicalPlan::table_scan(table_name.clone(), aliased_schema.clone(), table_oid);
 
             if i == 0 {
                 current_plan = Some(table_scan);
-                current_schema = Some(schema);
+                current_schema = Some(aliased_schema);
                 current_alias = alias.clone();
             } else {
                 let left_plan = current_plan.take().unwrap();
@@ -1580,14 +1529,14 @@ impl ExpressionParser {
                     let (join_predicate, join_operator) = self.process_join_operator(
                         &join.join_operator,
                         &left_schema,
-                        &schema,
+                        &aliased_schema,
                         left_alias.as_deref(),
                         right_alias.as_deref(),
                     )?;
 
-                    current_plan = Some(LogicalPlan::hash_join(
+                    current_plan = Some(LogicalPlan::nested_loop_join(
                         left_schema.clone(),
-                        schema.clone(),
+                        aliased_schema.clone(),
                         Arc::new(join_predicate),
                         join_operator,
                         left_plan,
@@ -1597,7 +1546,7 @@ impl ExpressionParser {
                     // Use merge_with_aliases for the current schema as well
                     current_schema = Some(Schema::merge_with_aliases(
                         &left_schema,
-                        &schema,
+                        &aliased_schema,
                         left_alias.as_deref(),
                         right_alias.as_deref(),
                     ));
@@ -2655,6 +2604,7 @@ mod tests {
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use std::collections::HashMap;
+    use sqlparser::ast::Ident;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -3334,9 +3284,9 @@ mod tests {
         
         // Test INNER JOIN with ON constraint
         let on_expr = sqlparser::ast::Expr::BinaryOp {
-            left: Box::new(sqlparser::ast::Expr::Identifier(Ident::new("id"))),
-            op: sqlparser::ast::BinaryOperator::Eq,
-            right: Box::new(sqlparser::ast::Expr::Identifier(Ident::new("id"))),
+            left: Box::new(Expr::Identifier(Ident::new("id"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier(Ident::new("id"))),
         };
         
         let inner_join = JoinOperator::Inner(JoinConstraint::On(on_expr.clone()));

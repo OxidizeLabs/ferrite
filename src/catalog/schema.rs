@@ -94,6 +94,14 @@ impl Schema {
                         return Some(index);
                     }
                 }
+                
+                // If not found with qualification, try to find the unqualified column name
+                // This helps when the schema has unqualified names but we're using qualified references
+                for (index, column) in self.columns.iter().enumerate() {
+                    if column.get_name() == col_name {
+                        return Some(index);
+                    }
+                }
             }
         } else {
             // If it's an unqualified name, try to find it in any qualified column
@@ -146,7 +154,15 @@ impl Schema {
                     new_col.set_name(format!("{}.{}", alias, col.get_name()));
                     merged_columns.push(new_col);
                 } else {
-                    merged_columns.push(col.clone());
+                    // If the column already has an alias but it's different, update it
+                    let parts: Vec<&str> = col.get_name().split('.').collect();
+                    if parts.len() == 2 && parts[0] != alias {
+                        let mut new_col = col.clone();
+                        new_col.set_name(format!("{}.{}", alias, parts[1]));
+                        merged_columns.push(new_col);
+                    } else {
+                        merged_columns.push(col.clone());
+                    }
                 }
             } else {
                 merged_columns.push(col.clone());
@@ -162,7 +178,15 @@ impl Schema {
                     new_col.set_name(format!("{}.{}", alias, col.get_name()));
                     merged_columns.push(new_col);
                 } else {
-                    merged_columns.push(col.clone());
+                    // If the column already has an alias but it's different, update it
+                    let parts: Vec<&str> = col.get_name().split('.').collect();
+                    if parts.len() == 2 && parts[0] != alias {
+                        let mut new_col = col.clone();
+                        new_col.set_name(format!("{}.{}", alias, parts[1]));
+                        merged_columns.push(new_col);
+                    } else {
+                        merged_columns.push(col.clone());
+                    }
                 }
             } else {
                 merged_columns.push(col.clone());
