@@ -57,10 +57,16 @@ impl ExpressionOps for ColumnRefExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        trace!("ColumnRef evaluate_join - tuple_index: {}, column_index: {}",
-            self.tuple_index, self.column_index);
-        trace!("Left tuple: {:?}, Right tuple: {:?}",
-            left_tuple.get_values(), right_tuple.get_values());
+        trace!(
+            "ColumnRef evaluate_join - tuple_index: {}, column_index: {}",
+            self.tuple_index,
+            self.column_index
+        );
+        trace!(
+            "Left tuple: {:?}, Right tuple: {:?}",
+            left_tuple.get_values(),
+            right_tuple.get_values()
+        );
 
         // Get the appropriate tuple and schema based on tuple_index
         let (tuple, _schema) = match self.tuple_index {
@@ -75,8 +81,11 @@ impl ExpressionOps for ColumnRefExpression {
             return Err(ExpressionError::InvalidColumnIndex(self.column_index));
         }
 
-        trace!("Selected tuple values: {:?}, using column_index: {}",
-            values, self.column_index);
+        trace!(
+            "Selected tuple values: {:?}, using column_index: {}",
+            values,
+            self.column_index
+        );
         Ok(values[self.column_index].clone())
     }
 
@@ -108,7 +117,8 @@ impl ExpressionOps for ColumnRefExpression {
         }
 
         // Get the column from schema and verify type matches
-        let schema_column = schema.get_column(self.column_index)
+        let schema_column = schema
+            .get_column(self.column_index)
             .ok_or_else(|| ExpressionError::InvalidColumnIndex(self.column_index))?;
 
         if schema_column.get_type() != self.ret_type.get_type() {
@@ -160,13 +170,15 @@ mod tests {
             Column::new("col3", TypeId::Boolean),
             Column::new("col4", TypeId::Decimal),
         ];
-        Tuple::new(&vec![
-            Value::new(42),
-            Value::new("test".to_string()),
-            Value::new(true),
-            Value::new(3.14),
-        ], Schema::new(columns),
-                   RID::new(0, 0),
+        Tuple::new(
+            &vec![
+                Value::new(42),
+                Value::new("test".to_string()),
+                Value::new(true),
+                Value::new(3.14),
+            ],
+            Schema::new(columns),
+            RID::new(0, 0),
         )
     }
 
@@ -175,12 +187,7 @@ mod tests {
 
         #[test]
         fn test_new_column_ref() {
-            let expr = ColumnRefExpression::new(
-                0,
-                1,
-                Column::new("test", TypeId::VarChar),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(0, 1, Column::new("test", TypeId::VarChar), vec![]);
 
             assert_eq!(expr.get_tuple_index(), 0);
             assert_eq!(expr.get_column_index(), 1);
@@ -198,30 +205,18 @@ mod tests {
             let tuple = create_test_tuple();
 
             // Test integer column
-            let expr = ColumnRefExpression::new(
-                0,
-                0,
-                Column::new("col1", TypeId::Integer),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(0, 0, Column::new("col1", TypeId::Integer), vec![]);
             assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), Value::new(42));
 
             // Test varchar column
-            let expr = ColumnRefExpression::new(
-                0,
-                1,
-                Column::new("col2", TypeId::VarChar),
-                vec![],
+            let expr = ColumnRefExpression::new(0, 1, Column::new("col2", TypeId::VarChar), vec![]);
+            assert_eq!(
+                expr.evaluate(&tuple, &schema).unwrap(),
+                Value::new("test".to_string())
             );
-            assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), Value::new("test".to_string()));
 
             // Test boolean column
-            let expr = ColumnRefExpression::new(
-                0,
-                2,
-                Column::new("col3", TypeId::Boolean),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(0, 2, Column::new("col3", TypeId::Boolean), vec![]);
             assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), Value::new(true));
         }
 
@@ -230,41 +225,41 @@ mod tests {
             let left_schema = create_test_schema();
             let right_schema = create_test_schema();
 
-            let left_tuple = Tuple::new(&vec![
-                Value::new(1),
-                Value::new("left".to_string()),
-                Value::new(true),
-                Value::new(1.1),
-            ], left_schema.clone(), Default::default());
+            let left_tuple = Tuple::new(
+                &vec![
+                    Value::new(1),
+                    Value::new("left".to_string()),
+                    Value::new(true),
+                    Value::new(1.1),
+                ],
+                left_schema.clone(),
+                Default::default(),
+            );
 
-            let right_tuple = Tuple::new(&vec![
-                Value::new(2),
-                Value::new("right".to_string()),
-                Value::new(false),
-                Value::new(2.2),
-            ], right_schema.clone(), Default::default());
+            let right_tuple = Tuple::new(
+                &vec![
+                    Value::new(2),
+                    Value::new("right".to_string()),
+                    Value::new(false),
+                    Value::new(2.2),
+                ],
+                right_schema.clone(),
+                Default::default(),
+            );
 
             // Test left tuple access
-            let expr = ColumnRefExpression::new(
-                0,
-                0,
-                Column::new("col1", TypeId::Integer),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(0, 0, Column::new("col1", TypeId::Integer), vec![]);
             assert_eq!(
-                expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap(),
+                expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+                    .unwrap(),
                 Value::new(1)
             );
 
             // Test right tuple access
-            let expr = ColumnRefExpression::new(
-                1,
-                1,
-                Column::new("col2", TypeId::VarChar),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(1, 1, Column::new("col2", TypeId::VarChar), vec![]);
             assert_eq!(
-                expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap(),
+                expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+                    .unwrap(),
                 Value::new("right".to_string())
             );
         }
@@ -276,25 +271,19 @@ mod tests {
         #[test]
         fn test_validate_success() {
             let schema = create_test_schema();
-            let expr = ColumnRefExpression::new(
-                0,
-                0,
-                Column::new("col1", TypeId::Integer),
-                vec![],
-            );
+            let expr = ColumnRefExpression::new(0, 0, Column::new("col1", TypeId::Integer), vec![]);
             assert!(expr.validate(&schema).is_ok());
         }
 
         #[test]
         fn test_validate_invalid_column_index() {
             let schema = create_test_schema();
-            let expr = ColumnRefExpression::new(
-                0,
-                99,
-                Column::new("invalid", TypeId::Integer),
-                vec![],
-            );
-            assert!(matches!(expr.validate(&schema), Err(ExpressionError::InvalidColumnIndex(_))));
+            let expr =
+                ColumnRefExpression::new(0, 99, Column::new("invalid", TypeId::Integer), vec![]);
+            assert!(matches!(
+                expr.validate(&schema),
+                Err(ExpressionError::InvalidColumnIndex(_))
+            ));
         }
 
         #[test]
@@ -310,10 +299,13 @@ mod tests {
             let result = expr.validate(&schema);
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert!(matches!(err, ExpressionError::TypeMismatch {
-                expected: TypeId::VarChar,
-                actual: TypeId::Integer
-            }));
+            assert!(matches!(
+                err,
+                ExpressionError::TypeMismatch {
+                    expected: TypeId::VarChar,
+                    actual: TypeId::Integer
+                }
+            ));
         }
     }
 
@@ -362,12 +354,8 @@ mod tests {
 
         #[test]
         fn test_display_formatting() {
-            let expr = ColumnRefExpression::new(
-                1,
-                2,
-                Column::new("test_col", TypeId::Integer),
-                vec![],
-            );
+            let expr =
+                ColumnRefExpression::new(1, 2, Column::new("test_col", TypeId::Integer), vec![]);
 
             // Test normal display (column name)
             assert_eq!(format!("{}", expr), "test_col");

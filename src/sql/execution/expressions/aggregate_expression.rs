@@ -59,30 +59,20 @@ impl AggregateExpression {
 
         // If no alias, generate name based on convention
         match self.agg_type {
-            AggregationType::CountStar => "COUNT(*)".to_string(),
+            AggregationType::CountStar => "COUNT_star".to_string(),
             _ if self.children.is_empty() => self.function_name.clone(),
             _ => {
                 let arg = self.get_arg();
-                match arg.as_ref() {
+                let expr_str = match arg.as_ref() {
                     Expression::ColumnRef(col_ref) => {
-                        let col_name = col_ref.get_return_type().get_name();
-                        // Check if it's a qualified column name (contains a dot)
-                        if col_name.contains('.') {
-                            let parts: Vec<&str> = col_name.split('.').collect();
-                            format!("{}({}.{})",
-                                self.function_name,
-                                parts[0], // table name
-                                parts[1]  // column name
-                            )
-                        } else {
-                            format!("{}({})",
-                                self.function_name,
-                                col_name
-                            )
-                        }
+                        col_ref.get_return_type().get_name().to_string()
                     }
-                    _ => format!("{}(expr)", self.function_name),
-                }
+                    Expression::Constant(const_expr) => const_expr.to_string(),
+                    Expression::Arithmetic(arith_expr) => arith_expr.to_string(),
+                    Expression::Function(func_expr) => func_expr.to_string(),
+                    _ => "expr".to_string(),
+                };
+                format!("{}_{}", self.function_name, expr_str.replace('.', "_"))
             }
         }
     }
@@ -192,7 +182,7 @@ impl ExpressionOps for AggregateExpression {
     ) -> Result<Value, ExpressionError> {
         // Create a merged schema and tuple with values from both tuples
         let merged_schema = Schema::merge(left_schema, right_schema);
-        
+
         // Create values array for the merged tuple by combining values from both tuples
         let mut merged_values = Vec::new();
         merged_values.extend(left_tuple.get_values().iter().cloned());
@@ -233,7 +223,7 @@ impl ExpressionOps for AggregateExpression {
 
         // Then validate aggregate-specific requirements
         match self.agg_type {
-            AggregationType::Count => Ok(()), // COUNT can take any number of arguments
+            AggregationType::Count | AggregationType::CountStar => Ok(()), // Both COUNT and COUNT(*) can take any number of arguments
             _ if self.children.is_empty() => Err(ExpressionError::InvalidOperation(format!(
                 "{:?} aggregate requires at least one argument",
                 self.agg_type
@@ -253,15 +243,25 @@ mod tests {
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("value", TypeId::Decimal),
+            Column::new("nullable", TypeId::Integer),
         ]);
 
         let tuple = Tuple::new(
-            &[Value::new(1), Value::new(10.5)],
+            &[Value::new(1), Value::new(10.5), Value::new(Val::Null)],
             schema.clone(),
             RID::new(0, 0),
         );
 
         (tuple, schema)
+    }
+
+    fn create_column_ref(col_idx: usize, col_name: &str, type_id: TypeId) -> Arc<Expression> {
+        Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            col_idx,
+            Column::new(col_name, type_id),
+            vec![],
+        )))
     }
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
 
         // Test COUNT(*)
         let count_star = AggregateExpression::new(
-            AggregationType::Count,
+            AggregationType::CountStar,
             vec![],
             Column::new("count", TypeId::BigInt),
             "COUNT".to_string(),
@@ -284,12 +284,7 @@ mod tests {
         // Test COUNT(column)
         let count_col = AggregateExpression::new(
             AggregationType::Count,
-            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                0,
-                Column::new("id", TypeId::Integer),
-                vec![],
-            )))],
+            vec![create_column_ref(0, "id", TypeId::Integer)],
             Column::new("count", TypeId::BigInt),
             "COUNT".to_string(),
         );
@@ -298,27 +293,198 @@ mod tests {
             count_col.evaluate(&tuple, &schema).unwrap(),
             Value::new(1_i64)
         );
+
+        // Test COUNT(nullable_column)
+        let count_null = AggregateExpression::new(
+            AggregationType::Count,
+            vec![create_column_ref(2, "nullable", TypeId::Integer)],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
+        );
+
+        assert_eq!(
+            count_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(0_i64)
+        );
     }
 
     #[test]
     fn test_sum_aggregate() {
-        let (tuple, schema) = create_test_tuple();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::BigInt),
+            Column::new("value", TypeId::Decimal),
+            Column::new("nullable", TypeId::BigInt),
+        ]);
 
-        let sum_expr = AggregateExpression::new(
+        let tuple = Tuple::new(
+            &[Value::new(1_i64), Value::new(10.5), Value::new(Val::Null)],
+            schema.clone(),
+            RID::new(0, 0),
+        );
+
+        // Test SUM on decimal column
+        let sum_decimal = AggregateExpression::new(
             AggregationType::Sum,
-            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,
-                1,
-                Column::new("value", TypeId::Decimal),
-                vec![],
-            )))],
+            vec![create_column_ref(1, "value", TypeId::Decimal)],
             Column::new("sum", TypeId::Decimal),
             "SUM".to_string(),
         );
 
         assert_eq!(
-            sum_expr.evaluate(&tuple, &schema).unwrap(),
+            sum_decimal.evaluate(&tuple, &schema).unwrap(),
             Value::new(10.5)
         );
+
+        // Test SUM on integer column
+        let sum_int = AggregateExpression::new(
+            AggregationType::Sum,
+            vec![create_column_ref(0, "id", TypeId::BigInt)],
+            Column::new("sum", TypeId::BigInt),
+            "SUM".to_string(),
+        );
+
+        assert_eq!(
+            sum_int.evaluate(&tuple, &schema).unwrap(),
+            Value::new(1_i64)
+        );
+
+        // Test SUM on nullable column
+        let sum_null = AggregateExpression::new(
+            AggregationType::Sum,
+            vec![create_column_ref(2, "nullable", TypeId::BigInt)],
+            Column::new("sum", TypeId::BigInt),
+            "SUM".to_string(),
+        );
+
+        assert_eq!(
+            sum_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(0_i64)
+        );
+    }
+
+    #[test]
+    fn test_min_max_aggregate() {
+        let (tuple, schema) = create_test_tuple();
+
+        // Test MIN
+        let min_expr = AggregateExpression::new(
+            AggregationType::Min,
+            vec![create_column_ref(1, "value", TypeId::Decimal)],
+            Column::new("min", TypeId::Decimal),
+            "MIN".to_string(),
+        );
+
+        assert_eq!(
+            min_expr.evaluate(&tuple, &schema).unwrap(),
+            Value::new(10.5)
+        );
+
+        // Test MAX
+        let max_expr = AggregateExpression::new(
+            AggregationType::Max,
+            vec![create_column_ref(1, "value", TypeId::Decimal)],
+            Column::new("max", TypeId::Decimal),
+            "MAX".to_string(),
+        );
+
+        assert_eq!(
+            max_expr.evaluate(&tuple, &schema).unwrap(),
+            Value::new(10.5)
+        );
+
+        // Test MIN on nullable column
+        let min_null = AggregateExpression::new(
+            AggregationType::Min,
+            vec![create_column_ref(2, "nullable", TypeId::Integer)],
+            Column::new("min", TypeId::Integer),
+            "MIN".to_string(),
+        );
+
+        assert_eq!(
+            min_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(Val::Null)
+        );
+    }
+
+    #[test]
+    fn test_avg_aggregate() {
+        let (tuple, schema) = create_test_tuple();
+
+        // Test AVG on decimal column
+        let avg_decimal = AggregateExpression::new(
+            AggregationType::Avg,
+            vec![create_column_ref(1, "value", TypeId::Decimal)],
+            Column::new("avg", TypeId::Decimal),
+            "AVG".to_string(),
+        );
+
+        assert_eq!(
+            avg_decimal.evaluate(&tuple, &schema).unwrap(),
+            Value::new(10.5)
+        );
+
+        // Test AVG on nullable column
+        let avg_null = AggregateExpression::new(
+            AggregationType::Avg,
+            vec![create_column_ref(2, "nullable", TypeId::Integer)],
+            Column::new("avg", TypeId::Integer),
+            "AVG".to_string(),
+        );
+
+        assert_eq!(
+            avg_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(Val::Null)
+        );
+    }
+
+    #[test]
+    fn test_column_name_generation() {
+        // Test COUNT(*) column name
+        let count_star = AggregateExpression::new(
+            AggregationType::CountStar,
+            vec![],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
+        );
+        assert_eq!(count_star.get_column_name(), "COUNT_star");
+
+        // Test regular aggregate column name
+        let sum_expr = AggregateExpression::new(
+            AggregationType::Sum,
+            vec![create_column_ref(0, "value", TypeId::Decimal)],
+            Column::new("sum", TypeId::Decimal),
+            "SUM".to_string(),
+        );
+        assert_eq!(sum_expr.get_column_name(), "SUM_value");
+
+        // Test with alias
+        let aliased_sum = sum_expr.with_alias("total".to_string());
+        assert_eq!(aliased_sum.get_column_name(), "total");
+    }
+
+    #[test]
+    fn test_validate() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::Decimal),
+        ]);
+
+        // Valid COUNT(*)
+        let count_star = AggregateExpression::new(
+            AggregationType::CountStar,
+            vec![],
+            Column::new("count", TypeId::BigInt),
+            "COUNT".to_string(),
+        );
+        assert!(count_star.validate(&schema).is_ok());
+
+        // Invalid SUM (no arguments)
+        let invalid_sum = AggregateExpression::new(
+            AggregationType::Sum,
+            vec![],
+            Column::new("sum", TypeId::Decimal),
+            "SUM".to_string(),
+        );
+        assert!(invalid_sum.validate(&schema).is_err());
     }
 }

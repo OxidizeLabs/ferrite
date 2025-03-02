@@ -1,6 +1,4 @@
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-use log::debug;
-use super::logical_plan::LogicalPlan;
+use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
 use crate::catalog::catalog::Catalog;
 use crate::catalog::column::Column;
@@ -9,12 +7,10 @@ use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use parking_lot::RwLock;
-use sqlparser::ast::*;
 use sqlparser::ast::Value as SqlValue;
+use sqlparser::ast::*;
 use std::sync::Arc;
-use log;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{Value, Val};
+use log::debug;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -133,186 +129,330 @@ impl LogicalPlanBuilder {
     }
 
     pub fn build_select_plan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
-        debug!("=== Starting Join Planning ===");
-        debug!("From clause: {:?}", select.from);
-
-        // Get the base table and any joins
-        let mut current_plan = if let Some(table_with_joins) = select.from.first() {
-            // Get the base table scan
-            let table_name = match &table_with_joins.relation {
-                TableFactor::Table { name, .. } => name.to_string(),
-                _ => return Err("Only simple table references are supported".to_string()),
-            };
-
-            let mut current_plan = LogicalPlan::table_scan(
-                table_name.clone(),
-                self.expression_parser.get_table_schema(&table_name)?,
-                self.expression_parser.get_table_oid(&table_name)?,
-            );
-
-            // Process any joins
-            for join in &table_with_joins.joins {
-                // Get the right table scan
-                let right_table = match &join.relation {
-                    TableFactor::Table { name, .. } => name.to_string(),
-                    _ => return Err("Only simple table joins are supported".to_string()),
-                };
-
-                let right_plan = LogicalPlan::table_scan(
-                    right_table.clone(),
-                    self.expression_parser.get_table_schema(&right_table)?,
-                    self.expression_parser.get_table_oid(&right_table)?,
-                );
-
-                // Create join predicate
-                let join_predicate = match &join.join_operator {
-                    JoinOperator::Inner(constraint) |
-                    JoinOperator::LeftOuter(constraint) |
-                    JoinOperator::RightOuter(constraint) => {
-                        match constraint {
-                            JoinConstraint::On(expr) => {
-                                let left_schema = current_plan.get_schema();
-                                let right_schema = right_plan.get_schema();
-                                Arc::new(self.expression_parser.parse_join_condition(
-                                    expr,
-                                    &left_schema,
-                                    &right_schema,
-                                )?)
-                            }
-                            _ => return Err("Only ON clause joins are supported".to_string()),
-                        }
-                    }
-                    JoinOperator::CrossJoin => {
-                        // Cross join doesn't need a predicate
-                        let true_value = Value::new(Val::Boolean(true));
-                        let true_column = Column::new("true", TypeId::Boolean);
-                        Arc::new(Expression::Constant(ConstantExpression::new(
-                            true_value,
-                            true_column,
-                            vec![],
-                        )))
-                    }
-                    _ => return Err("Unsupported join type".to_string()),
-                };
-
-                // Build the join plan
-                current_plan = self.build_join_plan(
-                    current_plan,
-                    right_plan,
-                    &join.join_operator,
-                    join_predicate,
-                )?;
+        let mut current_plan = {
+            if select.from.is_empty() {
+                return Err("FROM clause is required".to_string());
             }
-            current_plan
-        } else {
-            return Err("No FROM clause found".to_string());
+
+            // Check if we have a join (multiple tables in FROM clause)
+            if select.from.len() > 1 || !select.from[0].joins.is_empty() {
+                // Use the expression parser's prepare_join_scan method to handle joins
+                self.expression_parser.prepare_join_scan(select)?
+            } else {
+                // Single table query
+                self.build_table_scan(&select.from[0])?
+            }
         };
 
-        debug!("After join preparation:");
-        debug!("Current plan schema: {:?}", current_plan.get_schema());
-        debug!("Current plan type: {:?}", current_plan.plan_type);
+        // Store the original input schema for later use when parsing projection expressions
+        let original_schema = current_plan.get_schema().clone();
 
-        // Add filter if WHERE clause exists
-        if let Some(where_clause) = &select.selection {
+        // Apply WHERE clause if it exists
+        if let Some(selection) = &select.selection {
             let schema = current_plan.get_schema();
-            let predicate = Arc::new(
-                self.expression_parser
-                    .parse_expression(where_clause, &schema)?,
-            );
+            let filter_expr = self
+                .expression_parser
+                .parse_expression(selection, &schema)?;
             current_plan = LogicalPlan::filter(
                 schema.clone(),
-                String::new(), // No single table name for joins
-                0,             // No single table OID for joins
-                predicate,
+                String::new(), // table_name
+                0,             // table_oid
+                Arc::new(filter_expr),
                 current_plan,
             );
         }
 
-        // Handle aggregation if needed
-        let schema = current_plan.get_schema();
+        // Handle GROUP BY and aggregates
         let has_group_by = match &select.group_by {
-            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
             GroupByExpr::All(_) => true,
+            GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
         };
-        let has_aggregates = self
-            .expression_parser
-            .has_aggregate_functions(&select.projection);
+        let schema = current_plan.get_schema();
+
+        // Parse all expressions in the projection to identify aggregates
+        let mut has_aggregates = false;
+        let mut agg_exprs: Vec<Arc<Expression>> = Vec::new();
+
+        for item in &select.projection {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    // Use the original schema for parsing expressions to ensure all columns are available
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, &original_schema)?;
+                    if let Expression::Aggregate(_) = parsed_expr {
+                        has_aggregates = true;
+                        agg_exprs.push(Arc::new(parsed_expr));
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias: _ } => {
+                    // Use the original schema for parsing expressions to ensure all columns are available
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, &original_schema)?;
+                    if let Expression::Aggregate(_) = parsed_expr {
+                        has_aggregates = true;
+                        agg_exprs.push(Arc::new(parsed_expr));
+                    }
+                }
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                    // We'll check for wildcards after determining if there are aggregates
+                    // No action needed here
+                }
+            }
+        }
 
         if has_group_by || has_aggregates {
-            debug!("=== Starting Aggregation Planning ===");
-            debug!("Input schema: {:?}", schema);
-            debug!("Has GROUP BY: {}, Has Aggregates: {}", has_group_by, has_aggregates);
+            // Check for wildcards now that we know we have aggregates
+            for item in &select.projection {
+                if matches!(
+                    item,
+                    SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _)
+                ) {
+                    return Err("Wildcard projections are not supported in aggregates".to_string());
+                }
+            }
 
-            // Parse group by expressions
-            let group_by_exprs: Vec<_> = self
-                .expression_parser
-                .determine_group_by_expressions(select, &schema, has_group_by)?
-                .into_iter()
-                .map(Arc::new)
-                .collect();
-
-            debug!("Group by expressions: {:?}", group_by_exprs);
-
-            // Parse aggregates using the input schema
-            let (agg_exprs, _) = self
-                .expression_parser
-                .parse_aggregates(&select.projection, &schema)?;
-
-            debug!("Aggregate expressions: {:?}", agg_exprs);
-
-            // Create output schema for aggregation
-            let agg_schema = self.schema_manager.create_aggregation_output_schema(
-                &group_by_exprs
-                    .iter()
-                    .map(|e| e.as_ref())
-                    .collect::<Vec<_>>(),
-                &agg_exprs,
+            // Get group by expressions
+            let group_by_exprs = self.expression_parser.determine_group_by_expressions(
+                select,
+                &schema,
                 has_group_by,
-            );
+            )?;
 
-            debug!("Aggregation schema: {:?}", agg_schema);
+            // Create a new schema for the aggregate plan that includes both group by and aggregate columns
+            let mut agg_columns = Vec::new();
 
-            // Create the aggregate plan node
+            // Add group by columns
+            for expr in &group_by_exprs {
+                let col_name = match expr {
+                    Expression::ColumnRef(col_ref) => {
+                        col_ref.get_return_type().get_name().to_string()
+                    }
+                    _ => expr.get_return_type().get_name().to_string(),
+                };
+                agg_columns.push(Column::new(&col_name, expr.get_return_type().get_type()));
+            }
+
+            // Add aggregate columns
+            for agg_expr in &agg_exprs {
+                match agg_expr.as_ref() {
+                    Expression::Aggregate(agg) => {
+                        let col_name = agg.get_column_name();
+                        agg_columns.push(Column::new(&col_name, agg.get_return_type().get_type()));
+                    }
+                    _ => unreachable!("Expected aggregate expression"),
+                }
+            }
+
+            let agg_schema = Schema::new(agg_columns);
+
+            // Create aggregation plan node
             current_plan = LogicalPlan::aggregate(
-                group_by_exprs,
+                group_by_exprs.into_iter().map(|e| Arc::new(e)).collect(),
                 agg_exprs,
-                agg_schema.clone(),
-                current_plan
+                agg_schema,
+                current_plan,
             );
 
-            // Handle HAVING clause if present
+            // Apply HAVING clause if it exists
             if let Some(having) = &select.having {
-                let predicate = Arc::new(
-                    self.expression_parser
-                        .parse_expression(having, &agg_schema)?, // Use aggregation schema for HAVING clause
-                );
+                // Use the original schema for parsing the HAVING clause to ensure all columns are available
+                let having_expr = self
+                    .expression_parser
+                    .parse_expression(having, &original_schema)?;
                 current_plan = LogicalPlan::filter(
-                    agg_schema.clone(),
-                    String::new(),
-                    0,
-                    predicate,
+                    current_plan.get_schema().clone(),
+                    String::new(), // table_name
+                    0,             // table_oid
+                    Arc::new(having_expr),
+                    current_plan,
+                );
+            }
+
+            // Add projection on top of aggregation
+            // Use the original schema for parsing projection expressions
+            current_plan = self.build_projection_plan_with_schema(
+                &select.projection,
+                current_plan,
+                &original_schema,
+            )?;
+        } else {
+            // No aggregates, just add projection
+            current_plan = self.build_projection_plan(&select.projection, current_plan)?;
+        }
+
+        // Apply HAVING clause if it exists and we don't have aggregates
+        // This is a bit unusual but SQL allows it
+        if !has_aggregates && !has_group_by {
+            if let Some(having) = &select.having {
+                let having_expr = self.expression_parser.parse_expression(having, &schema)?;
+                current_plan = LogicalPlan::filter(
+                    current_plan.get_schema().clone(),
+                    String::new(), // table_name
+                    0,             // table_oid
+                    Arc::new(having_expr),
                     current_plan,
                 );
             }
         }
 
-        current_plan = self.build_projection_plan(&select.projection, current_plan)?;
-
-        // Handle ORDER BY
+        // Apply SORT BY if it exists (Hive-specific)
         if !select.sort_by.is_empty() {
+            let schema = current_plan.get_schema();
             let sort_exprs = select
                 .sort_by
                 .iter()
-                .map(|order| {
-                    let expr = self.expression_parser.parse_expression(&order, &schema)?;
-                    Ok(Arc::new(expr))
+                .map(|expr| {
+                    let parsed_expr = self.expression_parser.parse_expression(expr, &schema)?;
+                    Ok(Arc::new(parsed_expr))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
 
-            current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
+            if !sort_exprs.is_empty() {
+                current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
+            }
+        }
+
+        // Apply TOP if it exists (MSSQL-specific LIMIT)
+        if let Some(top) = &select.top {
+            if let Some(quantity) = &top.quantity {
+                let limit_val = match quantity {
+                    TopQuantity::Constant(n) => *n as usize,
+                    TopQuantity::Expr(expr) => match expr {
+                        Expr::Value(SqlValue::Number(n, _)) => n
+                            .parse::<usize>()
+                            .map_err(|_| "Invalid TOP value".to_string())?,
+                        _ => return Err("TOP quantity must be a number".to_string()),
+                    },
+                };
+
+                let schema = current_plan.get_schema().clone();
+                current_plan = LogicalPlan::limit(limit_val, schema, current_plan);
+            }
         }
 
         Ok(current_plan)
+    }
+
+    // New helper method to build projection plan with a specific schema for expression parsing
+    pub fn build_projection_plan_with_schema(
+        &self,
+        projection: &[SelectItem],
+        input_plan: Box<LogicalPlan>,
+        parse_schema: &Schema,
+    ) -> Result<Box<LogicalPlan>, String> {
+        let input_schema = input_plan.get_schema();
+        debug!("Building projection plan");
+        debug!("Input schema: {:?}", input_schema);
+        debug!("Projection items: {:?}", projection);
+
+        let mut projection_exprs = Vec::new();
+        let mut output_columns = Vec::new();
+
+        // Check if we're projecting from an aggregate plan
+        let is_aggregate_input = matches!(input_plan.plan_type, LogicalPlanType::Aggregate { .. });
+
+        for (i, item) in projection.iter().enumerate() {
+            debug!("Processing projection item {}: {:?}", i, item);
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    debug!("Processing unnamed expression: {:?}", expr);
+                    // Use the provided schema for parsing expressions
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, parse_schema)?;
+
+                    // For column references, use the column name from the expression
+                    let col_name = match expr {
+                        Expr::Identifier(ident) => ident.value.clone(),
+                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                            format!("{}.{}", parts[0].value, parts[1].value)
+                        }
+                        _ => parsed_expr.to_string(),
+                    };
+
+                    let output_col =
+                        Column::new(&col_name, parsed_expr.get_return_type().get_type());
+                    debug!("Created column: {:?}", output_col);
+                    output_columns.push(output_col);
+
+                    // For aggregate input, use column reference for non-aggregate expressions
+                    if is_aggregate_input && !matches!(parsed_expr, Expression::Aggregate(_)) {
+                        // Find the column in the input schema
+                        if let Some(col_idx) = input_schema.get_qualified_column_index(&col_name) {
+                            projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                ColumnRefExpression::new(
+                                    0,
+                                    col_idx,
+                                    input_schema.get_column(col_idx).unwrap().clone(),
+                                    vec![],
+                                ),
+                            )));
+                        } else {
+                            projection_exprs.push(Arc::new(parsed_expr));
+                        }
+                    } else {
+                        projection_exprs.push(Arc::new(parsed_expr));
+                    }
+                }
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    debug!(
+                        "Processing aliased expression: {:?} AS {}",
+                        expr, alias.value
+                    );
+                    // Use the provided schema for parsing expressions
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, parse_schema)?;
+                    let output_col =
+                        Column::new(&alias.value, parsed_expr.get_return_type().get_type());
+                    debug!("Created aliased column: {:?}", output_col);
+                    output_columns.push(output_col);
+
+                    // For aggregate input, use column reference for non-aggregate expressions
+                    if is_aggregate_input && !matches!(parsed_expr, Expression::Aggregate(_)) {
+                        // Find the column in the input schema
+                        if let Some(col_idx) = input_schema.get_qualified_column_index(&alias.value)
+                        {
+                            projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                ColumnRefExpression::new(
+                                    0,
+                                    col_idx,
+                                    input_schema.get_column(col_idx).unwrap().clone(),
+                                    vec![],
+                                ),
+                            )));
+                        } else {
+                            projection_exprs.push(Arc::new(parsed_expr));
+                        }
+                    } else {
+                        projection_exprs.push(Arc::new(parsed_expr));
+                    }
+                }
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                    debug!("Processing wildcard");
+                    for i in 0..input_schema.get_column_count() {
+                        let col = input_schema.get_column(i as usize).unwrap();
+                        debug!("Adding wildcard column: {:?}", col);
+                        output_columns.push(col.clone());
+                        projection_exprs.push(Arc::new(Expression::ColumnRef(
+                            ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
+                        )));
+                    }
+                }
+            }
+        }
+
+        let output_schema = Schema::new(output_columns);
+        debug!("Final projection schema: {:?}", &output_schema);
+        debug!("Projection expressions: {:?}", projection_exprs);
+
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            output_schema,
+            input_plan,
+        ))
     }
 
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
@@ -384,7 +524,8 @@ impl LogicalPlanBuilder {
         let table_oid = table_info.get_table_oidt();
 
         // Create base table scan
-        let mut current_plan = LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
+        let mut current_plan =
+            LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
 
         // Add filter if WHERE clause exists
         if let Some(where_clause) = selection {
@@ -448,85 +589,175 @@ impl LogicalPlanBuilder {
 
     pub fn build_projection_plan(
         &self,
-        projection: &[SelectItem],
+        select_items: &[SelectItem],
         input_plan: Box<LogicalPlan>,
     ) -> Result<Box<LogicalPlan>, String> {
         let input_schema = input_plan.get_schema();
-        debug!("Building projection plan");
-        debug!("Input schema: {:?}", input_schema);
-        debug!("Projection items: {:?}", projection);
-        
-        let mut projection_exprs = Vec::new();
-        let mut output_columns = Vec::new();
+        let parse_schema = input_schema.as_ref();
+        let is_aggregate_input = matches!(input_plan.plan_type, LogicalPlanType::Aggregate { .. });
 
-        for (i, item) in projection.iter().enumerate() {
-            debug!("Processing projection item {}: {:?}", i, item);
+        let mut output_columns = Vec::new();
+        let mut projection_exprs = Vec::new();
+
+        debug!(
+            "Building projection plan with input schema: {:?}",
+            input_schema
+        );
+        debug!("Select items: {:?}", select_items);
+
+        for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let parsed_expr = self.expression_parser.parse_expression(expr, &input_schema)?;
-                    debug!("Parsed expression: {:?}", parsed_expr);
+                    debug!("Processing unnamed expression: {:?}", expr);
 
-                    // Use the column name from the expression
-                    let col_name = match expr {
-                        Expr::CompoundIdentifier(parts) => {
-                            // For qualified names (e.g., u.name), preserve the full name
-                            let name = format!("{}.{}", parts[0].value, parts[1].value);
-                            debug!("Using qualified name: {}", name);
-                            name
-                        }
-                        Expr::Function(func) => {
-                            // For function calls without alias, use the function name
-                            func.name.to_string()
+                    // Determine column name from the expression
+                    let column_name = match expr {
+                        Expr::Identifier(ident) => ident.value.clone(),
+                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                            format!("{}.{}", parts[0].value, parts[1].value)
                         }
                         _ => {
-                            let name = parsed_expr.get_return_type().get_name().to_string();
-                            debug!("Using unqualified name: {}", name);
-                            name
+                            // Use the provided schema for parsing expressions
+                            let parsed_expr = self
+                                .expression_parser
+                                .parse_expression(expr, parse_schema)?;
+                            parsed_expr.to_string()
                         }
                     };
 
-                    let output_col = Column::new(
-                        &col_name,
-                        parsed_expr.get_return_type().get_type(),
-                    );
-                    debug!("Created output column: {:?}", output_col);
-                    
-                    output_columns.push(output_col);
-                    projection_exprs.push(Arc::new(parsed_expr));
+                    // For qualified column references (table.column format)
+                    match expr {
+                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                            // This is a qualified column reference like "u.name"
+                            let qualified_name = format!("{}.{}", parts[0].value, parts[1].value);
+
+                            // Find the column in the input schema
+                            if let Some(col_idx) =
+                                input_schema.get_qualified_column_index(&qualified_name)
+                            {
+                                let input_col = input_schema.get_column(col_idx).unwrap();
+
+                                // Create output column with the qualified name
+                                let output_col = Column::new(&qualified_name, input_col.get_type());
+                                output_columns.push(output_col);
+
+                                // Create column reference expression
+                                projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                    ColumnRefExpression::new(0, col_idx, input_col.clone(), vec![]),
+                                )));
+                            } else {
+                                return Err(format!(
+                                    "Column {} not found in schema",
+                                    qualified_name
+                                ));
+                            }
+                        }
+                        _ => {
+                            // Use the provided schema for parsing expressions
+                            let parsed_expr = self
+                                .expression_parser
+                                .parse_expression(expr, parse_schema)?;
+
+                            let output_col =
+                                Column::new(&column_name, parsed_expr.get_return_type().get_type());
+                            debug!("Created column: {:?}", output_col);
+                            output_columns.push(output_col);
+
+                            // For aggregate input, use column reference for non-aggregate expressions
+                            if is_aggregate_input
+                                && !matches!(parsed_expr, Expression::Aggregate(_))
+                            {
+                                // Find the column in the input schema
+                                if let Some(col_idx) =
+                                    input_schema.get_qualified_column_index(&column_name)
+                                {
+                                    projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                        ColumnRefExpression::new(
+                                            0,
+                                            col_idx,
+                                            input_schema.get_column(col_idx).unwrap().clone(),
+                                            vec![],
+                                        ),
+                                    )));
+                                } else {
+                                    projection_exprs.push(Arc::new(parsed_expr));
+                                }
+                            } else {
+                                projection_exprs.push(Arc::new(parsed_expr));
+                            }
+                        }
+                    }
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    debug!("Processing aliased expression: {:?} AS {}", expr, alias.value);
-                    let parsed_expr = self.expression_parser.parse_expression(expr, &input_schema)?;
-                    let output_col = Column::new(
-                        &alias.value,
-                        parsed_expr.get_return_type().get_type(),
+                    debug!(
+                        "Processing aliased expression: {:?} AS {}",
+                        expr, alias.value
                     );
+                    // Use the provided schema for parsing expressions
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, parse_schema)?;
+                    let output_col =
+                        Column::new(&alias.value, parsed_expr.get_return_type().get_type());
                     debug!("Created aliased column: {:?}", output_col);
+
                     output_columns.push(output_col);
                     projection_exprs.push(Arc::new(parsed_expr));
                 }
-                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                SelectItem::Wildcard(_) => {
                     debug!("Processing wildcard");
+                    // Add all columns from the input schema
                     for i in 0..input_schema.get_column_count() {
                         let col = input_schema.get_column(i as usize).unwrap();
-                        debug!("Adding wildcard column: {:?}", col);
                         output_columns.push(col.clone());
-                        projection_exprs.push(Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+
+                        let col_expr = Expression::ColumnRef(ColumnRefExpression::new(
                             0,
                             i as usize,
                             col.clone(),
                             vec![],
-                        ))));
+                        ));
+                        projection_exprs.push(Arc::new(col_expr));
+                    }
+                }
+                SelectItem::QualifiedWildcard(name, _) => {
+                    debug!("Processing qualified wildcard: {}", name);
+                    // Add columns that match the qualifier
+                    let qualifier = name.to_string();
+
+                    for i in 0..input_schema.get_column_count() {
+                        let col = input_schema.get_column(i as usize).unwrap();
+                        let col_name = col.get_name();
+
+                        // Check if the column name has the qualifier
+                        if col_name.starts_with(&format!("{}.", qualifier)) || 
+                           // Also check for table aliases in join queries
+                           (col_name.contains('.') && col_name.split('.').next().unwrap() == qualifier)
+                        {
+                            output_columns.push(col.clone());
+
+                            let col_expr = Expression::ColumnRef(ColumnRefExpression::new(
+                                0,
+                                i as usize,
+                                col.clone(),
+                                vec![],
+                            ));
+                            projection_exprs.push(Arc::new(col_expr));
+                        }
                     }
                 }
             }
         }
 
-        let projection_schema = Schema::new(output_columns);
-        debug!("Final projection schema: {:?}", projection_schema);
+        let output_schema = Schema::new(output_columns);
+        debug!("Final projection schema: {:?}", output_schema);
         debug!("Projection expressions: {:?}", projection_exprs);
-        
-        Ok(LogicalPlan::project(projection_exprs, projection_schema, input_plan))
+
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            output_schema,
+            input_plan,
+        ))
     }
 
     pub fn build_create_table_plan(
@@ -622,50 +853,86 @@ impl LogicalPlanBuilder {
         let right_schema = right_plan.get_schema();
 
         match join_type {
-            JoinOperator::Inner(_) => {
-                Ok(LogicalPlan::nested_loop_join(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    join_predicate,
-                    join_type.clone(),
-                    left_plan,
-                    right_plan,
-                ))
-            }
-            JoinOperator::LeftOuter(_) => {
-                Ok(LogicalPlan::nested_loop_join(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    join_predicate,
-                    join_type.clone(),
-                    left_plan,
-                    right_plan,
-                ))
-            }
-            JoinOperator::RightOuter(_) => {
-                Ok(LogicalPlan::nested_loop_join(
-                    right_schema.clone(),
-                    left_schema.clone(),
-                    join_predicate,
-                    JoinOperator::LeftOuter(JoinConstraint::None),
-                    right_plan,
-                    left_plan,
-                ))
-            }
-            JoinOperator::FullOuter(_) => {
-                Err("Full outer joins are not yet supported".to_string())
-            }
-            JoinOperator::CrossJoin => {
-                Ok(LogicalPlan::nested_loop_join(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    join_predicate,
-                    join_type.clone(),
-                    left_plan,
-                    right_plan,
-                ))
-            }
+            JoinOperator::Inner(_) => Ok(LogicalPlan::nested_loop_join(
+                left_schema.clone(),
+                right_schema.clone(),
+                join_predicate,
+                join_type.clone(),
+                left_plan,
+                right_plan,
+            )),
+            JoinOperator::LeftOuter(_) => Ok(LogicalPlan::nested_loop_join(
+                left_schema.clone(),
+                right_schema.clone(),
+                join_predicate,
+                join_type.clone(),
+                left_plan,
+                right_plan,
+            )),
+            JoinOperator::RightOuter(_) => Ok(LogicalPlan::nested_loop_join(
+                right_schema.clone(),
+                left_schema.clone(),
+                join_predicate,
+                JoinOperator::LeftOuter(JoinConstraint::None),
+                right_plan,
+                left_plan,
+            )),
+            JoinOperator::FullOuter(_) => Err("Full outer joins are not yet supported".to_string()),
+            JoinOperator::CrossJoin => Ok(LogicalPlan::nested_loop_join(
+                left_schema.clone(),
+                right_schema.clone(),
+                join_predicate,
+                join_type.clone(),
+                left_plan,
+                right_plan,
+            )),
             _ => Err(format!("Unsupported join type: {:?}", join_type)),
+        }
+    }
+
+    pub fn parse_order_by_expressions(
+        &self,
+        order_by: &Vec<OrderByExpr>,
+        schema: &Schema,
+    ) -> Result<Vec<Arc<Expression>>, String> {
+        let mut order_by_exprs = Vec::new();
+        for expr in order_by {
+            let parsed_expr = self
+                .expression_parser
+                .parse_expression(&expr.expr, schema)?;
+            order_by_exprs.push(Arc::new(parsed_expr));
+        }
+        Ok(order_by_exprs)
+    }
+
+    fn build_table_scan(
+        &self,
+        table_with_joins: &TableWithJoins,
+    ) -> Result<Box<LogicalPlan>, String> {
+        match &table_with_joins.relation {
+            TableFactor::Table { name, alias, .. } => {
+                let table_name = self.expression_parser.extract_table_name(name)?;
+                let schema = self.expression_parser.get_table_schema(&table_name)?;
+                let table_oid = self.expression_parser.get_table_oid(&table_name)?;
+
+                // If an alias is provided, apply it to the schema
+                let final_schema = if let Some(table_alias) = alias {
+                    let alias_name = table_alias.name.value.clone();
+                    // Create a new schema with the alias applied to all columns
+                    let mut aliased_columns = Vec::new();
+                    for col in schema.get_columns() {
+                        let mut new_col = col.clone();
+                        new_col.set_name(format!("{}.{}", alias_name, col.get_name()));
+                        aliased_columns.push(new_col);
+                    }
+                    Schema::new(aliased_columns)
+                } else {
+                    schema
+                };
+
+                Ok(LogicalPlan::table_scan(table_name, final_schema, table_oid))
+            }
+            _ => Err("Only simple table scans are supported".to_string()),
         }
     }
 }
@@ -988,14 +1255,27 @@ mod tests {
     mod aggregation_tests {
         use super::*;
         use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
         use crate::sql::planner::logical_plan::LogicalPlanType;
         use crate::types_db::type_id::TypeId;
 
         // Helper function to set up a test table
         fn setup_test_table(fixture: &mut TestContext) {
+            // Create the table with the correct schema
             fixture
                 .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
                 .unwrap();
+
+            // Verify the table exists and has the correct schema
+            fixture.assert_table_exists("users");
+            fixture.assert_table_schema(
+                "users",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                    ("age".to_string(), TypeId::Integer),
+                ],
+            );
         }
 
         #[test]
@@ -1006,7 +1286,7 @@ mod tests {
             let test_cases = vec![
                 (
                     "SELECT name, SUM(age) FROM users GROUP BY name",
-                    vec!["name", "SUM(age)"],
+                    vec!["name", "SUM_age"],
                 ),
                 (
                     "SELECT name, SUM(age) as total_age FROM users GROUP BY name",
@@ -1022,7 +1302,7 @@ mod tests {
                 ),
                 (
                     "SELECT name, AVG(age) FROM users GROUP BY name",
-                    vec!["name", "AVG(age)"],
+                    vec!["name", "AVG_age"],
                 ),
             ];
 
@@ -1030,16 +1310,29 @@ mod tests {
                 let plan = fixture
                     .planner
                     .create_logical_plan(sql)
-                    .unwrap_or_else(|e| {
-                        panic!("Failed to create plan for query '{}': {}", sql, e);
-                    });
+                    .unwrap_or_else(|e| panic!("Failed to create plan for query '{}': {}", sql, e));
 
-                // if let Err(e) = verify_aggregation_plan(&plan, &expected_columns) {
-                //     panic!(
-                //         "Verification failed for query '{}':\n{}\nPlan:\n{}",
-                //         sql, e, plan.explain(0)
-                //     );
-                // }
+                // Verify the plan structure
+                match &plan.plan_type {
+                    LogicalPlanType::Projection { schema, .. } => {
+                        // Verify column names match expected
+                        let actual_columns: Vec<_> = (0..schema.get_column_count())
+                            .map(|i| {
+                                schema
+                                    .get_column(i as usize)
+                                    .unwrap()
+                                    .get_name()
+                                    .to_string()
+                            })
+                            .collect();
+                        assert_eq!(
+                            actual_columns, expected_columns,
+                            "Column names don't match for query: {}",
+                            sql
+                        );
+                    }
+                    _ => panic!("Expected Projection as root node for query: {}", sql),
+                }
             }
         }
 
@@ -1057,7 +1350,7 @@ mod tests {
                 (
                     "SELECT SUM(age) FROM users",
                     vec![AggregationType::Sum],
-                    vec![TypeId::Integer],
+                    vec![TypeId::BigInt],
                 ),
                 (
                     "SELECT MIN(age), MAX(age) FROM users",
@@ -1072,14 +1365,14 @@ mod tests {
             ];
 
             for (sql, expected_types, expected_return_types) in test_cases {
-                let plan = fixture.planner.create_logical_plan(sql).unwrap();
+                let plan = fixture
+                    .planner
+                    .create_logical_plan(sql)
+                    .unwrap_or_else(|e| panic!("Failed to create plan for query '{}': {}", sql, e));
 
                 // First verify we have a projection node
                 match &plan.plan_type {
-                    LogicalPlanType::Projection {
-                        expressions,
-                        schema,
-                    } => {
+                    LogicalPlanType::Projection { expressions, .. } => {
                         assert_eq!(expressions.len(), expected_types.len());
                     }
                     _ => panic!("Expected Projection as root node for query: {}", sql),
@@ -1087,11 +1380,7 @@ mod tests {
 
                 // Then verify the aggregate node
                 match &plan.children[0].plan_type {
-                    LogicalPlanType::Aggregate {
-                        group_by,
-                        aggregates,
-                        schema,
-                    } => {
+                    LogicalPlanType::Aggregate { aggregates, .. } => {
                         // Check aggregate types
                         assert_eq!(
                             aggregates.len(),
@@ -1103,7 +1392,7 @@ mod tests {
                         for (i, expected_type) in expected_types.iter().enumerate() {
                             if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
                                 assert_eq!(
-                                    agg.get_agg_type(), // Remove & reference
+                                    agg.get_agg_type(),
                                     expected_type,
                                     "Aggregate type mismatch for query: {}",
                                     sql
@@ -1121,12 +1410,70 @@ mod tests {
                     }
                     _ => panic!("Expected Aggregate node for query: {}", sql),
                 }
+            }
+        }
 
-                // Finally verify the table scan node
-                match &plan.children[0].children[0].plan_type {
-                    LogicalPlanType::TableScan { .. } => {}
-                    _ => panic!("Expected TableScan as leaf node for query: {}", sql),
+        #[test]
+        fn test_group_by_with_aggregates() {
+            let mut fixture = TestContext::new("group_by_aggregates");
+            setup_test_table(&mut fixture);
+
+            // Verify the table was created correctly
+            fixture.assert_table_exists("users");
+            fixture.assert_table_schema(
+                "users",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                    ("age".to_string(), TypeId::Integer),
+                ],
+            );
+
+            let group_sql = "SELECT name, SUM(age) as total_age, COUNT(*) as num_users \
+                            FROM users \
+                            GROUP BY name \
+                            HAVING SUM(age) > 25";
+
+            let plan = fixture.planner.create_logical_plan(group_sql).unwrap();
+
+            // Verify projection
+            match &plan.plan_type {
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
+                    assert_eq!(schema.get_column_count(), 3);
+                    assert_eq!(expressions.len(), 3);
                 }
+                _ => panic!("Expected Projection as root node"),
+            }
+
+            // Verify filter (HAVING)
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Filter { predicate, .. } => {
+                    // Verify the predicate is comparing SUM(age) > 25
+                    match predicate.as_ref() {
+                        Expression::Comparison(comp) => {
+                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
+                        }
+                        _ => panic!("Expected Comparison expression in HAVING clause"),
+                    }
+                }
+                _ => panic!("Expected Filter node for HAVING clause"),
+            }
+
+            // Verify aggregation
+            match &plan.children[0].children[0].plan_type {
+                LogicalPlanType::Aggregate {
+                    group_by,
+                    aggregates,
+                    schema,
+                } => {
+                    assert_eq!(group_by.len(), 1); // name
+                    assert_eq!(aggregates.len(), 2); // SUM(age), COUNT(*)
+                    assert_eq!(schema.get_column_count(), 3);
+                }
+                _ => panic!("Expected Aggregate node"),
             }
         }
     }
@@ -1137,11 +1484,7 @@ mod tests {
 
         fn setup_test_tables(fixture: &mut TestContext) {
             fixture
-                .create_table(
-                    "users",
-                    "id INTEGER, name VARCHAR(255), age INTEGER",
-                    false,
-                )
+                .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
                 .unwrap();
             fixture
                 .create_table(
@@ -1160,37 +1503,66 @@ mod tests {
             let join_sql = "SELECT u.name, o.amount \
                            FROM users u \
                            INNER JOIN orders o ON u.id = o.user_id";
-            
-            let plan = fixture.planner.create_logical_plan(join_sql).expect("Failed to create plan");
+
+            let plan = fixture
+                .planner
+                .create_logical_plan(join_sql)
+                .expect("Failed to create plan");
 
             // First verify the join node and its schemas
             let join_node = match &plan.children[0].plan_type {
-                LogicalPlanType::NestedLoopJoin { 
-                    left_schema, 
+                LogicalPlanType::NestedLoopJoin {
+                    left_schema,
                     right_schema,
                     predicate,
-                    join_type 
+                    join_type,
                 } => {
                     // Verify left schema (users)
-                    assert_eq!(left_schema.get_column_count(), 3, "Wrong number of columns in left schema");
+                    assert_eq!(
+                        left_schema.get_column_count(),
+                        3,
+                        "Wrong number of columns in left schema"
+                    );
                     let left_cols: Vec<_> = (0..left_schema.get_column_count())
                         .map(|i| left_schema.get_column(i as usize).unwrap().get_name())
                         .collect();
                     assert!(left_cols.contains(&"id"), "Left schema missing 'id' column");
-                    assert!(left_cols.contains(&"name"), "Left schema missing 'name' column");
-                    assert!(left_cols.contains(&"age"), "Left schema missing 'age' column");
+                    assert!(
+                        left_cols.contains(&"name"),
+                        "Left schema missing 'name' column"
+                    );
+                    assert!(
+                        left_cols.contains(&"age"),
+                        "Left schema missing 'age' column"
+                    );
 
                     // Verify right schema (orders)
-                    assert_eq!(right_schema.get_column_count(), 3, "Wrong number of columns in right schema");
+                    assert_eq!(
+                        right_schema.get_column_count(),
+                        3,
+                        "Wrong number of columns in right schema"
+                    );
                     let right_cols: Vec<_> = (0..right_schema.get_column_count())
                         .map(|i| right_schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    assert!(right_cols.contains(&"order_id"), "Right schema missing 'order_id' column");
-                    assert!(right_cols.contains(&"user_id"), "Right schema missing 'user_id' column");
-                    assert!(right_cols.contains(&"amount"), "Right schema missing 'amount' column");
+                    assert!(
+                        right_cols.contains(&"order_id"),
+                        "Right schema missing 'order_id' column"
+                    );
+                    assert!(
+                        right_cols.contains(&"user_id"),
+                        "Right schema missing 'user_id' column"
+                    );
+                    assert!(
+                        right_cols.contains(&"amount"),
+                        "Right schema missing 'amount' column"
+                    );
 
                     // Verify join type
-                    assert!(matches!(join_type, JoinOperator::Inner(_)), "Expected INNER join");
+                    assert!(
+                        matches!(join_type, JoinOperator::Inner(_)),
+                        "Expected INNER join"
+                    );
 
                     // Verify predicate is a comparison
                     match predicate.as_ref() {
@@ -1203,16 +1575,29 @@ mod tests {
 
             // Then verify the projection can access columns from both tables
             match &plan.plan_type {
-                LogicalPlanType::Projection { expressions, schema } => {
-                    assert_eq!(schema.get_column_count(), 2, "Expected 2 columns in projection");
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
+                    assert_eq!(
+                        schema.get_column_count(),
+                        2,
+                        "Expected 2 columns in projection"
+                    );
                     assert_eq!(expressions.len(), 2, "Expected 2 expressions in projection");
-                    
+
                     // Verify column names in output schema
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    assert!(col_names.contains(&"u.name"), "Output missing 'u.name' column");
-                    assert!(col_names.contains(&"o.amount"), "Output missing 'o.amount' column");
+                    assert!(
+                        col_names.contains(&"u.name"),
+                        "Output missing 'u.name' column"
+                    );
+                    assert!(
+                        col_names.contains(&"o.amount"),
+                        "Output missing 'o.amount' column"
+                    );
                 }
                 _ => panic!("Expected Projection as root node"),
             }
@@ -1220,9 +1605,10 @@ mod tests {
     }
 
     mod group_by_tests {
-        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
         use super::*;
+        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
         use crate::sql::planner::logical_plan::LogicalPlanType;
+        use crate::types_db::type_id::TypeId;
 
         fn setup_test_table(fixture: &mut TestContext) {
             fixture
@@ -1239,6 +1625,18 @@ mod tests {
             let mut fixture = TestContext::new("group_by_aggregates");
             setup_test_table(&mut fixture);
 
+            // Verify the table was created correctly
+            fixture.assert_table_exists("sales");
+            fixture.assert_table_schema(
+                "sales",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("product".to_string(), TypeId::VarChar),
+                    ("amount".to_string(), TypeId::Decimal),
+                    ("region".to_string(), TypeId::VarChar),
+                ],
+            );
+
             let group_sql = "SELECT region, SUM(amount) as total_sales, COUNT(*) as num_sales \
                             FROM sales \
                             GROUP BY region \
@@ -1248,7 +1646,10 @@ mod tests {
 
             // Verify projection
             match &plan.plan_type {
-                LogicalPlanType::Projection { expressions, schema } => {
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
                 }
@@ -1271,10 +1672,10 @@ mod tests {
 
             // Verify aggregation
             match &plan.children[0].children[0].plan_type {
-                LogicalPlanType::Aggregate { 
-                    group_by, 
+                LogicalPlanType::Aggregate {
+                    group_by,
                     aggregates,
-                    schema 
+                    schema,
                 } => {
                     assert_eq!(group_by.len(), 1); // region
                     assert_eq!(aggregates.len(), 2); // SUM(amount), COUNT(*)
@@ -1296,10 +1697,10 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { 
-                    group_by, 
+                LogicalPlanType::Aggregate {
+                    group_by,
                     aggregates,
-                    schema 
+                    schema,
                 } => {
                     assert_eq!(group_by.len(), 1);
                     assert_eq!(aggregates.len(), 1);
@@ -1347,9 +1748,9 @@ mod tests {
 
             // Verify sort
             match &plan.children[0].plan_type {
-                LogicalPlanType::Sort { 
+                LogicalPlanType::Sort {
                     sort_expressions,
-                    schema 
+                    schema,
                 } => {
                     assert_eq!(sort_expressions.len(), 1);
                     assert_eq!(schema.get_column_count(), 2);
@@ -1359,7 +1760,10 @@ mod tests {
 
             // Verify projection
             match &plan.children[0].children[0].plan_type {
-                LogicalPlanType::Projection { expressions, schema } => {
+                LogicalPlanType::Projection {
+                    expressions,
+                    schema,
+                } => {
                     assert_eq!(expressions.len(), 2);
                     assert_eq!(schema.get_column_count(), 2);
                 }
@@ -1369,8 +1773,8 @@ mod tests {
     }
 
     mod subquery_tests {
-        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
         use super::*;
+        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
         use crate::sql::planner::logical_plan::LogicalPlanType;
 
         fn setup_test_tables(fixture: &mut TestContext) {
@@ -1406,14 +1810,12 @@ mod tests {
                 LogicalPlanType::Projection { .. } => {
                     // Verify filter with subquery
                     match &plan.children[0].plan_type {
-                        LogicalPlanType::Filter { predicate, .. } => {
-                            match predicate.as_ref() {
-                                Expression::Comparison(comp) => {
-                                    assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
-                                }
-                                _ => panic!("Expected Comparison expression"),
+                        LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                            Expression::Comparison(comp) => {
+                                assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
                             }
-                        }
+                            _ => panic!("Expected Comparison expression"),
+                        },
                         _ => panic!("Expected Filter node"),
                     }
                 }

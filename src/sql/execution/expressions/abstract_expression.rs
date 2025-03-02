@@ -18,7 +18,7 @@ use crate::sql::execution::expressions::column_value_expression::ColumnRefExpres
 use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::convert_expression::ConvertExpression;
-// use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
+use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
 use crate::sql::execution::expressions::exists_expression::ExistsExpression;
 use crate::sql::execution::expressions::extract_expression::ExtractExpression;
 use crate::sql::execution::expressions::filter_expression::FilterExpression;
@@ -34,7 +34,6 @@ use crate::sql::execution::expressions::logic_expression::LogicExpression;
 use crate::sql::execution::expressions::map_access_expression::MapAccessExpression;
 use crate::sql::execution::expressions::method_expression::MethodExpression;
 use crate::sql::execution::expressions::mock_expression::MockExpression;
-use crate::sql::execution::expressions::nested_expression::NestedExpression;
 use crate::sql::execution::expressions::overlay_expression::OverlayExpression;
 use crate::sql::execution::expressions::position_expression::PositionExpression;
 use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
@@ -56,7 +55,6 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::sql::execution::expressions::datetime_expression::DateTimeExpression;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -100,7 +98,6 @@ pub enum Expression {
     QualifiedWildcard(QualifiedWildcardExpression),
     TypedString(TypedStringExpression),
     Subscript(SubscriptExpression),
-    Nested(NestedExpression),
     IsCheck(IsCheckExpression),
     BinaryOp(BinaryOpExpression),
     Any(AnyExpression),
@@ -171,7 +168,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.evaluate(tuple, schema),
             Self::TypedString(expr) => expr.evaluate(tuple, schema),
             Self::Subscript(expr) => expr.evaluate(tuple, schema),
-            Self::Nested(expr) => expr.evaluate(tuple, schema),
             Self::IsCheck(expr) => expr.evaluate(tuple, schema),
             Self::BinaryOp(expr) => expr.evaluate(tuple, schema),
             Self::Any(expr) => expr.evaluate(tuple, schema),
@@ -263,7 +259,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.evaluate(left_tuple, left_schema),
             Self::TypedString(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Subscript(expr) => expr.evaluate(left_tuple, left_schema),
-            Self::Nested(expr) => expr.evaluate(left_tuple, left_schema),
             Self::IsCheck(expr) => expr.evaluate(left_tuple, left_schema),
             Self::BinaryOp(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Any(expr) => expr.evaluate(left_tuple, left_schema),
@@ -322,7 +317,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.get_child_at(child_idx),
             Self::TypedString(expr) => expr.get_child_at(child_idx),
             Self::Subscript(expr) => expr.get_child_at(child_idx),
-            Self::Nested(expr) => expr.get_child_at(child_idx),
             Self::IsCheck(expr) => expr.get_child_at(child_idx),
             Self::BinaryOp(expr) => expr.get_child_at(child_idx),
             Self::Any(expr) => expr.get_child_at(child_idx),
@@ -377,7 +371,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.get_children(),
             Self::TypedString(expr) => expr.get_children(),
             Self::Subscript(expr) => expr.get_children(),
-            Self::Nested(expr) => expr.get_children(),
             Self::IsCheck(expr) => expr.get_children(),
             Self::BinaryOp(expr) => expr.get_children(),
             Self::Any(expr) => expr.get_children(),
@@ -432,7 +425,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.get_return_type(),
             Self::TypedString(expr) => expr.get_return_type(),
             Self::Subscript(expr) => expr.get_return_type(),
-            Self::Nested(expr) => expr.get_return_type(),
             Self::IsCheck(expr) => expr.get_return_type(),
             Self::BinaryOp(expr) => expr.get_return_type(),
             Self::Any(expr) => expr.get_return_type(),
@@ -487,7 +479,6 @@ impl ExpressionOps for Expression {
             Self::QualifiedWildcard(expr) => expr.clone_with_children(children),
             Self::TypedString(expr) => expr.clone_with_children(children),
             Self::Subscript(expr) => expr.clone_with_children(children),
-            Self::Nested(expr) => expr.clone_with_children(children),
             Self::IsCheck(expr) => expr.clone_with_children(children),
             Self::BinaryOp(expr) => expr.clone_with_children(children),
             Self::Any(expr) => expr.clone_with_children(children),
@@ -796,13 +787,6 @@ impl Display for Expression {
                 }
             }
             Self::Subscript(expr) => {
-                if f.alternate() {
-                    write!(f, "{:#}", expr)
-                } else {
-                    write!(f, "{}", expr)
-                }
-            }
-            Self::Nested(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {

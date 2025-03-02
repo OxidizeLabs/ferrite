@@ -73,6 +73,41 @@ impl Schema {
         None
     }
 
+    pub fn get_qualified_column_index(&self, column_name: &str) -> Option<usize> {
+        // First try exact match (for already qualified names)
+        if let Some(idx) = self.get_column_index(column_name) {
+            return Some(idx);
+        }
+        
+        // If the column name contains a dot (table.column format)
+        if column_name.contains('.') {
+            // Split the qualified name into parts
+            let parts: Vec<&str> = column_name.split('.').collect();
+            if parts.len() == 2 {
+                let table_alias = parts[0];
+                let col_name = parts[1];
+                
+                // Try to find a column with this qualified name pattern
+                for (index, column) in self.columns.iter().enumerate() {
+                    let col_name_parts: Vec<&str> = column.get_name().split('.').collect();
+                    if col_name_parts.len() == 2 && col_name_parts[0] == table_alias && col_name_parts[1] == col_name {
+                        return Some(index);
+                    }
+                }
+            }
+        } else {
+            // If it's an unqualified name, try to find it in any qualified column
+            for (index, column) in self.columns.iter().enumerate() {
+                let col_name_parts: Vec<&str> = column.get_name().split('.').collect();
+                if col_name_parts.len() == 2 && col_name_parts[1] == column_name {
+                    return Some(index);
+                }
+            }
+        }
+        
+        None
+    }
+
     pub fn get_unlined_columns(&self) -> &Vec<u32> {
         &self.unlined_columns
     }
@@ -96,6 +131,44 @@ impl Schema {
     pub fn merge(left: &Schema, right: &Schema) -> Schema {
         let mut merged_columns = left.get_columns().clone();
         merged_columns.extend(right.get_columns().iter().cloned());
+        Schema::new(merged_columns)
+    }
+
+    pub fn merge_with_aliases(left: &Schema, right: &Schema, left_alias: Option<&str>, right_alias: Option<&str>) -> Schema {
+        let mut merged_columns = Vec::new();
+        
+        // Add left columns with alias if provided
+        for col in left.get_columns() {
+            if let Some(alias) = left_alias {
+                // Only add alias if the column name doesn't already have one
+                if !col.get_name().contains('.') {
+                    let mut new_col = col.clone();
+                    new_col.set_name(format!("{}.{}", alias, col.get_name()));
+                    merged_columns.push(new_col);
+                } else {
+                    merged_columns.push(col.clone());
+                }
+            } else {
+                merged_columns.push(col.clone());
+            }
+        }
+        
+        // Add right columns with alias if provided
+        for col in right.get_columns() {
+            if let Some(alias) = right_alias {
+                // Only add alias if the column name doesn't already have one
+                if !col.get_name().contains('.') {
+                    let mut new_col = col.clone();
+                    new_col.set_name(format!("{}.{}", alias, col.get_name()));
+                    merged_columns.push(new_col);
+                } else {
+                    merged_columns.push(col.clone());
+                }
+            } else {
+                merged_columns.push(col.clone());
+            }
+        }
+        
         Schema::new(merged_columns)
     }
 }
