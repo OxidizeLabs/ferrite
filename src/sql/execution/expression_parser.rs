@@ -71,6 +71,7 @@ use sqlparser::ast::{
     FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
     JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
     Subscript as SQLSubscript, TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
+    Ident,
 };
 use std::sync::Arc;
 
@@ -1492,38 +1493,22 @@ impl ExpressionParser {
 
                 // Process join
                 if let Some(join) = from.joins.get(i - 1) {
-                    let join_predicate = match &join.join_operator {
-                        JoinOperator::Inner(constraint) => {
-                            match constraint {
-                                JoinConstraint::On(expr) => {
-                                    // Create a combined schema for parsing the join predicate
-                                    let combined_schema = Schema::merge_with_aliases(
-                                        &left_schema,
-                                        &schema,
-                                        left_alias.as_deref(),
-                                        right_alias.as_deref(),
-                                    );
-                                    self.parse_expression(expr, &combined_schema)?
-                                }
-                                _ => return Err("Only ON join constraints supported".to_string()),
-                            }
-                        }
-                        _ => {
-                            return Err("Only INNER joins with ON clause are supported".to_string())
-                        }
-                    };
+                    let (join_predicate, join_operator) = self.process_join_operator(
+                        &join.join_operator,
+                        &left_schema,
+                        &schema,
+                        left_alias.as_deref(),
+                        right_alias.as_deref(),
+                    )?;
 
-                    current_plan = Some(match &join.join_operator {
-                        JoinOperator::Inner(_) => LogicalPlan::hash_join(
-                            left_schema.clone(),
-                            schema.clone(),
-                            Arc::new(join_predicate),
-                            join.join_operator.clone(),
-                            left_plan,
-                            table_scan,
-                        ),
-                        _ => return Err("Only INNER JOIN supported".to_string()),
-                    });
+                    current_plan = Some(LogicalPlan::hash_join(
+                        left_schema.clone(),
+                        schema.clone(),
+                        Arc::new(join_predicate),
+                        join_operator,
+                        left_plan,
+                        table_scan,
+                    ));
 
                     // Use merge_with_aliases for the current schema as well
                     current_schema = Some(Schema::merge_with_aliases(
@@ -1538,6 +1523,261 @@ impl ExpressionParser {
         }
 
         current_plan.ok_or_else(|| "No tables in FROM clause".to_string())
+    }
+
+    /// Process a join operator and constraint to create a join predicate
+    fn process_join_operator(
+        &self,
+        join_operator: &JoinOperator,
+        left_schema: &Schema,
+        right_schema: &Schema,
+        left_alias: Option<&str>,
+        right_alias: Option<&str>,
+    ) -> Result<(Expression, JoinOperator), String> {
+        let combined_schema = Schema::merge_with_aliases(
+            left_schema,
+            right_schema,
+            left_alias,
+            right_alias,
+        );
+
+        match join_operator {
+            JoinOperator::Inner(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::LeftOuter(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::RightOuter(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::FullOuter(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::CrossJoin => {
+                // For CROSS JOIN, we create a constant TRUE predicate
+                let predicate = Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("TRUE", TypeId::Boolean),
+                    vec![],
+                ));
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::Semi(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::LeftSemi(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::RightSemi(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::Anti(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::LeftAnti(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::RightAnti(constraint) => {
+                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::CrossApply => {
+                // For CROSS APPLY, we create a constant TRUE predicate
+                let predicate = Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("TRUE", TypeId::Boolean),
+                    vec![],
+                ));
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::OuterApply => {
+                // For OUTER APPLY, we create a constant TRUE predicate
+                let predicate = Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("TRUE", TypeId::Boolean),
+                    vec![],
+                ));
+                Ok((predicate, join_operator.clone()))
+            },
+            JoinOperator::AsOf { match_condition, constraint } => {
+                // Parse the match condition
+                let match_expr = self.parse_expression(match_condition, &combined_schema)?;
+                
+                // Parse the constraint
+                let constraint_expr = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                
+                // Combine the match condition and constraint with AND
+                let left_expr = Arc::new(match_expr);
+                let right_expr = Arc::new(constraint_expr);
+                let predicate = Expression::Logic(LogicExpression::new(
+                    left_expr.clone(),
+                    right_expr.clone(),
+                    LogicType::And,
+                    vec![left_expr, right_expr],
+                ));
+                
+                Ok((predicate, join_operator.clone()))
+            },
+        }
+    }
+
+    /// Process a join constraint to create a join predicate
+    fn process_join_constraint(
+        &self,
+        constraint: &JoinConstraint,
+        left_schema: &Schema,
+        right_schema: &Schema,
+        combined_schema: &Schema,
+    ) -> Result<Expression, String> {
+        match constraint {
+            JoinConstraint::On(expr) => {
+                // Parse the ON expression
+                self.parse_expression(expr, combined_schema)
+            },
+            JoinConstraint::Using(columns) => {
+                // For USING, we create equality predicates for each column
+                let mut predicates = Vec::new();
+                
+                for ident in columns {
+                    let column_name = ident.value.clone();
+                    
+                    // Find the column in both schemas
+                    let left_col_idx = left_schema.get_column_index(&column_name)
+                        .ok_or_else(|| format!("Column '{}' not found in left table", column_name))?;
+                    let right_col_idx = right_schema.get_column_index(&column_name)
+                        .ok_or_else(|| format!("Column '{}' not found in right table", column_name))?;
+                    
+                    // Create column references
+                    let left_col = left_schema.get_column(left_col_idx).unwrap().clone();
+                    let right_col = right_schema.get_column(right_col_idx).unwrap().clone();
+                    
+                    let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
+                        left_col_idx,
+                        0, // tuple index for left table
+                        left_col.clone(),
+                        vec![],
+                    ));
+                    
+                    let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
+                        right_col_idx + left_schema.get_column_count() as usize,
+                        1, // tuple index for right table
+                        right_col.clone(),
+                        vec![],
+                    ));
+                    
+                    // Create equality predicate
+                    let left_arc = Arc::new(left_expr);
+                    let right_arc = Arc::new(right_expr);
+                    let predicate = Expression::Comparison(ComparisonExpression::new(
+                        left_arc.clone(),
+                        right_arc.clone(),
+                        ComparisonType::Equal,
+                        vec![left_arc, right_arc],
+                    ));
+                    
+                    predicates.push(Arc::new(predicate));
+                }
+                
+                if predicates.is_empty() {
+                    return Err("USING clause must contain at least one column".to_string());
+                }
+                
+                // Combine all predicates with AND
+                if predicates.len() == 1 {
+                    Ok(predicates[0].as_ref().clone())
+                } else {
+                    // Create a dummy left and right for the LogicExpression
+                    let left = predicates[0].clone();
+                    let right = predicates[1].clone();
+                    
+                    Ok(Expression::Logic(LogicExpression::new(
+                        left,
+                        right,
+                        LogicType::And,
+                        predicates,
+                    )))
+                }
+            },
+            JoinConstraint::Natural => {
+                // For NATURAL JOIN, find common columns in both schemas and create equality predicates
+                let mut predicates = Vec::new();
+                
+                for left_idx in 0..left_schema.get_column_count() as usize {
+                    let left_col = left_schema.get_column(left_idx).unwrap();
+                    let column_name = left_col.get_name();
+                    
+                    // Check if the column exists in the right schema
+                    if let Some(right_idx) = right_schema.get_column_index(column_name) {
+                        let right_col = right_schema.get_column(right_idx).unwrap();
+                        
+                        // Create column references
+                        let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
+                            left_idx,
+                            0, // tuple index for left table
+                            left_col.clone(),
+                            vec![],
+                        ));
+                        
+                        let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
+                            right_idx + left_schema.get_column_count() as usize,
+                            1, // tuple index for right table
+                            right_col.clone(),
+                            vec![],
+                        ));
+                        
+                        // Create equality predicate
+                        let left_arc = Arc::new(left_expr);
+                        let right_arc = Arc::new(right_expr);
+                        let predicate = Expression::Comparison(ComparisonExpression::new(
+                            left_arc.clone(),
+                            right_arc.clone(),
+                            ComparisonType::Equal,
+                            vec![left_arc, right_arc],
+                        ));
+                        
+                        predicates.push(Arc::new(predicate));
+                    }
+                }
+                
+                if predicates.is_empty() {
+                    return Err("NATURAL JOIN requires at least one common column between tables".to_string());
+                }
+                
+                // Combine all predicates with AND
+                if predicates.len() == 1 {
+                    Ok(predicates[0].as_ref().clone())
+                } else {
+                    // Create a dummy left and right for the LogicExpression
+                    let left = predicates[0].clone();
+                    let right = predicates[1].clone();
+                    
+                    Ok(Expression::Logic(LogicExpression::new(
+                        left,
+                        right,
+                        LogicType::And,
+                        predicates,
+                    )))
+                }
+            },
+            JoinConstraint::None => {
+                // For no constraint (CROSS JOIN), create a constant TRUE predicate
+                Ok(Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("TRUE", TypeId::Boolean),
+                    vec![],
+                )))
+            },
+        }
     }
 
     pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
@@ -2994,5 +3234,80 @@ mod tests {
         for expr_str in test_cases {
             assert!(ctx.parse_expression(expr_str, &schema).is_err());
         }
+    }
+
+    #[test]
+    fn test_parse_join_operators() {
+        let ctx = TestContext::new("test_parse_join_operators");
+        let schema = ctx.setup_test_schema();
+        
+        // Create a second test schema
+        let mut columns = Vec::new();
+        columns.push(Column::new("id", TypeId::Integer));
+        columns.push(Column::new("name", TypeId::VarChar));
+        columns.push(Column::new("department", TypeId::VarChar));
+        let second_schema = Schema::new(columns);
+        
+        // Test INNER JOIN with ON constraint
+        let on_expr = sqlparser::ast::Expr::BinaryOp {
+            left: Box::new(sqlparser::ast::Expr::Identifier(Ident::new("id"))),
+            op: sqlparser::ast::BinaryOperator::Eq,
+            right: Box::new(sqlparser::ast::Expr::Identifier(Ident::new("id"))),
+        };
+        
+        let inner_join = JoinOperator::Inner(JoinConstraint::On(on_expr.clone()));
+        let result = ctx.expression_parser().process_join_operator(
+            &inner_join,
+            &schema,
+            &second_schema,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "Failed to process INNER JOIN: {:?}", result.err());
+        
+        // Test LEFT OUTER JOIN with ON constraint
+        let left_join = JoinOperator::LeftOuter(JoinConstraint::On(on_expr.clone()));
+        let result = ctx.expression_parser().process_join_operator(
+            &left_join,
+            &schema,
+            &second_schema,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "Failed to process LEFT OUTER JOIN: {:?}", result.err());
+        
+        // Test USING constraint
+        let using_cols = vec![Ident::new("id")];
+        let using_join = JoinOperator::Inner(JoinConstraint::Using(using_cols));
+        let result = ctx.expression_parser().process_join_operator(
+            &using_join,
+            &schema,
+            &second_schema,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "Failed to process USING constraint: {:?}", result.err());
+        
+        // Test NATURAL JOIN
+        let natural_join = JoinOperator::Inner(JoinConstraint::Natural);
+        let result = ctx.expression_parser().process_join_operator(
+            &natural_join,
+            &schema,
+            &second_schema,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "Failed to process NATURAL JOIN: {:?}", result.err());
+        
+        // Test CROSS JOIN
+        let cross_join = JoinOperator::CrossJoin;
+        let result = ctx.expression_parser().process_join_operator(
+            &cross_join,
+            &schema,
+            &second_schema,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "Failed to process CROSS JOIN: {:?}", result.err());
     }
 }
