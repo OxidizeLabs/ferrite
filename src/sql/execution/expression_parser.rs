@@ -122,43 +122,127 @@ impl ExpressionParser {
                 let column_name = &parts[1].value;
                 let qualified_name = format!("{}.{}", table_alias, column_name);
 
-                // Try to find the column using the qualified name
-                let column_idx = schema
-                    .get_qualified_column_index(&qualified_name)
-                    .or_else(|| {
-                        // Try looking up the original table name if alias doesn't work
-                        let catalog = self.catalog.read();
-
-                        // Try to find the table by alias
-                        if let Some(table) = catalog.get_table(table_alias) {
-                            // Check if column exists in this table
-                            let table_schema = table.get_table_schema();
-                            if table_schema.get_column_index(column_name).is_some() {
-                                // If found in original table, look for it in the schema
-                                // Try both qualified and unqualified names
-                                schema
-                                    .get_qualified_column_index(&qualified_name)
-                                    .or_else(|| schema.get_column_index(column_name))
-                            } else {
-                                None
-                            }
-                        } else {
-                            // If not found by alias, try just the column name
-                            // This is a fallback for cases where the schema might not use qualified names
-                            schema.get_column_index(column_name)
+                debug!("Parsing compound identifier: {}.{}", table_alias, column_name);
+                
+                // First, try to find the column using the qualified name directly
+                if let Some(column_idx) = schema.get_qualified_column_index(&qualified_name) {
+                    debug!("Found qualified column '{}' at index {}", qualified_name, column_idx);
+                    let column = schema.get_column(column_idx).unwrap().clone();
+                    
+                    // If the column name doesn't already include the table alias, add it
+                    let column_with_alias = if !column.get_name().contains('.') {
+                        let mut new_column = column.clone();
+                        new_column.set_name(qualified_name);
+                        new_column
+                    } else {
+                        column
+                    };
+                    
+                    return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                        0,
+                        column_idx,
+                        column_with_alias,
+                        vec![],
+                    )));
+                }
+                
+                // Second, try to find any column that matches the pattern table_alias.column_name
+                for i in 0..schema.get_column_count() as usize {
+                    let col = schema.get_column(i).unwrap();
+                    let col_name = col.get_name();
+                    
+                    if let Some(dot_pos) = col_name.find('.') {
+                        let prefix = &col_name[0..dot_pos];
+                        let suffix = &col_name[dot_pos + 1..];
+                        
+                        if prefix == table_alias && suffix == column_name {
+                            debug!("Found column with matching prefix and suffix at index {}", i);
+                            return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                                0,
+                                i,
+                                col.clone(),
+                                vec![],
+                            )));
                         }
-                    })
-                    .ok_or_else(|| {
-                        format!("Column {}.{} not found in schema", table_alias, column_name)
-                    })?;
-
-                let column = schema.get_column(column_idx).unwrap().clone();
-                Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                    0,
-                    column_idx,
-                    column,
-                    vec![],
-                )))
+                    }
+                }
+                
+                // Third, try to resolve using the catalog
+                let catalog = self.catalog.read();
+                
+                // Try to find the table by alias
+                if let Some(table) = catalog.get_table(table_alias) {
+                    debug!("Found table '{}' in catalog", table_alias);
+                    let table_schema = table.get_table_schema();
+                    
+                    if let Some(col_idx) = table_schema.get_column_index(column_name) {
+                        debug!("Found column '{}' in table '{}' schema", column_name, table_alias);
+                        
+                        // Now try to find this column in the joined schema
+                        for i in 0..schema.get_column_count() as usize {
+                            let col = schema.get_column(i).unwrap();
+                            let col_name = col.get_name();
+                            
+                            // Check for exact match (qualified or unqualified)
+                            if col_name == column_name {
+                                debug!("Found matching column at index {}", i);
+                                
+                                // Create a new column with the qualified name
+                                let mut new_column = col.clone();
+                                new_column.set_name(qualified_name);
+                                
+                                return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                                    0,
+                                    i,
+                                    new_column,
+                                    vec![],
+                                )));
+                            }
+                            
+                            // Check for qualified match
+                            if let Some(dot_pos) = col_name.find('.') {
+                                let prefix = &col_name[0..dot_pos];
+                                let suffix = &col_name[dot_pos + 1..];
+                                
+                                if (prefix == table_alias && suffix == column_name) || 
+                                   (col_name == qualified_name) {
+                                    debug!("Found matching qualified column at index {}", i);
+                                    return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                                        0,
+                                        i,
+                                        col.clone(),
+                                        vec![],
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Fourth, try using the resolve_column_ref_after_join method
+                if let Ok(column_idx) = self.resolve_column_ref_after_join(table_alias, column_name, schema) {
+                    debug!("Resolved column reference after join at index {}", column_idx);
+                    let column = schema.get_column(column_idx).unwrap().clone();
+                    
+                    // If the column name doesn't already include the table alias, add it
+                    let column_with_alias = if !column.get_name().contains('.') {
+                        let mut new_column = column.clone();
+                        new_column.set_name(qualified_name);
+                        new_column
+                    } else {
+                        column
+                    };
+                    
+                    return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                        0,
+                        column_idx,
+                        column_with_alias,
+                        vec![],
+                    )));
+                }
+                
+                // If we get here, we couldn't find the column
+                Err(format!("Column {}.{} not found in schema", table_alias, column_name))
             }
 
             Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
@@ -3309,5 +3393,117 @@ mod tests {
             None,
         );
         assert!(result.is_ok(), "Failed to process CROSS JOIN: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_qualified_column_references() {
+        let ctx = TestContext::new("test_parse_qualified_column_references");
+        
+        // Create a schema with regular columns
+        let base_schema = ctx.setup_test_schema();
+        
+        // Create schemas with table aliases
+        let table1_schema = Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t1"), None);
+        let table2_schema = Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t2"), None);
+        
+        // Merge the schemas to simulate a join
+        let joined_schema = Schema::merge(&table1_schema, &table2_schema);
+        
+        // Test cases for qualified column references
+        let test_cases = vec![
+            // Basic table alias references
+            ("t1.id = 1", "t1.id"),
+            ("t2.name = 'John'", "t2.name"),
+            ("t1.age > 25", "t1.age"),
+            ("t2.salary < 50000", "t2.salary"),
+            
+            // Comparison between columns from different tables
+            ("t1.id = t2.id", "t1.id"),
+            ("t1.age > t2.age", "t1.age"),
+            
+            // Arithmetic with qualified columns
+            ("t1.salary + t2.salary", "t1.salary"),
+            ("t1.age * 2", "t1.age"),
+            
+            // Complex expressions with qualified columns
+            ("t1.age > 25 AND t2.salary < 50000", "t1.age"),
+            ("t1.id = 1 OR t2.name = 'John'", "t1.id"),
+        ];
+        
+        for (expr_str, expected_column) in test_cases {
+            let expr = ctx
+                .parse_expression(expr_str, &joined_schema)
+                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+            
+            // Extract the first column reference from the expression
+            let column_ref = extract_first_column_ref(&expr);
+            
+            // Verify the column name matches the expected qualified name
+            assert!(
+                column_ref.is_some(),
+                "Expected ColumnRef in expression: {}",
+                expr_str
+            );
+            
+            if let Some(col_ref) = column_ref {
+                assert_eq!(
+                    col_ref.get_name(),
+                    expected_column,
+                    "Column name in '{}' should be '{}'",
+                    expr_str,
+                    expected_column
+                );
+            }
+        }
+        
+        // Test error cases
+        let error_cases = vec![
+            "unknown_table.unknown_column = 1",  // Unknown table alias and column
+            "t1.unknown_column = 1",            // Unknown column
+            "t3.unknown_column = 1",            // Non-existent table
+            "schema.table.column = 1",          // Three-part identifier not supported
+        ];
+        
+        for expr_str in error_cases {
+            assert!(
+                ctx.parse_expression(expr_str, &joined_schema).is_err(),
+                "Expected error for invalid expression: {}",
+                expr_str
+            );
+        }
+    }
+
+    // Helper function to extract the first column reference from an expression
+    fn extract_first_column_ref(expr: &Expression) -> Option<Column> {
+        match expr {
+            Expression::ColumnRef(col_ref) => Some(col_ref.get_return_type().clone()),
+            Expression::Comparison(comp) => {
+                let children = comp.get_children();
+                if let Expression::ColumnRef(col_ref) = children[0].as_ref() {
+                    Some(col_ref.get_return_type().clone())
+                } else {
+                    None
+                }
+            },
+            Expression::Arithmetic(arith) => {
+                let children = arith.get_children();
+                for child in children {
+                    if let Some(col) = extract_first_column_ref(child) {
+                        return Some(col);
+                    }
+                }
+                None
+            },
+            Expression::Logic(logic) => {
+                let children = logic.get_children();
+                for child in children {
+                    if let Some(col) = extract_first_column_ref(child) {
+                        return Some(col);
+                    }
+                }
+                None
+            },
+            _ => None,
+        }
     }
 }
