@@ -5,7 +5,10 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
 use parking_lot::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::*;
@@ -137,26 +140,23 @@ impl LogicalPlanBuilder {
             // Check if we have a join (multiple tables in FROM clause)
             if select.from.len() > 1 || !select.from[0].joins.is_empty() {
                 // Use the expression parser's prepare_join_scan method to handle joins
-                self.expression_parser.prepare_join_scan(select)?
+                self.prepare_join_scan(select)?
             } else {
                 // Single table query
                 self.build_table_scan(&select.from[0])?
             }
         };
 
-        // Store the original input schema for later use when parsing projection expressions
-        let original_schema = current_plan.get_schema().clone();
-
-        // Apply WHERE clause if it exists
-        if let Some(selection) = &select.selection {
-            let schema = current_plan.get_schema();
-            let filter_expr = self
-                .expression_parser
-                .parse_expression(selection, &schema)?;
+        // Process WHERE clause if it exists
+        if let Some(where_clause) = &select.selection {
+            debug!("Processing WHERE clause");
+            let parsing_schema = current_plan.get_schema().clone();
+            debug!("Schema has {} columns", parsing_schema.get_column_count());
+            let filter_expr = self.expression_parser.parse_expression(&where_clause, &parsing_schema)?;
             current_plan = LogicalPlan::filter(
-                schema.clone(),
-                String::new(), // table_name
-                0,             // table_oid
+                parsing_schema,
+                String::new(),
+                0,
                 Arc::new(filter_expr),
                 current_plan,
             );
@@ -179,7 +179,7 @@ impl LogicalPlanBuilder {
                     // Use the original schema for parsing expressions to ensure all columns are available
                     let parsed_expr = self
                         .expression_parser
-                        .parse_expression(expr, &original_schema)?;
+                        .parse_expression(expr, &schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -189,7 +189,7 @@ impl LogicalPlanBuilder {
                     // Use the original schema for parsing expressions to ensure all columns are available
                     let parsed_expr = self
                         .expression_parser
-                        .parse_expression(expr, &original_schema)?;
+                        .parse_expression(expr, &schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -260,7 +260,7 @@ impl LogicalPlanBuilder {
                 // Use the original schema for parsing the HAVING clause to ensure all columns are available
                 let having_expr = self
                     .expression_parser
-                    .parse_expression(having, &original_schema)?;
+                    .parse_expression(having, &schema)?;
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name
@@ -275,7 +275,7 @@ impl LogicalPlanBuilder {
             current_plan = self.build_projection_plan_with_schema(
                 &select.projection,
                 current_plan,
-                &original_schema,
+                &schema,
             )?;
         } else {
             // No aggregates, just add projection
@@ -369,7 +369,13 @@ impl LogicalPlanBuilder {
                         Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
                             format!("{}.{}", parts[0].value, parts[1].value)
                         }
-                        _ => parsed_expr.to_string(),
+                        _ => {
+                            // For aggregate expressions, use the get_column_name method
+                            match &parsed_expr {
+                                Expression::Aggregate(agg) => agg.get_column_name(),
+                                _ => parsed_expr.to_string()
+                            }
+                        }
                     };
 
                     let output_col =
@@ -617,7 +623,12 @@ impl LogicalPlanBuilder {
                             let parsed_expr = self
                                 .expression_parser
                                 .parse_expression(expr, parse_schema)?;
-                            parsed_expr.to_string()
+                            
+                            // For aggregate expressions, use the get_column_name method
+                            match &parsed_expr {
+                                Expression::Aggregate(agg) => agg.get_column_name(),
+                                _ => parsed_expr.to_string()
+                            }
                         }
                     };
 
@@ -828,6 +839,201 @@ impl LogicalPlanBuilder {
             )),
             _ => Err(format!("Unsupported join type: {:?}", join_type)),
         }
+    }
+
+    pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
+        if select.from.len() != 1 {
+            return Err("Only a single FROM clause is supported".to_string());
+        }
+
+        let table_with_joins = &select.from[0];
+        let joins = &table_with_joins.joins;
+
+        if joins.is_empty() {
+            // No joins, just a simple table scan
+            return self.build_table_scan(table_with_joins);
+        }
+
+        // We have joins, process them
+        let mut tables = Vec::new();
+        let mut aliases = Vec::new();
+        let mut table_aliases = Vec::new(); // Store all table aliases for the final schema
+
+        // Process the main table
+        let main_relation = &table_with_joins.relation;
+        if let TableFactor::Table { name, alias, .. } = main_relation {
+            tables.push(name.clone());
+            if let Some(table_alias) = alias {
+                aliases.push(Some(table_alias.name.value.clone()));
+                table_aliases.push(table_alias.name.value.clone());
+            } else {
+                aliases.push(None);
+                // Use the table name as the alias if no alias is provided
+                if let Some(last_name) = name.0.last() {
+                    table_aliases.push(last_name.value.clone());
+                } else {
+                    return Err("Invalid table name".to_string());
+                }
+            }
+        } else {
+            return Err("Only simple table references are supported in FROM clause".to_string());
+        }
+
+        // Process all joined tables
+        for join in joins {
+            if let TableFactor::Table { name, alias, .. } = &join.relation {
+                tables.push(name.clone());
+                if let Some(table_alias) = alias {
+                    aliases.push(Some(table_alias.name.value.clone()));
+                    table_aliases.push(table_alias.name.value.clone());
+                } else {
+                    aliases.push(None);
+                    // Use the table name as the alias if no alias is provided
+                    if let Some(last_name) = name.0.last() {
+                        table_aliases.push(last_name.value.clone());
+                    } else {
+                        return Err("Invalid table name".to_string());
+                    }
+                }
+            } else {
+                return Err("Only simple table references are supported in JOIN clause".to_string());
+            }
+        }
+
+        // Create a logical plan for each table
+        let mut plans = Vec::new();
+        for (i, (table, alias)) in tables.iter().zip(aliases.iter()).enumerate() {
+            let table_name = if let Some(last_name) = table.0.last() {
+                last_name.value.clone()
+            } else {
+                return Err("Invalid table name".to_string());
+            };
+
+            // Get the table from the catalog
+            let catalog_ref = self.expression_parser.catalog();
+            let catalog_guard = catalog_ref.read();
+            let table_info = catalog_guard.get_table(&table_name)
+                .ok_or_else(|| format!("Table {} not found", table_name))?;
+            
+            // Create a logical plan for this table
+            let mut schema = table_info.get_table_schema();
+            
+            // Apply alias to schema if provided
+            if let Some(alias_str) = alias {
+                // Create a new schema with the alias applied to all columns
+                let mut aliased_columns = Vec::new();
+                for col in schema.get_columns() {
+                    let mut new_col = col.clone();
+                    // Only add alias if the column doesn't already have one
+                    if !col.get_name().contains('.') {
+                        new_col.set_name(format!("{}.{}", alias_str, col.get_name()));
+                    }
+                    aliased_columns.push(new_col);
+                }
+                schema = Schema::new(aliased_columns);
+            }
+            
+            let table_oid = table_info.get_table_oidt();
+            let table_scan = LogicalPlan::table_scan(
+                table_name.clone(),
+                schema,
+                table_oid,
+            );
+            plans.push(table_scan);
+        }
+
+        // Process the joins
+        let mut current_plan = plans[0].clone();
+        let mut current_schema = current_plan.get_schema().clone();
+        let mut current_alias = aliases[0].clone();
+
+        for (i, join) in joins.iter().enumerate() {
+            let right_plan = plans[i + 1].clone();
+            let right_schema = right_plan.get_schema().clone();
+            let right_alias = aliases[i + 1].clone();
+
+            // Merge the schemas with aliases
+            let left_alias_ref = current_alias.as_deref();
+            let right_alias_ref = right_alias.as_deref();
+            
+            // Debug the aliases being used
+            debug!("Joining tables with aliases: left={:?}, right={:?}", left_alias_ref, right_alias_ref);
+            
+            // Create a new schema for the join result
+            let joined_schema = Schema::merge_with_aliases(
+                &current_schema,
+                &right_schema,
+                left_alias_ref,
+                right_alias_ref
+            );
+            
+            // Process the join constraint
+            let predicate = match &join.join_operator {
+                JoinOperator::Inner(constraint) |
+                JoinOperator::LeftOuter(constraint) |
+                JoinOperator::RightOuter(constraint) |
+                JoinOperator::FullOuter(constraint) => {
+                    match constraint {
+                        JoinConstraint::On(expr) => {
+                            // Parse the join condition with the combined schema
+                            debug!("Parsing join condition with schema: {:?}", joined_schema);
+                            self.expression_parser.parse_expression(expr, &joined_schema)?
+                        },
+                        _ => return Err("Only ON constraint is supported for joins".to_string()),
+                    }
+                },
+                JoinOperator::CrossJoin => {
+                    // For cross joins, we don't need a predicate
+                    Expression::Constant(ConstantExpression::new(
+                        Value::new(true),
+                        Column::new("TRUE", TypeId::Boolean),
+                        vec![],
+                    ))
+                },
+                JoinOperator::LeftSemi(constraint) |
+                JoinOperator::RightSemi(constraint) |
+                JoinOperator::LeftAnti(constraint) |
+                JoinOperator::RightAnti(constraint) => {
+                    match constraint {
+                        JoinConstraint::On(expr) => {
+                            // Parse the join condition with the combined schema
+                            self.expression_parser.parse_expression(expr, &joined_schema)?
+                        },
+                        _ => return Err("Only ON constraint is supported for joins".to_string()),
+                    }
+                },
+                _ => return Err(format!("Unsupported join type: {:?}", join.join_operator)),
+            };
+
+            // Create a join plan
+            let join_type = join.join_operator.clone();
+            
+            // Use the original schemas for the join plan, but the joined schema for the result
+            current_plan = Box::new(LogicalPlan::new(
+                LogicalPlanType::NestedLoopJoin {
+                    left_schema: current_schema.clone(),
+                    right_schema: right_schema.clone(),
+                    predicate: Arc::new(predicate),
+                    join_type,
+                },
+                vec![current_plan, right_plan],
+            ));
+            
+            // Update the current schema to the joined schema
+            current_schema = joined_schema;
+            
+            // After merging schemas, we no longer have a single alias for the combined schema
+            current_alias = None;
+        }
+
+        // Debug the final schema
+        debug!("Final join schema has {} columns:", current_schema.get_column_count());
+        for i in 0..current_schema.get_column_count() {
+            let col = current_schema.get_column(i as usize).unwrap();
+            debug!("  Schema column {}: name='{}', type={:?}", i, col.get_name(), col.get_type());
+        }
+
+        Ok(current_plan)
     }
 
     pub fn parse_order_by_expressions(
@@ -1131,9 +1337,9 @@ mod tests {
             // Then verify the filter node
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter {
-                    schema, predicate, ..
+                    schema, output_schema, predicate, ..
                 } => {
-                    assert_eq!(schema.get_column_count(), 3);
+                    assert_eq!(output_schema.get_column_count(), 3);
                     match predicate.as_ref() {
                         Expression::Comparison(comp) => {
                             assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
@@ -1469,14 +1675,14 @@ mod tests {
                     let left_cols: Vec<_> = (0..left_schema.get_column_count())
                         .map(|i| left_schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    assert!(left_cols.contains(&"id"), "Left schema missing 'id' column");
+                    assert!(left_cols.contains(&"u.id"), "Left schema missing 'u.id' column");
                     assert!(
-                        left_cols.contains(&"name"),
-                        "Left schema missing 'name' column"
+                        left_cols.contains(&"u.name"),
+                        "Left schema missing 'u.name' column"
                     );
                     assert!(
-                        left_cols.contains(&"age"),
-                        "Left schema missing 'age' column"
+                        left_cols.contains(&"u.age"),
+                        "Left schema missing 'u.age' column"
                     );
 
                     // Verify right schema (orders)
@@ -1489,16 +1695,16 @@ mod tests {
                         .map(|i| right_schema.get_column(i as usize).unwrap().get_name())
                         .collect();
                     assert!(
-                        right_cols.contains(&"order_id"),
-                        "Right schema missing 'order_id' column"
+                        right_cols.contains(&"o.order_id"),
+                        "Right schema missing 'o.order_id' column"
                     );
                     assert!(
-                        right_cols.contains(&"user_id"),
-                        "Right schema missing 'user_id' column"
+                        right_cols.contains(&"o.user_id"),
+                        "Right schema missing 'o.user_id' column"
                     );
                     assert!(
-                        right_cols.contains(&"amount"),
-                        "Right schema missing 'amount' column"
+                        right_cols.contains(&"o.amount"),
+                        "Right schema missing 'o.amount' column"
                     );
 
                     // Verify join type
