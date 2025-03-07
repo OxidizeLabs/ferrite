@@ -1,4 +1,5 @@
 use crate::catalog::schema::Schema;
+use crate::catalog::column::Column;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
@@ -28,6 +29,8 @@ use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionTy
 use sqlparser::ast::JoinOperator;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
+use log::debug;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -66,6 +69,7 @@ pub enum LogicalPlanType {
         table_oid: TableOidT,
         table_name: String,
         predicate: Arc<Expression>,
+        output_schema: Schema,
     },
     Projection {
         expressions: Vec<Arc<Expression>>,
@@ -518,10 +522,11 @@ impl LogicalPlan {
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Filter {
-                schema,
+                schema: schema.clone(),
                 table_oid,
                 table_name,
                 predicate,
+                output_schema: schema,
             },
             vec![input],
         ))
@@ -750,27 +755,114 @@ impl LogicalPlan {
             LogicalPlanType::Delete { schema, .. } => schema.clone(),
             LogicalPlanType::Update { schema, .. } => schema.clone(),
             LogicalPlanType::NestedLoopJoin { left_schema, right_schema, .. } => {
-                // Extract table names/aliases from the schemas
-                let left_alias = extract_table_alias_from_schema(left_schema);
-                let right_alias = extract_table_alias_from_schema(right_schema);
+                // For nested loop joins, we need to preserve all table aliases
+                // Get the schemas from the children to ensure we have the most up-to-date schemas
+                let left_child_schema = if !self.children.is_empty() {
+                    self.children[0].get_schema()
+                } else {
+                    left_schema.clone()
+                };
                 
-                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
+                let right_child_schema = if self.children.len() > 1 {
+                    self.children[1].get_schema()
+                } else {
+                    right_schema.clone()
+                };
+                
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(&left_child_schema);
+                let right_alias = extract_table_alias_from_schema(&right_child_schema);
+                
+                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                
+                // Create a new schema that preserves all column names with their original aliases
+                let mut merged_columns = Vec::new();
+                
+                // Add all columns from the left schema, preserving their original names
+                for col in left_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                // Add all columns from the right schema, preserving their original names
+                for col in right_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                Schema::new(merged_columns)
             }
             LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
-                // Extract table names/aliases from the schemas
-                let left_alias = extract_table_alias_from_schema(left_schema);
-                let right_alias = extract_table_alias_from_schema(right_schema);
+                // For nested index joins, we need to preserve all table aliases
+                // Get the schemas from the children to ensure we have the most up-to-date schemas
+                let left_child_schema = if !self.children.is_empty() {
+                    self.children[0].get_schema()
+                } else {
+                    left_schema.clone()
+                };
                 
-                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
+                let right_child_schema = if self.children.len() > 1 {
+                    self.children[1].get_schema()
+                } else {
+                    right_schema.clone()
+                };
+                
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(&left_child_schema);
+                let right_alias = extract_table_alias_from_schema(&right_child_schema);
+                
+                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                
+                // Create a new schema that preserves all column names with their original aliases
+                let mut merged_columns = Vec::new();
+                
+                // Add all columns from the left schema, preserving their original names
+                for col in left_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                // Add all columns from the right schema, preserving their original names
+                for col in right_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                Schema::new(merged_columns)
             }
             LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
-                // Extract table names/aliases from the schemas
-                let left_alias = extract_table_alias_from_schema(left_schema);
-                let right_alias = extract_table_alias_from_schema(right_schema);
+                // For hash joins, we need to preserve all table aliases
+                // Get the schemas from the children to ensure we have the most up-to-date schemas
+                let left_child_schema = if !self.children.is_empty() {
+                    self.children[0].get_schema()
+                } else {
+                    left_schema.clone()
+                };
                 
-                Schema::merge_with_aliases(left_schema, right_schema, left_alias.as_deref(), right_alias.as_deref())
+                let right_child_schema = if self.children.len() > 1 {
+                    self.children[1].get_schema()
+                } else {
+                    right_schema.clone()
+                };
+                
+                // Extract table names/aliases from the schemas
+                let left_alias = extract_table_alias_from_schema(&left_child_schema);
+                let right_alias = extract_table_alias_from_schema(&right_child_schema);
+                
+                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                
+                // Create a new schema that preserves all column names with their original aliases
+                let mut merged_columns = Vec::new();
+                
+                // Add all columns from the left schema, preserving their original names
+                for col in left_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                // Add all columns from the right schema, preserving their original names
+                for col in right_child_schema.get_columns() {
+                    merged_columns.push(col.clone());
+                }
+                
+                Schema::new(merged_columns)
             }
-            LogicalPlanType::Filter { .. } => self.children[0].get_schema(),
+            LogicalPlanType::Filter { output_schema, .. } => output_schema.clone(),
             LogicalPlanType::Sort { schema, .. } => schema.clone(),
             LogicalPlanType::Limit { schema, .. } => schema.clone(),
             LogicalPlanType::TopN { schema, .. } => schema.clone(),
@@ -839,6 +931,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_oid,
                 table_name,
                 predicate,
+                ..
             } => {
                 let children = self
                     .children
@@ -1268,12 +1361,26 @@ fn extract_join_keys(
 
 // Helper function to extract table alias from schema
 fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
-    // Look at the first column that has a table alias
+    // Create a map to count occurrences of each alias
+    let mut alias_counts = HashMap::new();
+    
+    // Look at all columns to find table aliases
     for column in schema.get_columns() {
         let name = column.get_name();
         if let Some(dot_pos) = name.find('.') {
-            return Some(name[..dot_pos].to_string());
+            let alias = name[..dot_pos].to_string();
+            *alias_counts.entry(alias).or_insert(0) += 1;
         }
     }
+    
+    // If we have aliases, return the most common one
+    if !alias_counts.is_empty() {
+        return alias_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(alias, _)| alias);
+    }
+    
     None
 }
+

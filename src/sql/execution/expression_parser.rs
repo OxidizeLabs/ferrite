@@ -61,7 +61,6 @@ use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
-use crate::sql::planner::logical_plan::LogicalPlan;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
@@ -122,12 +121,25 @@ impl ExpressionParser {
                 let qualified_name = format!("{}.{}", table_alias, column_name);
 
                 debug!("Parsing compound identifier: {}", qualified_name);
-                
+                debug!("Schema has {} columns:", schema.get_column_count());
+                for i in 0..schema.get_column_count() as usize {
+                    let col = schema.get_column(i).unwrap();
+                    debug!(
+                        "  Schema column {}: name='{}', type={:?}",
+                        i,
+                        col.get_name(),
+                        col.get_type()
+                    );
+                }
+
                 // First, try to find the column using the qualified name directly
                 if let Some(column_idx) = schema.get_qualified_column_index(&qualified_name) {
-                    debug!("Found qualified column '{}' at index {}", qualified_name, column_idx);
+                    debug!(
+                        "Found qualified column '{}' at index {}",
+                        qualified_name, column_idx
+                    );
                     let column = schema.get_column(column_idx).unwrap().clone();
-                    
+
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         column_idx,
@@ -135,16 +147,21 @@ impl ExpressionParser {
                         vec![],
                     )));
                 }
-                
+                debug!("Qualified column '{}' not found directly", qualified_name);
+
                 // Second, try to find any column that matches the pattern table_alias.column_name
                 for (idx, col) in schema.get_columns().iter().enumerate() {
                     let col_name = col.get_name();
-                    
+                    debug!("Checking column '{}' for pattern match", col_name);
+
                     // Check if the column name is already qualified with the same table alias
                     if col_name.starts_with(&format!("{}.", table_alias)) {
                         let parts: Vec<&str> = col_name.split('.').collect();
                         if parts.len() == 2 && parts[1] == column_name {
-                            debug!("Found column with matching pattern: '{}' at index {}", col_name, idx);
+                            debug!(
+                                "Found column with matching pattern: '{}' at index {}",
+                                col_name, idx
+                            );
                             return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                                 0,
                                 idx,
@@ -154,17 +171,23 @@ impl ExpressionParser {
                         }
                     }
                 }
-                
+                debug!(
+                    "No column found with pattern match for '{}'",
+                    qualified_name
+                );
+
                 // Third, if the table alias matches a known alias and the column exists without qualification
                 // This handles cases where the schema has unqualified column names but we're using qualified references
                 let unqualified_idx = schema.get_column_index(column_name);
                 if let Some(idx) = unqualified_idx {
-                    debug!("Found unqualified column '{}' at index {}, will qualify with '{}'", 
-                           column_name, idx, table_alias);
-                    
+                    debug!(
+                        "Found unqualified column '{}' at index {}, will qualify with '{}'",
+                        column_name, idx, table_alias
+                    );
+
                     let mut column = schema.get_column(idx).unwrap().clone();
                     column.set_name(qualified_name);
-                    
+
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         idx,
@@ -172,9 +195,13 @@ impl ExpressionParser {
                         vec![],
                     )));
                 }
-                
+                debug!("No unqualified column '{}' found", column_name);
+
                 // If we get here, the column wasn't found
-                Err(format!("Column {}.{} not found in schema", table_alias, column_name))
+                Err(format!(
+                    "Column {}.{} not found in schema",
+                    table_alias, column_name
+                ))
             }
 
             Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
@@ -902,6 +929,7 @@ impl ExpressionParser {
                 negated,
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
+                // The schema parameter is now called _outer_schema in parse_subquery
                 let subquery = Arc::new(self.parse_subquery(subquery, schema)?);
                 Ok(Expression::In(InExpression::new_subquery(
                     expr,
@@ -1139,6 +1167,7 @@ impl ExpressionParser {
                 )))
             }
             Expr::Exists { subquery, negated } => {
+                // The schema parameter is now called _outer_schema in parse_subquery
                 let subquery_expr = Arc::new(self.parse_subquery(subquery, schema)?);
                 Ok(Expression::Exists(ExistsExpression::new(
                     subquery_expr,
@@ -1146,7 +1175,10 @@ impl ExpressionParser {
                     Column::new("exists", TypeId::Boolean),
                 )))
             }
-            Expr::Subquery(query) => self.parse_subquery(query, schema),
+            Expr::Subquery(query) => {
+                // The schema parameter is now called _outer_schema in parse_subquery
+                self.parse_subquery(query, schema)
+            }
             Expr::GroupingSets(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1441,121 +1473,30 @@ impl ExpressionParser {
         Ok((table_name, schema, table_oid))
     }
 
-    pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
-        debug!("Preparing join scan for select: {:?}", select);
-
-        if select.from.len() != 1 {
-            return Err("Only single FROM clause supported".to_string());
+    pub fn parse_select_statements(
+        &self,
+        select: &Box<Select>,
+        schema: &Schema,
+    ) -> Result<Expression, String> {
+        debug!("Parsing select statements: {:?}", select);
+        // Ensure we have at least one projection item
+        if select.projection.is_empty() {
+            return Err("Empty SELECT statement in subquery".to_string());
         }
 
-        let from = &select.from[0];
-        if from.joins.is_empty() {
-            return self
-                .prepare_table_scan(select)
-                .map(|(name, schema, oid)| LogicalPlan::table_scan(name, schema, oid));
+        // For subqueries, we currently only support single-column results
+        if select.projection.len() > 1 {
+            return Err("Subqueries must return exactly one column".to_string());
         }
 
-        let mut tables = Vec::new();
-        let mut aliases = Vec::new();
-
-        // Add the main table
-        match &from.relation {
-            TableFactor::Table { name, alias, .. } => {
-                let table_name = name.to_string();
-                let alias_name = alias.as_ref().map(|a| a.name.value.clone());
-                tables.push(table_name);
-                aliases.push(alias_name);
-            }
-            _ => return Err("Only simple table references supported".to_string()),
-        };
-
-        // Add the joined tables
-        for join in &from.joins {
-            match &join.relation {
-                TableFactor::Table { name, alias, .. } => {
-                    let table_name = name.to_string();
-                    let alias_name = alias.as_ref().map(|a| a.name.value.clone());
-                    tables.push(table_name);
-                    aliases.push(alias_name);
-                }
-                _ => return Err("Only simple table references in joins supported".to_string()),
+        // Parse the first (and only) projection item
+        match &select.projection[0] {
+            SelectItem::UnnamedExpr(expr) => self.parse_expression(expr, schema),
+            SelectItem::ExprWithAlias { expr, .. } => self.parse_expression(expr, schema),
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                Err("Wildcards are not supported in subqueries".to_string())
             }
         }
-
-        // Create logical plans for each table
-        let mut current_plan = None;
-        let mut current_schema = None;
-        let mut current_alias = None;
-
-        for (i, (table_name, alias)) in tables.iter().zip(aliases.iter()).enumerate() {
-            let catalog_guard = self.catalog.read();
-            let table_info = catalog_guard
-                .get_table(table_name)
-                .ok_or_else(|| format!("Table '{}' not found", table_name))?;
-
-            let schema = table_info.get_table_schema();
-            let table_oid = table_info.get_table_oidt();
-            
-            // Apply alias to schema if provided
-            let aliased_schema = if let Some(alias_name) = alias {
-                // Create a new schema with the alias applied to all columns
-                let mut aliased_columns = Vec::new();
-                for col in schema.get_columns() {
-                    let mut new_col = col.clone();
-                    if !col.get_name().contains('.') {
-                        new_col.set_name(format!("{}.{}", alias_name, col.get_name()));
-                    }
-                    aliased_columns.push(new_col);
-                }
-                Schema::new(aliased_columns)
-            } else {
-                schema.clone()
-            };
-            
-            let table_scan = LogicalPlan::table_scan(table_name.clone(), aliased_schema.clone(), table_oid);
-
-            if i == 0 {
-                current_plan = Some(table_scan);
-                current_schema = Some(aliased_schema);
-                current_alias = alias.clone();
-            } else {
-                let left_plan = current_plan.take().unwrap();
-                let left_schema = current_schema.take().unwrap();
-                let left_alias = current_alias.take();
-                let right_alias = alias.clone();
-
-                // Process join
-                if let Some(join) = from.joins.get(i - 1) {
-                    let (join_predicate, join_operator) = self.process_join_operator(
-                        &join.join_operator,
-                        &left_schema,
-                        &aliased_schema,
-                        left_alias.as_deref(),
-                        right_alias.as_deref(),
-                    )?;
-
-                    current_plan = Some(LogicalPlan::nested_loop_join(
-                        left_schema.clone(),
-                        aliased_schema.clone(),
-                        Arc::new(join_predicate),
-                        join_operator,
-                        left_plan,
-                        table_scan,
-                    ));
-
-                    // Use merge_with_aliases for the current schema as well
-                    current_schema = Some(Schema::merge_with_aliases(
-                        &left_schema,
-                        &aliased_schema,
-                        left_alias.as_deref(),
-                        right_alias.as_deref(),
-                    ));
-                    current_alias = None; // Reset alias after merge
-                }
-            }
-        }
-
-        current_plan.ok_or_else(|| "No tables in FROM clause".to_string())
     }
 
     /// Process a join operator and constraint to create a join predicate
@@ -1567,30 +1508,46 @@ impl ExpressionParser {
         left_alias: Option<&str>,
         right_alias: Option<&str>,
     ) -> Result<(Expression, JoinOperator), String> {
-        let combined_schema = Schema::merge_with_aliases(
-            left_schema,
-            right_schema,
-            left_alias,
-            right_alias,
-        );
+        let combined_schema =
+            Schema::merge_with_aliases(left_schema, right_schema, left_alias, right_alias);
 
         match join_operator {
             JoinOperator::Inner(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::LeftOuter(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::RightOuter(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::FullOuter(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::CrossJoin => {
                 // For CROSS JOIN, we create a constant TRUE predicate
                 let predicate = Expression::Constant(ConstantExpression::new(
@@ -1599,31 +1556,61 @@ impl ExpressionParser {
                     vec![],
                 ));
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::Semi(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::LeftSemi(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::RightSemi(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::Anti(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::LeftAnti(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::RightAnti(constraint) => {
-                let predicate = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::CrossApply => {
                 // For CROSS APPLY, we create a constant TRUE predicate
                 let predicate = Expression::Constant(ConstantExpression::new(
@@ -1632,7 +1619,7 @@ impl ExpressionParser {
                     vec![],
                 ));
                 Ok((predicate, join_operator.clone()))
-            },
+            }
             JoinOperator::OuterApply => {
                 // For OUTER APPLY, we create a constant TRUE predicate
                 let predicate = Expression::Constant(ConstantExpression::new(
@@ -1641,14 +1628,22 @@ impl ExpressionParser {
                     vec![],
                 ));
                 Ok((predicate, join_operator.clone()))
-            },
-            JoinOperator::AsOf { match_condition, constraint } => {
+            }
+            JoinOperator::AsOf {
+                match_condition,
+                constraint,
+            } => {
                 // Parse the match condition
                 let match_expr = self.parse_expression(match_condition, &combined_schema)?;
-                
+
                 // Parse the constraint
-                let constraint_expr = self.process_join_constraint(constraint, left_schema, right_schema, &combined_schema)?;
-                
+                let constraint_expr = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
+
                 // Combine the match condition and constraint with AND
                 let left_expr = Arc::new(match_expr);
                 let right_expr = Arc::new(constraint_expr);
@@ -1658,9 +1653,9 @@ impl ExpressionParser {
                     LogicType::And,
                     vec![left_expr, right_expr],
                 ));
-                
+
                 Ok((predicate, join_operator.clone()))
-            },
+            }
         }
     }
 
@@ -1676,38 +1671,42 @@ impl ExpressionParser {
             JoinConstraint::On(expr) => {
                 // Parse the ON expression
                 self.parse_expression(expr, combined_schema)
-            },
+            }
             JoinConstraint::Using(columns) => {
                 // For USING, we create equality predicates for each column
                 let mut predicates = Vec::new();
-                
+
                 for ident in columns {
                     let column_name = ident.value.clone();
-                    
+
                     // Find the column in both schemas
-                    let left_col_idx = left_schema.get_column_index(&column_name)
-                        .ok_or_else(|| format!("Column '{}' not found in left table", column_name))?;
-                    let right_col_idx = right_schema.get_column_index(&column_name)
-                        .ok_or_else(|| format!("Column '{}' not found in right table", column_name))?;
-                    
+                    let left_col_idx =
+                        left_schema.get_column_index(&column_name).ok_or_else(|| {
+                            format!("Column '{}' not found in left table", column_name)
+                        })?;
+                    let right_col_idx =
+                        right_schema.get_column_index(&column_name).ok_or_else(|| {
+                            format!("Column '{}' not found in right table", column_name)
+                        })?;
+
                     // Create column references
                     let left_col = left_schema.get_column(left_col_idx).unwrap().clone();
                     let right_col = right_schema.get_column(right_col_idx).unwrap().clone();
-                    
+
                     let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
                         left_col_idx,
                         0, // tuple index for left table
                         left_col.clone(),
                         vec![],
                     ));
-                    
+
                     let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
                         right_col_idx + left_schema.get_column_count() as usize,
                         1, // tuple index for right table
                         right_col.clone(),
                         vec![],
                     ));
-                    
+
                     // Create equality predicate
                     let left_arc = Arc::new(left_expr);
                     let right_arc = Arc::new(right_expr);
@@ -1717,14 +1716,14 @@ impl ExpressionParser {
                         ComparisonType::Equal,
                         vec![left_arc, right_arc],
                     ));
-                    
+
                     predicates.push(Arc::new(predicate));
                 }
-                
+
                 if predicates.is_empty() {
                     return Err("USING clause must contain at least one column".to_string());
                 }
-                
+
                 // Combine all predicates with AND
                 if predicates.len() == 1 {
                     Ok(predicates[0].as_ref().clone())
@@ -1732,7 +1731,7 @@ impl ExpressionParser {
                     // Create a dummy left and right for the LogicExpression
                     let left = predicates[0].clone();
                     let right = predicates[1].clone();
-                    
+
                     Ok(Expression::Logic(LogicExpression::new(
                         left,
                         right,
@@ -1740,19 +1739,19 @@ impl ExpressionParser {
                         predicates,
                     )))
                 }
-            },
+            }
             JoinConstraint::Natural => {
                 // For NATURAL JOIN, find common columns in both schemas and create equality predicates
                 let mut predicates = Vec::new();
-                
+
                 for left_idx in 0..left_schema.get_column_count() as usize {
                     let left_col = left_schema.get_column(left_idx).unwrap();
                     let column_name = left_col.get_name();
-                    
+
                     // Check if the column exists in the right schema
                     if let Some(right_idx) = right_schema.get_column_index(column_name) {
                         let right_col = right_schema.get_column(right_idx).unwrap();
-                        
+
                         // Create column references
                         let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
                             left_idx,
@@ -1760,14 +1759,14 @@ impl ExpressionParser {
                             left_col.clone(),
                             vec![],
                         ));
-                        
+
                         let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
                             right_idx + left_schema.get_column_count() as usize,
                             1, // tuple index for right table
                             right_col.clone(),
                             vec![],
                         ));
-                        
+
                         // Create equality predicate
                         let left_arc = Arc::new(left_expr);
                         let right_arc = Arc::new(right_expr);
@@ -1777,15 +1776,18 @@ impl ExpressionParser {
                             ComparisonType::Equal,
                             vec![left_arc, right_arc],
                         ));
-                        
+
                         predicates.push(Arc::new(predicate));
                     }
                 }
-                
+
                 if predicates.is_empty() {
-                    return Err("NATURAL JOIN requires at least one common column between tables".to_string());
+                    return Err(
+                        "NATURAL JOIN requires at least one common column between tables"
+                            .to_string(),
+                    );
                 }
-                
+
                 // Combine all predicates with AND
                 if predicates.len() == 1 {
                     Ok(predicates[0].as_ref().clone())
@@ -1793,7 +1795,7 @@ impl ExpressionParser {
                     // Create a dummy left and right for the LogicExpression
                     let left = predicates[0].clone();
                     let right = predicates[1].clone();
-                    
+
                     Ok(Expression::Logic(LogicExpression::new(
                         left,
                         right,
@@ -1801,7 +1803,7 @@ impl ExpressionParser {
                         predicates,
                     )))
                 }
-            },
+            }
             JoinConstraint::None => {
                 // For no constraint (CROSS JOIN), create a constant TRUE predicate
                 Ok(Expression::Constant(ConstantExpression::new(
@@ -1809,7 +1811,7 @@ impl ExpressionParser {
                     Column::new("TRUE", TypeId::Boolean),
                     vec![],
                 )))
-            },
+            }
         }
     }
 
@@ -1912,6 +1914,180 @@ impl ExpressionParser {
         }
     }
 
+    pub fn resolve_column_ref_after_join(
+        &self,
+        table_alias: &str,
+        column_name: &str,
+        schema: &Schema,
+    ) -> Result<usize, String> {
+        debug!(
+            "Resolving column reference after join: {}.{}",
+            table_alias, column_name
+        );
+        log::debug!(
+            "Resolving column reference: table_alias='{}', column_name='{}' in schema with {} columns",
+            table_alias,
+            column_name,
+            schema.get_column_count()
+        );
+
+        // Debug: Print all columns in the schema
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            log::debug!(
+                "Schema column {}: name='{}', type={:?}",
+                i,
+                col.get_name(),
+                col.get_type()
+            );
+        }
+
+        // First, try to find a fully qualified column name
+        let qualified_name = format!("{}.{}", table_alias, column_name);
+        log::debug!("Looking for qualified name: '{}'", qualified_name);
+
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            if col.get_name() == qualified_name {
+                log::debug!("Found qualified column '{}' at index {}", qualified_name, i);
+                return Ok(i);
+            }
+        }
+        log::debug!("Qualified column '{}' not found", qualified_name);
+
+        // Second, try to find any column that starts with the given table alias prefix
+        log::debug!("Looking for columns with prefix: '{}'", table_alias);
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            let col_name = col.get_name();
+            if let Some(dot_pos) = col_name.find('.') {
+                let prefix = &col_name[0..dot_pos];
+                let suffix = &col_name[dot_pos + 1..];
+
+                log::debug!(
+                    "Checking column '{}': prefix='{}', suffix='{}'",
+                    col_name,
+                    prefix,
+                    suffix
+                );
+
+                if prefix == table_alias && suffix == column_name {
+                    log::debug!(
+                        "Found column with matching prefix and suffix at index {}",
+                        i
+                    );
+                    return Ok(i);
+                }
+            }
+        }
+        log::debug!("No column found with prefix '{}'", table_alias);
+
+        // Third, try to find the column by its unqualified name
+        log::debug!("Looking for unqualified column name: '{}'", column_name);
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            if col.get_name() == column_name {
+                log::debug!("Found unqualified column '{}' at index {}", column_name, i);
+                return Ok(i);
+            }
+        }
+        log::debug!("Unqualified column '{}' not found", column_name);
+
+        // Fourth, check if the table alias refers to an actual table in the catalog
+        log::debug!(
+            "Checking if '{}' is a valid table in the catalog",
+            table_alias
+        );
+        let catalog = self.catalog.read();
+        if let Some(table) = catalog.get_table(table_alias) {
+            log::debug!("Found table '{}' in catalog", table_alias);
+            let table_schema = table.get_table_schema();
+
+            // Debug: Print all columns in the table schema
+            log::debug!(
+                "Table '{}' schema has {} columns:",
+                table_alias,
+                table_schema.get_column_count()
+            );
+            for i in 0..table_schema.get_column_count() as usize {
+                let col = table_schema.get_column(i).unwrap();
+                log::debug!(
+                    "  Table column {}: name='{}', type={:?}",
+                    i,
+                    col.get_name(),
+                    col.get_type()
+                );
+            }
+
+            if let Some(col_idx) = table_schema.get_column_index(column_name) {
+                log::debug!(
+                    "Found column '{}' in table '{}' schema at index {}",
+                    column_name,
+                    table_alias,
+                    col_idx
+                );
+
+                // Now find this column in the joined schema
+                for i in 0..schema.get_column_count() as usize {
+                    let col = schema.get_column(i).unwrap();
+                    let col_name = col.get_name();
+                    log::debug!(
+                        "Checking if schema column '{}' matches table column '{}.{}'",
+                        col_name,
+                        table_alias,
+                        column_name
+                    );
+
+                    if col_name == column_name || col_name == qualified_name {
+                        log::debug!("Found matching column at index {}", i);
+                        return Ok(i);
+                    }
+
+                    if let Some(dot_pos) = col_name.find('.') {
+                        let prefix = &col_name[0..dot_pos];
+                        let suffix = &col_name[dot_pos + 1..];
+
+                        if prefix == table_alias && suffix == column_name {
+                            log::debug!("Found matching column with prefix at index {}", i);
+                            return Ok(i);
+                        }
+                    }
+                }
+            } else {
+                log::debug!(
+                    "Column '{}' not found in table '{}' schema",
+                    column_name,
+                    table_alias
+                );
+            }
+        } else {
+            log::debug!("Table '{}' not found in catalog", table_alias);
+        }
+
+        // Fifth, try to find any column that ends with the column name, regardless of prefix
+        log::debug!("Looking for any column ending with: '{}'", column_name);
+        for i in 0..schema.get_column_count() as usize {
+            let col = schema.get_column(i).unwrap();
+            let col_name = col.get_name();
+            if let Some(dot_pos) = col_name.find('.') {
+                let suffix = &col_name[dot_pos + 1..];
+
+                log::debug!("Checking column '{}': suffix='{}'", col_name, suffix);
+
+                if suffix == column_name {
+                    log::debug!("Found column with matching suffix at index {}", i);
+                    return Ok(i);
+                }
+            }
+        }
+        log::debug!("No column found ending with '{}'", column_name);
+
+        // If we get here, we couldn't find the column
+        let error_msg = format!("Column {}.{} not found in schema", table_alias, column_name);
+        log::debug!("{}", error_msg);
+        Err(error_msg)
+    }
+
     fn parse_at_timezone(
         &self,
         timestamp: &Expr,
@@ -2007,7 +2183,7 @@ impl ExpressionParser {
         )))
     }
 
-    fn parse_subquery(&self, query: &Query, schema: &Schema) -> Result<Expression, String> {
+    fn parse_subquery(&self, query: &Query, _outer_schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing subquery: {:?}", query);
         // Extract the body of the query
         let body = &query.body;
@@ -2015,8 +2191,30 @@ impl ExpressionParser {
         // For now, we only support SELECT expressions
         match body.as_ref() {
             SetExpr::Select(select) => {
-                // Parse the SELECT statement
-                let select_expr = Arc::new(self.parse_select_statements(select, schema)?);
+                // Get the schema for the tables in the subquery's FROM clause
+                let subquery_schema = if !select.from.is_empty() {
+                    // Get the first table in the FROM clause
+                    match &select.from[0].relation {
+                        TableFactor::Table { name, .. } => {
+                            // Extract the table name and get its schema
+                            let table_name = self.extract_table_name(name)?;
+                            debug!("Subquery references table: {}", table_name);
+                            self.get_table_schema(&table_name)?
+                        }
+                        _ => {
+                            debug!("Unsupported table factor in subquery, falling back to outer schema");
+                            _outer_schema.clone()
+                        }
+                    }
+                } else {
+                    debug!("No FROM clause in subquery, using outer schema");
+                    _outer_schema.clone()
+                };
+
+                debug!("Using schema for subquery: {:?}", subquery_schema);
+                
+                // Parse the SELECT statement with the correct schema
+                let select_expr = Arc::new(self.parse_select_statements(select, &subquery_schema)?);
 
                 // Create a SubqueryExpression with appropriate type and return type
                 Ok(Expression::Subquery(SubqueryExpression::new(
@@ -2041,32 +2239,6 @@ impl ExpressionParser {
                 Err("TABLE expressions in subqueries are not yet supported".to_string())
             }
             _ => Err("Unsupported subquery type".to_string()),
-        }
-    }
-
-    pub fn parse_select_statements(
-        &self,
-        select: &Box<Select>,
-        schema: &Schema,
-    ) -> Result<Expression, String> {
-        debug!("Parsing select statements: {:?}", select);
-        // Ensure we have at least one projection item
-        if select.projection.is_empty() {
-            return Err("Empty SELECT statement in subquery".to_string());
-        }
-
-        // For subqueries, we currently only support single-column results
-        if select.projection.len() > 1 {
-            return Err("Subqueries must return exactly one column".to_string());
-        }
-
-        // Parse the first (and only) projection item
-        match &select.projection[0] {
-            SelectItem::UnnamedExpr(expr) => self.parse_expression(expr, schema),
-            SelectItem::ExprWithAlias { expr, .. } => self.parse_expression(expr, schema),
-            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
-                Err("Wildcards are not supported in subqueries".to_string())
-            }
         }
     }
 
@@ -2398,180 +2570,6 @@ impl ExpressionParser {
         }
     }
 
-    pub fn resolve_column_ref_after_join(
-        &self,
-        table_alias: &str,
-        column_name: &str,
-        schema: &Schema,
-    ) -> Result<usize, String> {
-        debug!(
-            "Resolving column reference after join: {}.{}",
-            table_alias, column_name
-        );
-        log::debug!(
-            "Resolving column reference: table_alias='{}', column_name='{}' in schema with {} columns",
-            table_alias,
-            column_name,
-            schema.get_column_count()
-        );
-
-        // Debug: Print all columns in the schema
-        for i in 0..schema.get_column_count() as usize {
-            let col = schema.get_column(i).unwrap();
-            log::debug!(
-                "Schema column {}: name='{}', type={:?}",
-                i,
-                col.get_name(),
-                col.get_type()
-            );
-        }
-
-        // First, try to find a fully qualified column name
-        let qualified_name = format!("{}.{}", table_alias, column_name);
-        log::debug!("Looking for qualified name: '{}'", qualified_name);
-
-        for i in 0..schema.get_column_count() as usize {
-            let col = schema.get_column(i).unwrap();
-            if col.get_name() == qualified_name {
-                log::debug!("Found qualified column '{}' at index {}", qualified_name, i);
-                return Ok(i);
-            }
-        }
-        log::debug!("Qualified column '{}' not found", qualified_name);
-
-        // Second, try to find any column that starts with the given table alias prefix
-        log::debug!("Looking for columns with prefix: '{}'", table_alias);
-        for i in 0..schema.get_column_count() as usize {
-            let col = schema.get_column(i).unwrap();
-            let col_name = col.get_name();
-            if let Some(dot_pos) = col_name.find('.') {
-                let prefix = &col_name[0..dot_pos];
-                let suffix = &col_name[dot_pos + 1..];
-
-                log::debug!(
-                    "Checking column '{}': prefix='{}', suffix='{}'",
-                    col_name,
-                    prefix,
-                    suffix
-                );
-
-                if prefix == table_alias && suffix == column_name {
-                    log::debug!(
-                        "Found column with matching prefix and suffix at index {}",
-                        i
-                    );
-                    return Ok(i);
-                }
-            }
-        }
-        log::debug!("No column found with prefix '{}'", table_alias);
-
-        // Third, try to find the column by its unqualified name
-        log::debug!("Looking for unqualified column name: '{}'", column_name);
-        for i in 0..schema.get_column_count() as usize {
-            let col = schema.get_column(i).unwrap();
-            if col.get_name() == column_name {
-                log::debug!("Found unqualified column '{}' at index {}", column_name, i);
-                return Ok(i);
-            }
-        }
-        log::debug!("Unqualified column '{}' not found", column_name);
-
-        // Fourth, check if the table alias refers to an actual table in the catalog
-        log::debug!(
-            "Checking if '{}' is a valid table in the catalog",
-            table_alias
-        );
-        let catalog = self.catalog.read();
-        if let Some(table) = catalog.get_table(table_alias) {
-            log::debug!("Found table '{}' in catalog", table_alias);
-            let table_schema = table.get_table_schema();
-
-            // Debug: Print all columns in the table schema
-            log::debug!(
-                "Table '{}' schema has {} columns:",
-                table_alias,
-                table_schema.get_column_count()
-            );
-            for i in 0..table_schema.get_column_count() as usize {
-                let col = table_schema.get_column(i).unwrap();
-                log::debug!(
-                    "  Table column {}: name='{}', type={:?}",
-                    i,
-                    col.get_name(),
-                    col.get_type()
-                );
-            }
-
-            if let Some(col_idx) = table_schema.get_column_index(column_name) {
-                log::debug!(
-                    "Found column '{}' in table '{}' schema at index {}",
-                    column_name,
-                    table_alias,
-                    col_idx
-                );
-
-                // Now find this column in the joined schema
-                for i in 0..schema.get_column_count() as usize {
-                    let col = schema.get_column(i).unwrap();
-                    let col_name = col.get_name();
-                    log::debug!(
-                        "Checking if schema column '{}' matches table column '{}.{}'",
-                        col_name,
-                        table_alias,
-                        column_name
-                    );
-
-                    if col_name == column_name || col_name == qualified_name {
-                        log::debug!("Found matching column at index {}", i);
-                        return Ok(i);
-                    }
-
-                    if let Some(dot_pos) = col_name.find('.') {
-                        let prefix = &col_name[0..dot_pos];
-                        let suffix = &col_name[dot_pos + 1..];
-
-                        if prefix == table_alias && suffix == column_name {
-                            log::debug!("Found matching column with prefix at index {}", i);
-                            return Ok(i);
-                        }
-                    }
-                }
-            } else {
-                log::debug!(
-                    "Column '{}' not found in table '{}' schema",
-                    column_name,
-                    table_alias
-                );
-            }
-        } else {
-            log::debug!("Table '{}' not found in catalog", table_alias);
-        }
-
-        // Fifth, try to find any column that ends with the column name, regardless of prefix
-        log::debug!("Looking for any column ending with: '{}'", column_name);
-        for i in 0..schema.get_column_count() as usize {
-            let col = schema.get_column(i).unwrap();
-            let col_name = col.get_name();
-            if let Some(dot_pos) = col_name.find('.') {
-                let suffix = &col_name[dot_pos + 1..];
-
-                log::debug!("Checking column '{}': suffix='{}'", col_name, suffix);
-
-                if suffix == column_name {
-                    log::debug!("Found column with matching suffix at index {}", i);
-                    return Ok(i);
-                }
-            }
-        }
-        log::debug!("No column found ending with '{}'", column_name);
-
-        // If we get here, we couldn't find the column
-        let error_msg = format!("Column {}.{} not found in schema", table_alias, column_name);
-        log::debug!("{}", error_msg);
-        Err(error_msg)
-    }
-
     fn create_count_star(&self) -> Result<Expression, String> {
         debug!("Creating COUNT(*) expression");
         // Create a constant expression for COUNT(*)
@@ -2603,8 +2601,8 @@ mod tests {
     use crate::sql::execution::expressions::logic_expression::LogicType;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use std::collections::HashMap;
     use sqlparser::ast::Ident;
+    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -2696,6 +2694,40 @@ mod tests {
                 .map_err(|e| e.to_string())?;
             let expr = parser.parse_expr().map_err(|e| e.to_string())?;
             self.expression_parser().parse_expression(&expr, schema)
+        }
+    }
+
+    // Helper function to extract the first column reference from an expression
+    fn extract_first_column_ref(expr: &Expression) -> Option<Column> {
+        match expr {
+            Expression::ColumnRef(col_ref) => Some(col_ref.get_return_type().clone()),
+            Expression::Comparison(comp) => {
+                let children = comp.get_children();
+                if let Expression::ColumnRef(col_ref) = children[0].as_ref() {
+                    Some(col_ref.get_return_type().clone())
+                } else {
+                    None
+                }
+            }
+            Expression::Arithmetic(arith) => {
+                let children = arith.get_children();
+                for child in children {
+                    if let Some(col) = extract_first_column_ref(child) {
+                        return Some(col);
+                    }
+                }
+                None
+            }
+            Expression::Logic(logic) => {
+                let children = logic.get_children();
+                for child in children {
+                    if let Some(col) = extract_first_column_ref(child) {
+                        return Some(col);
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 
@@ -3274,21 +3306,21 @@ mod tests {
     fn test_parse_join_operators() {
         let ctx = TestContext::new("test_parse_join_operators");
         let schema = ctx.setup_test_schema();
-        
+
         // Create a second test schema
         let mut columns = Vec::new();
         columns.push(Column::new("id", TypeId::Integer));
         columns.push(Column::new("name", TypeId::VarChar));
         columns.push(Column::new("department", TypeId::VarChar));
         let second_schema = Schema::new(columns);
-        
+
         // Test INNER JOIN with ON constraint
         let on_expr = sqlparser::ast::Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new("id"))),
             op: BinaryOperator::Eq,
             right: Box::new(Expr::Identifier(Ident::new("id"))),
         };
-        
+
         let inner_join = JoinOperator::Inner(JoinConstraint::On(on_expr.clone()));
         let result = ctx.expression_parser().process_join_operator(
             &inner_join,
@@ -3297,8 +3329,12 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_ok(), "Failed to process INNER JOIN: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Failed to process INNER JOIN: {:?}",
+            result.err()
+        );
+
         // Test LEFT OUTER JOIN with ON constraint
         let left_join = JoinOperator::LeftOuter(JoinConstraint::On(on_expr.clone()));
         let result = ctx.expression_parser().process_join_operator(
@@ -3308,8 +3344,12 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_ok(), "Failed to process LEFT OUTER JOIN: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Failed to process LEFT OUTER JOIN: {:?}",
+            result.err()
+        );
+
         // Test USING constraint
         let using_cols = vec![Ident::new("id")];
         let using_join = JoinOperator::Inner(JoinConstraint::Using(using_cols));
@@ -3320,8 +3360,12 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_ok(), "Failed to process USING constraint: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Failed to process USING constraint: {:?}",
+            result.err()
+        );
+
         // Test NATURAL JOIN
         let natural_join = JoinOperator::Inner(JoinConstraint::Natural);
         let result = ctx.expression_parser().process_join_operator(
@@ -3331,8 +3375,12 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_ok(), "Failed to process NATURAL JOIN: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Failed to process NATURAL JOIN: {:?}",
+            result.err()
+        );
+
         // Test CROSS JOIN
         let cross_join = JoinOperator::CrossJoin;
         let result = ctx.expression_parser().process_join_operator(
@@ -3342,23 +3390,29 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_ok(), "Failed to process CROSS JOIN: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to process CROSS JOIN: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_parse_qualified_column_references() {
         let ctx = TestContext::new("test_parse_qualified_column_references");
-        
+
         // Create a schema with regular columns
         let base_schema = ctx.setup_test_schema();
-        
+
         // Create schemas with table aliases
-        let table1_schema = Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t1"), None);
-        let table2_schema = Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t2"), None);
-        
+        let table1_schema =
+            Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t1"), None);
+        let table2_schema =
+            Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t2"), None);
+
         // Merge the schemas to simulate a join
         let joined_schema = Schema::merge(&table1_schema, &table2_schema);
-        
+
         // Test cases for qualified column references
         let test_cases = vec![
             // Basic table alias references
@@ -3366,35 +3420,32 @@ mod tests {
             ("t2.name = 'John'", "t2.name"),
             ("t1.age > 25", "t1.age"),
             ("t2.salary < 50000", "t2.salary"),
-            
             // Comparison between columns from different tables
             ("t1.id = t2.id", "t1.id"),
             ("t1.age > t2.age", "t1.age"),
-            
             // Arithmetic with qualified columns
             ("t1.salary + t2.salary", "t1.salary"),
             ("t1.age * 2", "t1.age"),
-            
             // Complex expressions with qualified columns
             ("t1.age > 25 AND t2.salary < 50000", "t1.age"),
             ("t1.id = 1 OR t2.name = 'John'", "t1.id"),
         ];
-        
+
         for (expr_str, expected_column) in test_cases {
             let expr = ctx
                 .parse_expression(expr_str, &joined_schema)
                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-            
+
             // Extract the first column reference from the expression
             let column_ref = extract_first_column_ref(&expr);
-            
+
             // Verify the column name matches the expected qualified name
             assert!(
                 column_ref.is_some(),
                 "Expected ColumnRef in expression: {}",
                 expr_str
             );
-            
+
             if let Some(col_ref) = column_ref {
                 assert_eq!(
                     col_ref.get_name(),
@@ -3405,55 +3456,21 @@ mod tests {
                 );
             }
         }
-        
+
         // Test error cases
         let error_cases = vec![
-            "unknown_table.unknown_column = 1",  // Unknown table alias and column
+            "unknown_table.unknown_column = 1", // Unknown table alias and column
             "t1.unknown_column = 1",            // Unknown column
             "t3.unknown_column = 1",            // Non-existent table
             "schema.table.column = 1",          // Three-part identifier not supported
         ];
-        
+
         for expr_str in error_cases {
             assert!(
                 ctx.parse_expression(expr_str, &joined_schema).is_err(),
                 "Expected error for invalid expression: {}",
                 expr_str
             );
-        }
-    }
-
-    // Helper function to extract the first column reference from an expression
-    fn extract_first_column_ref(expr: &Expression) -> Option<Column> {
-        match expr {
-            Expression::ColumnRef(col_ref) => Some(col_ref.get_return_type().clone()),
-            Expression::Comparison(comp) => {
-                let children = comp.get_children();
-                if let Expression::ColumnRef(col_ref) = children[0].as_ref() {
-                    Some(col_ref.get_return_type().clone())
-                } else {
-                    None
-                }
-            },
-            Expression::Arithmetic(arith) => {
-                let children = arith.get_children();
-                for child in children {
-                    if let Some(col) = extract_first_column_ref(child) {
-                        return Some(col);
-                    }
-                }
-                None
-            },
-            Expression::Logic(logic) => {
-                let children = logic.get_children();
-                for child in children {
-                    if let Some(col) = extract_first_column_ref(child) {
-                        return Some(col);
-                    }
-                }
-                None
-            },
-            _ => None,
         }
     }
 }

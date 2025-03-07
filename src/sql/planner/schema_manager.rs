@@ -160,7 +160,51 @@ impl SchemaManager {
     }
 
     pub fn create_join_schema(&self, left_schema: &Schema, right_schema: &Schema) -> Schema {
-        Schema::merge(left_schema, right_schema)
+        // Extract table aliases from the schemas
+        let left_alias = self.extract_table_alias_from_schema(left_schema);
+        let right_alias = self.extract_table_alias_from_schema(right_schema);
+        
+        debug!("Creating join schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+        
+        // Create a new schema that preserves all column names with their original aliases
+        let mut merged_columns = Vec::new();
+        
+        // Add all columns from the left schema, preserving their original names
+        for col in left_schema.get_columns() {
+            merged_columns.push(col.clone());
+        }
+        
+        // Add all columns from the right schema, preserving their original names
+        for col in right_schema.get_columns() {
+            merged_columns.push(col.clone());
+        }
+        
+        Schema::new(merged_columns)
+    }
+    
+    // Helper function to extract table alias from schema
+    fn extract_table_alias_from_schema(&self, schema: &Schema) -> Option<String> {
+        // Create a map to count occurrences of each alias
+        let mut alias_counts = std::collections::HashMap::new();
+        
+        // Look at all columns to find table aliases
+        for column in schema.get_columns() {
+            let name = column.get_name();
+            if let Some(dot_pos) = name.find('.') {
+                let alias = name[..dot_pos].to_string();
+                *alias_counts.entry(alias).or_insert(0) += 1;
+            }
+        }
+        
+        // If we have aliases, return the most common one
+        if !alias_counts.is_empty() {
+            return alias_counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(alias, _)| alias);
+        }
+        
+        None
     }
 
     pub fn resolve_qualified_column<'a>(

@@ -153,7 +153,7 @@ impl Optimizer {
                 }
                 self.apply_early_pruning_to_children(plan)
             }
-            LogicalPlanType::Filter { schema, table_oid, table_name, predicate } => {
+            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate } => {
                 trace!("Examining filter predicate for simplification");
                 if let Expression::Constant(const_expr) = predicate.as_ref() {
                     if let Val::Boolean(b) = const_expr.get_value().value_ {
@@ -174,7 +174,7 @@ impl Optimizer {
     /// Phase 2: Apply rewrite rules
     fn apply_rewrite_rules(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
-            LogicalPlanType::Filter { schema, table_oid, table_name, predicate } => {
+            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate } => {
                 // Push down filter predicates
                 if let Some(child) = plan.children.pop() {
                     self.push_down_predicate(predicate.clone(), child)
@@ -329,6 +329,7 @@ impl Optimizer {
                 Ok(Box::new(LogicalPlan::new(
                     LogicalPlanType::Filter {
                         schema: Default::default(),
+                        output_schema: Default::default(),
                         table_oid: 0,
                         table_name: "".to_string(),
                         predicate,
@@ -336,7 +337,7 @@ impl Optimizer {
                     vec![child],
                 )))
             }
-            LogicalPlanType::Filter { predicate: existing_pred, .. } => {
+            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate: existing_pred } => {
                 // Combine predicates using AND
                 let combined_pred = Arc::new(Expression::Logic(LogicExpression::new(
                     predicate.clone(),
@@ -350,6 +351,7 @@ impl Optimizer {
                     Ok(Box::new(LogicalPlan::new(
                         LogicalPlanType::Filter {
                             schema: Default::default(),
+                            output_schema: Default::default(),
                             table_oid: 0,
                             table_name: "".to_string(),
                             predicate: combined_pred,
@@ -361,6 +363,7 @@ impl Optimizer {
             _ => Ok(Box::new(LogicalPlan::new(
                 LogicalPlanType::Filter {
                     schema: Default::default(),
+                    output_schema: Default::default(),
                     table_oid: 0,
                     table_name: "".to_string(),
                     predicate,

@@ -64,7 +64,14 @@ impl AggregateExpression {
                 let arg = self.get_arg();
                 let expr_str = match arg.as_ref() {
                     Expression::ColumnRef(col_ref) => {
-                        col_ref.get_return_type().get_name().to_string()
+                        // Extract just the column name without any table prefix
+                        let full_name = col_ref.get_return_type().get_name();
+                        // If the column name contains a dot (table.column), take just the column part
+                        if let Some(idx) = full_name.rfind('.') {
+                            full_name[idx + 1..].to_string()
+                        } else {
+                            full_name.to_string()
+                        }
                     }
                     Expression::Constant(const_expr) => const_expr.to_string(),
                     Expression::Arithmetic(arith_expr) => arith_expr.to_string(),
