@@ -1101,8 +1101,8 @@ mod tests {
         let output_schema = executor.get_output_schema();
         assert_eq!(output_schema.get_columns()[0].get_name(), "name",
                    "First column should be named 'name'");
-        assert_eq!(output_schema.get_columns()[1].get_name(), "SUM(age)",
-                   "Second column should be named 'SUM(age)'");
+        assert_eq!(output_schema.get_columns()[1].get_name(), "SUM_age",
+                   "Second column should be named 'SUM_age'");
 
         // Check first group (Jane Smith)
         assert_eq!(ToString::to_string(&results[0].get_value(0)), "Jane Smith");

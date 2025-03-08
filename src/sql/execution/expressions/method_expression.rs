@@ -17,6 +17,7 @@ pub struct MethodExpression {
     method_name: String,
     args: Vec<Arc<Expression>>,
     return_type: Column,
+    children: Vec<Arc<Expression>>, // Store all children for consistent pattern
 }
 
 impl MethodExpression {
@@ -26,11 +27,17 @@ impl MethodExpression {
         args: Vec<Arc<Expression>>,
         return_type: Column,
     ) -> Self {
+        // Create a combined children vector with expr as the first element
+        // followed by all the args
+        let mut children = vec![expr.clone()];
+        children.extend(args.iter().cloned());
+        
         Self {
             expr,
             method_name,
             args,
             return_type,
+            children,
         }
     }
 }
@@ -256,23 +263,15 @@ impl ExpressionOps for MethodExpression {
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        if child_idx == 0 {
-            &self.expr
-        } else if child_idx <= self.args.len() {
-            &self.args[child_idx - 1]
+        if child_idx < self.children.len() {
+            &self.children[child_idx]
         } else {
             panic!("Index out of bounds in MethodExpression::get_child_at")
         }
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        // We need to return a reference to a vector that contains all children
-        // Since we store expr and args separately, we can't directly return either
-        // This is a limitation of the current design
-        // In a real implementation, you might want to maintain a combined vector
-        // or redesign the interface
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {

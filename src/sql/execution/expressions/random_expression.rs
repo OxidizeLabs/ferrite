@@ -15,13 +15,22 @@ use crate::types_db::types::Type;
 pub struct RandomExpression {
     seed: Option<Arc<Expression>>,  // Optional seed expression
     return_type: Column,
+    children: Vec<Arc<Expression>>, // Store children for consistent pattern
 }
 
 impl RandomExpression {
     pub fn new(seed: Option<Arc<Expression>>, return_type: Column) -> Self {
+        // Initialize children vector with seed if present
+        let children = if let Some(seed_expr) = &seed {
+            vec![seed_expr.clone()]
+        } else {
+            Vec::new()
+        };
+        
         Self {
             seed,
             return_type,
+            children,
         }
     }
 }
@@ -50,31 +59,20 @@ impl ExpressionOps for RandomExpression {
         _right_tuple: &Tuple,
         _right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        // For join evaluation, we'll evaluate using the left tuple and schema
+        // For join evaluation, we only use the left tuple
         self.evaluate(left_tuple, left_schema)
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        if let Some(seed) = &self.seed {
-            if child_idx == 0 {
-                seed
-            } else {
-                panic!("Index out of bounds: RandomExpression has at most one child")
-            }
+        if child_idx < self.children.len() {
+            &self.children[child_idx]
         } else {
-            panic!("Index out of bounds: RandomExpression has no children")
+            panic!("Index out of bounds: RandomExpression has {} children", self.children.len())
         }
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        // This is a bit of a hack since we don't store the seed in a Vec
-        // but it's required by the trait. In practice, this method
-        // shouldn't be called directly - use get_child_at instead
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        match &self.seed {
-            Some(_) => panic!("Use get_child_at for RandomExpression"),
-            None => &EMPTY,
-        }
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {
