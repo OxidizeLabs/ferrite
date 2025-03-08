@@ -23,14 +23,32 @@ pub struct SubscriptExpression {
     expr: Arc<Expression>,
     subscript: Subscript,
     return_type: Column,
+    children: Vec<Arc<Expression>>,
 }
 
 impl SubscriptExpression {
     pub fn new(expr: Arc<Expression>, subscript: Subscript, return_type: Column) -> Self {
+        let mut children = vec![expr.clone()];
+        
+        match &subscript {
+            Subscript::Single(idx) => {
+                children.push(idx.clone());
+            },
+            Subscript::Range { start, end } => {
+                if let Some(start_expr) = start {
+                    children.push(start_expr.clone());
+                }
+                if let Some(end_expr) = end {
+                    children.push(end_expr.clone());
+                }
+            }
+        }
+        
         Self {
             expr,
             subscript,
             return_type,
+            children,
         }
     }
 }
@@ -255,28 +273,15 @@ impl ExpressionOps for SubscriptExpression {
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        match child_idx {
-            0 => &self.expr,
-            1 => match &self.subscript {
-                Subscript::Single(idx) => idx,
-                Subscript::Range { start, end } => {
-                    if let Some(start) = start {
-                        start
-                    } else if let Some(end) = end {
-                        end
-                    } else {
-                        panic!("Invalid child index")
-                    }
-                }
-            },
-            _ => panic!("Invalid child index"),
+        if child_idx < self.children.len() {
+            &self.children[child_idx]
+        } else {
+            panic!("Invalid child index: {}", child_idx)
         }
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        // Return empty vec since we handle children differently
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {

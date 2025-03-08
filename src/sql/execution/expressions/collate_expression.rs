@@ -13,14 +13,18 @@ pub struct CollateExpression {
     expr: Arc<Expression>,
     collation: String,
     return_type: Column,
+    children: Vec<Arc<Expression>>,
 }
 
 impl CollateExpression {
     pub fn new(expr: Arc<Expression>, collation: String, return_type: Column) -> Self {
+        let children = vec![expr.clone()];
+        
         Self {
             expr,
             collation,
             return_type,
+            children,
         }
     }
 }
@@ -54,8 +58,7 @@ impl ExpressionOps for CollateExpression {
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        static EMPTY: Vec<Arc<Expression>> = Vec::new();
-        &EMPTY
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {

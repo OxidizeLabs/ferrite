@@ -343,7 +343,7 @@ impl ExpressionParser {
                                 )))
                             }
                             _ => Err(format!(
-                                "Cannot compare values of types {:?} and {:?}",
+                                "Type mismatch: Cannot compare values of types {:?} and {:?}",
                                 left_type, right_type
                             )),
                         }
@@ -2216,11 +2216,14 @@ impl ExpressionParser {
                 // Parse the SELECT statement with the correct schema
                 let select_expr = Arc::new(self.parse_select_statements(select, &subquery_schema)?);
 
+                // Determine the appropriate return type for the subquery
+                let (subquery_type, return_type) = self.determine_subquery_type_and_return_type(select, &subquery_schema)?;
+
                 // Create a SubqueryExpression with appropriate type and return type
                 Ok(Expression::Subquery(SubqueryExpression::new(
                     select_expr,
-                    SubqueryType::Scalar, // Default to scalar for now
-                    Column::new("subquery", TypeId::Vector), // Default to Vector type
+                    subquery_type,
+                    return_type,
                 )))
             }
             SetExpr::Values(_) => {
@@ -2240,6 +2243,82 @@ impl ExpressionParser {
             }
             _ => Err("Unsupported subquery type".to_string()),
         }
+    }
+
+    // Helper method to determine the subquery type and return type
+    fn determine_subquery_type_and_return_type(&self, select: &Box<Select>, schema: &Schema) -> Result<(SubqueryType, Column), String> {
+        // Check if this is a scalar subquery (single column, likely with an aggregate)
+        if select.projection.len() == 1 {
+            // Check if it's an aggregate function
+            if let SelectItem::UnnamedExpr(Expr::Function(func)) = &select.projection[0] {
+                let func_name = self.extract_table_name(&func.name)?;
+                
+                // Handle common aggregate functions
+                match func_name.to_uppercase().as_str() {
+                    "AVG" => return Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Decimal))),
+                    "SUM" => {
+                        // Determine type based on argument
+                        if let FunctionArguments::List(args) = &func.args {
+                            if !args.args.is_empty() {
+                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
+                                    let arg_expr = self.parse_expression(expr, schema)?;
+                                    let arg_type = arg_expr.get_return_type().get_type();
+                                    
+                                    let return_type = match arg_type {
+                                        TypeId::Integer | TypeId::SmallInt | TypeId::TinyInt => TypeId::Integer,
+                                        TypeId::BigInt => TypeId::BigInt,
+                                        TypeId::Decimal => TypeId::Decimal,
+                                        _ => TypeId::Decimal, // Default to decimal for other types
+                                    };
+                                    
+                                    return Ok((SubqueryType::Scalar, Column::new("subquery_result", return_type)));
+                                }
+                            }
+                        }
+                        
+                        // Default to decimal if we can't determine the type
+                        return Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Decimal)));
+                    },
+                    "COUNT" => return Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Integer))),
+                    "MIN" | "MAX" => {
+                        // Determine type based on argument
+                        if let FunctionArguments::List(args) = &func.args {
+                            if !args.args.is_empty() {
+                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
+                                    let arg_expr = self.parse_expression(expr, schema)?;
+                                    let arg_type = arg_expr.get_return_type().get_type();
+                                    return Ok((SubqueryType::Scalar, Column::new("subquery_result", arg_type)));
+                                }
+                            }
+                        }
+                        
+                        // Default to integer if we can't determine the type
+                        return Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Integer)));
+                    },
+                    _ => {
+                        // For other functions, try to infer the return type
+                        let expr = self.parse_expression(&Expr::Function(func.clone()), schema)?;
+                        let return_type = expr.get_return_type().clone();
+                        return Ok((SubqueryType::Scalar, return_type));
+                    }
+                }
+            } else {
+                // Single column but not an aggregate function
+                let expr = self.parse_expression(
+                    match &select.projection[0] {
+                        SelectItem::UnnamedExpr(expr) => expr,
+                        SelectItem::ExprWithAlias { expr, .. } => expr,
+                        _ => return Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Vector))),
+                    },
+                    schema,
+                )?;
+                let return_type = expr.get_return_type().clone();
+                return Ok((SubqueryType::Scalar, return_type));
+            }
+        }
+        
+        // Default to vector type for non-scalar subqueries
+        Ok((SubqueryType::Scalar, Column::new("subquery_result", TypeId::Vector)))
     }
 
     fn parse_order_by_expressions(

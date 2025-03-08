@@ -17,14 +17,18 @@ pub struct AtTimeZoneExpression {
     timestamp: Arc<Expression>,
     timezone: Arc<Expression>,
     return_type: Column,
+    children: Vec<Arc<Expression>>,
 }
 
 impl AtTimeZoneExpression {
     pub fn new(timestamp: Arc<Expression>, timezone: Arc<Expression>, return_type: Column) -> Self {
+        let children = vec![timestamp.clone(), timezone.clone()];
+        
         Self {
             timestamp,
             timezone,
             return_type,
+            children,
         }
     }
 }
@@ -73,8 +77,7 @@ impl ExpressionOps for AtTimeZoneExpression {
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
-        static CHILDREN: Vec<Arc<Expression>> = Vec::new();
-        &CHILDREN
+        &self.children
     }
 
     fn get_return_type(&self) -> &Column {

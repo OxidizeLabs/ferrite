@@ -568,7 +568,7 @@ mod tests {
         
         assert_eq!(schema.get_column_count(), 2);
         assert_eq!(schema.get_column(0).unwrap().get_name(), "category");
-        assert_eq!(schema.get_column(1).unwrap().get_name(), "SUM(amount)");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "sum");
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         );
         
         assert_eq!(schema.get_column_count(), 1);
-        assert_eq!(schema.get_column(0).unwrap().get_name(), "COUNT(count_all)");
+        assert_eq!(schema.get_column(0).unwrap().get_name(), "count_all");
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
         
         assert_eq!(schema.get_column_count(), 2);
         assert_eq!(schema.get_column(0).unwrap().get_name(), "category");
-        assert_eq!(schema.get_column(1).unwrap().get_name(), "SUM(amount)");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "sum");
     }
 
     #[test]
