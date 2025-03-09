@@ -91,7 +91,11 @@ impl BoundExpression for MockExpression {
 
 impl Display for MockExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MockExpression({}:{:?})", self.name, self.return_type)
+        if f.alternate() {
+            write!(f, "MockExpression({}:{:?})", self.name, self.return_type)
+        } else {
+            write!(f, "{}", self.name)
+        }
     }
 }
 
