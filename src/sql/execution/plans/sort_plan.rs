@@ -1,6 +1,8 @@
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use sqlparser::ast::DataType;
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -63,5 +65,78 @@ impl Display for SortNode {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::column::Column;
+    use crate::types_db::type_id::TypeId;
+
+    #[test]
+    fn test_sort_node_creation() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        let order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        let order_bys = vec![order_by_expr];
+        let children = vec![];
+        
+        let sort_node = SortNode::new(schema.clone(), order_bys.clone(), children);
+        
+        assert_eq!(sort_node.get_output_schema(), &schema);
+        assert_eq!(sort_node.get_order_bys(), &order_bys);
+        assert_eq!(sort_node.get_children().len(), 0);
+        assert_eq!(sort_node.get_type(), PlanType::Sort);
+    }
+
+    #[test]
+    fn test_sort_node_display() {
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        let order_bys = vec![order_by_expr];
+        let children = vec![];
+        
+        let sort_node = SortNode::new(schema, order_bys, children);
+        
+        // Test default format
+        let default_format = format!("{}", sort_node);
+        assert_eq!(default_format, "→ Sort");
+        
+        // Test alternate format
+        let alternate_format = format!("{:#}", sort_node);
+        assert!(alternate_format.contains("→ Sort"));
+        assert!(alternate_format.contains("Order By:"));
+        assert!(alternate_format.contains("Schema:"));
+    }
+
+    #[test]
+    fn test_sort_node_with_children() {
+        let child_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let child_order_bys: Vec<Arc<Expression>> = vec![];
+        let child_children = vec![];
+        let child_node = PlanNode::Sort(SortNode::new(
+            child_schema.clone(),
+            child_order_bys,
+            child_children,
+        ));
+
+        let parent_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let parent_order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        let parent_order_bys = vec![parent_order_by_expr];
+        let parent_children = vec![child_node];
+        
+        let parent_sort_node = SortNode::new(parent_schema, parent_order_bys, parent_children);
+        
+        assert_eq!(parent_sort_node.get_children().len(), 1);
     }
 }
