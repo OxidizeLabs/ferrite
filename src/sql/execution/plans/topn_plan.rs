@@ -14,10 +14,12 @@ pub struct TopNNode {
 }
 
 impl TopNNode {
-    pub fn new(output_schema: Schema,
-               order_bys: Vec<Arc<Expression>>,
-               k: usize,
-               children: Vec<PlanNode>, ) -> Self {
+    pub fn new(
+        output_schema: Schema,
+        order_bys: Vec<Arc<Expression>>,
+        k: usize,
+        children: Vec<PlanNode>,
+    ) -> Self {
         Self {
             output_schema,
             order_bys,
@@ -77,11 +79,9 @@ impl Display for TopNNode {
 mod tests {
     use super::*;
     use crate::catalog::column::Column;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![
@@ -93,11 +93,7 @@ mod tests {
     }
 
     fn create_mock_child_plan(schema: Schema) -> PlanNode {
-        PlanNode::SeqScan(SeqScanPlanNode::new(
-            schema,
-            0,
-            "test_table".to_string(),
-        ))
+        PlanNode::SeqScan(SeqScanPlanNode::new(schema, 0, "test_table".to_string()))
     }
 
     fn create_mock_order_by(name: &str, type_id: TypeId) -> Arc<Expression> {

@@ -1,8 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use sqlparser::ast::DataType;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -15,7 +14,11 @@ pub struct SortNode {
 }
 
 impl SortNode {
-    pub fn new(output_schema: Schema, order_bys: Vec<Arc<Expression>>, children: Vec<PlanNode>) -> Self {
+    pub fn new(
+        output_schema: Schema,
+        order_bys: Vec<Arc<Expression>>,
+        children: Vec<PlanNode>,
+    ) -> Self {
         Self {
             output_schema,
             order_bys,
@@ -80,15 +83,18 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         let order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
         let order_bys = vec![order_by_expr];
         let children = vec![];
-        
+
         let sort_node = SortNode::new(schema.clone(), order_bys.clone(), children);
-        
+
         assert_eq!(sort_node.get_output_schema(), &schema);
         assert_eq!(sort_node.get_order_bys(), &order_bys);
         assert_eq!(sort_node.get_children().len(), 0);
@@ -99,17 +105,20 @@ mod tests {
     fn test_sort_node_display() {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
         let order_bys = vec![order_by_expr];
         let children = vec![];
-        
+
         let sort_node = SortNode::new(schema, order_bys, children);
-        
+
         // Test default format
         let default_format = format!("{}", sort_node);
         assert_eq!(default_format, "→ Sort");
-        
+
         // Test alternate format
         let alternate_format = format!("{:#}", sort_node);
         assert!(alternate_format.contains("→ Sort"));
@@ -130,13 +139,16 @@ mod tests {
 
         let parent_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let parent_order_by_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
         let parent_order_bys = vec![parent_order_by_expr];
         let parent_children = vec![child_node];
-        
+
         let parent_sort_node = SortNode::new(parent_schema, parent_order_bys, parent_children);
-        
+
         assert_eq!(parent_sort_node.get_children().len(), 1);
     }
 }
