@@ -1,5 +1,4 @@
 use crate::catalog::schema::Schema;
-use crate::catalog::column::Column;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
@@ -26,11 +25,19 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
-use sqlparser::ast::JoinOperator;
+use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
+use sqlparser::ast::{
+    BinaryOperator, Expr as SqlExpr, Function as SqlFunction,
+    FunctionArg as SqlFunctionArg, Ident, JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query,
+    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue,
+};
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use log::debug;
 use std::collections::HashMap;
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::types_db::type_id::TypeId;
+use crate::catalog::column::Column;
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -339,6 +346,21 @@ impl LogicalPlan {
                     indent_str, right_schema
                 ));
             }
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
+                result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
+                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
+                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
+                result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
+                result.push_str(&format!(
+                    "{}   Right Schema: {}\n",
+                    indent_str, right_schema
+                ));
+            }
             LogicalPlanType::HashJoin {
                 left_schema,
                 right_schema,
@@ -384,21 +406,6 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
-            LogicalPlanType::NestedIndexJoin {
-                left_schema,
-                right_schema,
-                predicate,
-                join_type,
-            } => {
-                result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
-                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
-                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
-                result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
-                result.push_str(&format!(
-                    "{}   Right Schema: {}\n",
-                    indent_str, right_schema
-                ));
             }
             LogicalPlanType::TopNPerGroup {
                 k,
@@ -549,7 +556,7 @@ impl LogicalPlan {
     pub fn insert(
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
@@ -584,9 +591,9 @@ impl LogicalPlan {
 
     pub fn index_scan(
         table_name: String,
-        table_oid: u64,
+        table_oid: TableOidT,
         index_name: String,
-        index_oid: u64,
+        index_oid: IndexOidT,
         schema: Schema,
         predicate_keys: Vec<Arc<Expression>>,
     ) -> Box<Self> {
@@ -603,7 +610,7 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn mock_scan(table_name: String, schema: Schema, table_oid: u64) -> Box<Self> {
+    pub fn mock_scan(table_name: String, schema: Schema, table_oid: TableOidT) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::MockScan {
                 table_name,
@@ -617,7 +624,7 @@ impl LogicalPlan {
     pub fn delete(
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
@@ -633,7 +640,7 @@ impl LogicalPlan {
     pub fn update(
         table_name: String,
         schema: Schema,
-        table_oid: u64,
+        table_oid: TableOidT,
         update_expressions: Vec<Arc<Expression>>,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
@@ -1384,3 +1391,704 @@ fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
     None
 }
 
+// Add these helper methods for Expression
+impl Expression {
+    pub fn column_ref(name: &str, type_id: TypeId) -> Self {
+        Self::ColumnRef(ColumnRefExpression::new(0, 0, Column::new(name, type_id), vec![]))
+    }
+
+    pub fn binary_op(left: Self, op: BinaryOperator, right: Self) -> Self {
+        let left_arc = Arc::new(left);
+        let right_arc = Arc::new(right);
+        let children = vec![left_arc.clone(), right_arc.clone()];
+        Self::BinaryOp(BinaryOpExpression::new(left_arc, right_arc, op, children).unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::column::Column;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::{Val, Value};
+    use sqlparser::ast::JoinOperator;
+
+    #[test]
+    fn test_create_table_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let plan = LogicalPlan::create_table(schema.clone(), "users".to_string(), false);
+
+        match plan.plan_type {
+            LogicalPlanType::CreateTable {
+                schema: s,
+                table_name,
+                if_not_exists,
+            } => {
+                assert_eq!(schema, s);
+                assert_eq!(table_name, "users");
+                assert_eq!(if_not_exists, false);
+            }
+            _ => panic!("Expected CreateTable plan"),
+        }
+    }
+
+    #[test]
+    fn test_table_scan_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+
+        match plan.plan_type {
+            LogicalPlanType::TableScan {
+                table_name,
+                schema: s,
+                table_oid,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+            }
+            _ => panic!("Expected TableScan plan"),
+        }
+    }
+
+    #[test]
+    fn test_filter_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("age", TypeId::Integer), vec![]
+        )));
+        let constant = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Integer(18)),
+            Column::new("const", TypeId::Integer),
+            vec![]
+        )));
+        let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            column_ref.clone(),
+            constant.clone(),
+            ComparisonType::GreaterThan,
+            vec![column_ref.clone(), constant.clone()]
+        )));
+
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let filter_plan = LogicalPlan::filter(
+            schema.clone(),
+            "users".to_string(),
+            1,
+            predicate.clone(),
+            scan_plan,
+        );
+
+        match filter_plan.plan_type {
+            LogicalPlanType::Filter {
+                schema: s,
+                table_oid,
+                table_name,
+                predicate: p,
+                output_schema: _,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+                assert_eq!(p, predicate);
+            }
+            _ => panic!("Expected Filter plan"),
+        }
+    }
+
+    #[test]
+    fn test_projection_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let expressions = vec![
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 0, Column::new("id", TypeId::Integer), vec![]
+            ))),
+        ];
+
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let projection_plan = LogicalPlan::project(expressions.clone(), schema.clone(), scan_plan);
+
+        match projection_plan.plan_type {
+            LogicalPlanType::Projection {
+                expressions: e,
+                schema: s,
+            } => {
+                assert_eq!(expressions, e);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Projection plan"),
+        }
+    }
+
+    #[test]
+    fn test_aggregate_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        let group_by = vec![
+            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, 0, Column::new("id", TypeId::Integer), vec![]
+            ))),
+        ];
+
+        let age_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("age", TypeId::Integer), vec![]
+        )));
+        let aggregates = vec![
+            Arc::new(Expression::Aggregate(AggregateExpression::new(
+                AggregationType::Avg,
+                vec![age_col.clone()],
+                Column::new("avg_age", TypeId::Decimal),
+                "AVG".to_string()
+            ))),
+        ];
+
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let aggregate_plan = LogicalPlan::aggregate(
+            group_by.clone(),
+            aggregates.clone(),
+            schema.clone(),
+            scan_plan,
+        );
+
+        match aggregate_plan.plan_type {
+            LogicalPlanType::Aggregate {
+                group_by: g,
+                aggregates: a,
+                schema: s,
+            } => {
+                assert_eq!(group_by, g);
+                assert_eq!(aggregates, a);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Aggregate plan"),
+        }
+    }
+
+    #[test]
+    fn test_explain_output() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, Column::new("age", TypeId::Integer), vec![]
+        )));
+        let constant = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Integer(18)),
+            Column::new("const", TypeId::Integer),
+            vec![]
+        )));
+        let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            column_ref.clone(),
+            constant.clone(),
+            ComparisonType::GreaterThan,
+            vec![column_ref.clone(), constant.clone()]
+        )));
+
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let filter_plan = LogicalPlan::filter(
+            schema.clone(),
+            "users".to_string(),
+            1,
+            predicate.clone(),
+            scan_plan,
+        );
+
+        let explain_output = filter_plan.explain(0);
+        assert!(explain_output.contains("Filter"));
+        assert!(explain_output.contains("TableScan"));
+    }
+
+    #[test]
+    fn test_get_schema() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let result_schema = plan.get_schema();
+        assert_eq!(schema, result_schema);
+    }
+
+    #[test]
+    fn test_to_physical_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let physical_plan = plan.to_physical_plan();
+        assert!(physical_plan.is_ok());
+    }
+
+    #[test]
+    fn test_create_index_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let key_attrs = vec![0]; // Index on the "id" column
+        let plan = LogicalPlan::create_index(
+            schema.clone(), 
+            "users".to_string(), 
+            "users_id_idx".to_string(), 
+            key_attrs.clone(), 
+            false
+        );
+
+        match plan.plan_type {
+            LogicalPlanType::CreateIndex {
+                schema: s,
+                table_name,
+                index_name,
+                key_attrs: k,
+                if_not_exists,
+            } => {
+                assert_eq!(schema, s);
+                assert_eq!(table_name, "users");
+                assert_eq!(index_name, "users_id_idx");
+                assert_eq!(key_attrs, k);
+                assert_eq!(if_not_exists, false);
+            }
+            _ => panic!("Expected CreateIndex plan"),
+        }
+    }
+
+    #[test]
+    fn test_mock_scan_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let plan = LogicalPlan::mock_scan("users".to_string(), schema.clone(), 1);
+
+        match plan.plan_type {
+            LogicalPlanType::MockScan {
+                table_name,
+                schema: s,
+                table_oid,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+            }
+            _ => panic!("Expected MockScan plan"),
+        }
+    }
+
+    #[test]
+    fn test_index_scan_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        let predicate_keys = vec![column_ref];
+        
+        let plan = LogicalPlan::index_scan(
+            "users".to_string(),
+            1,
+            "users_id_idx".to_string(),
+            2,
+            schema.clone(),
+            predicate_keys.clone()
+        );
+
+        match plan.plan_type {
+            LogicalPlanType::IndexScan {
+                table_name,
+                table_oid,
+                index_name,
+                index_oid,
+                schema: s,
+                predicate_keys: p,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(table_oid, 1);
+                assert_eq!(index_name, "users_id_idx");
+                assert_eq!(index_oid, 2);
+                assert_eq!(schema, s);
+                assert_eq!(predicate_keys, p);
+            }
+            _ => panic!("Expected IndexScan plan"),
+        }
+    }
+
+    #[test]
+    fn test_insert_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        // Create a values plan as the input to insert
+        let id_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Integer(1)),
+            Column::new("id", TypeId::Integer),
+            vec![]
+        )));
+        let name_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::VarLen("John".to_string())),
+            Column::new("name", TypeId::VarChar),
+            vec![]
+        )));
+        
+        let rows = vec![vec![id_val, name_val]];
+        let values_plan = LogicalPlan::values(rows.clone(), schema.clone());
+        
+        let insert_plan = LogicalPlan::insert(
+            "users".to_string(),
+            schema.clone(),
+            1,
+            values_plan
+        );
+
+        match insert_plan.plan_type {
+            LogicalPlanType::Insert {
+                table_name,
+                schema: s,
+                table_oid,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+            }
+            _ => panic!("Expected Insert plan"),
+        }
+    }
+
+    #[test]
+    fn test_delete_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let delete_plan = LogicalPlan::delete(
+            "users".to_string(),
+            schema.clone(),
+            1,
+            scan_plan
+        );
+
+        match delete_plan.plan_type {
+            LogicalPlanType::Delete {
+                table_name,
+                schema: s,
+                table_oid,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+            }
+            _ => panic!("Expected Delete plan"),
+        }
+    }
+
+    #[test]
+    fn test_update_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ]);
+        
+        // Create an update expression to set age = 30
+        let age_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Integer(30)),
+            Column::new("age", TypeId::Integer),
+            vec![]
+        )));
+        
+        let update_expressions = vec![age_val];
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        
+        let update_plan = LogicalPlan::update(
+            "users".to_string(),
+            schema.clone(),
+            1,
+            update_expressions.clone(),
+            scan_plan
+        );
+
+        match update_plan.plan_type {
+            LogicalPlanType::Update {
+                table_name,
+                schema: s,
+                table_oid,
+                update_expressions: u,
+            } => {
+                assert_eq!(table_name, "users");
+                assert_eq!(schema, s);
+                assert_eq!(table_oid, 1);
+                assert_eq!(update_expressions, u);
+            }
+            _ => panic!("Expected Update plan"),
+        }
+    }
+
+    #[test]
+    fn test_values_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        let id_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::Integer(1)),
+            Column::new("id", TypeId::Integer),
+            vec![]
+        )));
+        let name_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(Val::VarLen("John".to_string())),
+            Column::new("name", TypeId::VarChar),
+            vec![]
+        )));
+        
+        let rows = vec![vec![id_val.clone(), name_val.clone()]];
+        let values_plan = LogicalPlan::values(rows.clone(), schema.clone());
+
+        match values_plan.plan_type {
+            LogicalPlanType::Values {
+                rows: r,
+                schema: s,
+            } => {
+                assert_eq!(rows, r);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Values plan"),
+        }
+    }
+
+    #[test]
+    fn test_nested_loop_join_plan() {
+        // Create two mock scan plans
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        let left_plan = LogicalPlan::mock_scan(
+            "left_table".to_string(),
+            left_schema.clone(),
+            1,
+        );
+        let right_plan = LogicalPlan::mock_scan(
+            "right_table".to_string(),
+            right_schema.clone(),
+            2,
+        );
+
+        // Create a join condition
+        let join_condition = Expression::binary_op(
+            Expression::column_ref("left_table.id", TypeId::Integer),
+            BinaryOperator::Eq,
+            Expression::column_ref("right_table.id", TypeId::Integer),
+        );
+
+        // Create a nested loop join plan
+        let join_plan = LogicalPlan::nested_loop_join(
+            left_schema.clone(),
+            right_schema.clone(),
+            Arc::new(join_condition.clone()),
+            JoinOperator::Inner(JoinConstraint::None),
+            left_plan,
+            right_plan,
+        );
+
+        // Check the plan type
+        match join_plan.plan_type {
+            LogicalPlanType::NestedLoopJoin {
+                left_schema: ls,
+                right_schema: rs,
+                predicate,
+                join_type,
+            } => {
+                assert_eq!(left_schema, ls);
+                assert_eq!(right_schema, rs);
+                assert_eq!(*predicate, join_condition);
+                assert!(matches!(join_type, JoinOperator::Inner(_)));
+            }
+            _ => panic!("Expected NestedLoopJoin plan type"),
+        }
+    }
+
+    #[test]
+    fn test_hash_join_plan() {
+        // Create two mock scan plans
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        let left_plan = LogicalPlan::mock_scan(
+            "left_table".to_string(),
+            left_schema.clone(),
+            1,
+        );
+        let right_plan = LogicalPlan::mock_scan(
+            "right_table".to_string(),
+            right_schema.clone(),
+            2,
+        );
+
+        // Create a join condition
+        let join_condition = Expression::binary_op(
+            Expression::column_ref("left_table.id", TypeId::Integer),
+            BinaryOperator::Eq,
+            Expression::column_ref("right_table.id", TypeId::Integer),
+        );
+
+        // Create a hash join plan
+        let join_plan = LogicalPlan::hash_join(
+            left_schema.clone(),
+            right_schema.clone(),
+            Arc::new(join_condition.clone()),
+            JoinOperator::Inner(JoinConstraint::None),
+            left_plan,
+            right_plan,
+        );
+
+        // Check the plan type
+        match join_plan.plan_type {
+            LogicalPlanType::HashJoin {
+                left_schema: ls,
+                right_schema: rs,
+                predicate,
+                join_type,
+            } => {
+                assert_eq!(left_schema, ls);
+                assert_eq!(right_schema, rs);
+                assert_eq!(*predicate, join_condition);
+                assert!(matches!(join_type, JoinOperator::Inner(_)));
+            }
+            _ => panic!("Expected HashJoin plan type"),
+        }
+    }
+
+    #[test]
+    fn test_sort_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        // Sort by id column
+        let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        
+        let sort_expressions = vec![sort_expr.clone()];
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        
+        let sort_plan = LogicalPlan::sort(
+            sort_expressions.clone(),
+            schema.clone(),
+            scan_plan
+        );
+
+        match sort_plan.plan_type {
+            LogicalPlanType::Sort {
+                sort_expressions: se,
+                schema: s,
+            } => {
+                assert_eq!(sort_expressions, se);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Sort plan"),
+        }
+    }
+
+    #[test]
+    fn test_limit_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        let limit_plan = LogicalPlan::limit(10, schema.clone(), scan_plan);
+
+        match limit_plan.plan_type {
+            LogicalPlanType::Limit {
+                limit,
+                schema: s,
+            } => {
+                assert_eq!(limit, 10);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Limit plan"),
+        }
+    }
+
+    #[test]
+    fn test_top_n_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        // Sort by id column
+        let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, Column::new("id", TypeId::Integer), vec![]
+        )));
+        
+        let sort_expressions = vec![sort_expr.clone()];
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        
+        let top_n_plan = LogicalPlan::top_n(
+            5,
+            sort_expressions.clone(),
+            schema.clone(),
+            scan_plan
+        );
+
+        match top_n_plan.plan_type {
+            LogicalPlanType::TopN {
+                k,
+                sort_expressions: se,
+                schema: s,
+            } => {
+                assert_eq!(k, 5);
+                assert_eq!(sort_expressions, se);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected TopN plan"),
+        }
+    }
+}
