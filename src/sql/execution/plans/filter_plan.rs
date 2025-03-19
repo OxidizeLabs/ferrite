@@ -137,16 +137,17 @@ mod tests {
             right: Arc<Expression>,
             comp_type: ComparisonType,
         ) -> Arc<Expression> {
-            Arc::new(Expression::Comparison(ComparisonExpression::new(left, right, comp_type, vec![])))
+            Arc::new(Expression::Comparison(ComparisonExpression::new(
+                left,
+                right,
+                comp_type,
+                vec![],
+            )))
         }
 
         // Plan node creation helpers
         pub fn create_seq_scan(schema: Schema, table_name: &str) -> PlanNode {
-            PlanNode::SeqScan(SeqScanPlanNode::new(
-                schema,
-                0,
-                table_name.to_string(),
-            ))
+            PlanNode::SeqScan(SeqScanPlanNode::new(schema, 0, table_name.to_string()))
         }
 
         pub fn create_test_filter_node() -> (FilterNode, Arc<Expression>) {
@@ -179,12 +180,14 @@ mod tests {
                 }
                 "id < 100" => {
                     let col_ref = create_column_ref(&schema, 0); // id column
-                    let constant = create_constant_value(100, schema.get_column(0).unwrap().clone());
+                    let constant =
+                        create_constant_value(100, schema.get_column(0).unwrap().clone());
                     create_comparison(col_ref, constant, ComparisonType::LessThan)
                 }
                 "flag = true" => {
                     let col_ref = create_column_ref(&schema, 3); // flag column
-                    let constant = create_constant_value(true, schema.get_column(3).unwrap().clone());
+                    let constant =
+                        create_constant_value(true, schema.get_column(3).unwrap().clone());
                     create_comparison(col_ref, constant, ComparisonType::Equal)
                 }
                 expr => {
@@ -210,9 +213,13 @@ mod tests {
 
                     // Parse value based on column type
                     let value = match column.get_type() {
-                        TypeId::Integer => create_constant_value(value_str.parse::<i32>().unwrap(), column),
+                        TypeId::Integer => {
+                            create_constant_value(value_str.parse::<i32>().unwrap(), column)
+                        }
                         TypeId::VarChar => create_constant_value(value_str.to_string(), column),
-                        TypeId::Boolean => create_constant_value(value_str.parse::<bool>().unwrap(), column),
+                        TypeId::Boolean => {
+                            create_constant_value(value_str.parse::<bool>().unwrap(), column)
+                        }
                         _ => panic!("Unsupported type for column: {}", col_name),
                     };
 

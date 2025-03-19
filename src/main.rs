@@ -161,14 +161,15 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 
                     // Add header row with bold and centered headers
                     table.set_titles(Row::new(
-                        results.column_names
+                        results
+                            .column_names
                             .iter()
                             .map(|name| {
                                 let mut cell = Cell::new(&name.bold().to_string());
                                 cell.align(format::Alignment::CENTER);
                                 cell
                             })
-                            .collect()
+                            .collect(),
                     ));
 
                     // Add data rows with right alignment for numeric values
@@ -182,7 +183,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
                                     }
                                     cell
                                 })
-                                .collect()
+                                .collect(),
                         ));
                     }
 

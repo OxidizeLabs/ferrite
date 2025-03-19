@@ -97,11 +97,10 @@ impl Type for BigIntType {
 
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::BigInt(r) => {
-                r.checked_neg()
-                    .map(Value::new)
-                    .ok_or_else(|| "BigInt overflow in subtraction".to_string())
-            }
+            Val::BigInt(r) => r
+                .checked_neg()
+                .map(Value::new)
+                .ok_or_else(|| "BigInt overflow in subtraction".to_string()),
             Val::Integer(r) => Ok(Value::new(-(*r as i64))),
             Val::SmallInt(r) => Ok(Value::new(-(*r as i64))),
             Val::TinyInt(r) => Ok(Value::new(-(*r as i64))),
@@ -113,8 +112,11 @@ impl Type for BigIntType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::BigInt(_) | Val::Integer(_) | Val::SmallInt(_) |
-            Val::TinyInt(_) | Val::Decimal(_) => Ok(Value::new(0i64)),
+            Val::BigInt(_)
+            | Val::Integer(_)
+            | Val::SmallInt(_)
+            | Val::TinyInt(_)
+            | Val::Decimal(_) => Ok(Value::new(0i64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply BigInt by non-numeric type".to_string()),
         }
@@ -127,8 +129,11 @@ impl Type for BigIntType {
             Val::SmallInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::TinyInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
-            Val::BigInt(_) | Val::Integer(_) | Val::SmallInt(_) |
-            Val::TinyInt(_) | Val::Decimal(_) => Ok(Value::new(0i64)),
+            Val::BigInt(_)
+            | Val::Integer(_)
+            | Val::SmallInt(_)
+            | Val::TinyInt(_)
+            | Val::Decimal(_) => Ok(Value::new(0i64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide BigInt by non-numeric type".to_string()),
         }
@@ -140,8 +145,9 @@ impl Type for BigIntType {
             Val::Integer(r) if *r == 0 => Value::new(Val::Null),
             Val::SmallInt(r) if *r == 0 => Value::new(Val::Null),
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::BigInt(_) | Val::Integer(_) | Val::SmallInt(_) |
-            Val::TinyInt(_) => Value::new(0i64),
+            Val::BigInt(_) | Val::Integer(_) | Val::SmallInt(_) | Val::TinyInt(_) => {
+                Value::new(0i64)
+            }
             _ => Value::new(Val::Null),
         }
     }

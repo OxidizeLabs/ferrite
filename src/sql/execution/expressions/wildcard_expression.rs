@@ -221,7 +221,11 @@ mod tests {
     fn test_wildcard_empty_tuple() {
         let schema = create_test_schema();
         // Create a tuple with NULL values for each column
-        let null_values = vec![Value::new(Val::Null), Value::new(Val::Null), Value::new(Val::Null)];
+        let null_values = vec![
+            Value::new(Val::Null),
+            Value::new(Val::Null),
+            Value::new(Val::Null),
+        ];
         let empty_tuple = create_test_tuple(null_values, &schema);
         let wildcard = WildcardExpression::new(Column::new("*", TypeId::Vector));
 

@@ -13,7 +13,13 @@ pub struct CreateIndexPlanNode {
 }
 
 impl CreateIndexPlanNode {
-    pub fn new(output_schema: Schema, table_name: String, index_name: String, key_attrs: Vec<usize>, if_not_exists: bool) -> Self {
+    pub fn new(
+        output_schema: Schema,
+        table_name: String,
+        index_name: String,
+        key_attrs: Vec<usize>,
+        if_not_exists: bool,
+    ) -> Self {
         Self {
             output_schema,
             table_name,
@@ -57,7 +63,11 @@ impl AbstractPlanNode for CreateIndexPlanNode {
 
 impl Display for CreateIndexPlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "→ CreateIndex: {} on {}", self.index_name, self.table_name)?;
+        write!(
+            f,
+            "→ CreateIndex: {} on {}",
+            self.index_name, self.table_name
+        )?;
 
         if f.alternate() {
             write!(f, "\n   Key Columns: {:?}", self.key_attrs)?;
@@ -139,7 +149,7 @@ mod tests {
     #[test]
     fn test_create_index_if_not_exists() {
         let schema = create_test_schema();
-        
+
         // Test with if_not_exists = true
         let plan_node_with_flag = CreateIndexPlanNode::new(
             schema.clone(),
@@ -178,7 +188,10 @@ mod tests {
         );
 
         // Test basic display
-        assert_eq!(plan_node.to_string(), "→ CreateIndex: emp_id_idx on employees");
+        assert_eq!(
+            plan_node.to_string(),
+            "→ CreateIndex: emp_id_idx on employees"
+        );
 
         // Test detailed display without IF NOT EXISTS
         let detailed = format!("{:#}", plan_node);
@@ -244,10 +257,9 @@ mod tests {
 
         // Verify empty key attributes handling
         assert!(plan_node.get_key_attrs().is_empty());
-        
+
         // Verify display still works
         let detailed = format!("{:#}", plan_node);
         assert!(detailed.contains("Key Columns: []"));
     }
 }
-

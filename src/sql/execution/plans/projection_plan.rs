@@ -152,16 +152,8 @@ mod tests {
     }
 
     fn create_mock_table_scan(ctx: &TestContext, name: &str, schema: Schema) -> PlanNode {
-        let table_heap = Arc::new(TableHeap::new(
-            ctx.bpm.clone(),
-            0,
-        ));
-        let table_info = TableInfo::new(
-            schema.clone(),
-            name.to_string(),
-            table_heap,
-            1,
-        );
+        let table_heap = Arc::new(TableHeap::new(ctx.bpm.clone(), 0));
+        let table_info = TableInfo::new(schema.clone(), name.to_string(), table_heap, 1);
         PlanNode::TableScan(TableScanNode::new(table_info, Arc::from(schema), None))
     }
 
@@ -229,8 +221,8 @@ mod tests {
         ];
 
         let child_node = vec![create_mock_table_scan(&ctx, "test_table", input_schema)];
-        let projection = ProjectionNode::new(output_schema, expressions, vec![0, 1])
-            .with_children(child_node);
+        let projection =
+            ProjectionNode::new(output_schema, expressions, vec![0, 1]).with_children(child_node);
 
         let exprs = projection.get_expressions();
         assert_eq!(exprs.len(), 2);

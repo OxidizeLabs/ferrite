@@ -52,7 +52,10 @@ impl FilterExecutor {
                     *b
                 }
                 _ => {
-                    error!("Predicate evaluation returned non-boolean value: {:?}", value);
+                    error!(
+                        "Predicate evaluation returned non-boolean value: {:?}",
+                        value
+                    );
                     false
                 }
             },
@@ -146,13 +149,13 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use tempfile::TempDir;
-    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -386,7 +389,8 @@ mod tests {
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(transaction_context.get_transaction_id());
-            txn_table_heap.insert_tuple(&meta, &mut tuple, transaction_context.clone())
+            txn_table_heap
+                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
     }
@@ -518,7 +522,11 @@ mod tests {
         results.sort();
 
         // Verify results
-        assert_eq!(results, vec![32, 35], "Should find exactly two matches > 30");
+        assert_eq!(
+            results,
+            vec![32, 35],
+            "Should find exactly two matches > 30"
+        );
 
         // Verify cleanup
         drop(executor);
@@ -625,7 +633,10 @@ mod tests {
         // Sort and verify results
         results.sort();
         let expected_ages = vec![28, 30, 32, 35];
-        assert_eq!(results, expected_ages, "Filtered results don't match expected ages");
+        assert_eq!(
+            results, expected_ages,
+            "Filtered results don't match expected ages"
+        );
 
         // Verify cleanup
         drop(executor);
@@ -639,7 +650,8 @@ mod tests {
 
         // Create a filter with an empty schema to simulate invalid predicate
         let empty_schema = Schema::new(vec![]);
-        let invalid_filter_plan = create_invalid_age_filter(25, ComparisonType::Equal, &empty_schema);
+        let invalid_filter_plan =
+            create_invalid_age_filter(25, ComparisonType::Equal, &empty_schema);
 
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
@@ -649,7 +661,8 @@ mod tests {
             schema.clone(),
         ));
 
-        let mut executor = FilterExecutor::new(child_executor, executor_context, invalid_filter_plan);
+        let mut executor =
+            FilterExecutor::new(child_executor, executor_context, invalid_filter_plan);
 
         // Should initialize but return no results due to invalid predicate
         executor.init();

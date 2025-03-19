@@ -181,7 +181,6 @@ impl DiskScheduler {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,7 +214,8 @@ mod tests {
 
             // Create disk manager with mock disk IO
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             Self {
                 disk_manager,
                 disk_scheduler,
@@ -307,9 +307,7 @@ mod tests {
             let disk_scheduler = ctx.disk_scheduler.clone();
 
             let mut mock_disk_io = MockDiskIO::new();
-            mock_disk_io
-                .expect_write_page()
-                .returning(|_, _| Ok(()));
+            mock_disk_io.expect_write_page().returning(|_, _| Ok(()));
             ctx.set_mock_disk_io(mock_disk_io);
 
             let data = Arc::new(RwLock::new([0u8; DB_PAGE_SIZE as usize]));
@@ -483,5 +481,3 @@ mod tests {
         }
     }
 }
-
-

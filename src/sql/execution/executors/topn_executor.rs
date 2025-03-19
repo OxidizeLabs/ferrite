@@ -2,18 +2,18 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::storage::table::tuple::Tuple;
-use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::types_db::types::{CmpBool, Type};
+use crate::types_db::value::Value;
 use log::{debug, trace};
 use parking_lot::RwLock;
+use std::cmp::Ordering;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
-use std::cmp::Ordering;
-use crate::types_db::value::Value;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
@@ -25,9 +25,12 @@ struct TupleWithKeys {
 
 impl PartialEq for TupleWithKeys {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_keys.len() == other.sort_keys.len() && 
-        self.sort_keys.iter().zip(other.sort_keys.iter())
-            .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
+        self.sort_keys.len() == other.sort_keys.len()
+            && self
+                .sort_keys
+                .iter()
+                .zip(other.sort_keys.iter())
+                .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
     }
 }
 
@@ -46,11 +49,11 @@ impl Ord for TupleWithKeys {
                 CmpBool::CmpFalse => {
                     match a.compare_greater_than(b) {
                         CmpBool::CmpTrue => return Ordering::Greater,
-                        CmpBool::CmpFalse => continue,  // Equal, check next key
-                        CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                        CmpBool::CmpFalse => continue, // Equal, check next key
+                        CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
                 }
-                CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
         Ordering::Equal
@@ -71,9 +74,13 @@ pub struct TopNExecutor {
 impl TopNExecutor {
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<TopNNode>) -> Self {
         debug!("Creating TopNExecutor");
-        
-        let child_plan = plan.get_children().first().expect("TopN should have a child");
-        let child = child_plan.create_executor(Arc::clone(&context))
+
+        let child_plan = plan
+            .get_children()
+            .first()
+            .expect("TopN should have a child");
+        let child = child_plan
+            .create_executor(Arc::clone(&context))
             .expect("Failed to create child executor");
 
         Self {
@@ -89,7 +96,8 @@ impl TopNExecutor {
     /// Evaluates the sort keys for a tuple based on the order by expressions
     fn evaluate_sort_keys(&self, tuple: &Tuple) -> Vec<Value> {
         let schema = self.plan.get_output_schema();
-        let keys = self.plan
+        let keys = self
+            .plan
             .get_sort_order_by()
             .iter()
             .map(|expr| expr.evaluate(tuple, schema).unwrap())
@@ -107,24 +115,24 @@ impl AbstractExecutor for TopNExecutor {
 
         debug!("Initializing TopNExecutor");
         self.child.init();
-        
+
         let k = self.plan.get_k();
         debug!("TopN k value: {}", k);
-        
+
         // Use min-heap to maintain top K elements
         let mut heap = BinaryHeap::new();
-        
+
         // Process tuples one at a time
         while let Some((tuple, rid)) = self.child.next() {
             let sort_keys = self.evaluate_sort_keys(&tuple);
             debug!("Processing tuple with sort keys: {:?}", sort_keys);
-            
+
             let tuple_with_keys = TupleWithKeys {
                 sort_keys,
                 tuple,
                 rid,
             };
-            
+
             if heap.len() < k {
                 // Heap not full yet, add element
                 debug!("Heap not full (size {}), adding tuple", heap.len());
@@ -145,7 +153,10 @@ impl AbstractExecutor for TopNExecutor {
         // Reverse to get descending order
         self.sorted_tuples.reverse();
 
-        debug!("TopNExecutor initialization complete. Number of tuples: {}", self.sorted_tuples.len());
+        debug!(
+            "TopNExecutor initialization complete. Number of tuples: {}",
+            self.sorted_tuples.len()
+        );
         self.initialized = true;
     }
 
@@ -157,7 +168,11 @@ impl AbstractExecutor for TopNExecutor {
         if self.current_index < self.sorted_tuples.len() {
             let result = &self.sorted_tuples[self.current_index];
             self.current_index += 1;
-            debug!("Returning tuple {} with sort keys: {:?}", self.current_index - 1, result.sort_keys);
+            debug!(
+                "Returning tuple {} with sort keys: {:?}",
+                self.current_index - 1,
+                result.sort_keys
+            );
             Some((result.tuple.clone(), result.rid))
         } else {
             debug!("No more tuples to return");
@@ -180,23 +195,23 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use tempfile::TempDir;
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use std::collections::HashMap;
-    use crate::catalog::catalog::Catalog;
-    use crate::sql::execution::expressions::abstract_expression::Expression;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -265,11 +280,31 @@ mod tests {
 
         // Create test tuples
         let test_tuples = vec![
-            Tuple::new(&[Value::new(1), Value::new(10)], schema.clone(), RID::new(0, 0)),
-            Tuple::new(&[Value::new(2), Value::new(20)], schema.clone(), RID::new(0, 1)),
-            Tuple::new(&[Value::new(3), Value::new(30)], schema.clone(), RID::new(0, 2)),
-            Tuple::new(&[Value::new(4), Value::new(40)], schema.clone(), RID::new(0, 3)),
-            Tuple::new(&[Value::new(5), Value::new(50)], schema.clone(), RID::new(0, 4)),
+            Tuple::new(
+                &[Value::new(1), Value::new(10)],
+                schema.clone(),
+                RID::new(0, 0),
+            ),
+            Tuple::new(
+                &[Value::new(2), Value::new(20)],
+                schema.clone(),
+                RID::new(0, 1),
+            ),
+            Tuple::new(
+                &[Value::new(3), Value::new(30)],
+                schema.clone(),
+                RID::new(0, 2),
+            ),
+            Tuple::new(
+                &[Value::new(4), Value::new(40)],
+                schema.clone(),
+                RID::new(0, 3),
+            ),
+            Tuple::new(
+                &[Value::new(5), Value::new(50)],
+                schema.clone(),
+                RID::new(0, 4),
+            ),
         ];
 
         // Create catalog
@@ -292,7 +327,8 @@ mod tests {
         )));
 
         // Create mock scan plan - modify this section
-        let test_data: Vec<(Vec<Value>, RID)> = test_tuples.into_iter()
+        let test_data: Vec<(Vec<Value>, RID)> = test_tuples
+            .into_iter()
             .map(|tuple| (tuple.get_values().to_vec(), tuple.get_rid()))
             .collect();
 
@@ -300,17 +336,17 @@ mod tests {
             MockScanNode::new(
                 schema.clone(),
                 "test_table".to_string(),
-                vec![],  // no children for mock scan
+                vec![], // no children for mock scan
             )
-            .with_tuples(test_data)
+            .with_tuples(test_data),
         );
-        
+
         // Create order by expression (sort by value column)
-        let order_by= Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,  // tuple index
-            1,  // value column index
-            Column::new("value", TypeId::Integer),  // return type
-            vec![],  // children
+        let order_by = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,                                     // tuple index
+            1,                                     // value column index
+            Column::new("value", TypeId::Integer), // return type
+            vec![],                                // children
         )));
 
         // Create TopN plan

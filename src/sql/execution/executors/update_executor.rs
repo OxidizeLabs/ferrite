@@ -55,7 +55,7 @@ impl UpdateExecutor {
                 plan.get_table_name(),
                 table_info.get_table_schema()
             );
-            
+
             // Create TransactionalTableHeap
             Arc::new(TransactionalTableHeap::new(
                 table_info.get_table_heap(),
@@ -105,7 +105,9 @@ impl AbstractExecutor for UpdateExecutor {
                         let catalog_guard = catalog.read();
                         catalog_guard
                             .get_table(self.plan.get_table_name())
-                            .unwrap_or_else(|| panic!("Table {} not found", self.plan.get_table_name()))
+                            .unwrap_or_else(|| {
+                                panic!("Table {} not found", self.plan.get_table_name())
+                            })
                             .clone()
                     };
 
@@ -172,7 +174,8 @@ impl AbstractExecutor for UpdateExecutor {
                 };
 
                 let value_expr = &target_expressions[i * 2 + 1];
-                let new_value = value_expr.evaluate(&tuple, output_schema)
+                let new_value = value_expr
+                    .evaluate(&tuple, output_schema)
                     .expect("Failed to evaluate expression");
 
                 let values = tuple.get_values_mut();
@@ -183,7 +186,10 @@ impl AbstractExecutor for UpdateExecutor {
             let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
 
             // Update the tuple using TransactionalTableHeap
-            match self.table_heap.update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx) {
+            match self
+                .table_heap
+                .update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx)
+            {
                 Ok(new_rid) => {
                     debug!("Successfully updated tuple: {:?}", new_rid);
                     // Add the RID to our set of updated tuples
@@ -426,7 +432,7 @@ mod tests {
                 Arc::new(TransactionalTableHeap::new(
                     table_info.get_table_heap(),
                     table_info.get_table_oidt(),
-                ))
+                )),
             )
         };
 
@@ -437,7 +443,10 @@ mod tests {
         let filter_plan = create_age_filter(30, ComparisonType::GreaterThan, &schema);
 
         // Create update expression to increment age by 1
-        let age_col = schema.get_column(schema.get_column_index("age").unwrap()).unwrap().clone();
+        let age_col = schema
+            .get_column(schema.get_column_index("age").unwrap())
+            .unwrap()
+            .clone();
         let col_idx = schema.get_column_index("age").unwrap();
 
         // Create the column reference for the target column (this identifies which column to update)

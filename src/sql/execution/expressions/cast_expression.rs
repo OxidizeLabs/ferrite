@@ -42,19 +42,21 @@ impl CastExpression {
     }
 
     fn apply_format(&self, value: Value) -> Result<Value, ExpressionError> {
-        if let Some(format_str) = &self.format {
+        if let Some(_format_str) = &self.format {
             match (value.get_type_id(), self.target_type) {
                 (TypeId::Timestamp, TypeId::VarChar) => {
                     if let Val::Timestamp(ts) = value.get_val() {
                         Ok(Value::new(format!("{}", ts)))
                     } else {
-                        Err(ExpressionError::CastError("Invalid timestamp value".to_string()))
+                        Err(ExpressionError::CastError(
+                            "Invalid timestamp value".to_string(),
+                        ))
                     }
                 }
                 (TypeId::Integer | TypeId::Decimal | TypeId::BigInt, TypeId::VarChar) => {
                     Ok(Value::new(value.to_string()))
                 }
-                _ => Ok(value)
+                _ => Ok(value),
             }
         } else {
             Ok(value)
@@ -75,18 +77,28 @@ impl ExpressionOps for CastExpression {
             // Decimal to Integer casting
             (TypeId::Decimal, TypeId::Integer) => {
                 if let Val::Decimal(d) = value.get_val() {
-                    Ok(Value::new_with_type(Val::Integer(d.round() as i32), TypeId::Integer))
+                    Ok(Value::new_with_type(
+                        Val::Integer(d.round() as i32),
+                        TypeId::Integer,
+                    ))
                 } else {
-                    Err(ExpressionError::CastError("Invalid value for decimal to integer cast".to_string()))
+                    Err(ExpressionError::CastError(
+                        "Invalid value for decimal to integer cast".to_string(),
+                    ))
                 }
             }
 
             // Integer to Decimal casting
             (TypeId::Integer, TypeId::Decimal) => {
                 if let Val::Integer(i) = value.get_val() {
-                    Ok(Value::new_with_type(Val::Decimal(*i as f64), TypeId::Decimal))
+                    Ok(Value::new_with_type(
+                        Val::Decimal(*i as f64),
+                        TypeId::Decimal,
+                    ))
                 } else {
-                    Err(ExpressionError::CastError("Invalid value for integer to decimal cast".to_string()))
+                    Err(ExpressionError::CastError(
+                        "Invalid value for integer to decimal cast".to_string(),
+                    ))
                 }
             }
 
@@ -95,7 +107,9 @@ impl ExpressionOps for CastExpression {
                 if let Val::Integer(i) = value.get_val() {
                     Ok(Value::new_with_type(Val::BigInt(*i as i64), TypeId::BigInt))
                 } else {
-                    Err(ExpressionError::CastError("Invalid value for integer to bigint cast".to_string()))
+                    Err(ExpressionError::CastError(
+                        "Invalid value for integer to bigint cast".to_string(),
+                    ))
                 }
             }
 
@@ -104,16 +118,23 @@ impl ExpressionOps for CastExpression {
                 if let Val::VarLen(s) = value.get_val() {
                     Ok(Value::new_with_type(Val::ConstLen(s.clone()), TypeId::Char))
                 } else {
-                    Err(ExpressionError::CastError("Invalid value for varchar to char cast".to_string()))
+                    Err(ExpressionError::CastError(
+                        "Invalid value for varchar to char cast".to_string(),
+                    ))
                 }
             }
 
             // Char to VarChar casting
             (TypeId::Char, TypeId::VarChar) => {
                 if let Val::ConstLen(s) = value.get_val() {
-                    Ok(Value::new_with_type(Val::VarLen(s.clone()), TypeId::VarChar))
+                    Ok(Value::new_with_type(
+                        Val::VarLen(s.clone()),
+                        TypeId::VarChar,
+                    ))
                 } else {
-                    Err(ExpressionError::CastError("Invalid value for char to varchar cast".to_string()))
+                    Err(ExpressionError::CastError(
+                        "Invalid value for char to varchar cast".to_string(),
+                    ))
                 }
             }
 
@@ -137,8 +158,11 @@ impl ExpressionOps for CastExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let value = self.expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        value.cast_to(self.target_type)
+        let value = self
+            .expr
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        value
+            .cast_to(self.target_type)
             .map_err(|e| ExpressionError::CastError(e.to_string()))
     }
 
@@ -239,9 +263,9 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &vec![
-                Value::new(42),                // Integer
-                Value::new(3.14),              // Decimal
-                Value::new("test"),            // VarChar
+                Value::new(42),                     // Integer
+                Value::new(3.14),                   // Decimal
+                Value::new("test"),                 // VarChar
                 Value::new(9223372036854775807i64), // BigInt (i64::MAX)
             ],
             schema.clone(),
@@ -254,7 +278,8 @@ mod tests {
     fn test_cast_integer_to_decimal() {
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             Column::new("int_col", TypeId::Integer),
             vec![],
         )));
@@ -274,7 +299,8 @@ mod tests {
         initialize_logger();
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1,  // Fixed: Using tuple_index 0 and column_index 1 to get the decimal value (3.14)
+            0,
+            1, // Fixed: Using tuple_index 0 and column_index 1 to get the decimal value (3.14)
             Column::new("decimal_col", TypeId::Decimal),
             vec![],
         )));
@@ -293,7 +319,8 @@ mod tests {
     fn test_cast_integer_to_bigint() {
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             Column::new("int_col", TypeId::Integer),
             vec![],
         )));
@@ -313,7 +340,8 @@ mod tests {
         initialize_logger();
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2,  // Fixed: Using tuple_index 0 and column_index 2 to get the varchar value "test"
+            0,
+            2, // Fixed: Using tuple_index 0 and column_index 2 to get the varchar value "test"
             Column::new("varchar_col", TypeId::VarChar),
             vec![],
         )));
@@ -332,7 +360,8 @@ mod tests {
     fn test_invalid_cast() {
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2,  // Fixed: Using tuple_index 0 and column_index 2 to get the varchar value
+            0,
+            2, // Fixed: Using tuple_index 0 and column_index 2 to get the varchar value
             Column::new("varchar_col", TypeId::VarChar),
             vec![],
         )));
@@ -342,7 +371,7 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(ExpressionError::InvalidCast { .. }) => (),  // Fixed: expecting InvalidCast error
+            Err(ExpressionError::InvalidCast { .. }) => (), // Fixed: expecting InvalidCast error
             _ => panic!("Expected InvalidCast error"),
         }
     }
@@ -351,7 +380,8 @@ mod tests {
     fn test_cast_same_type() {
         let (tuple, schema) = create_test_tuple();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             Column::new("int_col", TypeId::Integer),
             vec![],
         )));
@@ -373,13 +403,14 @@ mod tests {
             &vec![Value::new(Val::Null)],
             Schema::new(vec![
                 // Use Integer type for the column, even though we'll store NULL in it
-                Column::new("null_col", TypeId::Integer)
+                Column::new("null_col", TypeId::Integer),
             ]),
             RID::new(0, 0),
         );
 
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             // Use Integer type for the column definition
             Column::new("null_col", TypeId::Integer),
             vec![],
@@ -395,7 +426,8 @@ mod tests {
     #[test]
     fn test_cast_expression_display() {
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             Column::new("int_col", TypeId::Integer),
             vec![],
         )));
@@ -414,7 +446,8 @@ mod tests {
         let schema = create_test_schema();
 
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0,
+            0,
+            0,
             Column::new("int_col", TypeId::Integer),
             vec![],
         )));
@@ -430,4 +463,4 @@ mod tests {
             Err(ExpressionError::InvalidCast { .. })
         ));
     }
-} 
+}

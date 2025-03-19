@@ -78,7 +78,7 @@ impl Schema {
         if let Some(idx) = self.get_column_index(column_name) {
             return Some(idx);
         }
-        
+
         // If the column name contains a dot (table.column format)
         if column_name.contains('.') {
             // Split the qualified name into parts
@@ -86,15 +86,18 @@ impl Schema {
             if parts.len() == 2 {
                 let table_alias = parts[0];
                 let col_name = parts[1];
-                
+
                 // Try to find a column with this qualified name pattern
                 for (index, column) in self.columns.iter().enumerate() {
                     let col_name_parts: Vec<&str> = column.get_name().split('.').collect();
-                    if col_name_parts.len() == 2 && col_name_parts[0] == table_alias && col_name_parts[1] == col_name {
+                    if col_name_parts.len() == 2
+                        && col_name_parts[0] == table_alias
+                        && col_name_parts[1] == col_name
+                    {
                         return Some(index);
                     }
                 }
-                
+
                 // If not found with qualification, try to find the unqualified column name
                 // This helps when the schema has unqualified names but we're using qualified references
                 for (index, column) in self.columns.iter().enumerate() {
@@ -112,7 +115,7 @@ impl Schema {
                 }
             }
         }
-        
+
         None
     }
 
@@ -142,9 +145,14 @@ impl Schema {
         Schema::new(merged_columns)
     }
 
-    pub fn merge_with_aliases(left: &Schema, right: &Schema, left_alias: Option<&str>, right_alias: Option<&str>) -> Schema {
+    pub fn merge_with_aliases(
+        left: &Schema,
+        right: &Schema,
+        left_alias: Option<&str>,
+        right_alias: Option<&str>,
+    ) -> Schema {
         let mut merged_columns = Vec::new();
-        
+
         // Add left columns with alias if provided
         for col in left.get_columns() {
             if let Some(alias) = left_alias {
@@ -168,7 +176,7 @@ impl Schema {
                 merged_columns.push(col.clone());
             }
         }
-        
+
         // Add right columns with alias if provided
         for col in right.get_columns() {
             if let Some(alias) = right_alias {
@@ -192,7 +200,7 @@ impl Schema {
                 merged_columns.push(col.clone());
             }
         }
-        
+
         Schema::new(merged_columns)
     }
 }
@@ -226,11 +234,8 @@ impl Display for Schema {
             )
         } else {
             // Basic format
-            let column_strings: Vec<String> = self
-                .columns
-                .iter()
-                .map(|col| format!("{}", col))
-                .collect();
+            let column_strings: Vec<String> =
+                self.columns.iter().map(|col| format!("{}", col)).collect();
 
             write!(f, "Schema ({})", column_strings.join(", "))
         }

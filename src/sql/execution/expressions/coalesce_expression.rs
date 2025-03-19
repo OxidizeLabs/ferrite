@@ -216,24 +216,18 @@ mod tests {
     #[test]
     fn test_coalesce_validation_empty() {
         let schema = Schema::new(vec![]);
-        
+
         // Test case: COALESCE()
-        let expr = CoalesceExpression::new(
-            vec![],
-            Column::new("result", TypeId::Integer),
-        );
+        let expr = CoalesceExpression::new(vec![], Column::new("result", TypeId::Integer));
 
         let result = expr.validate(&schema);
-        assert!(matches!(
-            result,
-            Err(ExpressionError::InvalidOperation(_))
-        ));
+        assert!(matches!(result, Err(ExpressionError::InvalidOperation(_))));
     }
 
     #[test]
     fn test_coalesce_validation_incompatible_types() {
         let schema = Schema::new(vec![]);
-        
+
         // Test case: COALESCE(1, 'text') - mixing integer and varchar
         let expr = CoalesceExpression::new(
             vec![
@@ -244,10 +238,7 @@ mod tests {
         );
 
         let result = expr.validate(&schema);
-        assert!(matches!(
-            result,
-            Err(ExpressionError::TypeMismatch { .. })
-        ));
+        assert!(matches!(result, Err(ExpressionError::TypeMismatch { .. })));
     }
 
     #[test]
@@ -294,8 +285,16 @@ mod tests {
     fn test_coalesce_evaluate_join() {
         let left_schema = Schema::new(vec![]);
         let right_schema = Schema::new(vec![]);
-        let left_tuple = Tuple::new(&*vec![], left_schema.clone(), crate::common::rid::RID::new(0, 0));
-        let right_tuple = Tuple::new(&*vec![], right_schema.clone(), crate::common::rid::RID::new(0, 0));
+        let left_tuple = Tuple::new(
+            &*vec![],
+            left_schema.clone(),
+            crate::common::rid::RID::new(0, 0),
+        );
+        let right_tuple = Tuple::new(
+            &*vec![],
+            right_schema.clone(),
+            crate::common::rid::RID::new(0, 0),
+        );
 
         let expr = CoalesceExpression::new(
             vec![
@@ -306,7 +305,9 @@ mod tests {
             Column::new("result", TypeId::Integer),
         );
 
-        let result = expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+        let result = expr
+            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+            .unwrap();
         assert_eq!(result, Value::new(1));
     }
 }

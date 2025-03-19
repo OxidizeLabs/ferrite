@@ -1,17 +1,17 @@
+use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
-use std::sync::Arc;
+use crate::common::config::INVALID_PAGE_ID;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
+use crate::concurrency::transaction::UndoLog;
 use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::common::config::TableOidT;
-use crate::concurrency::transaction::UndoLog;
-use log;
-use crate::common::config::{INVALID_PAGE_ID};
 use crate::storage::table::table_iterator::TableIterator;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
+use log;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct TransactionalTableHeap {
@@ -35,8 +35,14 @@ impl TransactionalTableHeap {
         self.table_heap.clone()
     }
 
-    pub fn rollback_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple, rid: RID) -> Result<(), String> {
-        self.table_heap.update_tuple(meta, tuple, rid, None)
+    pub fn rollback_tuple(
+        &self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+        rid: RID,
+    ) -> Result<(), String> {
+        self.table_heap
+            .update_tuple(meta, tuple, rid, None)
             .map(|_| ())
     }
 
@@ -47,7 +53,7 @@ impl TransactionalTableHeap {
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<RID, String> {
         let txn = txn_ctx.get_transaction();
-        
+
         // Transaction checks
         if txn.get_state() != TransactionState::Running {
             return Err("Transaction not in running state".to_string());
@@ -55,7 +61,8 @@ impl TransactionalTableHeap {
 
         // Lock acquisition
         let lock_manager = txn_ctx.get_lock_manager();
-        lock_manager.lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
+        lock_manager
+            .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
         // Perform insert using internal method
@@ -88,7 +95,7 @@ impl TransactionalTableHeap {
                     Err("Tuple not visible".to_string())
                 }
             }
-            _ => self.get_visible_version(rid, txn, txn_manager, meta, tuple)
+            _ => self.get_visible_version(rid, txn, txn_manager, meta, tuple),
         }
     }
 
@@ -100,7 +107,7 @@ impl TransactionalTableHeap {
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<RID, String> {
         let txn = txn_ctx.get_transaction();
-        
+
         // Transaction checks
         if txn.get_state() != TransactionState::Running {
             return Err("Transaction not in running state".to_string());
@@ -110,8 +117,9 @@ impl TransactionalTableHeap {
         let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
 
         // Visibility checks
-        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id() && 
-           !current_meta.is_committed() {
+        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id()
+            && !current_meta.is_committed()
+        {
             return Err("Cannot update uncommitted tuple from another transaction".to_string());
         }
 
@@ -171,7 +179,9 @@ impl TransactionalTableHeap {
         );
 
         // Perform update
-        let result = self.table_heap.update_tuple_internal(&new_meta, tuple, rid)?;
+        let result = self
+            .table_heap
+            .update_tuple_internal(&new_meta, tuple, rid)?;
         txn.append_write_set(self.table_oid, rid);
 
         Ok(result)
@@ -196,12 +206,12 @@ impl TransactionalTableHeap {
             log::debug!("Latest version is visible, returning it");
             return Ok((meta, tuple));
         }
-        
+
         // If latest version isn't visible, check version chain
         let mut current_meta = meta;
         let mut current_tuple = tuple;
         let mut current_link = txn_manager.get_undo_link(rid);
-        
+
         log::debug!(
             "Latest version not visible, starting chain traversal. Initial undo link: {:?}",
             current_link
@@ -265,11 +275,11 @@ impl TransactionalTableHeap {
 
     pub fn make_iterator(&self, txn_ctx: Option<Arc<TransactionContext>>) -> TableIterator {
         let first_page_id = self.table_heap.get_first_page_id();
-        
+
         TableIterator::new(
             Arc::new(self.clone()),
             RID::new(first_page_id, 0),
-            RID::new(INVALID_PAGE_ID, 0), 
+            RID::new(INVALID_PAGE_ID, 0),
             txn_ctx,
         )
     }
@@ -284,13 +294,9 @@ impl TransactionalTableHeap {
     }
 
     /// Deletes a tuple at the given RID by marking it as deleted
-    pub fn delete_tuple(
-        &self,
-        rid: RID,
-        txn_ctx: Arc<TransactionContext>,
-    ) -> Result<(), String> {
+    pub fn delete_tuple(&self, rid: RID, txn_ctx: Arc<TransactionContext>) -> Result<(), String> {
         let txn = txn_ctx.get_transaction();
-        
+
         // Transaction checks
         if txn.get_state() != TransactionState::Running {
             return Err("Transaction not in running state".to_string());
@@ -305,8 +311,9 @@ impl TransactionalTableHeap {
         let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
 
         // Visibility checks
-        if current_meta.get_creator_txn_id() != txn.get_transaction_id() && 
-           !current_meta.is_committed() {
+        if current_meta.get_creator_txn_id() != txn.get_transaction_id()
+            && !current_meta.is_committed()
+        {
             return Err("Cannot delete uncommitted tuple from another transaction".to_string());
         }
 
@@ -343,7 +350,7 @@ impl TransactionalTableHeap {
 
         // Create new meta with current transaction as creator
         let mut new_meta = TupleMeta::new(txn.get_transaction_id());
-        new_meta.set_deleted(true);  // Mark as deleted
+        new_meta.set_deleted(true); // Mark as deleted
         new_meta.set_commit_timestamp(Timestamp::MAX);
         new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
 
@@ -355,7 +362,8 @@ impl TransactionalTableHeap {
         );
 
         // Update the tuple with deleted metadata
-        self.table_heap.update_tuple(&new_meta, &mut current_tuple.clone(), rid, None)?;
+        self.table_heap
+            .update_tuple(&new_meta, &mut current_tuple.clone(), rid, None)?;
         txn.append_write_set(self.table_oid, rid);
 
         Ok(())
@@ -367,15 +375,15 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
 
     struct TestContext {
         txn_heap: Arc<TransactionalTableHeap>,
@@ -387,8 +395,18 @@ mod tests {
         fn new(name: &str) -> Self {
             // Set up storage components
             let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join(format!("{name}.db")).to_str().unwrap().to_string();
-            let log_path = temp_dir.path().join(format!("{name}.log")).to_str().unwrap().to_string();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
@@ -407,10 +425,7 @@ mod tests {
             let table_heap = Arc::new(TableHeap::new(bpm.clone(), 1));
 
             // Create transactional table heap
-            let txn_heap = Arc::new(TransactionalTableHeap::new(
-                table_heap.clone(),
-                1,
-            ));
+            let txn_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), 1));
 
             Self {
                 txn_heap,
@@ -419,11 +434,14 @@ mod tests {
             }
         }
 
-        fn create_transaction_context(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
+        fn create_transaction_context(
+            &self,
+            isolation_level: IsolationLevel,
+        ) -> Arc<TransactionContext> {
             let txn = self.txn_manager.begin(isolation_level).unwrap();
             Arc::new(TransactionContext::new(
                 txn,
-                Arc::new(LockManager::new()),  // Use mock lock manager
+                Arc::new(LockManager::new()), // Use mock lock manager
                 self.txn_manager.clone(),
             ))
         }
@@ -452,11 +470,14 @@ mod tests {
         let (mut meta, mut tuple) = create_test_tuple();
         meta = TupleMeta::new(txn1.get_transaction_id());
 
-        let rid = ctx.txn_heap.insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
+        let rid = ctx
+            .txn_heap
+            .insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Commit first transaction
-        ctx.txn_manager.commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm());
+        ctx.txn_manager
+            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm());
 
         // Create second transaction
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
@@ -465,24 +486,31 @@ mod tests {
         let mut new_tuple = tuple.clone();
         new_tuple.get_values_mut()[1] = Value::new(200);
 
-        ctx.txn_heap.update_tuple(&meta, &mut new_tuple, rid, txn_ctx2.clone())
+        ctx.txn_heap
+            .update_tuple(&meta, &mut new_tuple, rid, txn_ctx2.clone())
             .expect("Update failed");
 
         // Create third transaction to verify version chain
         let txn_ctx3 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
-        let (old_meta, old_tuple) = ctx.txn_heap.get_tuple(rid, txn_ctx3)
+        let (old_meta, old_tuple) = ctx
+            .txn_heap
+            .get_tuple(rid, txn_ctx3)
             .expect("Failed to get old version");
 
-        assert_eq!(old_meta.get_creator_txn_id(), txn1.get_transaction_id(),
-                   "Creator transaction ID mismatch - expected {}, got {}",
-                   txn1.get_transaction_id(), old_meta.get_creator_txn_id());
+        assert_eq!(
+            old_meta.get_creator_txn_id(),
+            txn1.get_transaction_id(),
+            "Creator transaction ID mismatch - expected {}, got {}",
+            txn1.get_transaction_id(),
+            old_meta.get_creator_txn_id()
+        );
         assert_eq!(old_tuple.get_values()[1], Value::new(100));
     }
 
     #[test]
     fn test_isolation_levels() {
         let ctx = TestContext::new("test_isolation_levels");
-        
+
         // Create READ_UNCOMMITTED transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
         let txn1 = txn_ctx1.get_transaction();
@@ -490,17 +518,23 @@ mod tests {
         // Insert tuple
         let (mut meta, mut tuple) = create_test_tuple();
         meta = TupleMeta::new(txn1.get_transaction_id());
-        
-        let rid = ctx.txn_heap.insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
+
+        let rid = ctx
+            .txn_heap
+            .insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Verify visibility based on isolation level
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
-        assert!(ctx.txn_heap.get_tuple(rid, txn_ctx2).is_err(),
-                "READ_COMMITTED should not see uncommitted tuple");
+        assert!(
+            ctx.txn_heap.get_tuple(rid, txn_ctx2).is_err(),
+            "READ_COMMITTED should not see uncommitted tuple"
+        );
 
         let txn_ctx3 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
-        assert!(ctx.txn_heap.get_tuple(rid, txn_ctx3).is_ok(),
-                "READ_UNCOMMITTED should see uncommitted tuple");
+        assert!(
+            ctx.txn_heap.get_tuple(rid, txn_ctx3).is_ok(),
+            "READ_UNCOMMITTED should see uncommitted tuple"
+        );
     }
 }

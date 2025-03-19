@@ -134,22 +134,15 @@ impl ExpressionOps for CaseExpression {
     ) -> Result<Value, ExpressionError> {
         // Similar to evaluate but with join context
         let base_value = match &self.base_expr {
-            Some(expr) => Some(expr.evaluate_join(
-                left_tuple,
-                left_schema,
-                right_tuple,
-                right_schema,
-            )?),
+            Some(expr) => {
+                Some(expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?)
+            }
             None => None,
         };
 
         for (i, when_expr) in self.when_exprs.iter().enumerate() {
-            let when_value = when_expr.evaluate_join(
-                left_tuple,
-                left_schema,
-                right_tuple,
-                right_schema,
-            )?;
+            let when_value =
+                when_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
             let matches = match &base_value {
                 Some(base) => base == &when_value,
                 None => match when_value.get_val() {
@@ -309,12 +302,8 @@ mod tests {
             vec![],
         )));
 
-        let case = CaseExpression::new(
-            None,
-            vec![when_expr],
-            vec![then_expr],
-            Some(else_expr),
-        ).unwrap();
+        let case =
+            CaseExpression::new(None, vec![when_expr], vec![then_expr], Some(else_expr)).unwrap();
 
         let schema = Schema::new(vec![]);
         let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
@@ -341,12 +330,8 @@ mod tests {
             vec![],
         )));
 
-        let case = CaseExpression::new(
-            Some(base_expr),
-            vec![when_expr],
-            vec![then_expr],
-            None,
-        ).unwrap();
+        let case =
+            CaseExpression::new(Some(base_expr), vec![when_expr], vec![then_expr], None).unwrap();
 
         let schema = Schema::new(vec![]);
         let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
@@ -368,12 +353,7 @@ mod tests {
             vec![],
         )));
 
-        let case = CaseExpression::new(
-            None,
-            vec![when_expr],
-            vec![then_expr],
-            None,
-        ).unwrap();
+        let case = CaseExpression::new(None, vec![when_expr], vec![then_expr], None).unwrap();
 
         let schema = Schema::new(vec![]);
         let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
@@ -381,4 +361,4 @@ mod tests {
         let result = case.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_val(), &Val::Null);
     }
-} 
+}

@@ -6,12 +6,12 @@ use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use crate::storage::table::tuple::TupleMeta;
+use log;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use log;
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -192,7 +192,7 @@ impl Transaction {
         let mut logs = self.undo_logs.lock().unwrap();
         let idx = logs.len();
         logs.push(log);
-        
+
         // Add debug logging
         log::debug!(
             "Appended undo log at index {} for txn {}. New length: {}",
@@ -345,9 +345,9 @@ impl Transaction {
                 visible
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                let visible = meta.is_committed() && 
-                             meta.get_commit_timestamp() <= *self.read_ts.read() && 
-                             !meta.is_deleted();
+                let visible = meta.is_committed() &&
+                    meta.get_commit_timestamp() <= *self.read_ts.read() &&
+                    !meta.is_deleted();
                 log::debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
             }

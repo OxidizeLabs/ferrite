@@ -1,7 +1,7 @@
 pub mod abstract_plan;
 pub mod aggregation_plan;
-pub mod create_table_plan;
 pub mod create_index_plan;
+pub mod create_table_plan;
 pub mod delete_plan;
 pub mod filter_plan;
 pub mod hash_join_plan;

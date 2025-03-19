@@ -13,11 +13,7 @@ pub struct MockScanNode {
 }
 
 impl MockScanNode {
-    pub fn new(
-        schema: Schema,
-        table_name: String,
-        children: Vec<PlanNode>,
-    ) -> Self {
+    pub fn new(schema: Schema, table_name: String, children: Vec<PlanNode>) -> Self {
         Self {
             output_schema: schema,
             table: table_name,
@@ -104,11 +100,7 @@ mod tests {
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
         let child_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
 
-        let child = MockScanNode::new(
-            child_schema,
-            "child_table".to_string(),
-            vec![],
-        );
+        let child = MockScanNode::new(child_schema, "child_table".to_string(), vec![]);
 
         let parent = MockScanNode::new(
             schema,
@@ -136,10 +128,8 @@ mod tests {
             (vec![Value::new(2)], RID::new(1, 2)),
         ];
 
-        let node = MockScanNode::new(schema, table_name, vec![])
-            .with_tuples(tuples.clone());
+        let node = MockScanNode::new(schema, table_name, vec![]).with_tuples(tuples.clone());
 
         assert_eq!(node.get_tuples(), &tuples);
     }
 }
-

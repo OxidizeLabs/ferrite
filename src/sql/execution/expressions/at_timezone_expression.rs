@@ -23,7 +23,7 @@ pub struct AtTimeZoneExpression {
 impl AtTimeZoneExpression {
     pub fn new(timestamp: Arc<Expression>, timezone: Arc<Expression>, return_type: Column) -> Self {
         let children = vec![timestamp.clone(), timezone.clone()];
-        
+
         Self {
             timestamp,
             timezone,
@@ -40,19 +40,20 @@ impl ExpressionOps for AtTimeZoneExpression {
 
         // Get timestamp as string
         let timestamp_str = timestamp_val.to_string();
-        
+
         // Parse the timezone string using chrono_tz
         let timezone_str = timezone_val.to_string();
         let timezone = Tz::from_str(&timezone_str)
             .map_err(|e| ExpressionError::InvalidOperation(format!("Invalid timezone: {}", e)))?;
 
         // Parse the timestamp and convert to the target timezone
-        let dt = DateTime::parse_from_rfc3339(&timestamp_str)
-            .map_err(|e| ExpressionError::InvalidOperation(format!("Invalid timestamp format: {}", e)))?;
+        let dt = DateTime::parse_from_rfc3339(&timestamp_str).map_err(|e| {
+            ExpressionError::InvalidOperation(format!("Invalid timestamp format: {}", e))
+        })?;
 
         // Convert to target timezone
         let converted = dt.with_timezone(&timezone);
-        
+
         // Return as RFC3339 string
         Ok(Value::new(converted.to_rfc3339()))
     }
@@ -169,7 +170,7 @@ mod tests {
 
         // Evaluate expression
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        
+
         // The result should be "2024-01-01T04:00:00-08:00" (12:00 UTC = 04:00 PST)
         assert_eq!(result.to_string(), "2024-01-01T04:00:00-08:00");
     }
@@ -250,9 +251,6 @@ mod tests {
             Column::new("result", TypeId::Timestamp),
         );
 
-        assert_eq!(
-            expr.to_string(),
-            "2024-01-01T12:00:00Z AT TIME ZONE UTC"
-        );
+        assert_eq!(expr.to_string(), "2024-01-01T12:00:00Z AT TIME ZONE UTC");
     }
 }

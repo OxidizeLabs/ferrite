@@ -1,7 +1,10 @@
+use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::comparison_expression::ComparisonType;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
@@ -25,23 +28,20 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
-use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
-use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, Function as SqlFunction,
-    FunctionArg as SqlFunctionArg, Ident, JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue,
-};
-use std::fmt::{self, Display, Formatter};
-use std::sync::Arc;
-use log::{debug, info, error, warn};
-use std::collections::{HashMap, HashSet};
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::types_db::type_id::TypeId;
-use crate::catalog::column::Column;
+use log::{debug, error, info, warn};
+use sqlparser::ast::{
+    BinaryOperator, Expr as SqlExpr, Function as SqlFunction, FunctionArg as SqlFunctionArg, Ident,
+    JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    Statement, TableFactor, TableWithJoins, Value as SqlValue,
+};
 use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display, Formatter};
+use std::ptr;
+use std::sync::Arc;
 use std::thread::LocalKey;
 use std::thread_local;
-use std::ptr;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
@@ -358,7 +358,11 @@ impl LogicalPlan {
                     indent_str, right_schema
                 ));
             }
-            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
                 result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
                 result.push_str(&format!(
@@ -366,7 +370,11 @@ impl LogicalPlan {
                     indent_str, right_schema
                 ));
             }
-            LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
+            LogicalPlanType::HashJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
                 result.push_str(&format!("{}→ HashJoin\n", indent_str));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
                 result.push_str(&format!(
@@ -563,11 +571,11 @@ impl LogicalPlan {
                             .get_columns()
                             .iter()
                             .position(|c| {
-                                c.get_name().starts_with("SUM(") ||
-                                c.get_name().starts_with("COUNT(") ||
-                                c.get_name().starts_with("AVG(") ||
-                                c.get_name().starts_with("MIN(") ||
-                                c.get_name().starts_with("MAX(")
+                                c.get_name().starts_with("SUM(")
+                                    || c.get_name().starts_with("COUNT(")
+                                    || c.get_name().starts_with("AVG(")
+                                    || c.get_name().starts_with("MIN(")
+                                    || c.get_name().starts_with("MAX(")
                             })
                             .unwrap_or(0) // Default to first column if not found
                     });
@@ -798,7 +806,11 @@ impl LogicalPlan {
             LogicalPlanType::Values { schema, .. } => schema.clone(),
             LogicalPlanType::Delete { schema, .. } => schema.clone(),
             LogicalPlanType::Update { schema, .. } => schema.clone(),
-            LogicalPlanType::NestedLoopJoin { left_schema, right_schema, .. } => {
+            LogicalPlanType::NestedLoopJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
                 // For nested loop joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
                 let left_child_schema = if !self.children.is_empty() {
@@ -817,7 +829,10 @@ impl LogicalPlan {
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
 
-                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                debug!(
+                    "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
+                    left_alias, right_alias
+                );
 
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
@@ -834,7 +849,11 @@ impl LogicalPlan {
 
                 Schema::new(merged_columns)
             }
-            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
+            LogicalPlanType::NestedIndexJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
                 // For nested index joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
                 let left_child_schema = if !self.children.is_empty() {
@@ -853,7 +872,10 @@ impl LogicalPlan {
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
 
-                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                debug!(
+                    "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
+                    left_alias, right_alias
+                );
 
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
@@ -870,7 +892,11 @@ impl LogicalPlan {
 
                 Schema::new(merged_columns)
             }
-            LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
+            LogicalPlanType::HashJoin {
+                left_schema,
+                right_schema,
+                ..
+            } => {
                 // For hash joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
                 let left_child_schema = if !self.children.is_empty() {
@@ -889,7 +915,10 @@ impl LogicalPlan {
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
 
-                debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
+                debug!(
+                    "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
+                    left_alias, right_alias
+                );
 
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
@@ -943,18 +972,18 @@ impl<'a> PlanConverter<'a> {
         if self.stack.is_empty() {
             return Err("Empty plan stack".to_string());
         }
-        
+
         let root_node = self.stack[0];
         let root_id = ptr::addr_of!(*root_node) as usize;
-        
+
         while let Some(node) = self.stack.pop() {
             let node_id = ptr::addr_of!(*node) as usize;
-            
+
             // If we've already processed this node, skip it
             if self.results.contains_key(&node_id) {
                 continue;
             }
-            
+
             // Check if all children have been processed
             if self.are_all_children_processed(node) {
                 // Process the current node
@@ -963,34 +992,34 @@ impl<'a> PlanConverter<'a> {
             } else {
                 // Mark this node as being processed
                 self.visited.insert(node_id);
-                
+
                 // Push the node back onto the stack
                 self.stack.push(node);
-                
+
                 // Push all unprocessed children onto the stack
                 self.push_unprocessed_children(node);
-                
+
                 // Remove this node from visited since we're done with its children
                 self.visited.remove(&node_id);
             }
         }
-        
+
         // Get the result for the root node using the stored ID
         match self.results.get(&root_id) {
             Some(result) => result.clone(),
-            None => Err("Root node not processed".to_string())
+            None => Err("Root node not processed".to_string()),
         }
     }
-    
+
     /// Check if all children of a node have been processed
     fn are_all_children_processed(&self, node: &'a LogicalPlan) -> bool {
         // If the node has no children, return true immediately
         if node.children.is_empty() {
             return true;
         }
-        
+
         let mut all_children_processed = true;
-        
+
         for child in &node.children {
             let child_id = ptr::addr_of!(**child) as usize;
             if !self.results.contains_key(&child_id) {
@@ -1001,27 +1030,30 @@ impl<'a> PlanConverter<'a> {
                 break;
             }
         }
-        
+
         all_children_processed
     }
-    
+
     /// Push all unprocessed children of a node onto the stack
     fn push_unprocessed_children(&mut self, node: &'a LogicalPlan) {
         // If the node has no children, return immediately
         if node.children.is_empty() {
             return;
         }
-        
+
         for child in node.children.iter().rev() {
             let child_ref = child.as_ref();
             let child_id = ptr::addr_of!(*child_ref) as usize;
-            
+
             if !self.results.contains_key(&child_id) {
                 // Check for cycles
                 if self.visited.contains(&child_id) {
                     self.results.insert(
-                        child_id, 
-                        Err(format!("Cycle detected in plan conversion at node: {:?}", child_ref.plan_type))
+                        child_id,
+                        Err(format!(
+                            "Cycle detected in plan conversion at node: {:?}",
+                            child_ref.plan_type
+                        )),
                     );
                 } else {
                     self.stack.push(child_ref);
@@ -1029,30 +1061,30 @@ impl<'a> PlanConverter<'a> {
             }
         }
     }
-    
+
     /// Get all processed child plans for a node
     fn get_child_plans(&self, node: &'a LogicalPlan) -> Vec<PlanNode> {
         // If the node has no children, return an empty vector immediately
         if node.children.is_empty() {
             return Vec::new();
         }
-        
+
         let mut child_plans = Vec::new();
-        
+
         for child in &node.children {
             let child_id = ptr::addr_of!(**child) as usize;
             if let Some(Ok(plan)) = self.results.get(&child_id) {
                 child_plans.push(plan.clone());
             }
         }
-        
+
         child_plans
     }
-    
+
     /// Convert a single node to a physical plan
     fn convert_node(&self, node: &'a LogicalPlan) -> Result<PlanNode, String> {
         let child_plans = self.get_child_plans(node);
-        
+
         match &node.plan_type {
             LogicalPlanType::CreateTable {
                 schema,
@@ -1063,7 +1095,7 @@ impl<'a> PlanConverter<'a> {
                 table_name.clone(),
                 *if_not_exists,
             ))),
-            
+
             LogicalPlanType::CreateIndex {
                 schema,
                 table_name,
@@ -1077,7 +1109,7 @@ impl<'a> PlanConverter<'a> {
                 key_attrs.clone(),
                 *if_not_exists,
             ))),
-            
+
             LogicalPlanType::TableScan {
                 table_name,
                 schema,
@@ -1087,7 +1119,7 @@ impl<'a> PlanConverter<'a> {
                 *table_oid,
                 table_name.clone(),
             ))),
-            
+
             LogicalPlanType::IndexScan {
                 table_name,
                 table_oid,
@@ -1103,23 +1135,21 @@ impl<'a> PlanConverter<'a> {
                 *index_oid,
                 predicate_keys.clone(),
             ))),
-            
+
             LogicalPlanType::Filter {
                 schema,
                 table_oid,
                 table_name,
                 predicate,
                 ..
-            } => {
-                Ok(PlanNode::Filter(FilterNode::new(
-                    schema.clone(),
-                    *table_oid,
-                    table_name.to_string(),
-                    predicate.clone(),
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::Filter(FilterNode::new(
+                schema.clone(),
+                *table_oid,
+                table_name.to_string(),
+                predicate.clone(),
+                child_plans,
+            ))),
+
             LogicalPlanType::Projection {
                 expressions,
                 schema,
@@ -1127,38 +1157,35 @@ impl<'a> PlanConverter<'a> {
             } => {
                 // Create output schema
                 let output_schema = schema.clone();
-                
+
                 Ok(PlanNode::Projection(
-                    ProjectionNode::new(output_schema, expressions.clone(), column_mappings.clone())
-                        .with_children(child_plans),
+                    ProjectionNode::new(
+                        output_schema,
+                        expressions.clone(),
+                        column_mappings.clone(),
+                    )
+                    .with_children(child_plans),
                 ))
-            },
-            
+            }
+
             LogicalPlanType::Insert {
                 table_name,
                 schema,
                 table_oid,
-            } => {
-                Ok(PlanNode::Insert(InsertNode::new(
-                    schema.clone(),
-                    *table_oid,
-                    table_name.to_string(),
-                    vec![],
-                    child_plans,
-                )))
-            },
-            
-            LogicalPlanType::Values {
-                rows,
-                schema,
-            } => {
-                Ok(PlanNode::Values(ValuesNode::new(
-                    schema.clone(),
-                    rows.clone(),
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::Insert(InsertNode::new(
+                schema.clone(),
+                *table_oid,
+                table_name.to_string(),
+                vec![],
+                child_plans,
+            ))),
+
+            LogicalPlanType::Values { rows, schema } => Ok(PlanNode::Values(ValuesNode::new(
+                schema.clone(),
+                rows.clone(),
+                child_plans,
+            ))),
+
             LogicalPlanType::MockScan {
                 table_name,
                 schema,
@@ -1168,35 +1195,31 @@ impl<'a> PlanConverter<'a> {
                 table_name.clone(),
                 vec![],
             ))),
-            
+
             LogicalPlanType::Delete {
                 table_name,
                 schema,
                 table_oid,
-            } => {
-                Ok(PlanNode::Delete(DeleteNode::new(
-                    schema.clone(),
-                    table_name.clone(),
-                    *table_oid,
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::Delete(DeleteNode::new(
+                schema.clone(),
+                table_name.clone(),
+                *table_oid,
+                child_plans,
+            ))),
+
             LogicalPlanType::Update {
                 table_name,
                 schema,
                 table_oid,
                 update_expressions,
-            } => {
-                Ok(PlanNode::Update(UpdateNode::new(
-                    schema.clone(),
-                    table_name.clone(),
-                    *table_oid,
-                    update_expressions.clone(),
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::Update(UpdateNode::new(
+                schema.clone(),
+                table_name.clone(),
+                *table_oid,
+                update_expressions.clone(),
+                child_plans,
+            ))),
+
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
@@ -1218,14 +1241,14 @@ impl<'a> PlanConverter<'a> {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-                
+
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
                     child_plans,
                     group_by.clone(),
                     agg_exprs,
                 )))
-            },
-            
+            }
+
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
                 right_schema,
@@ -1240,7 +1263,7 @@ impl<'a> PlanConverter<'a> {
                         Ok((l, r)) => (l, r),
                         Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                     };
-                    
+
                     Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
                         left_schema.clone(),
                         right_schema.clone(),
@@ -1251,8 +1274,8 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            },
-            
+            }
+
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
                 right_schema,
@@ -1267,7 +1290,7 @@ impl<'a> PlanConverter<'a> {
                         Ok((l, r)) => (l, r),
                         Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                     };
-                    
+
                     Ok(PlanNode::NestedIndexJoin(NestedIndexJoinNode::new(
                         left_schema.clone(),
                         right_schema.clone(),
@@ -1278,8 +1301,8 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            },
-            
+            }
+
             LogicalPlanType::HashJoin {
                 left_schema,
                 right_schema,
@@ -1294,7 +1317,7 @@ impl<'a> PlanConverter<'a> {
                         Ok((l, r)) => (l, r),
                         Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                     };
-                    
+
                     Ok(PlanNode::HashJoin(HashJoinNode::new(
                         left_schema.clone(),
                         right_schema.clone(),
@@ -1305,60 +1328,47 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            },
-            
+            }
+
             LogicalPlanType::Sort {
                 sort_expressions,
                 schema,
-            } => {
-                Ok(PlanNode::Sort(
-                    SortNode::new(
-                        schema.clone(),
-                        sort_expressions.clone(),
-                        child_plans,
-                    ),
-                ))
-            },
-            
-            LogicalPlanType::Limit {
-                limit,
-                schema,
-            } => {
-                Ok(PlanNode::Limit(LimitNode::new(
-                    *limit,
-                    schema.clone(),
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::Sort(SortNode::new(
+                schema.clone(),
+                sort_expressions.clone(),
+                child_plans,
+            ))),
+
+            LogicalPlanType::Limit { limit, schema } => Ok(PlanNode::Limit(LimitNode::new(
+                *limit,
+                schema.clone(),
+                child_plans,
+            ))),
+
             LogicalPlanType::TopN {
                 k,
                 sort_expressions,
                 schema,
-            } => {
-                Ok(PlanNode::TopN(TopNNode::new(
-                    schema.clone(),
-                    sort_expressions.clone(),
-                    *k,
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::TopN(TopNNode::new(
+                schema.clone(),
+                sort_expressions.clone(),
+                *k,
+                child_plans,
+            ))),
+
             LogicalPlanType::TopNPerGroup {
                 k,
                 sort_expressions,
                 groups,
                 schema,
-            } => {
-                Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
-                    *k,
-                    sort_expressions.clone(),
-                    groups.clone(),
-                    schema.clone(),
-                    child_plans,
-                )))
-            },
-            
+            } => Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
+                *k,
+                sort_expressions.clone(),
+                groups.clone(),
+                schema.clone(),
+                child_plans,
+            ))),
+
             LogicalPlanType::Window {
                 group_by,
                 aggregates,
@@ -1385,7 +1395,7 @@ impl<'a> PlanConverter<'a> {
                         }
                         _ => return Err("Invalid window function expression".to_string()),
                     };
-                    
+
                     // Create a new WindowFunction with the appropriate partitioning and ordering
                     window_functions.push(WindowFunction::new(
                         function_type,
@@ -1402,13 +1412,13 @@ impl<'a> PlanConverter<'a> {
                         },
                     ));
                 }
-                
+
                 Ok(PlanNode::Window(WindowNode::new(
                     schema.clone(),
                     window_functions,
                     child_plans,
                 )))
-            },
+            }
         }
     }
 }
@@ -1476,7 +1486,7 @@ fn extract_join_keys(
 fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
     // Create a map to count occurrences of each alias
     let mut alias_counts = HashMap::new();
-    
+
     // Look at all columns to find table aliases
     for column in schema.get_columns() {
         let name = column.get_name();
@@ -1485,7 +1495,7 @@ fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
             *alias_counts.entry(alias).or_insert(0) += 1;
         }
     }
-    
+
     // If we have aliases, return the most common one
     if !alias_counts.is_empty() {
         return alias_counts
@@ -1493,14 +1503,19 @@ fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
             .max_by_key(|(_, count)| *count)
             .map(|(alias, _)| alias);
     }
-    
+
     None
 }
 
 // Add these helper methods for Expression
 impl Expression {
     pub fn column_ref(name: &str, type_id: TypeId) -> Self {
-        Self::ColumnRef(ColumnRefExpression::new(0, 0, Column::new(name, type_id), vec![]))
+        Self::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new(name, type_id),
+            vec![],
+        ))
     }
 
     pub fn binary_op(left: Self, op: BinaryOperator, right: Self) -> Self {
@@ -1515,10 +1530,14 @@ impl Expression {
 mod tests {
     use super::*;
     use crate::catalog::column::Column;
+    use crate::sql::execution::expressions::aggregate_expression::{
+        AggregateExpression, AggregationType,
+    };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
-    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use sqlparser::ast::JoinOperator;
@@ -1575,18 +1594,21 @@ mod tests {
         ]);
 
         let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("age", TypeId::Integer), vec![]
+            0,
+            1,
+            Column::new("age", TypeId::Integer),
+            vec![],
         )));
         let constant = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(18)),
             Column::new("const", TypeId::Integer),
-            vec![]
+            vec![],
         )));
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
             column_ref.clone(),
             constant.clone(),
             ComparisonType::GreaterThan,
-            vec![column_ref.clone(), constant.clone()]
+            vec![column_ref.clone(), constant.clone()],
         )));
 
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
@@ -1639,7 +1661,8 @@ mod tests {
         ]);
 
         // Create a projection plan
-        let projection_plan = LogicalPlan::project(expressions.clone(), output_schema.clone(), table_scan);
+        let projection_plan =
+            LogicalPlan::project(expressions.clone(), output_schema.clone(), table_scan);
 
         // Check the plan type
         match projection_plan.plan_type {
@@ -1664,23 +1687,25 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
 
-        let group_by = vec![
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 0, Column::new("id", TypeId::Integer), vec![]
-            ))),
-        ];
+        let group_by = vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
+        )))];
 
         let age_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("age", TypeId::Integer), vec![]
+            0,
+            1,
+            Column::new("age", TypeId::Integer),
+            vec![],
         )));
-        let aggregates = vec![
-            Arc::new(Expression::Aggregate(AggregateExpression::new(
-                AggregationType::Avg,
-                vec![age_col.clone()],
-                Column::new("avg_age", TypeId::Decimal),
-                "AVG".to_string()
-            ))),
-        ];
+        let aggregates = vec![Arc::new(Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Avg,
+            vec![age_col.clone()],
+            Column::new("avg_age", TypeId::Decimal),
+            "AVG".to_string(),
+        )))];
 
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
         let aggregate_plan = LogicalPlan::aggregate(
@@ -1712,18 +1737,21 @@ mod tests {
         ]);
 
         let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("age", TypeId::Integer), vec![]
+            0,
+            1,
+            Column::new("age", TypeId::Integer),
+            vec![],
         )));
         let constant = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(18)),
             Column::new("const", TypeId::Integer),
-            vec![]
+            vec![],
         )));
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
             column_ref.clone(),
             constant.clone(),
             ComparisonType::GreaterThan,
-            vec![column_ref.clone(), constant.clone()]
+            vec![column_ref.clone(), constant.clone()],
         )));
 
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
@@ -1772,11 +1800,11 @@ mod tests {
         ]);
         let key_attrs = vec![0]; // Index on the "id" column
         let plan = LogicalPlan::create_index(
-            schema.clone(), 
-            "users".to_string(), 
-            "users_id_idx".to_string(), 
-            key_attrs.clone(), 
-            false
+            schema.clone(),
+            "users".to_string(),
+            "users_id_idx".to_string(),
+            key_attrs.clone(),
+            false,
         );
 
         match plan.plan_type {
@@ -1825,19 +1853,22 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         let column_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
         let predicate_keys = vec![column_ref];
-        
+
         let plan = LogicalPlan::index_scan(
             "users".to_string(),
             1,
             "users_id_idx".to_string(),
             2,
             schema.clone(),
-            predicate_keys.clone()
+            predicate_keys.clone(),
         );
 
         match plan.plan_type {
@@ -1866,28 +1897,23 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         // Create a values plan as the input to insert
         let id_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(1)),
             Column::new("id", TypeId::Integer),
-            vec![]
+            vec![],
         )));
         let name_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("John".to_string())),
             Column::new("name", TypeId::VarChar),
-            vec![]
+            vec![],
         )));
-        
+
         let rows = vec![vec![id_val, name_val]];
         let values_plan = LogicalPlan::values(rows.clone(), schema.clone());
-        
-        let insert_plan = LogicalPlan::insert(
-            "users".to_string(),
-            schema.clone(),
-            1,
-            values_plan
-        );
+
+        let insert_plan = LogicalPlan::insert("users".to_string(), schema.clone(), 1, values_plan);
 
         match insert_plan.plan_type {
             LogicalPlanType::Insert {
@@ -1909,14 +1935,9 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        let delete_plan = LogicalPlan::delete(
-            "users".to_string(),
-            schema.clone(),
-            1,
-            scan_plan
-        );
+        let delete_plan = LogicalPlan::delete("users".to_string(), schema.clone(), 1, scan_plan);
 
         match delete_plan.plan_type {
             LogicalPlanType::Delete {
@@ -1939,23 +1960,23 @@ mod tests {
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
         ]);
-        
+
         // Create an update expression to set age = 30
         let age_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(30)),
             Column::new("age", TypeId::Integer),
-            vec![]
+            vec![],
         )));
-        
+
         let update_expressions = vec![age_val];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        
+
         let update_plan = LogicalPlan::update(
             "users".to_string(),
             schema.clone(),
             1,
             update_expressions.clone(),
-            scan_plan
+            scan_plan,
         );
 
         match update_plan.plan_type {
@@ -1980,26 +2001,23 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         let id_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::Integer(1)),
             Column::new("id", TypeId::Integer),
-            vec![]
+            vec![],
         )));
         let name_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(Val::VarLen("John".to_string())),
             Column::new("name", TypeId::VarChar),
-            vec![]
+            vec![],
         )));
-        
+
         let rows = vec![vec![id_val.clone(), name_val.clone()]];
         let values_plan = LogicalPlan::values(rows.clone(), schema.clone());
 
         match values_plan.plan_type {
-            LogicalPlanType::Values {
-                rows: r,
-                schema: s,
-            } => {
+            LogicalPlanType::Values { rows: r, schema: s } => {
                 assert_eq!(rows, r);
                 assert_eq!(schema, s);
             }
@@ -2019,16 +2037,8 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
 
-        let left_plan = LogicalPlan::mock_scan(
-            "left_table".to_string(),
-            left_schema.clone(),
-            1,
-        );
-        let right_plan = LogicalPlan::mock_scan(
-            "right_table".to_string(),
-            right_schema.clone(),
-            2,
-        );
+        let left_plan = LogicalPlan::mock_scan("left_table".to_string(), left_schema.clone(), 1);
+        let right_plan = LogicalPlan::mock_scan("right_table".to_string(), right_schema.clone(), 2);
 
         // Create a join condition
         let join_condition = Expression::binary_op(
@@ -2076,16 +2086,8 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
 
-        let left_plan = LogicalPlan::mock_scan(
-            "left_table".to_string(),
-            left_schema.clone(),
-            1,
-        );
-        let right_plan = LogicalPlan::mock_scan(
-            "right_table".to_string(),
-            right_schema.clone(),
-            2,
-        );
+        let left_plan = LogicalPlan::mock_scan("left_table".to_string(), left_schema.clone(), 1);
+        let right_plan = LogicalPlan::mock_scan("right_table".to_string(), right_schema.clone(), 2);
 
         // Create a join condition
         let join_condition = Expression::binary_op(
@@ -2127,20 +2129,19 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         // Sort by id column
         let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         let sort_expressions = vec![sort_expr.clone()];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        
-        let sort_plan = LogicalPlan::sort(
-            sort_expressions.clone(),
-            schema.clone(),
-            scan_plan
-        );
+
+        let sort_plan = LogicalPlan::sort(sort_expressions.clone(), schema.clone(), scan_plan);
 
         match sort_plan.plan_type {
             LogicalPlanType::Sort {
@@ -2160,15 +2161,12 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
         let limit_plan = LogicalPlan::limit(10, schema.clone(), scan_plan);
 
         match limit_plan.plan_type {
-            LogicalPlanType::Limit {
-                limit,
-                schema: s,
-            } => {
+            LogicalPlanType::Limit { limit, schema: s } => {
                 assert_eq!(limit, 10);
                 assert_eq!(schema, s);
             }
@@ -2182,21 +2180,19 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         // Sort by id column
         let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         let sort_expressions = vec![sort_expr.clone()];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        
-        let top_n_plan = LogicalPlan::top_n(
-            5,
-            sort_expressions.clone(),
-            schema.clone(),
-            scan_plan
-        );
+
+        let top_n_plan = LogicalPlan::top_n(5, sort_expressions.clone(), schema.clone(), scan_plan);
 
         match top_n_plan.plan_type {
             LogicalPlanType::TopN {

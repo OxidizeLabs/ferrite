@@ -10,12 +10,11 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum InOperand {
-    List(Arc<Expression>),          // For IN (val1, val2, ...)
-    Subquery(Arc<Expression>),      // For IN (SELECT ...)
-    Unnest(Arc<Expression>),        // For IN UNNEST(array_expr)
+    List(Arc<Expression>),     // For IN (val1, val2, ...)
+    Subquery(Arc<Expression>), // For IN (SELECT ...)
+    Unnest(Arc<Expression>),   // For IN UNNEST(array_expr)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,7 +86,11 @@ impl InExpression {
         self.check_value_in_list(value, list_values)
     }
 
-    fn evaluate_subquery(&self, value: &Value, subquery_result: Value) -> Result<Value, ExpressionError> {
+    fn evaluate_subquery(
+        &self,
+        value: &Value,
+        subquery_result: Value,
+    ) -> Result<Value, ExpressionError> {
         // Handle subquery results
         match subquery_result.get_val() {
             Val::Vector(values) => self.check_value_in_list(value, values),
@@ -95,7 +98,11 @@ impl InExpression {
         }
     }
 
-    fn evaluate_unnest(&self, value: &Value, unnest_result: Value) -> Result<Value, ExpressionError> {
+    fn evaluate_unnest(
+        &self,
+        value: &Value,
+        unnest_result: Value,
+    ) -> Result<Value, ExpressionError> {
         // Handle UNNEST results - should be a vector
         match unnest_result.get_val() {
             Val::Vector(values) => self.check_value_in_list(value, values),
@@ -171,19 +178,28 @@ impl ExpressionOps for InExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let value = self.expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let value = self
+            .expr
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
         match &self.operand {
             InOperand::List(list_expr) => {
-                let list_result = list_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                let list_result =
+                    list_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
                 self.evaluate_list(&value, list_result)
             }
             InOperand::Subquery(subquery_expr) => {
-                let subquery_result = subquery_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                let subquery_result = subquery_expr.evaluate_join(
+                    left_tuple,
+                    left_schema,
+                    right_tuple,
+                    right_schema,
+                )?;
                 self.evaluate_subquery(&value, subquery_result)
             }
             InOperand::Unnest(array_expr) => {
-                let unnest_result = array_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                let unnest_result =
+                    array_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
                 self.evaluate_unnest(&value, unnest_result)
             }
         }

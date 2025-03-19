@@ -14,7 +14,12 @@ pub struct DeleteNode {
 
 impl DeleteNode {
     /// Creates a new DeleteNode with the given output schema and child node.
-    pub fn new(output_schema: Schema, table_name: String, table_id: TableOidT, children: Vec<PlanNode>) -> Self {
+    pub fn new(
+        output_schema: Schema,
+        table_name: String,
+        table_id: TableOidT,
+        children: Vec<PlanNode>,
+    ) -> Self {
         Self {
             output_schema,
             table_name,

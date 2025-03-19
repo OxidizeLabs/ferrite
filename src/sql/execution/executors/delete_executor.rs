@@ -11,7 +11,6 @@ use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<DeleteNode>,
@@ -50,7 +49,7 @@ impl DeleteExecutor {
                 plan.get_table_name(),
                 table_info.get_table_schema()
             );
-            
+
             // Create TransactionalTableHeap
             Arc::new(TransactionalTableHeap::new(
                 table_info.get_table_heap(),
@@ -188,10 +187,13 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::abstract_expression::Expression::Constant;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::values_plan::ValuesNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
@@ -200,9 +202,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -251,7 +250,7 @@ mod tests {
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadCommitted));
             // Set transaction state to Running
             transaction.set_state(TransactionState::Running);
-            
+
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -282,12 +281,12 @@ mod tests {
         fn create_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
             // Use a simple atomic counter for test transaction IDs
             static NEXT_TXN_ID: AtomicU64 = AtomicU64::new(1);
-            
+
             let txn_id = NEXT_TXN_ID.fetch_add(1, Ordering::SeqCst);
             let txn = Arc::new(Transaction::new(txn_id, isolation_level));
             // Set transaction state to Running
             txn.set_state(TransactionState::Running);
-            
+
             Arc::new(TransactionContext::new(
                 txn,
                 Arc::new(LockManager::new()),
@@ -328,15 +327,17 @@ mod tests {
             let exec_guard = execution_context.read();
             // Hold the catalog lock
             let catalog_guard = exec_guard.get_catalog().read();
-            let table_info = catalog_guard.get_table(table_name).expect("Table not found");
-            
+            let table_info = catalog_guard
+                .get_table(table_name)
+                .expect("Table not found");
+
             // Create values that will live beyond the lock scope
             let oid = table_info.get_table_oidt();
             let heap = Arc::new(TransactionalTableHeap::new(
                 table_info.get_table_heap(),
                 table_info.get_table_oidt(),
             ));
-            
+
             (oid, heap)
         };
 
@@ -359,11 +360,7 @@ mod tests {
             let tuple_meta = TupleMeta::new(ctx.transaction_context.get_transaction_id());
 
             table_heap
-                .insert_tuple(
-                    &tuple_meta,
-                    &mut tuple,
-                    ctx.transaction_context.clone(),
-                )
+                .insert_tuple(&tuple_meta, &mut tuple, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
 
@@ -438,14 +435,12 @@ mod tests {
 
         // Commit the transaction after deletes
         let txn_ctx = execution_context.read().get_transaction_context();
-        ctx.transaction_manager.commit(
-            txn_ctx.get_transaction(),
-            ctx.bpm.clone()
-        );
+        ctx.transaction_manager
+            .commit(txn_ctx.get_transaction(), ctx.bpm.clone());
 
         // Create new transaction for verification
         let verify_txn_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
-        
+
         // Verify remaining tuples
         let mut remaining_count = 0;
         let mut remaining_ids = Vec::new();
@@ -463,16 +458,23 @@ mod tests {
         }
 
         assert_eq!(remaining_count, 3, "Should have 3 tuples remaining");
-        
+
         // Verify specific IDs remain
-        assert!(remaining_ids.contains(&Val::from(1)), "ID 1 should still exist");
-        assert!(remaining_ids.contains(&Val::from(2)), "ID 2 should still exist");
-        assert!(remaining_ids.contains(&Val::from(3)), "ID 3 should still exist");
+        assert!(
+            remaining_ids.contains(&Val::from(1)),
+            "ID 1 should still exist"
+        );
+        assert!(
+            remaining_ids.contains(&Val::from(2)),
+            "ID 2 should still exist"
+        );
+        assert!(
+            remaining_ids.contains(&Val::from(3)),
+            "ID 3 should still exist"
+        );
 
         // Clean up - commit verification transaction
-        ctx.transaction_manager.commit(
-            verify_txn_ctx.get_transaction(),
-            ctx.bpm.clone()
-        );
+        ctx.transaction_manager
+            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone());
     }
 }

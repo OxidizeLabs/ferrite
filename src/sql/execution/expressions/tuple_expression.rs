@@ -33,7 +33,13 @@ impl ExpressionOps for TupleExpression {
         Ok(Value::new_vector(values))
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         let mut values = Vec::new();
         for expr in &self.children {
             values.push(expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?);
@@ -71,11 +77,14 @@ impl ExpressionOps for TupleExpression {
 
 impl Display for TupleExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "ROW({})",
-               self.children.iter()
-                   .map(|e| e.to_string())
-                   .collect::<Vec<_>>()
-                   .join(", ")
+        write!(
+            f,
+            "ROW({})",
+            self.children
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
@@ -86,8 +95,8 @@ mod tests {
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
-    use sqlparser::ast::Value as SQLValue;
     use crate::types_db::type_id::TypeId;
+    use sqlparser::ast::Value as SQLValue;
 
     #[test]
     fn test_tuple_expression_evaluate() {
@@ -136,14 +145,16 @@ mod tests {
     #[test]
     fn test_tuple_expression_display() {
         // Create literal expressions for the tuple elements
-        let lit1 = Arc::new(Expression::Literal(LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap()));
-        let lit2 = Arc::new(Expression::Literal(LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap()));
+        let lit1 = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap(),
+        ));
+        let lit2 = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap(),
+        ));
 
         // Create a tuple expression with these literals
-        let tuple_expr = TupleExpression::new(
-            vec![lit1, lit2],
-            Column::new("tuple", TypeId::Vector),
-        );
+        let tuple_expr =
+            TupleExpression::new(vec![lit1, lit2], Column::new("tuple", TypeId::Vector));
 
         // Verify the string representation
         assert_eq!(tuple_expr.to_string(), "ROW(42, 'hello')");
@@ -164,10 +175,8 @@ mod tests {
         )));
 
         // Create a tuple expression
-        let tuple_expr = TupleExpression::new(
-            vec![const1.clone()],
-            Column::new("tuple", TypeId::Vector),
-        );
+        let tuple_expr =
+            TupleExpression::new(vec![const1.clone()], Column::new("tuple", TypeId::Vector));
 
         // Clone with different children
         let cloned_expr = tuple_expr.clone_with_children(vec![const1.clone(), const2.clone()]);
@@ -190,15 +199,15 @@ mod tests {
         // Create a valid column reference expression
         let col_ref = Arc::new(Expression::ColumnRef(
             crate::sql::execution::expressions::column_value_expression::ColumnRefExpression::new(
-                0, 0, Column::new("col1", TypeId::Integer), vec![],
+                0,
+                0,
+                Column::new("col1", TypeId::Integer),
+                vec![],
             ),
         ));
 
         // Create a tuple expression with the column reference
-        let tuple_expr = TupleExpression::new(
-            vec![col_ref],
-            Column::new("tuple", TypeId::Vector),
-        );
+        let tuple_expr = TupleExpression::new(vec![col_ref], Column::new("tuple", TypeId::Vector));
 
         // Validation should succeed
         assert!(tuple_expr.validate(&schema).is_ok());
@@ -206,17 +215,18 @@ mod tests {
         // Create an invalid column reference
         let invalid_col_ref = Arc::new(Expression::ColumnRef(
             crate::sql::execution::expressions::column_value_expression::ColumnRefExpression::new(
-                0, 1, Column::new("col2", TypeId::Integer), vec![],
+                0,
+                1,
+                Column::new("col2", TypeId::Integer),
+                vec![],
             ),
         ));
 
         // Create a tuple expression with the invalid column reference
-        let invalid_tuple_expr = TupleExpression::new(
-            vec![invalid_col_ref],
-            Column::new("tuple", TypeId::Vector),
-        );
+        let invalid_tuple_expr =
+            TupleExpression::new(vec![invalid_col_ref], Column::new("tuple", TypeId::Vector));
 
         // Validation should fail
         assert!(invalid_tuple_expr.validate(&schema).is_err());
     }
-} 
+}

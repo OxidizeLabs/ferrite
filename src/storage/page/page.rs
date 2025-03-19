@@ -107,8 +107,7 @@ impl PageTrait for BasicPage {
     }
 
     fn get_page_type(&self) -> PageType {
-        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
-            .unwrap_or(PageType::Invalid)
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET]).unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
@@ -201,8 +200,11 @@ mod tests {
             PageType::from_u8(PAGE_TYPE_HASH_TABLE_HEADER),
             Some(PageType::HashTableHeader)
         );
-        assert_eq!(PageType::from_u8(PAGE_TYPE_INVALID), Some(PageType::Invalid));
-        
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_INVALID),
+            Some(PageType::Invalid)
+        );
+
         // Test invalid conversion
         assert_eq!(PageType::from_u8(255), None);
 
@@ -251,7 +253,7 @@ mod tests {
     fn test_page_type_equality() {
         assert!(PageType::Basic == PageType::Basic);
         assert!(PageType::Table != PageType::Basic);
-        
+
         // Test that the enum values match their corresponding constants
         assert_eq!(PageType::Basic as u8, PAGE_TYPE_BASIC);
         assert_eq!(PageType::Table as u8, PAGE_TYPE_TABLE);
@@ -264,20 +266,28 @@ mod tests {
     #[test]
     fn test_basic_page_operations() {
         let mut page = BasicPage::new(1);
-        
+
         // Test initial state
         assert_eq!(page.get_page_id(), 1);
         assert_eq!(page.get_pin_count(), 1);
         assert!(!page.is_dirty());
-        assert_eq!(page.get_page_type(), PageType::Basic, "Page type should be set in new()");
-        assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Basic.to_u8(), "Page type should be set in data");
-        
+        assert_eq!(
+            page.get_page_type(),
+            PageType::Basic,
+            "Page type should be set in new()"
+        );
+        assert_eq!(
+            page.data[PAGE_TYPE_OFFSET],
+            PageType::Basic.to_u8(),
+            "Page type should be set in data"
+        );
+
         // Test pin count operations
         page.increment_pin_count();
         assert_eq!(page.get_pin_count(), 2);
         page.decrement_pin_count();
         assert_eq!(page.get_pin_count(), 1);
-        
+
         // Test dirty flag
         page.set_dirty(true);
         assert!(page.is_dirty());
@@ -297,15 +307,17 @@ mod tests {
         // Test data writing and reading
         let test_data = [42u8; 128];
         page.set_data(0, &test_data).expect("Failed to set data");
-        
+
         // Create expected data array that accounts for preserved page type
         let mut expected_data = [42u8; 128];
         expected_data[PAGE_TYPE_OFFSET] = PageType::Basic.to_u8();
-        
+
         assert_eq!(&page.get_data()[0..128], &expected_data);
 
         // Test data boundaries
-        assert!(page.set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20]).is_err());
+        assert!(page
+            .set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20])
+            .is_err());
         assert!(page.set_data(DB_PAGE_SIZE as usize, &[1u8]).is_err());
     }
 
@@ -313,23 +325,25 @@ mod tests {
     #[test]
     fn test_page_type_preservation() {
         let mut page = BasicPage::new(1);
-        
+
         // Try to overwrite the entire page including page type
         let test_data = [0xFF; DB_PAGE_SIZE as usize];
         page.set_data(0, &test_data).expect("Failed to set data");
-        
+
         // Verify that page type is preserved
         assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
-        
+
         // Try to overwrite just the page type byte
-        page.set_data(PAGE_TYPE_OFFSET, &[0xFF]).expect("Failed to set data");
+        page.set_data(PAGE_TYPE_OFFSET, &[0xFF])
+            .expect("Failed to set data");
         assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
-        
+
         // Write data that includes page type byte
         let test_data = [0xFF; 4];
-        page.set_data(PAGE_TYPE_OFFSET, &test_data).expect("Failed to set data");
+        page.set_data(PAGE_TYPE_OFFSET, &test_data)
+            .expect("Failed to set data");
         assert_eq!(page.get_data()[PAGE_TYPE_OFFSET], PageType::Basic.to_u8());
-        
+
         // Write data starting at offset 0
         let test_data = [0xFF; 2];
         page.set_data(0, &test_data).expect("Failed to set data");
@@ -339,13 +353,13 @@ mod tests {
     #[test]
     fn test_page_type_persistence() {
         let mut page = BasicPage::new(1);
-        
+
         // Set page type
         page.get_data_mut()[PAGE_TYPE_OFFSET] = PageType::Basic.to_u8();
-        
+
         // Verify type is preserved
         assert_eq!(page.get_page_type(), PageType::Basic);
-        
+
         // Change type and verify
         page.get_data_mut()[PAGE_TYPE_OFFSET] = PageType::Table.to_u8();
         assert_eq!(page.get_page_type(), PageType::Table);
@@ -354,15 +368,15 @@ mod tests {
     #[test]
     fn test_page_reset() {
         let mut page = BasicPage::new(1);
-        
+
         // Fill page with non-zero data
         page.get_data_mut().fill(42);
         page.set_dirty(true);
         page.set_pin_count(5);
-        
+
         // Reset memory
         page.reset_memory();
-        
+
         // Verify data is zeroed except for page type byte
         assert!(page.get_data().iter().enumerate().all(|(i, &x)| {
             if i == PAGE_TYPE_OFFSET {
@@ -383,16 +397,16 @@ mod tests {
     #[test]
     fn test_invalid_page_operations() {
         let mut page = BasicPage::new(1);
-        
+
         // Test invalid pin count operations
         page.set_pin_count(0);
         page.decrement_pin_count(); // Should not go below 0
         assert_eq!(page.get_pin_count(), 0);
-        
+
         // Test invalid data operations
         let result = page.set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20]);
         assert!(matches!(result, Err(PageError::InvalidOffset { .. })));
-        
+
         let result = page.set_data(DB_PAGE_SIZE as usize, &[1u8]);
         assert!(matches!(result, Err(PageError::InvalidOffset { .. })));
     }
@@ -421,8 +435,8 @@ mod tests {
 
     #[test]
     fn test_concurrent_pin_operations() {
-        use std::sync::Arc;
         use parking_lot::RwLock;
+        use std::sync::Arc;
         use std::thread;
 
         let page = Arc::new(RwLock::new(BasicPage::new(1)));
@@ -447,4 +461,3 @@ mod tests {
         assert_eq!(page.read().get_pin_count(), 11); // Initial 1 + 10 increments
     }
 }
-

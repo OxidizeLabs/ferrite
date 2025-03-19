@@ -158,7 +158,6 @@ mod tests {
     use crate::storage::table::tuple::Tuple;
     use sqlparser::ast::Value as SQLValue;
 
-
     fn create_test_schema() -> Schema {
         Schema::new(vec![])
     }

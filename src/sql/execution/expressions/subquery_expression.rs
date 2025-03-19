@@ -4,7 +4,7 @@ use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{Value, Val};
+use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -26,7 +26,11 @@ pub struct SubqueryExpression {
 }
 
 impl SubqueryExpression {
-    pub fn new(subquery: Arc<Expression>, subquery_type: SubqueryType, return_type: Column) -> Self {
+    pub fn new(
+        subquery: Arc<Expression>,
+        subquery_type: SubqueryType,
+        return_type: Column,
+    ) -> Self {
         Self {
             subquery: subquery.clone(),
             subquery_type,
@@ -38,13 +42,20 @@ impl SubqueryExpression {
     fn extract_scalar_value(&self, value: Value) -> Result<Value, ExpressionError> {
         match value.get_val() {
             // If it's already a scalar value, return as is
-            Val::Null | Val::Boolean(_) | Val::TinyInt(_) | Val::SmallInt(_) | 
-            Val::Integer(_) | Val::BigInt(_) | Val::Decimal(_) | Val::Timestamp(_) |
-            Val::VarLen(_) | Val::ConstLen(_) => Ok(value),
-            
+            Val::Null
+            | Val::Boolean(_)
+            | Val::TinyInt(_)
+            | Val::SmallInt(_)
+            | Val::Integer(_)
+            | Val::BigInt(_)
+            | Val::Decimal(_)
+            | Val::Timestamp(_)
+            | Val::VarLen(_)
+            | Val::ConstLen(_) => Ok(value),
+
             // If it's a vector with one element (common for scalar subqueries), return that element
             Val::Vector(v) if v.len() == 1 => Ok(v[0].clone()),
-            
+
             // Otherwise, it's an error
             _ => Err(ExpressionError::InvalidOperation(
                 "Scalar subquery must return exactly one value".to_string(),
@@ -77,18 +88,35 @@ impl ExpressionOps for SubqueryExpression {
         }
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         match self.subquery_type {
             SubqueryType::Scalar => {
-                let result = self.subquery.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                let result = self.subquery.evaluate_join(
+                    left_tuple,
+                    left_schema,
+                    right_tuple,
+                    right_schema,
+                )?;
                 self.extract_scalar_value(result)
             }
             SubqueryType::Exists => {
-                let result = self.subquery.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                let result = self.subquery.evaluate_join(
+                    left_tuple,
+                    left_schema,
+                    right_tuple,
+                    right_schema,
+                )?;
                 Ok(Value::new(!result.is_null()))
             }
             SubqueryType::InList | SubqueryType::Quantified => {
-                self.subquery.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+                self.subquery
+                    .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
         }
     }
@@ -113,7 +141,7 @@ impl ExpressionOps for SubqueryExpression {
         if children.len() != 1 {
             panic!("SubqueryExpression requires exactly one child");
         }
-        
+
         Arc::new(Expression::Subquery(SubqueryExpression::new(
             children[0].clone(),
             self.subquery_type.clone(),
@@ -124,7 +152,7 @@ impl ExpressionOps for SubqueryExpression {
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Validate the subquery expression
         self.subquery.validate(schema)?;
-        
+
         // Additional validation based on subquery type
         match self.subquery_type {
             SubqueryType::Scalar => {
@@ -164,10 +192,10 @@ impl Display for SubqueryExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Val;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Val;
 
     // Helper function to create a mock expression that returns a specific value
     fn create_mock_expression(name: String, return_type: TypeId) -> Arc<Expression> {
@@ -184,12 +212,8 @@ mod tests {
     fn test_scalar_subquery() {
         let mock_expr = create_mock_expression("test_scalar".to_string(), TypeId::Integer);
         let return_type = Column::new("test", TypeId::Integer);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Scalar,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Scalar, return_type);
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema).unwrap();
@@ -200,12 +224,8 @@ mod tests {
     fn test_exists_subquery() {
         let mock_expr = create_mock_expression("test_exists".to_string(), TypeId::Boolean);
         let return_type = Column::new("test", TypeId::Boolean);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Exists,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Exists, return_type);
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema).unwrap();
@@ -216,29 +236,24 @@ mod tests {
     fn test_in_list_subquery() {
         let mock_expr = create_mock_expression("test_in_list".to_string(), TypeId::Vector);
         let return_type = Column::new("test", TypeId::Vector);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::InList,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::InList, return_type);
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema).unwrap();
         // MockExpression returns [1, 2, 3] for Vector type
-        assert_eq!(result, Value::new_vector(vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)]));
+        assert_eq!(
+            result,
+            Value::new_vector(vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)])
+        );
     }
 
     #[test]
     fn test_scalar_subquery_error() {
         let mock_expr = create_mock_expression("test_error".to_string(), TypeId::Invalid);
         let return_type = Column::new("test", TypeId::Invalid);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Scalar,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Scalar, return_type);
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema).unwrap();
@@ -249,12 +264,8 @@ mod tests {
     fn test_validate_scalar_subquery() {
         let mock_expr = create_mock_expression("test_validate".to_string(), TypeId::Integer);
         let return_type = Column::new("test", TypeId::Integer);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Scalar,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Scalar, return_type);
 
         let (_, schema) = create_empty_tuple();
         assert!(subquery.validate(&schema).is_ok());
@@ -264,34 +275,31 @@ mod tests {
     fn test_any_subquery() {
         let mock_expr = create_mock_expression("test_any".to_string(), TypeId::Vector);
         let return_type = Column::new("test", TypeId::Vector);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Quantified,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Quantified, return_type);
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema).unwrap();
         // MockExpression returns [1, 2, 3] for Vector type
-        assert_eq!(result, Value::new_vector(vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)]));
+        assert_eq!(
+            result,
+            Value::new_vector(vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)])
+        );
     }
 
     #[test]
     fn test_evaluate_join() {
         let mock_expr = create_mock_expression("test_join".to_string(), TypeId::Integer);
         let return_type = Column::new("test", TypeId::Integer);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr,
-            SubqueryType::Scalar,
-            return_type,
-        );
+
+        let subquery = SubqueryExpression::new(mock_expr, SubqueryType::Scalar, return_type);
 
         let (left_tuple, left_schema) = create_empty_tuple();
         let (right_tuple, right_schema) = create_empty_tuple();
-        
-        let result = subquery.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+
+        let result = subquery
+            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+            .unwrap();
         assert_eq!(result, Value::new(42i32)); // MockExpression returns 42 for Integer type
     }
 
@@ -300,16 +308,13 @@ mod tests {
         let return_type = Column::new("test", TypeId::Integer);
         let mock_value = Value::new(42);
         let mock_expr = create_mock_expression(ToString::to_string(&mock_value), TypeId::Integer);
-        
-        let subquery = SubqueryExpression::new(
-            mock_expr.clone(),
-            SubqueryType::Scalar,
-            return_type.clone(),
-        );
+
+        let subquery =
+            SubqueryExpression::new(mock_expr.clone(), SubqueryType::Scalar, return_type.clone());
 
         let new_children = vec![mock_expr];
         let cloned = subquery.clone_with_children(new_children);
 
         assert_eq!(cloned.get_return_type(), &return_type);
     }
-} 
+}

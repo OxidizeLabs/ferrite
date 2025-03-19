@@ -3,7 +3,6 @@ use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPag
 
 pub const DB_PAGE_SIZE: usize = 4096;
 
-
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
 pub const fn index_template_arguments<KeyType, ValueType, KeyComparator>() {}
@@ -12,7 +11,7 @@ pub const fn index_template_arguments<KeyType, ValueType, KeyComparator>() {}
  * Linear Probe Hashing Definitions
  */
 pub type HashTableBlockType<KeyType, ValueType, KeyComparator> =
-HashTableBlockPage<KeyType, ValueType, KeyComparator>;
+    HashTableBlockPage<KeyType, ValueType, KeyComparator>;
 
 /**
  * BLOCK_ARRAY_SIZE is the number of (key, value) pairs that can be stored in a linear probe hash block page. It is an
@@ -36,7 +35,7 @@ pub const fn block_array_size<KeyType, ValueType>() -> usize {
  * Extendible Hashing Definitions
  */
 pub type HashTableBucketType<KeyType, ValueType, KeyComparator> =
-HashTableBucketPage<KeyType, ValueType, KeyComparator>;
+    HashTableBucketPage<KeyType, ValueType, KeyComparator>;
 
 /**
  * BUCKET_ARRAY_SIZE is the number of (key, value) pairs that can be stored in an extendible hash index bucket page.

@@ -140,7 +140,8 @@ mod tests {
 
             // Create disk components
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
@@ -153,7 +154,11 @@ mod tests {
             let lock_manager = Arc::new(LockManager::new());
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
-            let transaction_context = Arc::new(TransactionContext::new(transaction, lock_manager.clone(), transaction_manager.clone()));
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
 
             Self {
                 bpm,
@@ -189,27 +194,34 @@ mod tests {
         ]));
 
         // Create catalog and table
-        let mut catalog = Catalog::new(bpm.clone(), 0, 0, HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new(), transaction_manager);
+        let mut catalog = Catalog::new(
+            bpm.clone(),
+            0,
+            0,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            transaction_manager,
+        );
 
         let table_name = "test_table".to_string();
         let table_info = catalog.create_table(table_name, (*schema).clone()).unwrap();
 
         // Insert test data
         let table_heap = table_info.get_table_heap();
-        let test_data = vec![
-            (1, "Alice", 25),
-            (2, "Bob", 30),
-            (3, "Charlie", 35),
-        ];
+        let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
-            table_heap.insert_tuple(&meta, &mut tuple).expect("Failed to insert tuple");
+            table_heap
+                .insert_tuple(&meta, &mut tuple)
+                .expect("Failed to insert tuple");
         }
 
         // Create scan plan and executor
         let plan = Arc::new(TableScanNode::new(
-            table_info,  // Wrap in Arc
+            table_info, // Wrap in Arc
             schema.clone(),
             None,
         ));
@@ -255,7 +267,7 @@ mod tests {
 
         // Create executor
         let plan = Arc::new(TableScanNode::new(
-            table_info,  // table_info is already an Arc<TableInfo>
+            table_info, // table_info is already an Arc<TableInfo>
             schema.clone(),
             None,
         ));
@@ -269,6 +281,9 @@ mod tests {
         let mut executor = TableScanExecutor::new(context, plan);
         executor.init();
 
-        assert!(executor.next().is_none(), "Empty table should return no tuples");
+        assert!(
+            executor.next().is_none(),
+            "Empty table should return no tuples"
+        );
     }
 }

@@ -176,32 +176,31 @@ mod tests {
     #[test]
     fn test_get_next_ts_and_register() {
         let mut watermark = Watermark::new();
-        
+
         let ts1 = watermark.get_next_ts_and_register();
         assert_eq!(ts1, 1);
         assert_eq!(watermark.get_watermark(), ts1);
-        
+
         let ts2 = watermark.get_next_ts_and_register();
         assert_eq!(ts2, 2);
         assert_eq!(watermark.get_watermark(), ts1); // Should still be ts1 as it's the minimum
-        
+
         assert_eq!(watermark.unregister_txn(ts1), ts2); // After removing ts1, watermark should move to ts2
     }
 
     #[test]
     fn test_update_commit_ts() {
         let mut watermark = Watermark::new();
-        
+
         let ts1 = watermark.get_next_ts_and_register();
-        let ts2 = watermark.get_next_ts_and_register();
-        
+
         // Update commit timestamp to a higher value
         let new_commit_ts = 10;
         watermark.update_commit_ts(new_commit_ts);
-        
+
         // Watermark should still be ts1 as it's the minimum active transaction
         assert_eq!(watermark.get_watermark(), ts1);
-        
+
         // Next timestamp should be greater than the updated commit timestamp
         assert!(watermark.get_next_ts() > new_commit_ts);
     }
@@ -209,18 +208,17 @@ mod tests {
     #[test]
     fn test_clone_watermark() {
         let mut original = Watermark::new();
-        
+
         // Add some transactions
         let ts1 = original.get_next_ts_and_register();
-        let ts2 = original.get_next_ts_and_register();
-        
+
         // Clone the watermark
         let cloned = original.clone_watermark();
-        
+
         // Verify the cloned watermark has the same state
         assert_eq!(original.get_watermark(), cloned.get_watermark());
         assert_eq!(original.get_next_ts(), cloned.get_next_ts());
-        
+
         // Verify modifications to original don't affect clone
         original.unregister_txn(ts1);
         assert_ne!(original.get_watermark(), cloned.get_watermark());
@@ -229,26 +227,26 @@ mod tests {
     #[test]
     fn test_concurrent_operations() {
         let mut watermark = Watermark::new();
-        
+
         // Simulate concurrent transaction starts
         let ts1 = watermark.get_next_ts();
         let ts2 = watermark.get_next_ts();
         let ts3 = watermark.get_next_ts();
-        
+
         // Register them in different order
         watermark.add_txn(ts2);
         watermark.add_txn(ts1);
         watermark.add_txn(ts3);
-        
+
         assert_eq!(watermark.get_watermark(), ts1);
-        
+
         // Simulate concurrent commits (out of order)
         watermark.remove_txn(ts2);
         assert_eq!(watermark.get_watermark(), ts1);
-        
+
         watermark.remove_txn(ts3);
         assert_eq!(watermark.get_watermark(), ts1);
-        
+
         watermark.remove_txn(ts1);
         assert_eq!(watermark.get_watermark(), 4); // Next available timestamp
     }
@@ -256,16 +254,16 @@ mod tests {
     #[test]
     fn test_update_commit_ts_and_get_watermark() {
         let mut watermark = Watermark::new();
-        
+
         let ts1 = watermark.get_next_ts_and_register();
         let ts2 = watermark.get_next_ts_and_register();
-        
+
         let new_commit_ts = 10;
         let new_watermark = watermark.update_commit_ts_and_get_watermark(new_commit_ts);
-        
+
         // Watermark should still be ts1 as it's the minimum active transaction
         assert_eq!(new_watermark, ts1);
-        
+
         // After removing all transactions, watermark should be the new commit ts
         watermark.remove_txn(ts1);
         watermark.remove_txn(ts2);

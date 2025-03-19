@@ -534,7 +534,7 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            },
+            }
             PlanNode::Values(node) => Ok(Box::new(ValuesExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -625,11 +625,16 @@ impl PlanNode {
                     .get_children()
                     .first()
                     .ok_or_else(|| "Limit node must have a child".to_string())?;
-                
+
                 // Create the child executor with proper error handling to avoid recursion issues
                 let child_executor = match child_plan.create_executor(context.clone()) {
                     Ok(executor) => executor,
-                    Err(e) => return Err(format!("Failed to create child executor for Limit node: {}", e)),
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to create child executor for Limit node: {}",
+                            e
+                        ))
+                    }
                 };
 
                 Ok(Box::new(LimitExecutor::new(

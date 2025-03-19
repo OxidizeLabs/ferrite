@@ -304,18 +304,16 @@ mod tests {
     fn test_escape_character() {
         let test_cases = vec![
             // Test escaping special characters in pattern
-            ("hello%world", "hello\\%world", true),   // Escaped % in pattern matches literal % in value
-            ("hello_world", "hello\\_world", true),   // Escaped _ in pattern matches literal _ in value
-            ("hello%", "hello\\%", true),            // Escaped % at end
-            ("hello_", "hello\\_", true),            // Escaped _ at end
+            ("hello%world", "hello\\%world", true), // Escaped % in pattern matches literal % in value
+            ("hello_world", "hello\\_world", true), // Escaped _ in pattern matches literal _ in value
+            ("hello%", "hello\\%", true),           // Escaped % at end
+            ("hello_", "hello\\_", true),           // Escaped _ at end
             ("hello\\world", "hello\\\\world", true), // Escaped backslash
-            
             // Test unescaped wildcards in pattern
-            ("hello%world", "hello%world", true),     // % in pattern matches % in value
-            ("helloXworld", "hello%world", true),     // % in pattern matches any character
-            ("hello_world", "hello_world", true),     // _ in pattern matches _ in value
-            ("helloXworld", "hello_world", true),     // _ in pattern matches any character
-            
+            ("hello%world", "hello%world", true), // % in pattern matches % in value
+            ("helloXworld", "hello%world", true), // % in pattern matches any character
+            ("hello_world", "hello_world", true), // _ in pattern matches _ in value
+            ("helloXworld", "hello_world", true), // _ in pattern matches any character
             // Test literal matches
             ("hello\\%world", "hello\\\\%world", true), // Escaped backslash followed by %
             ("hello\\_world", "hello\\\\_world", true), // Escaped backslash followed by _

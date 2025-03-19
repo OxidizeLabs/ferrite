@@ -80,11 +80,8 @@ mod tests {
         let table_name = "employees";
         let if_not_exists = false;
 
-        let plan_node = CreateTablePlanNode::new(
-            schema.clone(),
-            table_name.to_string(),
-            if_not_exists,
-        );
+        let plan_node =
+            CreateTablePlanNode::new(schema.clone(), table_name.to_string(), if_not_exists);
 
         // Verify basic properties
         assert_eq!(plan_node.get_table_name(), table_name);
@@ -108,21 +105,15 @@ mod tests {
     #[test]
     fn test_create_table_if_not_exists() {
         let schema = create_test_schema();
-        
+
         // Test with if_not_exists = true
-        let plan_node_with_flag = CreateTablePlanNode::new(
-            schema.clone(),
-            "employees".to_string(),
-            true,
-        );
+        let plan_node_with_flag =
+            CreateTablePlanNode::new(schema.clone(), "employees".to_string(), true);
         assert!(plan_node_with_flag.if_not_exists());
 
         // Test with if_not_exists = false
-        let plan_node_without_flag = CreateTablePlanNode::new(
-            schema.clone(),
-            "employees".to_string(),
-            false,
-        );
+        let plan_node_without_flag =
+            CreateTablePlanNode::new(schema.clone(), "employees".to_string(), false);
         assert!(!plan_node_without_flag.if_not_exists());
     }
 
@@ -132,11 +123,7 @@ mod tests {
         let table_name = "employees";
 
         // Test without IF NOT EXISTS
-        let plan_node = CreateTablePlanNode::new(
-            schema.clone(),
-            table_name.to_string(),
-            false,
-        );
+        let plan_node = CreateTablePlanNode::new(schema.clone(), table_name.to_string(), false);
 
         // Test basic display
         assert_eq!(plan_node.to_string(), "→ CreateTable: employees");
@@ -147,11 +134,8 @@ mod tests {
         assert!(!detailed.contains("IF NOT EXISTS"));
 
         // Test with IF NOT EXISTS
-        let plan_node_if_not_exists = CreateTablePlanNode::new(
-            schema.clone(),
-            table_name.to_string(),
-            true,
-        );
+        let plan_node_if_not_exists =
+            CreateTablePlanNode::new(schema.clone(), table_name.to_string(), true);
 
         // Test detailed display with IF NOT EXISTS
         let detailed_if_not_exists = format!("{:#}", plan_node_if_not_exists);
@@ -162,11 +146,7 @@ mod tests {
     #[test]
     fn test_create_table_children() {
         let schema = create_test_schema();
-        let plan_node = CreateTablePlanNode::new(
-            schema,
-            "employees".to_string(),
-            false,
-        );
+        let plan_node = CreateTablePlanNode::new(schema, "employees".to_string(), false);
 
         // CreateTable nodes should have no children
         assert!(plan_node.get_children().is_empty());
@@ -175,11 +155,7 @@ mod tests {
     #[test]
     fn test_plan_type() {
         let schema = create_test_schema();
-        let plan_node = CreateTablePlanNode::new(
-            schema,
-            "employees".to_string(),
-            false,
-        );
+        let plan_node = CreateTablePlanNode::new(schema, "employees".to_string(), false);
 
         assert_eq!(plan_node.get_type(), PlanType::CreateTable);
     }
@@ -187,15 +163,11 @@ mod tests {
     #[test]
     fn test_create_table_empty_schema() {
         let empty_schema = Schema::new(vec![]);
-        let plan_node = CreateTablePlanNode::new(
-            empty_schema,
-            "empty_table".to_string(),
-            false,
-        );
+        let plan_node = CreateTablePlanNode::new(empty_schema, "empty_table".to_string(), false);
 
         // Verify empty schema handling
         assert_eq!(plan_node.get_output_schema().get_columns().len(), 0);
-        
+
         // Verify display still works
         let detailed = format!("{:#}", plan_node);
         assert!(detailed.contains("Schema:"));

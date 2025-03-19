@@ -31,7 +31,7 @@ impl MethodExpression {
         // followed by all the args
         let mut children = vec![expr.clone()];
         children.extend(args.iter().cloned());
-        
+
         Self {
             expr,
             method_name,
@@ -225,7 +225,7 @@ impl ExpressionOps for MethodExpression {
 
         // Create a merged schema and tuple with values from both tuples
         let temp_schema = Schema::merge(left_schema, right_schema);
-        
+
         // Create values array for the merged tuple by combining values from both tuples
         let mut temp_values = Vec::new();
         temp_values.extend(left_tuple.get_values().iter().cloned());

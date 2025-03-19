@@ -4,11 +4,11 @@ use crate::common::exception::DBError;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
+use crate::sql::planner::logical_plan::{LogicalPlan, LogicalPlanType};
 use crate::types_db::value::Val;
 use log::{debug, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::sql::planner::logical_plan::{LogicalPlan, LogicalPlanType};
 
 pub struct Optimizer {
     catalog: Arc<RwLock<Catalog>>,
@@ -73,12 +73,25 @@ impl Optimizer {
     }
 
     /// Phase 0: Index scan optimization
-    fn apply_index_scan_optimization(&self, plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
-        trace!("Attempting index scan optimization for plan node: {:?}", plan.plan_type);
+    fn apply_index_scan_optimization(
+        &self,
+        plan: Box<LogicalPlan>,
+    ) -> Result<Box<LogicalPlan>, DBError> {
+        trace!(
+            "Attempting index scan optimization for plan node: {:?}",
+            plan.plan_type
+        );
 
         match &plan.plan_type {
-            LogicalPlanType::TableScan { table_name, schema, table_oid } => {
-                debug!("Examining table scan on {} for potential index usage", table_name);
+            LogicalPlanType::TableScan {
+                table_name,
+                schema,
+                table_oid,
+            } => {
+                debug!(
+                    "Examining table scan on {} for potential index usage",
+                    table_name
+                );
 
                 let catalog = self.catalog.read();
                 let indexes = catalog.get_table_indexes(table_name);
@@ -97,7 +110,9 @@ impl Optimizer {
                         if !key_attrs.is_empty() {
                             if let Some(table_info) = catalog.get_table(table_name) {
                                 let table_schema = table_info.get_table_schema();
-                                if let Some(col_idx) = table_schema.get_column_index(&first_col.get_name()) {
+                                if let Some(col_idx) =
+                                    table_schema.get_column_index(&first_col.get_name())
+                                {
                                     if key_attrs[0] == col_idx {
                                         info!("Converting table scan to index scan using index {} on table {}",
                                               index_info.get_index_name(), table_name);
@@ -129,7 +144,10 @@ impl Optimizer {
         }
     }
 
-    fn apply_index_scan_to_children(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
+    fn apply_index_scan_to_children(
+        &self,
+        mut plan: Box<LogicalPlan>,
+    ) -> Result<Box<LogicalPlan>, DBError> {
         // Recursively try to convert any table scans in child nodes
         let mut new_children = Vec::new();
         for child in plan.children.drain(..) {
@@ -153,7 +171,13 @@ impl Optimizer {
                 }
                 self.apply_early_pruning_to_children(plan)
             }
-            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate } => {
+            LogicalPlanType::Filter {
+                schema,
+                output_schema,
+                table_oid,
+                table_name,
+                predicate,
+            } => {
                 trace!("Examining filter predicate for simplification");
                 if let Expression::Constant(const_expr) = predicate.as_ref() {
                     if let Val::Boolean(b) = const_expr.get_value().value_ {
@@ -174,7 +198,13 @@ impl Optimizer {
     /// Phase 2: Apply rewrite rules
     fn apply_rewrite_rules(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
-            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate } => {
+            LogicalPlanType::Filter {
+                schema,
+                output_schema,
+                table_oid,
+                table_name,
+                predicate,
+            } => {
                 // Push down filter predicates
                 if let Some(child) = plan.children.pop() {
                     self.push_down_predicate(predicate.clone(), child)
@@ -184,7 +214,8 @@ impl Optimizer {
             }
             LogicalPlanType::Projection {
                 expressions,
-                ..
+                schema,
+                column_mappings: _,
             } => {
                 // Combine consecutive projections
                 if let Some(child) = plan.children.pop() {
@@ -337,7 +368,13 @@ impl Optimizer {
                     vec![child],
                 )))
             }
-            LogicalPlanType::Filter { schema, output_schema, table_oid, table_name, predicate: existing_pred } => {
+            LogicalPlanType::Filter {
+                schema,
+                output_schema,
+                table_oid,
+                table_name,
+                predicate: existing_pred,
+            } => {
                 // Combine predicates using AND
                 let combined_pred = Arc::new(Expression::Logic(LogicExpression::new(
                     predicate.clone(),
@@ -378,16 +415,41 @@ impl Optimizer {
         expressions: Vec<Arc<Expression>>,
         child: Box<LogicalPlan>,
     ) -> Result<Box<LogicalPlan>, DBError> {
-        if let LogicalPlanType::Projection { .. } = child.clone().plan_type
-        {
+        if let LogicalPlanType::Projection { .. } = child.clone().plan_type {
             // TODO: Implement projection merging logic
             // This would involve rewriting the outer expressions in terms of the inner ones
             Ok(child)
         } else {
+            // Calculate column mappings
+            let input_schema = child.get_schema();
+            let mut column_mappings = Vec::with_capacity(expressions.len());
+
+            for expr in &expressions {
+                if let Expression::ColumnRef(col_ref) = expr.as_ref() {
+                    let col_name = col_ref.get_return_type().get_name();
+
+                    // Try to find the column in the input schema
+                    let input_idx = input_schema
+                        .get_columns()
+                        .iter()
+                        .position(|c| c.get_name() == col_name)
+                        .unwrap_or(0); // Default to first column if not found
+
+                    column_mappings.push(input_idx);
+                } else {
+                    // For non-column references, use a placeholder mapping
+                    column_mappings.push(0);
+                }
+            }
+
+            // TODO: Compute correct schema
+            let output_schema = Schema::new(vec![]);
+
             Ok(Box::new(LogicalPlan::new(
                 LogicalPlanType::Projection {
                     expressions,
-                    schema: Schema::new(vec![]), // TODO: Compute correct schema
+                    schema: output_schema,
+                    column_mappings,
                 },
                 vec![child],
             )))
@@ -404,11 +466,19 @@ impl Optimizer {
     }
 
     /// Validation
-    fn validate_plan(&self, plan: &LogicalPlan, check_options: &CheckOptions) -> Result<(), DBError> {
+    fn validate_plan(
+        &self,
+        plan: &LogicalPlan,
+        check_options: &CheckOptions,
+    ) -> Result<(), DBError> {
         trace!("Validating plan node: {:?}", plan.plan_type);
 
         match &plan.plan_type {
-            LogicalPlanType::TableScan { table_name, table_oid, .. } => {
+            LogicalPlanType::TableScan {
+                table_name,
+                table_oid,
+                ..
+            } => {
                 let catalog = self.catalog.read();
                 if catalog.get_table_by_oid(*table_oid).is_none() {
                     warn!("Table with OID {} not found in catalog", table_oid);
@@ -416,15 +486,25 @@ impl Optimizer {
                 }
             }
             LogicalPlanType::NestedLoopJoin { predicate, .. } => {
-                if check_options.has_check(&CheckOption::EnableNljCheck) && predicate.get_children().is_empty() {
+                if check_options.has_check(&CheckOption::EnableNljCheck)
+                    && predicate.get_children().is_empty()
+                {
                     warn!("NLJ validation failed: missing join predicate");
-                    return Err(DBError::Validation("NLJ requires join predicate".to_string()));
+                    return Err(DBError::Validation(
+                        "NLJ requires join predicate".to_string(),
+                    ));
                 }
             }
-            LogicalPlanType::TopN { k, sort_expressions, .. } => {
+            LogicalPlanType::TopN {
+                k,
+                sort_expressions,
+                ..
+            } => {
                 if *k == 0 || sort_expressions.is_empty() {
                     warn!("TopN validation failed: invalid specification");
-                    return Err(DBError::Validation("Invalid TopN specification".to_string()));
+                    return Err(DBError::Validation(
+                        "Invalid TopN specification".to_string(),
+                    ));
                 }
             }
             _ => {}

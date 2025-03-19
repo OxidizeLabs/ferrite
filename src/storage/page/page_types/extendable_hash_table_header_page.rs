@@ -1,8 +1,8 @@
-use std::any::Any;
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
 use log::{debug, info};
+use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::size_of;
@@ -119,7 +119,10 @@ impl ExtendableHTableHeaderPage {
         } else {
             self.directory_page_ids.push(directory_page_id);
         }
-        debug!("Directory page ID at index {} set to {}", directory_idx, directory_page_id);
+        debug!(
+            "Directory page ID at index {} set to {}",
+            directory_idx, directory_page_id
+        );
     }
 
     /// Returns the maximum number of directory page IDs the header page can handle.
@@ -210,8 +213,7 @@ impl PageTrait for ExtendableHTableHeaderPage {
     }
 
     fn get_page_type(&self) -> PageType {
-        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
-            .unwrap_or(PageType::Invalid)
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET]).unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
@@ -263,7 +265,8 @@ impl PageTrait for ExtendableHTableHeaderPage {
     fn reset_memory(&mut self) {
         self.data.fill(0);
         self.directory_page_ids.clear();
-        self.directory_page_ids.resize(HTABLE_HEADER_ARRAY_SIZE, INVALID_PAGE_ID);
+        self.directory_page_ids
+            .resize(HTABLE_HEADER_ARRAY_SIZE, INVALID_PAGE_ID);
         self.global_depth = 0;
         self.is_dirty = false;
         self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
@@ -297,7 +300,7 @@ mod basic_behavior {
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::page::page::{PageTrait};
+    use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use chrono::Utc;
     use log::info;
@@ -357,7 +360,8 @@ mod basic_behavior {
         let bpm = &ctx.bpm;
 
         info!("Creating ExtendedHashTableHeader page");
-        let header_page = bpm.new_page::<ExtendableHTableHeaderPage>()
+        let header_page = bpm
+            .new_page::<ExtendableHTableHeaderPage>()
             .expect("Failed to create header page");
 
         {
@@ -367,7 +371,10 @@ mod basic_behavior {
 
             // Initialize the header page with a max depth of 2
             page.init(2);
-            info!("Initialized header page with global depth: {}", page.global_depth());
+            info!(
+                "Initialized header page with global depth: {}",
+                page.global_depth()
+            );
 
             // Test hashes that will produce different upper bits
             let hashes = [
@@ -400,7 +407,7 @@ mod tests {
     fn test_header_page_type() {
         let page = ExtendableHTableHeaderPage::new(1);
         assert_eq!(page.get_page_type(), PageType::HashTableHeader);
-        
+
         // Test after reset
         let mut page = ExtendableHTableHeaderPage::new(1);
         page.reset_memory();
@@ -410,11 +417,11 @@ mod tests {
     #[test]
     fn test_data_operations() {
         let mut page = ExtendableHTableHeaderPage::new(1);
-        
+
         // Test data setting
         let test_data = vec![1, 2, 3, 4];
         page.set_data(10, &test_data).unwrap();
-        
+
         // Verify data was set
         assert_eq!(&page.get_data()[10..14], &test_data);
         assert!(page.is_dirty());
@@ -424,10 +431,10 @@ mod tests {
     fn test_pin_count() {
         let mut page = ExtendableHTableHeaderPage::new(1);
         assert_eq!(page.get_pin_count(), 1);
-        
+
         page.increment_pin_count();
         assert_eq!(page.get_pin_count(), 2);
-        
+
         page.decrement_pin_count();
         assert_eq!(page.get_pin_count(), 1);
     }

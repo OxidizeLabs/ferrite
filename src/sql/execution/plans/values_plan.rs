@@ -225,7 +225,6 @@ impl Display for ValueRow {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,7 +310,11 @@ mod tests {
             let schema = create_test_schema();
             let expressions = vec![
                 create_constant_expr(Value::new(42), "id", TypeId::Integer),
-                create_constant_expr(Value::new(Val::VarLen("NULL".to_string())), "name", TypeId::VarChar),
+                create_constant_expr(
+                    Value::new(Val::VarLen("NULL".to_string())),
+                    "name",
+                    TypeId::VarChar,
+                ),
                 create_constant_expr(Value::new(true), "active", TypeId::Boolean),
             ];
 
@@ -358,8 +361,16 @@ mod tests {
                 vec![], // empty row
                 vec![
                     Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer)),
-                    Arc::new(create_constant_expr(Value::new("test"), "name", TypeId::VarChar)),
-                    Arc::new(create_constant_expr(Value::new(true), "active", TypeId::Boolean)),
+                    Arc::new(create_constant_expr(
+                        Value::new("test"),
+                        "name",
+                        TypeId::VarChar,
+                    )),
+                    Arc::new(create_constant_expr(
+                        Value::new(true),
+                        "active",
+                        TypeId::Boolean,
+                    )),
                 ],
                 vec![], // another empty row
             ];
@@ -395,7 +406,11 @@ mod tests {
             let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
             let rows = vec![
                 vec![], // empty row
-                vec![Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer))],
+                vec![Arc::new(create_constant_expr(
+                    Value::new(1),
+                    "id",
+                    TypeId::Integer,
+                ))],
                 vec![], // another empty row
             ];
 
@@ -430,11 +445,7 @@ mod tests {
             let node = ValuesNode::new(
                 schema.clone(),
                 vec![],
-                vec![PlanNode::Values(ValuesNode::new(
-                    schema,
-                    vec![],
-                    vec![],
-                ))],
+                vec![PlanNode::Values(ValuesNode::new(schema, vec![], vec![]))],
             );
 
             let detailed_str = format!("{:#}", node);
@@ -450,8 +461,16 @@ mod tests {
                 vec![], // empty row
                 vec![
                     Arc::new(create_constant_expr(Value::new(1), "id", TypeId::Integer)),
-                    Arc::new(create_constant_expr(Value::new("test"), "name", TypeId::VarChar)),
-                    Arc::new(create_constant_expr(Value::new(true), "active", TypeId::Boolean)),
+                    Arc::new(create_constant_expr(
+                        Value::new("test"),
+                        "name",
+                        TypeId::VarChar,
+                    )),
+                    Arc::new(create_constant_expr(
+                        Value::new(true),
+                        "active",
+                        TypeId::Boolean,
+                    )),
                 ],
                 vec![], // another empty row
             ];

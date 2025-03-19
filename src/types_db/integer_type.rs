@@ -117,18 +117,15 @@ impl Type for IntegerType {
 
     fn add(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Integer(r) => {
-                r.checked_add(0)
-                    .map(Value::new)
-                    .ok_or_else(|| "Integer overflow in addition".to_string())
-            }
+            Val::Integer(r) => r
+                .checked_add(0)
+                .map(Value::new)
+                .ok_or_else(|| "Integer overflow in addition".to_string()),
             Val::TinyInt(r) => Ok(Value::new(*r as i32)),
             Val::SmallInt(r) => Ok(Value::new(*r as i32)),
-            Val::BigInt(r) => {
-                i32::try_from(*r)
-                    .map(Value::new)
-                    .map_err(|_| "Integer overflow in addition".to_string())
-            }
+            Val::BigInt(r) => i32::try_from(*r)
+                .map(Value::new)
+                .map_err(|_| "Integer overflow in addition".to_string()),
             Val::Decimal(r) => Ok(Value::new(*r as i32)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-numeric types to Integer".to_string()),
@@ -137,11 +134,10 @@ impl Type for IntegerType {
 
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Integer(r) => {
-                r.checked_neg()
-                    .map(Value::new)
-                    .ok_or_else(|| "Integer overflow in subtraction".to_string())
-            }
+            Val::Integer(r) => r
+                .checked_neg()
+                .map(Value::new)
+                .ok_or_else(|| "Integer overflow in subtraction".to_string()),
             Val::TinyInt(r) => Ok(Value::new(-(*r as i32))),
             Val::SmallInt(r) => Ok(Value::new(-(*r as i32))),
             Val::BigInt(r) => {
@@ -159,13 +155,13 @@ impl Type for IntegerType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Integer(r) => {
-                r.checked_mul(0)
-                    .map(Value::new)
-                    .ok_or_else(|| "Integer overflow in multiplication".to_string())
+            Val::Integer(r) => r
+                .checked_mul(0)
+                .map(Value::new)
+                .ok_or_else(|| "Integer overflow in multiplication".to_string()),
+            Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) | Val::Decimal(_) => {
+                Ok(Value::new(0))
             }
-            Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) |
-            Val::Decimal(_) => Ok(Value::new(0)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Integer by non-numeric type".to_string()),
         }
@@ -178,8 +174,11 @@ impl Type for IntegerType {
             Val::SmallInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::BigInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
-            Val::Integer(_) | Val::TinyInt(_) | Val::SmallInt(_) |
-            Val::BigInt(_) | Val::Decimal(_) => Ok(Value::new(0)),
+            Val::Integer(_)
+            | Val::TinyInt(_)
+            | Val::SmallInt(_)
+            | Val::BigInt(_)
+            | Val::Decimal(_) => Ok(Value::new(0)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide Integer by non-numeric type".to_string()),
         }
@@ -191,8 +190,7 @@ impl Type for IntegerType {
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
             Val::SmallInt(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::Integer(_) | Val::TinyInt(_) | Val::SmallInt(_) |
-            Val::BigInt(_) => Value::new(0),
+            Val::Integer(_) | Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) => Value::new(0),
             _ => Value::new(Val::Null),
         }
     }

@@ -136,7 +136,12 @@ impl Display for ColumnRefExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             // Detailed format: #0.1
-            write!(f, "Col#{}.{}", self.get_tuple_index(), self.get_column_index())
+            write!(
+                f,
+                "Col#{}.{}",
+                self.get_tuple_index(),
+                self.get_column_index()
+            )
         } else {
             // Basic format: just the column name
             write!(f, "{}", self.ret_type.get_name())

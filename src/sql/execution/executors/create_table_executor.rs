@@ -229,12 +229,12 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm.clone(),
-            0,              // next_index_oid
-            0,              // next_table_oid
-            HashMap::new(), // tables
-            HashMap::new(), // indexes
-            HashMap::new(), // table_names
-            HashMap::new(), // index_names
+            0,                               // next_index_oid
+            0,                               // next_table_oid
+            HashMap::new(),                  // tables
+            HashMap::new(),                  // indexes
+            HashMap::new(),                  // table_names
+            HashMap::new(),                  // index_names
             ctx.transaction_manager.clone(), // Add transaction manager
         )
     }

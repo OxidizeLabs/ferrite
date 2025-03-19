@@ -1,8 +1,8 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{ Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
-use crate::types_db::value::Value;
 use crate::common::rid::RID;
+use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::types_db::value::Value;
 use std::any::Any;
 use std::fmt::Debug;
 use std::mem::size_of;
@@ -92,7 +92,7 @@ impl ExtendableHTableBucketPage {
     fn serialize_entries(&mut self) -> Result<(), PageError> {
         // Start after the page header
         let mut offset = BUCKET_HEADER_SIZE;
-        
+
         // Write local depth
         self.data[offset] = self.local_depth;
         offset += 1;
@@ -106,10 +106,10 @@ impl ExtendableHTableBucketPage {
         // Write entries
         for (value, rid) in &self.entries {
             // Serialize value
-            let value_bytes = bincode::serialize(value)
-                .map_err(|_| PageError::SerializationError)?;
+            let value_bytes =
+                bincode::serialize(value).map_err(|_| PageError::SerializationError)?;
             let value_size = value_bytes.len();
-            
+
             // Write value size and data
             self.data[offset..offset + 4].copy_from_slice(&(value_size as u32).to_le_bytes());
             offset += 4;
@@ -148,8 +148,9 @@ impl ExtendableHTableBucketPage {
             offset += 4;
 
             // Deserialize value
-            let value: Value = bincode::deserialize(&self.data[offset..offset + value_size as usize])
-                .map_err(|_| PageError::DeserializationError)?;
+            let value: Value =
+                bincode::deserialize(&self.data[offset..offset + value_size as usize])
+                    .map_err(|_| PageError::DeserializationError)?;
             offset += value_size as usize;
 
             // Read RID
@@ -193,8 +194,7 @@ impl PageTrait for ExtendableHTableBucketPage {
     }
 
     fn get_page_type(&self) -> PageType {
-        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
-            .unwrap_or(PageType::Invalid)
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET]).unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
@@ -236,7 +236,7 @@ impl PageTrait for ExtendableHTableBucketPage {
         }
         self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
         self.is_dirty = true;
-        
+
         // If we're setting the whole page data, try to deserialize entries
         if offset == 0 && new_data.len() == self.data.len() {
             self.deserialize_entries()?;
@@ -270,16 +270,16 @@ impl PageTrait for ExtendableHTableBucketPage {
 mod basic_behavior {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use chrono::Utc;
     use log::info;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -333,7 +333,8 @@ mod basic_behavior {
         let bpm = &ctx.bpm;
 
         // Create a new bucket page using type-safe API
-        let bucket_page = bpm.new_page::<ExtendableHTableBucketPage>()
+        let bucket_page = bpm
+            .new_page::<ExtendableHTableBucketPage>()
             .expect("Failed to create new bucket page");
 
         {
@@ -359,29 +360,32 @@ mod basic_behavior {
 
         // Create bucket pages
         for _ in 0..4 {
-            let bucket_page = bpm.new_page::<ExtendableHTableBucketPage>()
+            let bucket_page = bpm
+                .new_page::<ExtendableHTableBucketPage>()
                 .expect("Failed to create new bucket page");
-            
+
             {
                 let mut page = bucket_page.write();
                 page.init(10);
                 info!("Initialized bucket page with max size: {}", page.get_size());
             }
-            
+
             bucket_pages.push(bucket_page);
         }
 
         // Create directory page
-        let directory_page = bpm.new_page::<ExtendableHTableDirectoryPage>()
+        let directory_page = bpm
+            .new_page::<ExtendableHTableDirectoryPage>()
             .expect("Failed to create directory page");
-        
+
         {
             let mut dir = directory_page.write();
             dir.init(3);
             info!("Initialized directory page with max depth: 3");
 
             // Get page IDs from bucket pages
-            let bucket_page_ids: Vec<PageId> = bucket_pages.iter()
+            let bucket_page_ids: Vec<PageId> = bucket_pages
+                .iter()
                 .map(|p| p.read().get_page_id())
                 .collect();
 
@@ -419,9 +423,10 @@ mod basic_behavior {
             let bpm_clone = Arc::clone(&bpm);
             let handle = thread::spawn(move || {
                 for j in 0..operations_per_thread {
-                    let bucket_page = bpm_clone.new_page::<ExtendableHTableBucketPage>()
+                    let bucket_page = bpm_clone
+                        .new_page::<ExtendableHTableBucketPage>()
                         .expect("Failed to create new bucket page");
-                    
+
                     let bucket_page_id = bucket_page.read().get_page_id();
                     info!(
                         "Thread {} created bucket page with ID: {} (operation {})",
@@ -448,7 +453,7 @@ mod tests {
     fn test_bucket_page_type() {
         let page = ExtendableHTableBucketPage::new(1);
         assert_eq!(page.get_page_type(), PageType::HashTableBucket);
-        
+
         // Test after reset
         let mut page = ExtendableHTableBucketPage::new(1);
         page.reset_memory();
@@ -459,19 +464,19 @@ mod tests {
     fn test_serialization() {
         let mut page = ExtendableHTableBucketPage::new(1);
         page.init(10);
-        
+
         // Add some test entries
         let value = Value::new(42);
         let rid = RID::new(1, 1);
         page.insert(value.clone(), rid);
-        
+
         // Serialize
         page.serialize_entries().unwrap();
-        
+
         // Create new page and copy data
         let mut new_page = ExtendableHTableBucketPage::new(2);
         new_page.set_data(0, page.get_data()).unwrap();
-        
+
         // Verify entries were deserialized correctly
         assert_eq!(new_page.get_size(), 1);
         assert_eq!(new_page.lookup(&value), Some(rid));
@@ -480,11 +485,11 @@ mod tests {
     #[test]
     fn test_data_operations() {
         let mut page = ExtendableHTableBucketPage::new(1);
-        
+
         // Test data setting
         let test_data = vec![1, 2, 3, 4];
         page.set_data(10, &test_data).unwrap();
-        
+
         // Verify data was set
         assert_eq!(&page.get_data()[10..14], &test_data);
         assert!(page.is_dirty());

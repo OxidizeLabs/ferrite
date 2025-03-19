@@ -20,10 +20,13 @@ impl Type for TimestampType {
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Timestamp(r) => CmpBool::from(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() == *r),
+            Val::Timestamp(r) => CmpBool::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    == *r,
+            ),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -39,10 +42,13 @@ impl Type for TimestampType {
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Timestamp(r) => CmpBool::from(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() < *r),
+            Val::Timestamp(r) => CmpBool::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    < *r,
+            ),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -50,10 +56,13 @@ impl Type for TimestampType {
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Timestamp(r) => CmpBool::from(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() <= *r),
+            Val::Timestamp(r) => CmpBool::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    <= *r,
+            ),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -61,10 +70,13 @@ impl Type for TimestampType {
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Timestamp(r) => CmpBool::from(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() > *r),
+            Val::Timestamp(r) => CmpBool::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    > *r,
+            ),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -72,10 +84,13 @@ impl Type for TimestampType {
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Timestamp(r) => CmpBool::from(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() >= *r),
+            Val::Timestamp(r) => CmpBool::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    >= *r,
+            ),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -154,10 +169,7 @@ impl Type for TimestampType {
             Val::Timestamp(ts) => {
                 let datetime = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(*ts);
                 // Convert to a more readable format that explicitly includes UTC
-                let secs = datetime
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                let secs = datetime.duration_since(UNIX_EPOCH).unwrap().as_secs();
                 let seconds = secs % 60;
                 let minutes = (secs / 60) % 60;
                 let hours = (secs / 3600) % 24;
@@ -195,12 +207,21 @@ mod tests {
 
         // Test equals
         assert_eq!(timestamp_type.compare_equals(&current), CmpBool::CmpTrue);
-        assert_eq!(timestamp_type.compare_equals(&future_val), CmpBool::CmpFalse);
+        assert_eq!(
+            timestamp_type.compare_equals(&future_val),
+            CmpBool::CmpFalse
+        );
         assert_eq!(timestamp_type.compare_equals(&null), CmpBool::CmpNull);
 
         // Test less than
-        assert_eq!(timestamp_type.compare_less_than(&future_val), CmpBool::CmpTrue);
-        assert_eq!(timestamp_type.compare_less_than(&past_val), CmpBool::CmpFalse);
+        assert_eq!(
+            timestamp_type.compare_less_than(&future_val),
+            CmpBool::CmpTrue
+        );
+        assert_eq!(
+            timestamp_type.compare_less_than(&past_val),
+            CmpBool::CmpFalse
+        );
         assert_eq!(timestamp_type.compare_less_than(&null), CmpBool::CmpNull);
     }
 
@@ -239,12 +260,24 @@ mod tests {
         let null = Value::new(Val::Null);
 
         // Test min/max
-        assert!(matches!(Type::min(&timestamp_type, &future_val).get_val(), Val::Timestamp(_)));
-        assert!(matches!(Type::min(&timestamp_type, &past_val).get_val(), Val::Timestamp(_)));
+        assert!(matches!(
+            Type::min(&timestamp_type, &future_val).get_val(),
+            Val::Timestamp(_)
+        ));
+        assert!(matches!(
+            Type::min(&timestamp_type, &past_val).get_val(),
+            Val::Timestamp(_)
+        ));
         assert_eq!(Type::min(&timestamp_type, &null), Value::new(Val::Null));
 
-        assert!(matches!(Type::max(&timestamp_type, &future_val).get_val(), Val::Timestamp(_)));
-        assert!(matches!(Type::max(&timestamp_type, &past_val).get_val(), Val::Timestamp(_)));
+        assert!(matches!(
+            Type::max(&timestamp_type, &future_val).get_val(),
+            Val::Timestamp(_)
+        ));
+        assert!(matches!(
+            Type::max(&timestamp_type, &past_val).get_val(),
+            Val::Timestamp(_)
+        ));
         assert_eq!(Type::max(&timestamp_type, &null), Value::new(Val::Null));
     }
 

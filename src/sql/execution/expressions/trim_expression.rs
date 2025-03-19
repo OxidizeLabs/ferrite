@@ -80,15 +80,15 @@ impl ExpressionOps for TrimExpression {
 
         // Perform the trim operation based on the trim type
         let result = match self.trim_type {
-            TrimType::Both => {
-                string_to_trim.trim_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
-            TrimType::Leading => {
-                string_to_trim.trim_start_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
-            TrimType::Trailing => {
-                string_to_trim.trim_end_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
+            TrimType::Both => string_to_trim
+                .trim_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
+            TrimType::Leading => string_to_trim
+                .trim_start_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
+            TrimType::Trailing => string_to_trim
+                .trim_end_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
         };
 
         Ok(Value::new(result))
@@ -153,15 +153,15 @@ impl ExpressionOps for TrimExpression {
 
         // Perform the trim operation based on the trim type
         let result = match self.trim_type {
-            TrimType::Both => {
-                string_to_trim.trim_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
-            TrimType::Leading => {
-                string_to_trim.trim_start_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
-            TrimType::Trailing => {
-                string_to_trim.trim_end_matches(|c| chars_to_trim.contains(c)).to_string()
-            }
+            TrimType::Both => string_to_trim
+                .trim_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
+            TrimType::Leading => string_to_trim
+                .trim_start_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
+            TrimType::Trailing => string_to_trim
+                .trim_end_matches(|c| chars_to_trim.contains(c))
+                .to_string(),
         };
 
         Ok(Value::new(result))

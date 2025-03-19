@@ -1,19 +1,19 @@
-use crate::types_db::type_id::TypeId;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use rand::{Rng, SeedableRng};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::types_db::types::Type;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RandomExpression {
-    seed: Option<Arc<Expression>>,  // Optional seed expression
+    seed: Option<Arc<Expression>>, // Optional seed expression
     return_type: Column,
     children: Vec<Arc<Expression>>, // Store children for consistent pattern
 }
@@ -26,7 +26,7 @@ impl RandomExpression {
         } else {
             Vec::new()
         };
-        
+
         Self {
             seed,
             return_type,
@@ -41,7 +41,9 @@ impl ExpressionOps for RandomExpression {
             // If seed is provided, use it to initialize the RNG
             let seed = seed_expr.evaluate(tuple, schema)?;
             let seed_val = seed.as_bigint().or_else(|_| {
-                Err(ExpressionError::InvalidSeed("Seed must be convertible to integer".to_string()))
+                Err(ExpressionError::InvalidSeed(
+                    "Seed must be convertible to integer".to_string(),
+                ))
             })? as u64;
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed_val);
             Ok(Value::new(rng.random::<f64>()))
@@ -67,7 +69,10 @@ impl ExpressionOps for RandomExpression {
         if child_idx < self.children.len() {
             &self.children[child_idx]
         } else {
-            panic!("Index out of bounds: RandomExpression has {} children", self.children.len())
+            panic!(
+                "Index out of bounds: RandomExpression has {} children",
+                self.children.len()
+            )
         }
     }
 
@@ -80,7 +85,10 @@ impl ExpressionOps for RandomExpression {
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        assert!(children.len() <= 1, "RandomExpression accepts at most one child");
+        assert!(
+            children.len() <= 1,
+            "RandomExpression accepts at most one child"
+        );
         Arc::new(Expression::Random(RandomExpression::new(
             children.into_iter().next(),
             self.return_type.clone(),
@@ -91,14 +99,14 @@ impl ExpressionOps for RandomExpression {
         // Validate the seed expression if it exists
         if let Some(seed) = &self.seed {
             seed.validate(schema)?;
-            
+
             // Check that seed expression returns a type that can be converted to integer
             let seed_type = seed.get_return_type().get_type();
             match seed_type {
                 TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt => Ok(()),
                 _ => Err(ExpressionError::InvalidSeed(
-                    "Seed expression must return an integer type".to_string()
-                ))
+                    "Seed expression must return an integer type".to_string(),
+                )),
             }
         } else {
             Ok(())
@@ -118,8 +126,8 @@ impl Display for RandomExpression {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     fn create_test_schema() -> Schema {
@@ -138,13 +146,10 @@ mod tests {
 
     #[test]
     fn test_unseeded_random() {
-        let expr = RandomExpression::new(
-            None,
-            Column::new("random", TypeId::Decimal)
-        );
-        
+        let expr = RandomExpression::new(None, Column::new("random", TypeId::Decimal));
+
         let (tuple, schema) = create_test_tuple();
-        
+
         // Test multiple evaluations
         for _ in 0..10 {
             let result = expr.evaluate(&tuple, &schema).unwrap();
@@ -159,25 +164,32 @@ mod tests {
         let seed_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(42i64),
             Column::new("seed", TypeId::BigInt),
-            vec![]
+            vec![],
         )));
 
-        let expr = RandomExpression::new(
-            Some(seed_expr),
-            Column::new("random", TypeId::Decimal)
-        );
-        
+        let expr = RandomExpression::new(Some(seed_expr), Column::new("random", TypeId::Decimal));
+
         let (tuple, schema) = create_test_tuple();
-        
+
         // Same seed should produce same sequence
         let first_sequence: Vec<f64> = (0..3)
-            .map(|_| expr.evaluate(&tuple, &schema).unwrap().as_decimal().unwrap())
+            .map(|_| {
+                expr.evaluate(&tuple, &schema)
+                    .unwrap()
+                    .as_decimal()
+                    .unwrap()
+            })
             .collect();
-            
+
         let second_sequence: Vec<f64> = (0..3)
-            .map(|_| expr.evaluate(&tuple, &schema).unwrap().as_decimal().unwrap())
+            .map(|_| {
+                expr.evaluate(&tuple, &schema)
+                    .unwrap()
+                    .as_decimal()
+                    .unwrap()
+            })
             .collect();
-            
+
         assert_eq!(first_sequence, second_sequence);
     }
 
@@ -187,22 +199,19 @@ mod tests {
         let seed_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("not a number"),
             Column::new("seed", TypeId::VarChar),
-            vec![]
+            vec![],
         )));
 
-        let expr = RandomExpression::new(
-            Some(seed_expr),
-            Column::new("random", TypeId::Decimal)
-        );
-        
+        let expr = RandomExpression::new(Some(seed_expr), Column::new("random", TypeId::Decimal));
+
         let (tuple, schema) = create_test_tuple();
-        
+
         // Validation should fail
         assert!(matches!(
             expr.validate(&schema),
             Err(ExpressionError::InvalidSeed(_))
         ));
-        
+
         // Evaluation should fail
         assert!(matches!(
             expr.evaluate(&tuple, &schema),
@@ -213,49 +222,41 @@ mod tests {
     #[test]
     fn test_display() {
         // Test unseeded random
-        let expr = RandomExpression::new(
-            None,
-            Column::new("random", TypeId::Decimal)
-        );
+        let expr = RandomExpression::new(None, Column::new("random", TypeId::Decimal));
         assert_eq!(expr.to_string(), "RANDOM()");
 
         // Test seeded random
         let seed_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(42i64),
             Column::new("seed", TypeId::BigInt),
-            vec![]
+            vec![],
         )));
-        let expr = RandomExpression::new(
-            Some(seed_expr),
-            Column::new("random", TypeId::Decimal)
-        );
+        let expr = RandomExpression::new(Some(seed_expr), Column::new("random", TypeId::Decimal));
         assert_eq!(expr.to_string(), "RANDOM(42)");
     }
 
     #[test]
     fn test_clone_with_children() {
-        let expr = RandomExpression::new(
-            None,
-            Column::new("random", TypeId::Decimal)
-        );
-        
+        let expr = RandomExpression::new(None, Column::new("random", TypeId::Decimal));
+
         // Test cloning with no children
         let cloned = expr.clone_with_children(vec![]);
         assert!(matches!(cloned.as_ref(), Expression::Random(_)));
-        
+
         // Test cloning with one child
         let seed_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(42i64),
             Column::new("seed", TypeId::BigInt),
-            vec![]
+            vec![],
         )));
         let cloned = expr.clone_with_children(vec![seed_expr.clone()]);
         assert!(matches!(cloned.as_ref(), Expression::Random(_)));
-        
+
         // Test that cloning with too many children panics
         let seed_expr2 = seed_expr.clone();
         assert!(std::panic::catch_unwind(|| {
             expr.clone_with_children(vec![seed_expr, seed_expr2]);
-        }).is_err());
+        })
+        .is_err());
     }
-} 
+}

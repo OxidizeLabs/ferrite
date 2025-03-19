@@ -3,8 +3,8 @@ use crate::catalog::schema::Schema;
 use crate::common::exception::{ArrayExpressionError, ExpressionError};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::{Val, Value};
 use crate::types_db::types;
+use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -58,7 +58,7 @@ impl ExpressionOps for ArrayExpression {
         self.evaluate_children(|child| {
             child.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
         })
-            .map_err(|e| ExpressionError::Array(e))
+        .map_err(|e| ExpressionError::Array(e))
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -88,15 +88,14 @@ impl ExpressionOps for ArrayExpression {
             // Check that all children have compatible types
             let child_type = child.get_return_type().get_type();
             let return_type = self.return_type.get_type();
-            
+
             // Get the type instance to check coercibility
             let type_instance = types::get_instance(return_type);
             if !type_instance.is_coercible_from(child_type) {
                 return Err(ExpressionError::Array(ArrayExpressionError::TypeMismatch(
                     format!(
                         "Array element type {:?} is not compatible with array type {:?}",
-                        child_type,
-                        return_type
+                        child_type, return_type
                     ),
                 )));
             }
@@ -108,11 +107,14 @@ impl ExpressionOps for ArrayExpression {
 
 impl Display for ArrayExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "ARRAY[{}]",
-               self.children.iter()
-                   .map(|e| e.to_string())
-                   .collect::<Vec<_>>()
-                   .join(", ")
+        write!(
+            f,
+            "ARRAY[{}]",
+            self.children
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
@@ -147,9 +149,11 @@ mod tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
-        let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
+        let result = expr
+            .evaluate(&tuple, &schema)
+            .expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
-        
+
         if let Val::Vector(vec) = result.get_val() {
             assert_eq!(vec.len(), 2);
             assert_eq!(vec[0].get_val(), &Val::Integer(1));
@@ -170,9 +174,11 @@ mod tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&*vec![], schema.clone(), rid);
 
-        let result = expr.evaluate(&tuple, &schema).expect("Evaluation should succeed");
+        let result = expr
+            .evaluate(&tuple, &schema)
+            .expect("Evaluation should succeed");
         assert_eq!(result.get_type_id(), TypeId::Vector);
-        
+
         if let Val::Vector(vec) = result.get_val() {
             assert_eq!(vec.len(), 0);
         } else {

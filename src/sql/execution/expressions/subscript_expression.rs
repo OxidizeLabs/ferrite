@@ -3,11 +3,11 @@ use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::types_db::type_id::TypeId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subscript {
@@ -29,11 +29,11 @@ pub struct SubscriptExpression {
 impl SubscriptExpression {
     pub fn new(expr: Arc<Expression>, subscript: Subscript, return_type: Column) -> Self {
         let mut children = vec![expr.clone()];
-        
+
         match &subscript {
             Subscript::Single(idx) => {
                 children.push(idx.clone());
-            },
+            }
             Subscript::Range { start, end } => {
                 if let Some(start_expr) = start {
                     children.push(start_expr.clone());
@@ -43,7 +43,7 @@ impl SubscriptExpression {
                 }
             }
         }
-        
+
         Self {
             expr,
             subscript,
@@ -56,20 +56,22 @@ impl SubscriptExpression {
 impl ExpressionOps for SubscriptExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let value = self.expr.evaluate(tuple, schema)?;
-        
+
         // Get the vector from the value
         let vec = match value.get_val() {
             Val::Vector(v) => v,
-            _ => return Err(ExpressionError::InvalidType(format!(
-                "Cannot perform subscript operation on non-vector type: {:?}", 
-                value.get_type_id()
-            ))),
+            _ => {
+                return Err(ExpressionError::InvalidType(format!(
+                    "Cannot perform subscript operation on non-vector type: {:?}",
+                    value.get_type_id()
+                )))
+            }
         };
 
         match &self.subscript {
             Subscript::Single(idx) => {
                 let idx_val = idx.evaluate(tuple, schema)?;
-                
+
                 // Convert index to usize
                 let index = match idx_val.get_val() {
                     Val::Integer(i) => {
@@ -79,30 +81,32 @@ impl ExpressionOps for SubscriptExpression {
                             if -i > len {
                                 return Err(ExpressionError::IndexOutOfBounds {
                                     idx: *i as usize,
-                                    size: len as usize
+                                    size: len as usize,
                                 });
                             }
                             (len + i) as usize
                         } else {
                             *i as usize
                         }
-                    },
-                    _ => return Err(ExpressionError::InvalidType(
-                        "Array index must be an integer".to_string()
-                    )),
+                    }
+                    _ => {
+                        return Err(ExpressionError::InvalidType(
+                            "Array index must be an integer".to_string(),
+                        ))
+                    }
                 };
 
                 // Check bounds
                 if index >= vec.len() {
                     return Err(ExpressionError::IndexOutOfBounds {
                         idx: index,
-                        size: vec.len()
+                        size: vec.len(),
                     });
                 }
 
                 Ok(vec[index].clone())
-            },
-            
+            }
+
             Subscript::Range { start, end } => {
                 let start_idx = match start {
                     Some(start_expr) => {
@@ -119,12 +123,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            },
-                            _ => return Err(ExpressionError::InvalidType(
-                                "Range start index must be an integer".to_string()
-                            )),
+                            }
+                            _ => {
+                                return Err(ExpressionError::InvalidType(
+                                    "Range start index must be an integer".to_string(),
+                                ))
+                            }
                         }
-                    },
+                    }
                     None => 0,
                 };
 
@@ -143,12 +149,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            },
-                            _ => return Err(ExpressionError::InvalidType(
-                                "Range end index must be an integer".to_string()
-                            )),
+                            }
+                            _ => {
+                                return Err(ExpressionError::InvalidType(
+                                    "Range end index must be an integer".to_string(),
+                                ))
+                            }
                         }
-                    },
+                    }
                     None => vec.len(),
                 };
 
@@ -164,22 +172,33 @@ impl ExpressionOps for SubscriptExpression {
         }
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
-        let value = self.expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
+        let value = self
+            .expr
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+
         // Get the vector from the value
         let vec = match value.get_val() {
             Val::Vector(v) => v,
-            _ => return Err(ExpressionError::InvalidType(format!(
-                "Cannot perform subscript operation on non-vector type: {:?}", 
-                value.get_type_id()
-            ))),
+            _ => {
+                return Err(ExpressionError::InvalidType(format!(
+                    "Cannot perform subscript operation on non-vector type: {:?}",
+                    value.get_type_id()
+                )))
+            }
         };
 
         match &self.subscript {
             Subscript::Single(idx) => {
-                let idx_val = idx.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-                
+                let idx_val =
+                    idx.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+
                 // Convert index to usize
                 let index = match idx_val.get_val() {
                     Val::Integer(i) => {
@@ -188,34 +207,41 @@ impl ExpressionOps for SubscriptExpression {
                             if -i > len {
                                 return Err(ExpressionError::IndexOutOfBounds {
                                     idx: *i as usize,
-                                    size: len as usize
+                                    size: len as usize,
                                 });
                             }
                             (len + i) as usize
                         } else {
                             *i as usize
                         }
-                    },
-                    _ => return Err(ExpressionError::InvalidType(
-                        "Array index must be an integer".to_string()
-                    )),
+                    }
+                    _ => {
+                        return Err(ExpressionError::InvalidType(
+                            "Array index must be an integer".to_string(),
+                        ))
+                    }
                 };
 
                 if index >= vec.len() {
                     return Err(ExpressionError::IndexOutOfBounds {
                         idx: index,
-                        size: vec.len()
+                        size: vec.len(),
                     });
                 }
 
                 Ok(vec[index].clone())
-            },
-            
+            }
+
             Subscript::Range { start, end } => {
                 // Similar logic as evaluate() for range handling
                 let start_idx = match start {
                     Some(start_expr) => {
-                        let start_val = start_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                        let start_val = start_expr.evaluate_join(
+                            left_tuple,
+                            left_schema,
+                            right_tuple,
+                            right_schema,
+                        )?;
                         match start_val.get_val() {
                             Val::Integer(i) => {
                                 if *i < 0 {
@@ -228,18 +254,25 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            },
-                            _ => return Err(ExpressionError::InvalidType(
-                                "Range start index must be an integer".to_string()
-                            )),
+                            }
+                            _ => {
+                                return Err(ExpressionError::InvalidType(
+                                    "Range start index must be an integer".to_string(),
+                                ))
+                            }
                         }
-                    },
+                    }
                     None => 0,
                 };
 
                 let end_idx = match end {
                     Some(end_expr) => {
-                        let end_val = end_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+                        let end_val = end_expr.evaluate_join(
+                            left_tuple,
+                            left_schema,
+                            right_tuple,
+                            right_schema,
+                        )?;
                         match end_val.get_val() {
                             Val::Integer(i) => {
                                 if *i < 0 {
@@ -252,12 +285,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            },
-                            _ => return Err(ExpressionError::InvalidType(
-                                "Range end index must be an integer".to_string()
-                            )),
+                            }
+                            _ => {
+                                return Err(ExpressionError::InvalidType(
+                                    "Range end index must be an integer".to_string(),
+                                ))
+                            }
                         }
-                    },
+                    }
                     None => vec.len(),
                 };
 
@@ -289,19 +324,34 @@ impl ExpressionOps for SubscriptExpression {
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        assert!(!children.is_empty(), "Must provide at least one child expression");
-        
+        assert!(
+            !children.is_empty(),
+            "Must provide at least one child expression"
+        );
+
         let new_expr = children[0].clone();
         let new_subscript = match &self.subscript {
             Subscript::Single(_) => {
-                assert_eq!(children.len(), 2, "Expected 2 children for single subscript");
+                assert_eq!(
+                    children.len(),
+                    2,
+                    "Expected 2 children for single subscript"
+                );
                 Subscript::Single(children[1].clone())
-            },
+            }
             Subscript::Range { start: _, end: _ } => {
                 assert!(children.len() <= 3, "Too many children for range subscript");
                 Subscript::Range {
-                    start: if children.len() > 1 { Some(children[1].clone()) } else { None },
-                    end: if children.len() > 2 { Some(children[2].clone()) } else { None },
+                    start: if children.len() > 1 {
+                        Some(children[1].clone())
+                    } else {
+                        None
+                    },
+                    end: if children.len() > 2 {
+                        Some(children[2].clone())
+                    } else {
+                        None
+                    },
                 }
             }
         };
@@ -319,10 +369,10 @@ impl ExpressionOps for SubscriptExpression {
 
         // Validate that base expression returns a vector
         if self.expr.get_return_type().get_type() != TypeId::Vector {
-            return Err(ExpressionError::InvalidType(
-                format!("Cannot perform subscript operation on non-vector type: {:?}", 
-                    self.expr.get_return_type().get_type())
-            ));
+            return Err(ExpressionError::InvalidType(format!(
+                "Cannot perform subscript operation on non-vector type: {:?}",
+                self.expr.get_return_type().get_type()
+            )));
         }
 
         // Validate subscript expressions
@@ -331,16 +381,16 @@ impl ExpressionOps for SubscriptExpression {
                 idx.validate(schema)?;
                 if idx.get_return_type().get_type() != TypeId::Integer {
                     return Err(ExpressionError::InvalidType(
-                        "Array index must be an integer".to_string()
+                        "Array index must be an integer".to_string(),
                     ));
                 }
-            },
+            }
             Subscript::Range { start, end } => {
                 if let Some(start) = start {
                     start.validate(schema)?;
                     if start.get_return_type().get_type() != TypeId::Integer {
                         return Err(ExpressionError::InvalidType(
-                            "Range start index must be an integer".to_string()
+                            "Range start index must be an integer".to_string(),
                         ));
                     }
                 }
@@ -348,7 +398,7 @@ impl ExpressionOps for SubscriptExpression {
                     end.validate(schema)?;
                     if end.get_return_type().get_type() != TypeId::Integer {
                         return Err(ExpressionError::InvalidType(
-                            "Range end index must be an integer".to_string()
+                            "Range end index must be an integer".to_string(),
                         ));
                     }
                 }
@@ -416,10 +466,11 @@ mod tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
 
         // Test positive index
-        let idx_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("2".to_string(), false),
-        ).unwrap()));
-        
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("2".to_string(), false))
+                .unwrap(),
+        ));
+
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
             Subscript::Single(idx_expr),
@@ -430,10 +481,11 @@ mod tests {
         assert_eq!(result, Value::new(3)); // 0-based indexing, so index 2 gives value 3
 
         // Test negative index
-        let neg_idx_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("-1".to_string(), false),
-        ).unwrap()));
-        
+        let neg_idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-1".to_string(), false))
+                .unwrap(),
+        ));
+
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
             Subscript::Single(neg_idx_expr),
@@ -451,12 +503,14 @@ mod tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
 
         // Test range with both bounds
-        let start_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("1".to_string(), false),
-        ).unwrap()));
-        let end_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("4".to_string(), false),
-        ).unwrap()));
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("1".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("4".to_string(), false))
+                .unwrap(),
+        ));
 
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
@@ -474,7 +528,7 @@ mod tests {
                 assert_eq!(v[0], Value::new(2));
                 assert_eq!(v[1], Value::new(3));
                 assert_eq!(v[2], Value::new(4));
-            },
+            }
             _ => panic!("Expected vector result"),
         }
     }
@@ -485,12 +539,14 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
 
-        let start_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("-3".to_string(), false),
-        ).unwrap()));
-        let end_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("-1".to_string(), false),
-        ).unwrap()));
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-3".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-1".to_string(), false))
+                .unwrap(),
+        ));
 
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
@@ -507,7 +563,7 @@ mod tests {
                 assert_eq!(v.len(), 2);
                 assert_eq!(v[0], Value::new(3));
                 assert_eq!(v[1], Value::new(4));
-            },
+            }
             _ => panic!("Expected vector result"),
         }
     }
@@ -519,10 +575,11 @@ mod tests {
         let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
 
         // Test index out of bounds
-        let idx_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("10".to_string(), false),
-        ).unwrap()));
-        
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("10".to_string(), false))
+                .unwrap(),
+        ));
+
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
             Subscript::Single(idx_expr),
@@ -535,10 +592,13 @@ mod tests {
         ));
 
         // Test invalid index type
-        let invalid_idx_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::SingleQuotedString("not_a_number".to_string()),
-        ).unwrap()));
-        
+        let invalid_idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::SingleQuotedString(
+                "not_a_number".to_string(),
+            ))
+            .unwrap(),
+        ));
+
         let subscript_expr = SubscriptExpression::new(
             vec_expr.clone(),
             Subscript::Single(invalid_idx_expr),
@@ -574,7 +634,7 @@ mod tests {
                 for i in 0..5 {
                     assert_eq!(v[i], Value::new(i as i32 + 1));
                 }
-            },
+            }
             _ => panic!("Expected vector result"),
         }
     }
@@ -582,9 +642,10 @@ mod tests {
     #[test]
     fn test_display() {
         let vec_expr = create_test_vector();
-        let idx_expr = Arc::new(Expression::Literal(LiteralValueExpression::new(
-            sqlparser::ast::Value::Number("1".to_string(), false),
-        ).unwrap()));
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("1".to_string(), false))
+                .unwrap(),
+        ));
 
         // Test single index display
         let single_subscript = SubscriptExpression::new(
@@ -598,15 +659,23 @@ mod tests {
         let range_subscript = SubscriptExpression::new(
             vec_expr.clone(),
             Subscript::Range {
-                start: Some(Arc::new(Expression::Literal(LiteralValueExpression::new(
-                    sqlparser::ast::Value::Number("1".to_string(), false),
-                ).unwrap()))),
-                end: Some(Arc::new(Expression::Literal(LiteralValueExpression::new(
-                    sqlparser::ast::Value::Number("3".to_string(), false),
-                ).unwrap()))),
+                start: Some(Arc::new(Expression::Literal(
+                    LiteralValueExpression::new(sqlparser::ast::Value::Number(
+                        "1".to_string(),
+                        false,
+                    ))
+                    .unwrap(),
+                ))),
+                end: Some(Arc::new(Expression::Literal(
+                    LiteralValueExpression::new(sqlparser::ast::Value::Number(
+                        "3".to_string(),
+                        false,
+                    ))
+                    .unwrap(),
+                ))),
             },
             Column::new("result", TypeId::Vector),
         );
         assert_eq!(range_subscript.to_string(), "test_vec[1:3]");
     }
-} 
+}

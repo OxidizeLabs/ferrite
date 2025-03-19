@@ -76,10 +76,7 @@ impl Catalog {
         }
 
         let table_oid = self.next_table_oid;
-        let table_heap = Arc::new(TableHeap::new(
-            self.bpm.clone(),
-            table_oid,
-        ));
+        let table_heap = Arc::new(TableHeap::new(self.bpm.clone(), table_oid));
 
         // Increment table OID
         self.next_table_oid += 1;
@@ -178,12 +175,10 @@ impl Catalog {
         // Now populate the index using the stored version with transaction support
         if let Some(table_info) = self.get_table(table_name) {
             let table_heap = table_info.get_table_heap();
-            
+
             // Create transactional table heap wrapper
-            let txn_table_heap = TransactionalTableHeap::new(
-                table_heap.clone(),
-                table_info.get_table_oidt(),
-            );
+            let txn_table_heap =
+                TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
 
             // Create a transaction for populating the index
             let txn = self
@@ -199,7 +194,7 @@ impl Catalog {
             // Get reference to the index we just created
             if let Some(_) = self.indexes.get(&index_oid) {
                 let mut index_write_guard = index.write();
-                
+
                 // Create iterator using transactional table heap
                 let mut iter = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
 
@@ -602,10 +597,7 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_heap = Arc::new(TableHeap::new(
-            bpm.clone(),
-            1,
-        ));
+        let table_heap = Arc::new(TableHeap::new(bpm.clone(), 1));
         let table_heap2 = Arc::new(TableHeap::new(bpm, 1));
 
         // Create two identical TableInfo instances
@@ -714,7 +706,8 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_create_result = catalog.create_table("test_table".to_string(), table_schema.clone());
+        let table_create_result =
+            catalog.create_table("test_table".to_string(), table_schema.clone());
         assert!(table_create_result.is_some(), "Failed to create table");
 
         // Create an index on the 'id' column
@@ -723,9 +716,9 @@ mod tests {
             "test_index",
             "test_table",
             key_schema.clone(),
-            vec![0],  // index on first column (id)
-            4,        // size of integer
-            false,    // not unique
+            vec![0], // index on first column (id)
+            4,       // size of integer
+            false,   // not unique
             IndexType::BPlusTreeIndex,
         );
         assert!(index_res.is_some(), "Failed to create index");
@@ -744,11 +737,18 @@ mod tests {
             false,
             IndexType::BPlusTreeIndex,
         );
-        assert!(duplicate_index.is_none(), "Should not be able to create duplicate index");
+        assert!(
+            duplicate_index.is_none(),
+            "Should not be able to create duplicate index"
+        );
 
         // Verify index exists in table's index list
         let table_indexes = catalog.get_table_indexes("test_table");
-        assert_eq!(table_indexes.len(), 1, "Table should have exactly one index");
+        assert_eq!(
+            table_indexes.len(),
+            1,
+            "Table should have exactly one index"
+        );
         assert_eq!(table_indexes[0].get_index_name(), "test_index");
     }
 
@@ -766,7 +766,8 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let table_create_result = catalog.create_table("lookup_test".to_string(), table_schema.clone());
+        let table_create_result =
+            catalog.create_table("lookup_test".to_string(), table_schema.clone());
         assert!(table_create_result.is_some(), "Failed to create table");
 
         // Create an index on the 'id' column
@@ -775,9 +776,9 @@ mod tests {
             "id_index",
             "lookup_test",
             key_schema,
-            vec![0],  // index on first column (id)
-            4,        // size of integer
-            true,     // unique
+            vec![0], // index on first column (id)
+            4,       // size of integer
+            true,    // unique
             IndexType::BPlusTreeIndex,
         );
         assert!(index_res.is_some(), "Failed to create index");
@@ -794,7 +795,10 @@ mod tests {
 
         // Test lookup with invalid OID
         let invalid_index = catalog.get_index_by_index_oid(999);
-        assert!(invalid_index.is_none(), "Should not find non-existent index");
+        assert!(
+            invalid_index.is_none(),
+            "Should not find non-existent index"
+        );
     }
 
     #[test]
@@ -824,10 +828,8 @@ mod tests {
         let table_heap = table_info.get_table_heap();
 
         // Create transactional table heap wrapper
-        let txn_table_heap = TransactionalTableHeap::new(
-            table_heap.clone(),
-            table_info.get_table_oidt(),
-        );
+        let txn_table_heap =
+            TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
 
         // Create and insert a test tuple
         let mut tuple = Tuple::new(
@@ -839,7 +841,8 @@ mod tests {
         let tuple_meta = TupleMeta::new(txn.get_transaction_id());
 
         // Insert the tuple using transactional table heap
-        let rid = txn_table_heap.insert_tuple(&tuple_meta, &mut tuple, txn_ctx.clone())
+        let rid = txn_table_heap
+            .insert_tuple(&tuple_meta, &mut tuple, txn_ctx.clone())
             .expect("Failed to insert tuple");
         tuple.set_rid(rid);
 

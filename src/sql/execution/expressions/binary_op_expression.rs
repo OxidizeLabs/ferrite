@@ -354,13 +354,13 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &[
-                Value::new(0),         // int_col
-                Value::new(0.0),       // decimal_col
-                Value::new(false),     // bool_col
-                Value::new(""),        // string_col
+                Value::new(0),     // int_col
+                Value::new(0.0),   // decimal_col
+                Value::new(false), // bool_col
+                Value::new(""),    // string_col
             ],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         // Test integer arithmetic
@@ -375,12 +375,7 @@ mod tests {
             let left_expr = create_constant_expr(Value::new(left), TypeId::Integer);
             let right_expr = create_constant_expr(Value::new(right), TypeId::Integer);
 
-            let binary_expr = BinaryOpExpression::new(
-                left_expr,
-                right_expr,
-                op,
-                vec![],
-            ).unwrap();
+            let binary_expr = BinaryOpExpression::new(left_expr, right_expr, op, vec![]).unwrap();
 
             let result = binary_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -398,12 +393,7 @@ mod tests {
             let left_expr = create_constant_expr(Value::new(left), TypeId::Decimal);
             let right_expr = create_constant_expr(Value::new(right), TypeId::Decimal);
 
-            let binary_expr = BinaryOpExpression::new(
-                left_expr,
-                right_expr,
-                op,
-                vec![],
-            ).unwrap();
+            let binary_expr = BinaryOpExpression::new(left_expr, right_expr, op, vec![]).unwrap();
 
             let result = binary_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -415,13 +405,13 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &[
-                Value::new(0),         // int_col
-                Value::new(0.0),       // decimal_col
-                Value::new(false),     // bool_col
-                Value::new(""),        // string_col
+                Value::new(0),     // int_col
+                Value::new(0.0),   // decimal_col
+                Value::new(false), // bool_col
+                Value::new(""),    // string_col
             ],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let test_cases = vec![
@@ -437,12 +427,7 @@ mod tests {
             let left_expr = create_constant_expr(Value::new(left), TypeId::Integer);
             let right_expr = create_constant_expr(Value::new(right), TypeId::Integer);
 
-            let binary_expr = BinaryOpExpression::new(
-                left_expr,
-                right_expr,
-                op,
-                vec![],
-            ).unwrap();
+            let binary_expr = BinaryOpExpression::new(left_expr, right_expr, op, vec![]).unwrap();
 
             let result = binary_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -454,13 +439,13 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &[
-                Value::new(0),         // int_col
-                Value::new(0.0),       // decimal_col
-                Value::new(false),     // bool_col
-                Value::new(""),        // string_col
+                Value::new(0),     // int_col
+                Value::new(0.0),   // decimal_col
+                Value::new(false), // bool_col
+                Value::new(""),    // string_col
             ],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let test_cases = vec![
@@ -474,12 +459,7 @@ mod tests {
             let left_expr = create_constant_expr(Value::new(left), TypeId::Boolean);
             let right_expr = create_constant_expr(Value::new(right), TypeId::Boolean);
 
-            let binary_expr = BinaryOpExpression::new(
-                left_expr,
-                right_expr,
-                op,
-                vec![],
-            ).unwrap();
+            let binary_expr = BinaryOpExpression::new(left_expr, right_expr, op, vec![]).unwrap();
 
             let result = binary_expr.evaluate(&tuple, &schema).unwrap();
             assert_eq!(result, Value::new(expected));
@@ -491,24 +471,21 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &[
-                Value::new(0),         // int_col
-                Value::new(0.0),       // decimal_col
-                Value::new(false),     // bool_col
-                Value::new(""),        // string_col
+                Value::new(0),     // int_col
+                Value::new(0.0),   // decimal_col
+                Value::new(false), // bool_col
+                Value::new(""),    // string_col
             ],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let left_expr = create_constant_expr(Value::new("Hello"), TypeId::VarChar);
         let right_expr = create_constant_expr(Value::new("World"), TypeId::VarChar);
 
-        let binary_expr = BinaryOpExpression::new(
-            left_expr,
-            right_expr,
-            BinaryOperator::StringConcat,
-            vec![],
-        ).unwrap();
+        let binary_expr =
+            BinaryOpExpression::new(left_expr, right_expr, BinaryOperator::StringConcat, vec![])
+                .unwrap();
 
         let result = binary_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new("HelloWorld"));
@@ -521,7 +498,11 @@ mod tests {
             // Logical operations with non-boolean operands
             (TypeId::Integer, TypeId::Integer, BinaryOperator::And),
             // String concatenation with non-string operands
-            (TypeId::Integer, TypeId::VarChar, BinaryOperator::StringConcat),
+            (
+                TypeId::Integer,
+                TypeId::VarChar,
+                BinaryOperator::StringConcat,
+            ),
             // Arithmetic with mixed incompatible types
             (TypeId::Boolean, TypeId::Integer, BinaryOperator::Plus),
         ];
@@ -530,14 +511,15 @@ mod tests {
             let left_expr = create_constant_expr(Value::new(1), left_type);
             let right_expr = create_constant_expr(Value::new(1), right_type);
 
-            let result = BinaryOpExpression::new(
-                left_expr,
-                right_expr,
-                op.clone(),
-                vec![],
-            );
+            let result = BinaryOpExpression::new(left_expr, right_expr, op.clone(), vec![]);
 
-            assert!(result.is_err(), "Expected error for {:?} operation between {:?} and {:?}", op, left_type, right_type);
+            assert!(
+                result.is_err(),
+                "Expected error for {:?} operation between {:?} and {:?}",
+                op,
+                left_type,
+                right_type
+            );
         }
     }
 
@@ -546,24 +528,20 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &[
-                Value::new(0),         // int_col
-                Value::new(0.0),       // decimal_col
-                Value::new(false),     // bool_col
-                Value::new(""),        // string_col
+                Value::new(0),     // int_col
+                Value::new(0.0),   // decimal_col
+                Value::new(false), // bool_col
+                Value::new(""),    // string_col
             ],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let left_expr = create_constant_expr(Value::new(10), TypeId::Integer);
         let right_expr = create_constant_expr(Value::new(0), TypeId::Integer);
 
-        let binary_expr = BinaryOpExpression::new(
-            left_expr,
-            right_expr,
-            BinaryOperator::Divide,
-            vec![],
-        ).unwrap();
+        let binary_expr =
+            BinaryOpExpression::new(left_expr, right_expr, BinaryOperator::Divide, vec![]).unwrap();
 
         let result = binary_expr.evaluate(&tuple, &schema);
         assert!(result.is_err());
@@ -574,12 +552,8 @@ mod tests {
         let left_expr = create_constant_expr(Value::new(5), TypeId::Integer);
         let right_expr = create_constant_expr(Value::new(3), TypeId::Integer);
 
-        let binary_expr = BinaryOpExpression::new(
-            left_expr,
-            right_expr,
-            BinaryOperator::Plus,
-            vec![],
-        ).unwrap();
+        let binary_expr =
+            BinaryOpExpression::new(left_expr, right_expr, BinaryOperator::Plus, vec![]).unwrap();
 
         assert_eq!(format!("{}", binary_expr), "(5 + 3)");
         assert_eq!(format!("{:#}", binary_expr), "(Constant(5) + Constant(3))");
@@ -596,14 +570,12 @@ mod tests {
         let left_expr = create_constant_expr(Value::new(5), TypeId::Integer);
         let right_expr = create_constant_expr(Value::new(3), TypeId::Integer);
 
-        let binary_expr = BinaryOpExpression::new(
-            left_expr,
-            right_expr,
-            BinaryOperator::Plus,
-            vec![],
-        ).unwrap();
+        let binary_expr =
+            BinaryOpExpression::new(left_expr, right_expr, BinaryOperator::Plus, vec![]).unwrap();
 
-        let result = binary_expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+        let result = binary_expr
+            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+            .unwrap();
         assert_eq!(result, Value::new(8));
     }
 }

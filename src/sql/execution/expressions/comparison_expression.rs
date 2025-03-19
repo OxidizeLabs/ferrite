@@ -111,8 +111,12 @@ impl ExpressionOps for ComparisonExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let lhs = self.left.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let rhs = self.right.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let lhs = self
+            .left
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let rhs = self
+            .right
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
 
         let bool_result = match comparison_result {

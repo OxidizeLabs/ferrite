@@ -99,11 +99,12 @@ impl Type for StructType {
 
         if let Val::Vector(values) = val.get_val() {
             let mut result = String::from("STRUCT{");
-            
+
             // Skip the first element which contains field names
             if values.len() > 1 {
                 let field_names = if let Val::Vector(names) = &values[0].value_ {
-                    names.iter()
+                    names
+                        .iter()
                         .map(|v| {
                             if let Val::VarLen(name) | Val::ConstLen(name) = &v.value_ {
                                 name.clone()
@@ -120,17 +121,21 @@ impl Type for StructType {
                     if i > 1 {
                         result.push_str(", ");
                     }
-                    
-                    let field_name = if i-1 < field_names.len() {
-                        &field_names[i-1]
+
+                    let field_name = if i - 1 < field_names.len() {
+                        &field_names[i - 1]
                     } else {
                         "?"
                     };
-                    
-                    result.push_str(&format!("{}: {}", field_name, ToString::to_string(&values[i])));
+
+                    result.push_str(&format!(
+                        "{}: {}",
+                        field_name,
+                        ToString::to_string(&values[i])
+                    ));
                 }
             }
-            
+
             result.push('}');
             return result;
         }
@@ -149,65 +154,75 @@ pub static STRUCT_TYPE_INSTANCE: StructType = StructType;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn create_test_struct(fields: Vec<&str>, values: Vec<Value>) -> Value {
-        let field_names = fields.into_iter()
+        let field_names = fields
+            .into_iter()
             .map(|s| Value::new(Val::VarLen(s.to_string())))
             .collect::<Vec<_>>();
-        
+
         let mut struct_values = vec![Value::new(Val::Vector(field_names))];
         struct_values.extend(values);
-        
+
         Value::new(Val::Vector(struct_values))
     }
 
     #[test]
     fn test_struct_equality() {
         let struct_type = StructType;
-        
+
         // Test empty struct
         let empty_struct = create_test_struct(vec![], vec![]);
         assert_eq!(struct_type.compare_equals(&empty_struct), CmpBool::CmpFalse);
-        
+
         // Test simple struct
         let struct1 = create_test_struct(
             vec!["name", "age"],
             vec![
                 Value::new(Val::VarLen("John".to_string())),
-                Value::new(Val::Integer(30))
-            ]
+                Value::new(Val::Integer(30)),
+            ],
         );
-        
+
         assert_eq!(struct_type.compare_equals(&struct1), CmpBool::CmpTrue);
-        
+
         // Test null comparison
-        assert_eq!(struct_type.compare_equals(&Value::new(Val::Null)), CmpBool::CmpNull);
-        
+        assert_eq!(
+            struct_type.compare_equals(&Value::new(Val::Null)),
+            CmpBool::CmpNull
+        );
+
         // Test invalid value comparison
-        assert_eq!(struct_type.compare_equals(&Value::new(Val::Integer(42))), CmpBool::CmpFalse);
+        assert_eq!(
+            struct_type.compare_equals(&Value::new(Val::Integer(42))),
+            CmpBool::CmpFalse
+        );
     }
 
     #[test]
     fn test_struct_to_string() {
         let struct_type = StructType;
-        
+
         // Test null
         assert_eq!(struct_type.to_string(&Value::new(Val::Null)), "NULL");
-        
+
         // Test empty struct
         let empty_struct = create_test_struct(vec![], vec![]);
         assert_eq!(struct_type.to_string(&empty_struct), "STRUCT{}");
-        
+
         // Test struct with fields
         let struct1 = create_test_struct(
             vec!["name", "age"],
             vec![
                 Value::new(Val::VarLen("John".to_string())),
-                Value::new(Val::Integer(30))
-            ]
+                Value::new(Val::Integer(30)),
+            ],
         );
-        assert_eq!(struct_type.to_string(&struct1), "STRUCT{name: John, age: 30}");
-        
+        assert_eq!(
+            struct_type.to_string(&struct1),
+            "STRUCT{name: John, age: 30}"
+        );
+
         // Test invalid struct
         assert_eq!(
             struct_type.to_string(&Value::new(Val::Integer(42))),
@@ -220,22 +235,31 @@ mod tests {
         let struct_type = StructType;
         let struct1 = create_test_struct(
             vec!["name"],
-            vec![Value::new(Val::VarLen("John".to_string()))]
+            vec![Value::new(Val::VarLen("John".to_string()))],
         );
-        
+
         // Test arithmetic operations
         assert!(struct_type.add(&struct1).is_err());
         assert!(struct_type.subtract(&struct1).is_err());
         assert!(struct_type.multiply(&struct1).is_err());
         assert!(struct_type.divide(&struct1).is_err());
-        
+
         // Test comparison operations
         assert_eq!(struct_type.compare_less_than(&struct1), CmpBool::CmpFalse);
-        assert_eq!(struct_type.compare_greater_than(&struct1), CmpBool::CmpFalse);
-        
+        assert_eq!(
+            struct_type.compare_greater_than(&struct1),
+            CmpBool::CmpFalse
+        );
+
         // Test that <= and >= are same as ==
         let equals_result = struct_type.compare_equals(&struct1);
-        assert_eq!(struct_type.compare_less_than_equals(&struct1), equals_result);
-        assert_eq!(struct_type.compare_greater_than_equals(&struct1), equals_result);
+        assert_eq!(
+            struct_type.compare_less_than_equals(&struct1),
+            equals_result
+        );
+        assert_eq!(
+            struct_type.compare_greater_than_equals(&struct1),
+            equals_result
+        );
     }
-} 
+}

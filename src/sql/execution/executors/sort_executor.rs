@@ -69,7 +69,7 @@ impl AbstractExecutor for SortExecutor {
             let schema = self.plan.get_output_schema().clone();
 
             debug!("Starting to sort {} tuples", self.sorted_tuples.len());
-            
+
             // Sort tuples using a more explicit, iterative approach
             self.sorted_tuples.sort_by(|(tuple_a, _), (tuple_b, _)| {
                 // Compare each order by expression in sequence
@@ -77,7 +77,7 @@ impl AbstractExecutor for SortExecutor {
                     // Evaluate expressions for both tuples
                     let val_a_result = order_by.evaluate(tuple_a, &schema);
                     let val_b_result = order_by.evaluate(tuple_b, &schema);
-                    
+
                     // Handle evaluation results
                     if let (Ok(val_a), Ok(val_b)) = (&val_a_result, &val_b_result) {
                         // Compare values
@@ -107,11 +107,11 @@ impl AbstractExecutor for SortExecutor {
                         continue;
                     }
                 }
-                
+
                 // If all expressions are equal or had errors, return equal
                 std::cmp::Ordering::Equal
             });
-            
+
             debug!("Sorting completed");
         }
 
@@ -133,7 +133,11 @@ impl AbstractExecutor for SortExecutor {
 
         let result = self.sorted_tuples[self.current_index].clone();
         self.current_index += 1;
-        debug!("Returning tuple {} of {}", self.current_index, self.sorted_tuples.len());
+        debug!(
+            "Returning tuple {} of {}",
+            self.current_index,
+            self.sorted_tuples.len()
+        );
         Some(result)
     }
 
@@ -301,11 +305,8 @@ mod tests {
             .collect();
 
         // Create mock scan plan
-        let mock_plan = MockScanNode::new(
-            schema.clone(),
-            "test_table".to_string(),
-            vec![],
-        ).with_tuples(mock_tuples.clone());
+        let mock_plan = MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+            .with_tuples(mock_tuples.clone());
 
         // Create sort expression (sort by age)
         let age_col = schema.get_column(2).unwrap().clone();
@@ -357,11 +358,11 @@ mod tests {
 
         // Create test data with duplicate ages
         let mock_data = vec![
-            (1, "Alice", 30),   // Should be first due to name
-            (2, "Bob", 30),     // Should be second due to name
+            (1, "Alice", 30), // Should be first due to name
+            (2, "Bob", 30),   // Should be second due to name
             (3, "Charlie", 25),
             (4, "David", 35),
-            (5, "Eve", 25),     // Should come before Charlie due to name
+            (5, "Eve", 25), // Should come before Charlie due to name
         ];
 
         let mock_tuples: Vec<(Vec<Value>, RID)> = mock_data
@@ -379,11 +380,8 @@ mod tests {
             })
             .collect();
 
-        let mock_plan = MockScanNode::new(
-            schema.clone(),
-            "test_table".to_string(),
-            vec![],
-        ).with_tuples(mock_tuples.clone());
+        let mock_plan = MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+            .with_tuples(mock_tuples.clone());
 
         // Sort by age, then name
         let age_col = schema.get_column(2).unwrap().clone();
@@ -467,11 +465,8 @@ mod tests {
             ));
         }
 
-        let mock_plan = MockScanNode::new(
-            schema.clone(),
-            "test_table".to_string(),
-            vec![],
-        ).with_tuples(mock_tuples.clone());
+        let mock_plan = MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+            .with_tuples(mock_tuples.clone());
 
         // Sort by age
         let age_col = schema.get_column(2).unwrap().clone();
@@ -503,20 +498,20 @@ mod tests {
         // Verify the first few results to ensure sorting worked
         let mut count = 0;
         let mut last_age = 0;
-        
+
         while let Some((tuple, _)) = sort_executor.next() {
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
-            
+
             // Verify ascending order
             assert!(age >= last_age, "Ages should be in ascending order");
             last_age = age;
-            
+
             count += 1;
             if count > 1000 {
                 panic!("Too many results returned");
             }
         }
-        
+
         assert_eq!(count, 1000, "Should have 1000 results");
     }
 
@@ -554,11 +549,8 @@ mod tests {
             })
             .collect();
 
-        let mock_plan = MockScanNode::new(
-            schema.clone(),
-            "test_table".to_string(),
-            vec![],
-        ).with_tuples(mock_tuples.clone());
+        let mock_plan = MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+            .with_tuples(mock_tuples.clone());
 
         // Create multiple sort expressions (sort by age, then name, then id)
         let age_col = schema.get_column(2).unwrap().clone();
@@ -616,21 +608,27 @@ mod tests {
 
         // Verify results are sorted correctly
         assert_eq!(results.len(), 5, "Should have 5 results");
-        
+
         // Check that results are in ascending order by age
         for i in 1..results.len() {
-            assert!(results[i].0 >= results[i-1].0, 
-                "Ages should be in ascending order");
-            
+            assert!(
+                results[i].0 >= results[i - 1].0,
+                "Ages should be in ascending order"
+            );
+
             // If ages are equal, check names
-            if results[i].0 == results[i-1].0 {
-                assert!(results[i].1 >= results[i-1].1, 
-                    "Names should be in ascending order when ages are equal");
-                
+            if results[i].0 == results[i - 1].0 {
+                assert!(
+                    results[i].1 >= results[i - 1].1,
+                    "Names should be in ascending order when ages are equal"
+                );
+
                 // If names are equal, check ids
-                if results[i].1 == results[i-1].1 {
-                    assert!(results[i].2 >= results[i-1].2, 
-                        "IDs should be in ascending order when ages and names are equal");
+                if results[i].1 == results[i - 1].1 {
+                    assert!(
+                        results[i].2 >= results[i - 1].2,
+                        "IDs should be in ascending order when ages and names are equal"
+                    );
                 }
             }
         }
@@ -670,11 +668,8 @@ mod tests {
             })
             .collect();
 
-        let mock_plan = MockScanNode::new(
-            schema.clone(),
-            "test_table".to_string(),
-            vec![],
-        ).with_tuples(mock_tuples.clone());
+        let mock_plan = MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+            .with_tuples(mock_tuples.clone());
 
         // Create sort expressions
         let id_col = schema.get_column(0).unwrap().clone();
@@ -745,11 +740,8 @@ mod tests {
         ));
 
         // Create the outermost executor
-        let mut outer_sort_executor = SortExecutor::new(
-            middle_sort_executor,
-            exec_ctx,
-            outer_sort_plan,
-        );
+        let mut outer_sort_executor =
+            SortExecutor::new(middle_sort_executor, exec_ctx, outer_sort_plan);
 
         // Initialize and run the nested executors
         outer_sort_executor.init();
@@ -763,11 +755,13 @@ mod tests {
 
         // Verify we got all results
         assert_eq!(results.len(), 5, "Should have 5 results");
-        
+
         // Verify results are sorted by age (the outermost sort)
         for i in 1..results.len() {
-            assert!(results[i] >= results[i-1], 
-                "Ages should be in ascending order");
+            assert!(
+                results[i] >= results[i - 1],
+                "Ages should be in ascending order"
+            );
         }
     }
 }
