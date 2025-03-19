@@ -33,11 +33,20 @@ use sqlparser::ast::{
 };
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
-use log::debug;
-use std::collections::HashMap;
+use log::{debug, info, error, warn};
+use std::collections::{HashMap, HashSet};
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::types_db::type_id::TypeId;
 use crate::catalog::column::Column;
+use std::cell::Cell;
+use std::thread::LocalKey;
+use std::thread_local;
+use std::ptr;
+
+// Add thread-local variable for tracking recursion depth
+thread_local! {
+    static RECURSION_DEPTH: Cell<usize> = Cell::new(0);
+}
 
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
@@ -81,6 +90,8 @@ pub enum LogicalPlanType {
     Projection {
         expressions: Vec<Arc<Expression>>,
         schema: Schema,
+        /// Maps output column positions to input column positions
+        column_mappings: Vec<usize>,
     },
     Insert {
         table_name: String,
@@ -253,6 +264,7 @@ impl LogicalPlan {
             LogicalPlanType::Projection {
                 expressions,
                 schema,
+                column_mappings,
             } => {
                 result.push_str(&format!("{}→ Projection\n", indent_str));
                 result.push_str(&format!("{}   Expressions: [", indent_str));
@@ -346,30 +358,16 @@ impl LogicalPlan {
                     indent_str, right_schema
                 ));
             }
-            LogicalPlanType::NestedIndexJoin {
-                left_schema,
-                right_schema,
-                predicate,
-                join_type,
-            } => {
+            LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
                 result.push_str(&format!("{}→ NestedIndexJoin\n", indent_str));
-                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
-                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
                 result.push_str(&format!(
                     "{}   Right Schema: {}\n",
                     indent_str, right_schema
                 ));
             }
-            LogicalPlanType::HashJoin {
-                left_schema,
-                right_schema,
-                predicate,
-                join_type,
-            } => {
+            LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
                 result.push_str(&format!("{}→ HashJoin\n", indent_str));
-                result.push_str(&format!("{}   Join Type: {:?}\n", indent_str, join_type));
-                result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Left Schema: {}\n", indent_str, left_schema));
                 result.push_str(&format!(
                     "{}   Right Schema: {}\n",
@@ -544,10 +542,49 @@ impl LogicalPlan {
         schema: Schema,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
+        // Get the input schema
+        let input_schema = input.get_schema();
+
+        // Calculate column mappings
+        let mut column_mappings = Vec::with_capacity(expressions.len());
+
+        for expr in &expressions {
+            if let Expression::ColumnRef(col_ref) = expr.as_ref() {
+                let col_name = col_ref.get_return_type().get_name();
+
+                // Try to find the column in the input schema
+                let input_idx = input_schema
+                    .get_columns()
+                    .iter()
+                    .position(|c| c.get_name() == col_name)
+                    .unwrap_or_else(|| {
+                        // If not found directly, look for aggregate functions
+                        input_schema
+                            .get_columns()
+                            .iter()
+                            .position(|c| {
+                                c.get_name().starts_with("SUM(") ||
+                                c.get_name().starts_with("COUNT(") ||
+                                c.get_name().starts_with("AVG(") ||
+                                c.get_name().starts_with("MIN(") ||
+                                c.get_name().starts_with("MAX(")
+                            })
+                            .unwrap_or(0) // Default to first column if not found
+                    });
+
+                column_mappings.push(input_idx);
+            } else {
+                // For expressions that aren't simple column references,
+                // we'll just use a placeholder mapping
+                column_mappings.push(0);
+            }
+        }
+
         Box::new(Self::new(
             LogicalPlanType::Projection {
                 expressions,
                 schema,
+                column_mappings,
             },
             vec![input],
         ))
@@ -769,32 +806,32 @@ impl LogicalPlan {
                 } else {
                     left_schema.clone()
                 };
-                
+
                 let right_child_schema = if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     right_schema.clone()
                 };
-                
+
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
-                
+
                 debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
-                
+
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
-                
+
                 // Add all columns from the left schema, preserving their original names
                 for col in left_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 // Add all columns from the right schema, preserving their original names
                 for col in right_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 Schema::new(merged_columns)
             }
             LogicalPlanType::NestedIndexJoin { left_schema, right_schema, .. } => {
@@ -805,32 +842,32 @@ impl LogicalPlan {
                 } else {
                     left_schema.clone()
                 };
-                
+
                 let right_child_schema = if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     right_schema.clone()
                 };
-                
+
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
-                
+
                 debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
-                
+
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
-                
+
                 // Add all columns from the left schema, preserving their original names
                 for col in left_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 // Add all columns from the right schema, preserving their original names
                 for col in right_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 Schema::new(merged_columns)
             }
             LogicalPlanType::HashJoin { left_schema, right_schema, .. } => {
@@ -841,32 +878,32 @@ impl LogicalPlan {
                 } else {
                     left_schema.clone()
                 };
-                
+
                 let right_child_schema = if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     right_schema.clone()
                 };
-                
+
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
                 let right_alias = extract_table_alias_from_schema(&right_child_schema);
-                
+
                 debug!("Merging schemas in get_schema with aliases: left={:?}, right={:?}", left_alias, right_alias);
-                
+
                 // Create a new schema that preserves all column names with their original aliases
                 let mut merged_columns = Vec::new();
-                
+
                 // Add all columns from the left schema, preserving their original names
                 for col in left_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 // Add all columns from the right schema, preserving their original names
                 for col in right_child_schema.get_columns() {
                     merged_columns.push(col.clone());
                 }
-                
+
                 Schema::new(merged_columns)
             }
             LogicalPlanType::Filter { output_schema, .. } => output_schema.clone(),
@@ -880,9 +917,143 @@ impl LogicalPlan {
     }
 }
 
-impl LogicalToPhysical for LogicalPlan {
-    fn to_physical_plan(&self) -> Result<PlanNode, String> {
-        match &self.plan_type {
+/// A struct to handle the conversion from logical plans to physical plans
+/// using an iterative approach to avoid stack overflows
+struct PlanConverter<'a> {
+    stack: Vec<&'a LogicalPlan>,
+    results: HashMap<usize, Result<PlanNode, String>>,
+    visited: HashSet<usize>,
+}
+
+impl<'a> PlanConverter<'a> {
+    /// Create a new PlanConverter with the root node
+    fn new(root: &'a LogicalPlan) -> Self {
+        let mut converter = Self {
+            stack: Vec::new(),
+            results: HashMap::new(),
+            visited: HashSet::new(),
+        };
+        converter.stack.push(root);
+        converter
+    }
+
+    /// Convert the logical plan to a physical plan using an iterative approach
+    fn convert(&mut self) -> Result<PlanNode, String> {
+        // Store the root node ID at the beginning
+        if self.stack.is_empty() {
+            return Err("Empty plan stack".to_string());
+        }
+        
+        let root_node = self.stack[0];
+        let root_id = ptr::addr_of!(*root_node) as usize;
+        
+        while let Some(node) = self.stack.pop() {
+            let node_id = ptr::addr_of!(*node) as usize;
+            
+            // If we've already processed this node, skip it
+            if self.results.contains_key(&node_id) {
+                continue;
+            }
+            
+            // Check if all children have been processed
+            if self.are_all_children_processed(node) {
+                // Process the current node
+                let result = self.convert_node(node);
+                self.results.insert(node_id, result);
+            } else {
+                // Mark this node as being processed
+                self.visited.insert(node_id);
+                
+                // Push the node back onto the stack
+                self.stack.push(node);
+                
+                // Push all unprocessed children onto the stack
+                self.push_unprocessed_children(node);
+                
+                // Remove this node from visited since we're done with its children
+                self.visited.remove(&node_id);
+            }
+        }
+        
+        // Get the result for the root node using the stored ID
+        match self.results.get(&root_id) {
+            Some(result) => result.clone(),
+            None => Err("Root node not processed".to_string())
+        }
+    }
+    
+    /// Check if all children of a node have been processed
+    fn are_all_children_processed(&self, node: &'a LogicalPlan) -> bool {
+        // If the node has no children, return true immediately
+        if node.children.is_empty() {
+            return true;
+        }
+        
+        let mut all_children_processed = true;
+        
+        for child in &node.children {
+            let child_id = ptr::addr_of!(**child) as usize;
+            if !self.results.contains_key(&child_id) {
+                all_children_processed = false;
+                break;
+            } else if let Some(Err(_)) = self.results.get(&child_id) {
+                all_children_processed = false;
+                break;
+            }
+        }
+        
+        all_children_processed
+    }
+    
+    /// Push all unprocessed children of a node onto the stack
+    fn push_unprocessed_children(&mut self, node: &'a LogicalPlan) {
+        // If the node has no children, return immediately
+        if node.children.is_empty() {
+            return;
+        }
+        
+        for child in node.children.iter().rev() {
+            let child_ref = child.as_ref();
+            let child_id = ptr::addr_of!(*child_ref) as usize;
+            
+            if !self.results.contains_key(&child_id) {
+                // Check for cycles
+                if self.visited.contains(&child_id) {
+                    self.results.insert(
+                        child_id, 
+                        Err(format!("Cycle detected in plan conversion at node: {:?}", child_ref.plan_type))
+                    );
+                } else {
+                    self.stack.push(child_ref);
+                }
+            }
+        }
+    }
+    
+    /// Get all processed child plans for a node
+    fn get_child_plans(&self, node: &'a LogicalPlan) -> Vec<PlanNode> {
+        // If the node has no children, return an empty vector immediately
+        if node.children.is_empty() {
+            return Vec::new();
+        }
+        
+        let mut child_plans = Vec::new();
+        
+        for child in &node.children {
+            let child_id = ptr::addr_of!(**child) as usize;
+            if let Some(Ok(plan)) = self.results.get(&child_id) {
+                child_plans.push(plan.clone());
+            }
+        }
+        
+        child_plans
+    }
+    
+    /// Convert a single node to a physical plan
+    fn convert_node(&self, node: &'a LogicalPlan) -> Result<PlanNode, String> {
+        let child_plans = self.get_child_plans(node);
+        
+        match &node.plan_type {
             LogicalPlanType::CreateTable {
                 schema,
                 table_name,
@@ -892,7 +1063,7 @@ impl LogicalToPhysical for LogicalPlan {
                 table_name.clone(),
                 *if_not_exists,
             ))),
-
+            
             LogicalPlanType::CreateIndex {
                 schema,
                 table_name,
@@ -906,7 +1077,7 @@ impl LogicalToPhysical for LogicalPlan {
                 key_attrs.clone(),
                 *if_not_exists,
             ))),
-
+            
             LogicalPlanType::TableScan {
                 table_name,
                 schema,
@@ -916,7 +1087,7 @@ impl LogicalToPhysical for LogicalPlan {
                 *table_oid,
                 table_name.clone(),
             ))),
-
+            
             LogicalPlanType::IndexScan {
                 table_name,
                 table_oid,
@@ -932,7 +1103,7 @@ impl LogicalToPhysical for LogicalPlan {
                 *index_oid,
                 predicate_keys.clone(),
             ))),
-
+            
             LogicalPlanType::Filter {
                 schema,
                 table_oid,
@@ -940,157 +1111,97 @@ impl LogicalToPhysical for LogicalPlan {
                 predicate,
                 ..
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Filter(FilterNode::new(
                     schema.clone(),
                     *table_oid,
                     table_name.to_string(),
                     predicate.clone(),
-                    children,
+                    child_plans,
                 )))
-            }
-
+            },
+            
             LogicalPlanType::Projection {
                 expressions,
                 schema,
+                column_mappings,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
-
-                // Get the input schema from the child
-                let input_schema = if let Some(child) = self.children.first() {
-                    child.get_schema()
-                } else {
-                    return Err("Projection must have a child node".to_string());
-                };
-
-                // Create column mappings and update output schema
-                let mut output_schema = schema.clone();
-                let mut column_mappings = Vec::new();
-
-                for (i, expr) in expressions.iter().enumerate() {
-                    if let Expression::ColumnRef(col_ref) = expr.as_ref() {
-                        let col_name = col_ref.get_return_type().get_name();
-                        let input_idx = input_schema
-                            .get_columns()
-                            .iter()
-                            .position(|c| {
-                                // Match either exact name or aggregate function name
-                                c.get_name() == col_name
-                                    || (c.get_name().starts_with("SUM(") && col_name == "total_age")
-                                    || (c.get_name().starts_with("COUNT(")
-                                    && col_name == "emp_count")
-                                    || (c.get_name().starts_with("AVG(")
-                                    && col_name == "avg_salary")
-                                    || (c.get_name().starts_with("MIN(") && col_name == "min_age")
-                                    || (c.get_name().starts_with("MAX(")
-                                    && col_name == "max_salary")
-                            })
-                            .unwrap_or(i);
-
-                        column_mappings.push(input_idx);
-
-                        // Update the output schema column name to use the alias
-                        output_schema.get_columns_mut()[i].set_name(col_name.to_string());
-                    } else {
-                        column_mappings.push(i);
-                    }
-                }
-
+                // Create output schema
+                let output_schema = schema.clone();
+                
                 Ok(PlanNode::Projection(
-                    ProjectionNode::new(output_schema, expressions.clone(), column_mappings)
-                        .with_children(children),
+                    ProjectionNode::new(output_schema, expressions.clone(), column_mappings.clone())
+                        .with_children(child_plans),
                 ))
-            }
-
+            },
+            
             LogicalPlanType::Insert {
                 table_name,
                 schema,
                 table_oid,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Insert(InsertNode::new(
                     schema.clone(),
                     *table_oid,
                     table_name.to_string(),
                     vec![],
-                    children,
+                    child_plans,
                 )))
-            }
-
+            },
+            
+            LogicalPlanType::Values {
+                rows,
+                schema,
+            } => {
+                Ok(PlanNode::Values(ValuesNode::new(
+                    schema.clone(),
+                    rows.clone(),
+                    child_plans,
+                )))
+            },
+            
+            LogicalPlanType::MockScan {
+                table_name,
+                schema,
+                table_oid: _,
+            } => Ok(PlanNode::MockScan(MockScanNode::new(
+                schema.clone(),
+                table_name.clone(),
+                vec![],
+            ))),
+            
             LogicalPlanType::Delete {
                 table_name,
                 schema,
                 table_oid,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Delete(DeleteNode::new(
                     schema.clone(),
                     table_name.clone(),
                     *table_oid,
-                    children,
+                    child_plans,
                 )))
-            }
-
+            },
+            
             LogicalPlanType::Update {
                 table_name,
                 schema,
                 table_oid,
                 update_expressions,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
                 Ok(PlanNode::Update(UpdateNode::new(
                     schema.clone(),
                     table_name.clone(),
                     *table_oid,
                     update_expressions.clone(),
-                    children,
+                    child_plans,
                 )))
-            }
-
-            LogicalPlanType::Values { rows, schema } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
-                Ok(PlanNode::Values(ValuesNode::new(
-                    schema.clone(),
-                    rows.clone(),
-                    children,
-                )))
-            }
-
+            },
+            
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
                 schema,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?;
-
                 // Filter out duplicate expressions
                 let agg_exprs = aggregates
                     .iter()
@@ -1107,211 +1218,206 @@ impl LogicalToPhysical for LogicalPlan {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-
+                
                 Ok(PlanNode::Aggregation(AggregationPlanNode::new(
-                    children,
+                    child_plans,
                     group_by.clone(),
                     agg_exprs,
                 )))
-            }
-
+            },
+            
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
                 right_schema,
                 predicate,
                 join_type,
             } => {
-                let left = self.children[0].to_physical_plan()?;
-                let right = self.children[1].to_physical_plan()?;
-
-                // Extract join key expressions from the predicate
-                let (left_keys, right_keys) = extract_join_keys(predicate)?;
-
-                Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    predicate.clone(),
-                    join_type.clone(),
-                    left_keys,
-                    right_keys,
-                    vec![left, right],
-                )))
-            }
-
-            LogicalPlanType::HashJoin {
-                left_schema,
-                right_schema,
-                predicate,
-                join_type,
-            } => {
-                let left = self.children[0].to_physical_plan()?;
-                let right = self.children[1].to_physical_plan()?;
-
-                // Extract join key expressions from the predicate
-                let (left_keys, right_keys) = extract_join_keys(predicate)?;
-
-                Ok(PlanNode::HashJoin(HashJoinNode::new(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    predicate.clone(),
-                    join_type.clone(),
-                    left_keys,
-                    right_keys,
-                    vec![left, right],
-                )))
-            }
-
-            LogicalPlanType::Sort {
-                sort_expressions,
-                schema,
-            } => {
-                let child = self.children[0].to_physical_plan()?;
-                Ok(PlanNode::Sort(SortNode::new(
-                    schema.clone(),
-                    sort_expressions.clone(),
-                    vec![child],
-                )))
-            }
-
-            LogicalPlanType::Limit { limit, schema } => {
-                let child = self.children[0].to_physical_plan()?;
-                Ok(PlanNode::Limit(LimitNode::new(
-                    *limit,
-                    schema.clone(),
-                    vec![child],
-                )))
-            }
-
-            LogicalPlanType::TopN {
-                k,
-                sort_expressions,
-                schema,
-            } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan().unwrap())
-                    .collect::<Vec<PlanNode>>();
-                Ok(PlanNode::TopN(TopNNode::new(
-                    schema.clone(),
-                    sort_expressions.clone(),
-                    k.clone(),
-                    children,
-                )))
-            }
-
-            LogicalPlanType::MockScan {
-                table_name,
-                schema,
-                table_oid: _,
-            } => Ok(PlanNode::MockScan(MockScanNode::new(
-                schema.clone(),
-                table_name.clone(),
-                vec![],
-            ))),
-
+                if child_plans.len() < 2 {
+                    Err("NestedLoopJoin requires two children".to_string())
+                } else {
+                    // Extract join key expressions from the predicate
+                    let (left_keys, right_keys) = match extract_join_keys(&predicate) {
+                        Ok((l, r)) => (l, r),
+                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                    };
+                    
+                    Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
+                        left_schema.clone(),
+                        right_schema.clone(),
+                        predicate.clone(),
+                        join_type.clone(),
+                        left_keys,
+                        right_keys,
+                        vec![child_plans[0].clone(), child_plans[1].clone()],
+                    )))
+                }
+            },
+            
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
                 right_schema,
                 predicate,
                 join_type,
             } => {
-                let left = self.children[0].to_physical_plan()?;
-                let right = self.children[1].to_physical_plan()?;
-
-                // Extract join key expressions from the predicate
-                let (left_keys, right_keys) = extract_join_keys(predicate)?;
-
-                Ok(PlanNode::NestedIndexJoin(NestedIndexJoinNode::new(
-                    left_schema.clone(),
-                    right_schema.clone(),
-                    predicate.clone(),
-                    join_type.clone(),
-                    left_keys,
-                    right_keys,
-                    vec![left, right],
+                if child_plans.len() < 2 {
+                    Err("NestedIndexJoin requires two children".to_string())
+                } else {
+                    // Extract join key expressions from the predicate
+                    let (left_keys, right_keys) = match extract_join_keys(&predicate) {
+                        Ok((l, r)) => (l, r),
+                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                    };
+                    
+                    Ok(PlanNode::NestedIndexJoin(NestedIndexJoinNode::new(
+                        left_schema.clone(),
+                        right_schema.clone(),
+                        predicate.clone(),
+                        join_type.clone(),
+                        left_keys,
+                        right_keys,
+                        vec![child_plans[0].clone(), child_plans[1].clone()],
+                    )))
+                }
+            },
+            
+            LogicalPlanType::HashJoin {
+                left_schema,
+                right_schema,
+                predicate,
+                join_type,
+            } => {
+                if child_plans.len() < 2 {
+                    Err("HashJoin requires two children".to_string())
+                } else {
+                    // Extract join key expressions from the predicate
+                    let (left_keys, right_keys) = match extract_join_keys(&predicate) {
+                        Ok((l, r)) => (l, r),
+                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                    };
+                    
+                    Ok(PlanNode::HashJoin(HashJoinNode::new(
+                        left_schema.clone(),
+                        right_schema.clone(),
+                        predicate.clone(),
+                        join_type.clone(),
+                        left_keys,
+                        right_keys,
+                        vec![child_plans[0].clone(), child_plans[1].clone()],
+                    )))
+                }
+            },
+            
+            LogicalPlanType::Sort {
+                sort_expressions,
+                schema,
+            } => {
+                Ok(PlanNode::Sort(
+                    SortNode::new(
+                        schema.clone(),
+                        sort_expressions.clone(),
+                        child_plans,
+                    ),
+                ))
+            },
+            
+            LogicalPlanType::Limit {
+                limit,
+                schema,
+            } => {
+                Ok(PlanNode::Limit(LimitNode::new(
+                    *limit,
+                    schema.clone(),
+                    child_plans,
                 )))
-            }
+            },
+            
+            LogicalPlanType::TopN {
+                k,
+                sort_expressions,
+                schema,
+            } => {
+                Ok(PlanNode::TopN(TopNNode::new(
+                    schema.clone(),
+                    sort_expressions.clone(),
+                    *k,
+                    child_plans,
+                )))
+            },
+            
             LogicalPlanType::TopNPerGroup {
                 k,
                 sort_expressions,
                 groups,
                 schema,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?;
-
                 Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
                     *k,
                     sort_expressions.clone(),
                     groups.clone(),
                     schema.clone(),
-                    children,
+                    child_plans,
                 )))
-            }
+            },
+            
             LogicalPlanType::Window {
                 group_by,
                 aggregates,
                 partitions,
                 schema,
             } => {
-                let children = self
-                    .children
-                    .iter()
-                    .map(|child| child.to_physical_plan())
-                    .collect::<Result<Vec<PlanNode>, String>>()?;
-
                 // Convert the logical window expressions into WindowFunction structs
-                let window_functions = aggregates
-                    .iter()
-                    .enumerate()
-                    .map(|(i, agg_expr)| {
-                        // Determine the window function type based on the aggregate expression
-                        let function_type = match agg_expr.as_ref() {
-                            Expression::Aggregate(agg) => match agg.get_agg_type() {
-                                AggregationType::Count => WindowFunctionType::Count,
-                                AggregationType::Sum => WindowFunctionType::Sum,
-                                AggregationType::Min => WindowFunctionType::Min,
-                                AggregationType::Max => WindowFunctionType::Max,
-                                AggregationType::Avg => WindowFunctionType::Average,
-                                // Add other mappings as needed
-                                _ => return Err("Unsupported window function type".to_string()),
-                            },
-                            Expression::Window(window_func) => {
-                                // If it's already a window function, use its type directly
-                                window_func.get_window_type()
-                            }
-                            _ => return Err("Invalid window function expression".to_string()),
-                        };
-
-                        // Create a new WindowFunction with the appropriate partitioning and ordering
-                        Ok(WindowFunction::new(
-                            function_type,
-                            Arc::clone(agg_expr),
-                            if i < partitions.len() {
-                                vec![Arc::clone(&partitions[i])]
-                            } else {
-                                vec![]
-                            },
-                            if i < group_by.len() {
-                                vec![Arc::clone(&group_by[i])]
-                            } else {
-                                vec![]
-                            },
-                        ))
-                    })
-                    .collect::<Result<Vec<WindowFunction>, String>>()?;
-
+                let mut window_functions = Vec::with_capacity(aggregates.len());
+                for (i, agg_expr) in aggregates.iter().enumerate() {
+                    // Determine the window function type based on the aggregate expression
+                    let function_type = match agg_expr.as_ref() {
+                        Expression::Aggregate(agg) => match agg.get_agg_type() {
+                            AggregationType::Count => WindowFunctionType::Count,
+                            AggregationType::Sum => WindowFunctionType::Sum,
+                            AggregationType::Min => WindowFunctionType::Min,
+                            AggregationType::Max => WindowFunctionType::Max,
+                            AggregationType::Avg => WindowFunctionType::Average,
+                            // Add other mappings as needed
+                            _ => return Err("Unsupported window function type".to_string()),
+                        },
+                        Expression::Window(window_func) => {
+                            // If it's already a window function, use its type directly
+                            window_func.get_window_type()
+                        }
+                        _ => return Err("Invalid window function expression".to_string()),
+                    };
+                    
+                    // Create a new WindowFunction with the appropriate partitioning and ordering
+                    window_functions.push(WindowFunction::new(
+                        function_type,
+                        Arc::clone(agg_expr),
+                        if i < partitions.len() {
+                            vec![Arc::clone(&partitions[i])]
+                        } else {
+                            vec![]
+                        },
+                        if i < group_by.len() {
+                            vec![Arc::clone(&group_by[i])]
+                        } else {
+                            vec![]
+                        },
+                    ));
+                }
+                
                 Ok(PlanNode::Window(WindowNode::new(
                     schema.clone(),
                     window_functions,
-                    children,
+                    child_plans,
                 )))
-            }
+            },
         }
+    }
+}
+
+impl LogicalToPhysical for LogicalPlan {
+    fn to_physical_plan(&self) -> Result<PlanNode, String> {
+        // Use the PlanConverter to convert the logical plan to a physical plan
+        let mut converter = PlanConverter::new(self);
+        converter.convert()
     }
 }
 
@@ -1511,27 +1617,41 @@ mod tests {
 
     #[test]
     fn test_projection_plan() {
-        let schema = Schema::new(vec![
+        // Create a schema for the input
+        let input_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ]);
+
+        // Create a table scan as the input
+        let table_scan = LogicalPlan::table_scan("users".to_string(), input_schema.clone(), 1);
+
+        // Create projection expressions
+        let id_expr = Arc::new(Expression::column_ref("id", TypeId::Integer));
+        let name_expr = Arc::new(Expression::column_ref("name", TypeId::VarChar));
+        let expressions = vec![id_expr.clone(), name_expr.clone()];
+
+        // Create output schema
+        let output_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let expressions = vec![
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 0, Column::new("id", TypeId::Integer), vec![]
-            ))),
-        ];
+        // Create a projection plan
+        let projection_plan = LogicalPlan::project(expressions.clone(), output_schema.clone(), table_scan);
 
-        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        let projection_plan = LogicalPlan::project(expressions.clone(), schema.clone(), scan_plan);
-
+        // Check the plan type
         match projection_plan.plan_type {
             LogicalPlanType::Projection {
                 expressions: e,
                 schema: s,
+                column_mappings,
             } => {
                 assert_eq!(expressions, e);
-                assert_eq!(schema, s);
+                assert_eq!(output_schema, s);
+                // The column mappings should map to the correct input columns
+                assert_eq!(column_mappings, vec![0, 1]);
             }
             _ => panic!("Expected Projection plan"),
         }
