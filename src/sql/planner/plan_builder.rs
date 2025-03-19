@@ -5,15 +5,15 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::*;
 use std::sync::Arc;
-use log::debug;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -152,7 +152,9 @@ impl LogicalPlanBuilder {
             debug!("Processing WHERE clause");
             let parsing_schema = current_plan.get_schema().clone();
             debug!("Schema has {} columns", parsing_schema.get_column_count());
-            let filter_expr = self.expression_parser.parse_expression(&where_clause, &parsing_schema)?;
+            let filter_expr = self
+                .expression_parser
+                .parse_expression(&where_clause, &parsing_schema)?;
             current_plan = LogicalPlan::filter(
                 parsing_schema,
                 String::new(),
@@ -177,9 +179,7 @@ impl LogicalPlanBuilder {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     // Use the original schema for parsing expressions to ensure all columns are available
-                    let parsed_expr = self
-                        .expression_parser
-                        .parse_expression(expr, &schema)?;
+                    let parsed_expr = self.expression_parser.parse_expression(expr, &schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -187,9 +187,7 @@ impl LogicalPlanBuilder {
                 }
                 SelectItem::ExprWithAlias { expr, alias: _ } => {
                     // Use the original schema for parsing expressions to ensure all columns are available
-                    let parsed_expr = self
-                        .expression_parser
-                        .parse_expression(expr, &schema)?;
+                    let parsed_expr = self.expression_parser.parse_expression(expr, &schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -258,9 +256,7 @@ impl LogicalPlanBuilder {
             // Apply HAVING clause if it exists
             if let Some(having) = &select.having {
                 // Use the original schema for parsing the HAVING clause to ensure all columns are available
-                let having_expr = self
-                    .expression_parser
-                    .parse_expression(having, &schema)?;
+                let having_expr = self.expression_parser.parse_expression(having, &schema)?;
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name
@@ -272,11 +268,8 @@ impl LogicalPlanBuilder {
 
             // Add projection on top of aggregation
             // Use the original schema for parsing projection expressions
-            current_plan = self.build_projection_plan_with_schema(
-                &select.projection,
-                current_plan,
-                &schema,
-            )?;
+            current_plan =
+                self.build_projection_plan_with_schema(&select.projection, current_plan, &schema)?;
         } else {
             // No aggregates, just add projection
             current_plan = self.build_projection_plan(&select.projection, current_plan)?;
@@ -373,7 +366,7 @@ impl LogicalPlanBuilder {
                             // For aggregate expressions, use the get_column_name method
                             match &parsed_expr {
                                 Expression::Aggregate(agg) => agg.get_column_name(),
-                                _ => parsed_expr.to_string()
+                                _ => parsed_expr.to_string(),
                             }
                         }
                     };
@@ -454,7 +447,11 @@ impl LogicalPlanBuilder {
         debug!("Final projection schema: {:?}", output_schema);
         debug!("Projection expressions: {:?}", projection_exprs);
 
-        Ok(LogicalPlan::project(projection_exprs, output_schema, input_plan))
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            output_schema,
+            input_plan,
+        ))
     }
 
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
@@ -623,11 +620,11 @@ impl LogicalPlanBuilder {
                             let parsed_expr = self
                                 .expression_parser
                                 .parse_expression(expr, parse_schema)?;
-                            
+
                             // For aggregate expressions, use the get_column_name method
                             match &parsed_expr {
                                 Expression::Aggregate(agg) => agg.get_column_name(),
-                                _ => parsed_expr.to_string()
+                                _ => parsed_expr.to_string(),
                             }
                         }
                     };
@@ -636,9 +633,10 @@ impl LogicalPlanBuilder {
                     let parsed_expr = self
                         .expression_parser
                         .parse_expression(expr, parse_schema)?;
-                    
+
                     // Use the column name from the expression for the output column
-                    let output_col = Column::new(&column_name, parsed_expr.get_return_type().get_type());
+                    let output_col =
+                        Column::new(&column_name, parsed_expr.get_return_type().get_type());
                     debug!("Created column: {:?}", output_col);
                     output_columns.push(output_col);
                     projection_exprs.push(Arc::new(parsed_expr));
@@ -678,18 +676,18 @@ impl LogicalPlanBuilder {
                 SelectItem::QualifiedWildcard(obj_name, _) => {
                     debug!("Processing qualified wildcard: {:?}", obj_name);
                     let table_alias = obj_name.to_string();
-                    
+
                     // Add all columns from the input schema that match the table alias
                     let mut found_columns = false;
                     for i in 0..input_schema.get_column_count() {
                         let col = input_schema.get_column(i as usize).unwrap();
                         let col_name = col.get_name();
-                        
+
                         // Check if the column belongs to the specified table
                         if col_name.starts_with(&format!("{}.", table_alias)) {
                             found_columns = true;
                             output_columns.push(col.clone());
-                            
+
                             let col_expr = Expression::ColumnRef(ColumnRefExpression::new(
                                 0,
                                 i as usize,
@@ -699,7 +697,7 @@ impl LogicalPlanBuilder {
                             projection_exprs.push(Arc::new(col_expr));
                         }
                     }
-                    
+
                     if !found_columns {
                         return Err(format!("No columns found for table alias: {}", table_alias));
                     }
@@ -708,7 +706,11 @@ impl LogicalPlanBuilder {
         }
 
         let output_schema = Schema::new(output_columns);
-        Ok(LogicalPlan::project(projection_exprs, output_schema, input_plan))
+        Ok(LogicalPlan::project(
+            projection_exprs,
+            output_schema,
+            input_plan,
+        ))
     }
 
     pub fn build_create_table_plan(
@@ -912,12 +914,13 @@ impl LogicalPlanBuilder {
             // Get the table from the catalog
             let catalog_ref = self.expression_parser.catalog();
             let catalog_guard = catalog_ref.read();
-            let table_info = catalog_guard.get_table(&table_name)
+            let table_info = catalog_guard
+                .get_table(&table_name)
                 .ok_or_else(|| format!("Table {} not found", table_name))?;
-            
+
             // Create a logical plan for this table
             let mut schema = table_info.get_table_schema();
-            
+
             // Apply alias to schema if provided
             if let Some(alias_str) = alias {
                 // Create a new schema with the alias applied to all columns
@@ -932,13 +935,9 @@ impl LogicalPlanBuilder {
                 }
                 schema = Schema::new(aliased_columns);
             }
-            
+
             let table_oid = table_info.get_table_oidt();
-            let table_scan = LogicalPlan::table_scan(
-                table_name.clone(),
-                schema,
-                table_oid,
-            );
+            let table_scan = LogicalPlan::table_scan(table_name.clone(), schema, table_oid);
             plans.push(table_scan);
         }
 
@@ -955,33 +954,37 @@ impl LogicalPlanBuilder {
             // Merge the schemas with aliases
             let left_alias_ref = current_alias.as_deref();
             let right_alias_ref = right_alias.as_deref();
-            
+
             // Debug the aliases being used
-            debug!("Joining tables with aliases: left={:?}, right={:?}", left_alias_ref, right_alias_ref);
-            
+            debug!(
+                "Joining tables with aliases: left={:?}, right={:?}",
+                left_alias_ref, right_alias_ref
+            );
+
             // Create a new schema for the join result
             let joined_schema = Schema::merge_with_aliases(
                 &current_schema,
                 &right_schema,
                 left_alias_ref,
-                right_alias_ref
+                right_alias_ref,
             );
-            
+
             // Process the join constraint
             let predicate = match &join.join_operator {
-                JoinOperator::Inner(constraint) |
-                JoinOperator::LeftOuter(constraint) |
-                JoinOperator::RightOuter(constraint) |
-                JoinOperator::FullOuter(constraint) => {
+                JoinOperator::Inner(constraint)
+                | JoinOperator::LeftOuter(constraint)
+                | JoinOperator::RightOuter(constraint)
+                | JoinOperator::FullOuter(constraint) => {
                     match constraint {
                         JoinConstraint::On(expr) => {
                             // Parse the join condition with the combined schema
                             debug!("Parsing join condition with schema: {:?}", joined_schema);
-                            self.expression_parser.parse_expression(expr, &joined_schema)?
-                        },
+                            self.expression_parser
+                                .parse_expression(expr, &joined_schema)?
+                        }
                         _ => return Err("Only ON constraint is supported for joins".to_string()),
                     }
-                },
+                }
                 JoinOperator::CrossJoin => {
                     // For cross joins, we don't need a predicate
                     Expression::Constant(ConstantExpression::new(
@@ -989,25 +992,26 @@ impl LogicalPlanBuilder {
                         Column::new("TRUE", TypeId::Boolean),
                         vec![],
                     ))
-                },
-                JoinOperator::LeftSemi(constraint) |
-                JoinOperator::RightSemi(constraint) |
-                JoinOperator::LeftAnti(constraint) |
-                JoinOperator::RightAnti(constraint) => {
+                }
+                JoinOperator::LeftSemi(constraint)
+                | JoinOperator::RightSemi(constraint)
+                | JoinOperator::LeftAnti(constraint)
+                | JoinOperator::RightAnti(constraint) => {
                     match constraint {
                         JoinConstraint::On(expr) => {
                             // Parse the join condition with the combined schema
-                            self.expression_parser.parse_expression(expr, &joined_schema)?
-                        },
+                            self.expression_parser
+                                .parse_expression(expr, &joined_schema)?
+                        }
                         _ => return Err("Only ON constraint is supported for joins".to_string()),
                     }
-                },
+                }
                 _ => return Err(format!("Unsupported join type: {:?}", join.join_operator)),
             };
 
             // Create a join plan
             let join_type = join.join_operator.clone();
-            
+
             // Use the original schemas for the join plan, but the joined schema for the result
             current_plan = Box::new(LogicalPlan::new(
                 LogicalPlanType::NestedLoopJoin {
@@ -1018,19 +1022,27 @@ impl LogicalPlanBuilder {
                 },
                 vec![current_plan, right_plan],
             ));
-            
+
             // Update the current schema to the joined schema
             current_schema = joined_schema;
-            
+
             // After merging schemas, we no longer have a single alias for the combined schema
             current_alias = None;
         }
 
         // Debug the final schema
-        debug!("Final join schema has {} columns:", current_schema.get_column_count());
+        debug!(
+            "Final join schema has {} columns:",
+            current_schema.get_column_count()
+        );
         for i in 0..current_schema.get_column_count() {
             let col = current_schema.get_column(i as usize).unwrap();
-            debug!("  Schema column {}: name='{}', type={:?}", i, col.get_name(), col.get_type());
+            debug!(
+                "  Schema column {}: name='{}', type={:?}",
+                i,
+                col.get_name(),
+                col.get_type()
+            );
         }
 
         Ok(current_plan)
@@ -1295,6 +1307,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
@@ -1327,6 +1340,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
@@ -1337,7 +1351,10 @@ mod tests {
             // Then verify the filter node
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter {
-                    schema, output_schema, predicate, ..
+                    schema,
+                    output_schema,
+                    predicate,
+                    ..
                 } => {
                     assert_eq!(output_schema.get_column_count(), 3);
                     match predicate.as_ref() {
@@ -1590,6 +1607,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
@@ -1675,7 +1693,10 @@ mod tests {
                     let left_cols: Vec<_> = (0..left_schema.get_column_count())
                         .map(|i| left_schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    assert!(left_cols.contains(&"u.id"), "Left schema missing 'u.id' column");
+                    assert!(
+                        left_cols.contains(&"u.id"),
+                        "Left schema missing 'u.id' column"
+                    );
                     assert!(
                         left_cols.contains(&"u.name"),
                         "Left schema missing 'u.name' column"
@@ -1727,6 +1748,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(
                         schema.get_column_count(),
@@ -1798,6 +1820,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
@@ -1912,6 +1935,7 @@ mod tests {
                 LogicalPlanType::Projection {
                     expressions,
                     schema,
+                    column_mappings: _,
                 } => {
                     assert_eq!(expressions.len(), 2);
                     assert_eq!(schema.get_column_count(), 2);
