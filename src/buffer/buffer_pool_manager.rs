@@ -669,57 +669,7 @@ impl BufferPoolManager {
 
         Arc::new(RwLock::new(new_page))
     }
-
-    fn read_typed_page_from_disk<T: Page>(&self, page_id: PageId) -> Option<Arc<RwLock<T>>> {
-        let mut buffer = [0u8; DB_PAGE_SIZE as usize];
-
-        trace!(
-            "Reading page {} from disk, expecting type {:?}",
-            page_id,
-            T::TYPE_ID
-        );
-
-        // Read the raw data from disk
-        if let Err(e) = self.disk_manager.read_page(page_id, &mut buffer) {
-            error!("Failed to read page {} from disk: {}", page_id, e);
-            return None;
-        }
-
-        trace!(
-            "Read data from disk - First bytes: {:?}, Type byte: {}",
-            &buffer[..8],
-            buffer[PAGE_TYPE_OFFSET]
-        );
-
-        // Create the page and copy the data
-        let mut page = T::new(page_id);
-        page.get_data_mut().copy_from_slice(&buffer);
-
-        trace!(
-            "After initial data copy - Type byte: {}, Expected: {}",
-            page.get_data()[PAGE_TYPE_OFFSET],
-            T::TYPE_ID.to_u8()
-        );
-
-        // Explicitly set the page type
-        page.get_data_mut()[PAGE_TYPE_OFFSET] = T::TYPE_ID.to_u8();
-
-        trace!(
-            "After setting type - First bytes: {:?}, Type byte: {}",
-            &page.get_data()[..8],
-            page.get_data()[PAGE_TYPE_OFFSET]
-        );
-
-        // Verify the page type is set correctly
-        debug_assert_eq!(
-            PageType::from_u8(page.get_data()[PAGE_TYPE_OFFSET]),
-            Some(T::TYPE_ID),
-            "Page type not set correctly after creation"
-        );
-
-        Some(Arc::new(RwLock::new(page)))
-    }
-
+    
     fn update_page_metadata<P: PageTrait + 'static>(
         &self,
         frame_id: FrameId,

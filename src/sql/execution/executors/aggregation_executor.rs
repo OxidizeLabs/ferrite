@@ -37,15 +37,6 @@ impl AggregateValues {
             values: vec![Value::new(Val::Null); num_aggregates],
         }
     }
-
-    fn update(&mut self, index: usize, value: Value) -> Result<(), String> {
-        if self.values[index].is_null() {
-            self.values[index] = value;
-        } else {
-            self.values[index] = self.values[index].add(&value)?;
-        }
-        Ok(())
-    }
 }
 
 pub struct AggregationExecutor {
@@ -205,12 +196,10 @@ impl AbstractExecutor for AggregationExecutor {
             // Handle empty input case
             if !has_rows && self.group_by_exprs.is_empty() {
                 // Create empty group key for no group by
-                let key = GroupKey { values: vec![] };
+                let key = GroupKey::new(vec![]);
 
                 // Create default aggregate values
-                let mut agg_values = AggregateValues {
-                    values: vec![Value::from(TypeId::Invalid); self.aggregate_exprs.len()],
-                };
+                let mut agg_values = AggregateValues::new(self.aggregate_exprs.len());
 
                 // Set default values based on aggregate type
                 for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
