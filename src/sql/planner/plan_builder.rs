@@ -795,54 +795,6 @@ impl LogicalPlanBuilder {
         }
     }
 
-    pub fn build_join_plan(
-        &self,
-        left_plan: Box<LogicalPlan>,
-        right_plan: Box<LogicalPlan>,
-        join_type: &JoinOperator,
-        join_predicate: Arc<Expression>,
-    ) -> Result<Box<LogicalPlan>, String> {
-        let left_schema = left_plan.get_schema();
-        let right_schema = right_plan.get_schema();
-
-        match join_type {
-            JoinOperator::Inner(_) => Ok(LogicalPlan::nested_loop_join(
-                left_schema.clone(),
-                right_schema.clone(),
-                join_predicate,
-                join_type.clone(),
-                left_plan,
-                right_plan,
-            )),
-            JoinOperator::LeftOuter(_) => Ok(LogicalPlan::nested_loop_join(
-                left_schema.clone(),
-                right_schema.clone(),
-                join_predicate,
-                join_type.clone(),
-                left_plan,
-                right_plan,
-            )),
-            JoinOperator::RightOuter(_) => Ok(LogicalPlan::nested_loop_join(
-                right_schema.clone(),
-                left_schema.clone(),
-                join_predicate,
-                JoinOperator::LeftOuter(JoinConstraint::None),
-                right_plan,
-                left_plan,
-            )),
-            JoinOperator::FullOuter(_) => Err("Full outer joins are not yet supported".to_string()),
-            JoinOperator::CrossJoin => Ok(LogicalPlan::nested_loop_join(
-                left_schema.clone(),
-                right_schema.clone(),
-                join_predicate,
-                join_type.clone(),
-                left_plan,
-                right_plan,
-            )),
-            _ => Err(format!("Unsupported join type: {:?}", join_type)),
-        }
-    }
-
     pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
         if select.from.len() != 1 {
             return Err("Only a single FROM clause is supported".to_string());
@@ -1046,21 +998,6 @@ impl LogicalPlanBuilder {
         }
 
         Ok(current_plan)
-    }
-
-    pub fn parse_order_by_expressions(
-        &self,
-        order_by: &Vec<OrderByExpr>,
-        schema: &Schema,
-    ) -> Result<Vec<Arc<Expression>>, String> {
-        let mut order_by_exprs = Vec::new();
-        for expr in order_by {
-            let parsed_expr = self
-                .expression_parser
-                .parse_expression(&expr.expr, schema)?;
-            order_by_exprs.push(Arc::new(parsed_expr));
-        }
-        Ok(order_by_exprs)
     }
 
     fn build_table_scan(

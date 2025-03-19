@@ -150,13 +150,7 @@ impl Page for TablePage {
     fn new(page_id: PageId) -> Self {
         let mut page = Self {
             data: Box::new([0; DB_PAGE_SIZE as usize]),
-            header: TablePageHeader {
-                page_id,
-                prev_page_id: INVALID_PAGE_ID,
-                next_page_id: INVALID_PAGE_ID,
-                num_tuples: 0,
-                num_deleted_tuples: 0,
-            },
+            header: TablePageHeader::new(page_id),
             pin_count: 1,
             is_dirty: false,
             tuple_info: Vec::new(),

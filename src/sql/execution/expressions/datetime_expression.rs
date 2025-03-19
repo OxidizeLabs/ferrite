@@ -623,10 +623,6 @@ impl ExpressionOps for DateTimeExpression {
                     ))),
                 }
             }
-            _ => Err(ExpressionError::InvalidOperation(format!(
-                "Unsupported datetime operation: {:?}",
-                self.operation
-            ))),
         }
     }
 
@@ -988,16 +984,6 @@ impl Display for DateTimeExpression {
             DateTimeOperation::Subtract => {
                 write!(f, "{} - {}", self.args[0], self.args[1])
             }
-            _ => write!(
-                f,
-                "{:?}({})",
-                self.operation,
-                self.args
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
         }
     }
 }
