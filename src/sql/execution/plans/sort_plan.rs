@@ -1,6 +1,5 @@
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -75,6 +74,7 @@ impl Display for SortNode {
 mod tests {
     use super::*;
     use crate::catalog::column::Column;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::types_db::type_id::TypeId;
 
     #[test]

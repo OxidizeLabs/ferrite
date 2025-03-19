@@ -1,23 +1,13 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
-use crate::catalog::column::Column;
-use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
-use crate::recovery::log_manager::LogManager;
 use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::sql::execution::executors::sort_executor::SortExecutor;
-use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
-use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
-use crate::sql::execution::plans::sort_plan::SortNode;
-use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
@@ -30,7 +20,6 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
-use tempfile::TempDir;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,

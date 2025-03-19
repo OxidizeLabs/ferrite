@@ -29,18 +29,13 @@ use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
 use crate::types_db::type_id::TypeId;
-use log::{debug, error, info, warn};
-use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, Function as SqlFunction, FunctionArg as SqlFunctionArg, Ident,
-    JoinConstraint, JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
-    Statement, TableFactor, TableWithJoins, Value as SqlValue,
-};
+use log::debug;
+use sqlparser::ast::{BinaryOperator, JoinOperator};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
 use std::ptr;
 use std::sync::Arc;
-use std::thread::LocalKey;
 use std::thread_local;
 
 // Add thread-local variable for tracking recursion depth
@@ -1540,7 +1535,7 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::JoinOperator;
+    use sqlparser::ast::{BinaryOperator, JoinConstraint, JoinOperator};
 
     #[test]
     fn test_create_table_plan() {
