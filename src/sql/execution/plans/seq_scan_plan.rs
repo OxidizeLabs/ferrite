@@ -155,18 +155,11 @@ mod tests {
         #[test]
         fn test_display_with_children() {
             let schema = create_test_schema();
-            let mut parent_node = SeqScanPlanNode::new(
-                schema.clone(),
-                1,
-                "parent".to_string(),
-            );
+            let mut parent_node = SeqScanPlanNode::new(schema.clone(), 1, "parent".to_string());
 
             // Add a child node
-            let child_node = PlanNode::SeqScan(SeqScanPlanNode::new(
-                schema,
-                2,
-                "child".to_string(),
-            ));
+            let child_node =
+                PlanNode::SeqScan(SeqScanPlanNode::new(schema, 2, "child".to_string()));
             parent_node.children = vec![child_node];
 
             let detailed_str = format!("{:#}", parent_node);
@@ -182,12 +175,8 @@ mod tests {
         #[test]
         fn test_schema_inference() {
             let schema = create_test_schema();
-            let table_ref = BoundBaseTableRef::new(
-                "test_table".to_string(),
-                1,
-                None,
-                schema.clone(),
-            );
+            let table_ref =
+                BoundBaseTableRef::new("test_table".to_string(), 1, None, schema.clone());
 
             let inferred_schema = SeqScanPlanNode::infer_scan_schema(&table_ref).unwrap();
             assert_eq!(inferred_schema, schema);

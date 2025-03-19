@@ -1,8 +1,8 @@
 use crate::common::config::FrameId;
 use log::{debug, error, trace};
+use parking_lot::{Mutex as ParkingMutex, RwLock};
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
-use parking_lot::{Mutex as ParkingMutex, RwLock};
 
 /// The type of access operation on a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,7 +120,8 @@ impl LRUKReplacer {
                         victim_frame_id = Some(frame_id);
                     } else if num_accesses == min_k_accesses {
                         // If same number of accesses, choose the one with earlier first access
-                        let first_access = entry.access_history.front().copied().unwrap_or(u64::MAX);
+                        let first_access =
+                            entry.access_history.front().copied().unwrap_or(u64::MAX);
                         if first_access < oldest_k_access {
                             oldest_k_access = first_access;
                             victim_frame_id = Some(frame_id);
@@ -128,7 +129,8 @@ impl LRUKReplacer {
                     }
                 } else if min_k_accesses >= self.k {
                     // For frames with k or more accesses, compare their k-th most recent access
-                    let k_access = entry.access_history
+                    let k_access = entry
+                        .access_history
                         .get(num_accesses - self.k)
                         .copied()
                         .unwrap_or(u64::MAX);
@@ -185,7 +187,10 @@ impl LRUKReplacer {
             entry.access_history.pop_front();
         }
 
-        debug!("Updated access times for frame {}: {:?}", frame_id, entry.access_history);
+        debug!(
+            "Updated access times for frame {}: {:?}",
+            frame_id, entry.access_history
+        );
         trace!("Recorded access for frame {} at {}", frame_id, now);
     }
 
@@ -275,10 +280,7 @@ impl LRUKReplacer {
     /// The number of evictable frames.
     pub fn total_evictable_frames(&self) -> usize {
         let store = self.frame_store.read();
-        let size = store
-            .iter()
-            .filter(|&entry| entry.1.is_evictable)
-            .count();
+        let size = store.iter().filter(|&entry| entry.1.is_evictable).count();
         debug!("Current size of evictable frames: {}", size);
         size
     }
@@ -286,11 +288,11 @@ impl LRUKReplacer {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::sync::Arc;
     use super::*;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Duration;
-    use parking_lot::Mutex;
 
     #[test]
     fn evict_single_frame() {
@@ -464,15 +466,9 @@ mod unit_tests {
     #[test]
     fn frame_removal() {
         let replacer = Arc::new(Mutex::new(LRUKReplacer::new(5, 2)));
-        replacer
-            .lock()
-            .record_access(1, AccessType::Lookup);
-        replacer
-            .lock()
-            .record_access(2, AccessType::Lookup);
-        replacer
-            .lock()
-            .record_access(3, AccessType::Lookup);
+        replacer.lock().record_access(1, AccessType::Lookup);
+        replacer.lock().record_access(2, AccessType::Lookup);
+        replacer.lock().record_access(3, AccessType::Lookup);
         replacer.lock().set_evictable(1, true);
         replacer.lock().set_evictable(2, true);
         replacer.lock().set_evictable(3, true);
@@ -611,10 +607,10 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
-    use std::sync::Arc;
     use super::*;
-    use std::thread;
     use parking_lot::Mutex;
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn concurrent_access() {
@@ -657,9 +653,9 @@ mod concurrency {
 
 #[cfg(test)]
 mod edge_cases {
-    use std::sync::Arc;
-    use parking_lot::Mutex;
     use super::*;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
 
     #[test]
     fn evict_from_empty() {
@@ -682,9 +678,7 @@ mod edge_cases {
         );
 
         // Edge case: add an element, set it to non-evictable, then try to evict
-        replacer
-            .lock()
-            .record_access(1, AccessType::Lookup);
+        replacer.lock().record_access(1, AccessType::Lookup);
         replacer.lock().set_evictable(1, false);
 
         assert_eq!(
@@ -717,9 +711,7 @@ mod edge_cases {
 
         // Add frames and set them all to evictable
         for i in 1..=5 {
-            replacer
-                .lock()
-                .record_access(i, AccessType::Lookup);
+            replacer.lock().record_access(i, AccessType::Lookup);
             replacer.lock().set_evictable(i, true);
         }
 

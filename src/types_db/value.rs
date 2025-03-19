@@ -126,11 +126,7 @@ impl Value {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self.value_,
-            Val::Decimal(_) |
-            Val::TinyInt(_) |
-            Val::SmallInt(_) |
-            Val::Integer(_) |
-            Val::BigInt(_)
+            Val::Decimal(_) | Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_)
         )
     }
 
@@ -160,12 +156,14 @@ impl Value {
             (Val::BigInt(a), Val::BigInt(b)) => {
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
             }
-            (Val::Integer(a), Val::BigInt(b)) => {
-                Ok(Value::new_with_type(Val::BigInt(*a as i64 + b), TypeId::BigInt))
-            }
-            (Val::BigInt(a), Val::Integer(b)) => {
-                Ok(Value::new_with_type(Val::BigInt(a + *b as i64), TypeId::BigInt))
-            }
+            (Val::Integer(a), Val::BigInt(b)) => Ok(Value::new_with_type(
+                Val::BigInt(*a as i64 + b),
+                TypeId::BigInt,
+            )),
+            (Val::BigInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::BigInt(a + *b as i64),
+                TypeId::BigInt,
+            )),
             (Val::Decimal(a), Val::Decimal(b)) => {
                 Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
             }
@@ -176,20 +174,27 @@ impl Value {
                 Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
             }
             // Promote smaller types to larger ones
-            (Val::TinyInt(a), Val::Integer(b)) => {
-                Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
-            }
-            (Val::Integer(a), Val::TinyInt(b)) => {
-                Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
-            }
-            (Val::SmallInt(a), Val::Integer(b)) => {
-                Ok(Value::new_with_type(Val::Integer(*a as i32 + b), TypeId::Integer))
-            }
-            (Val::Integer(a), Val::SmallInt(b)) => {
-                Ok(Value::new_with_type(Val::Integer(a + *b as i32), TypeId::Integer))
-            }
-            _ => Err(format!("Cannot add values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            (Val::TinyInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::Integer(*a as i32 + b),
+                TypeId::Integer,
+            )),
+            (Val::Integer(a), Val::TinyInt(b)) => Ok(Value::new_with_type(
+                Val::Integer(a + *b as i32),
+                TypeId::Integer,
+            )),
+            (Val::SmallInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::Integer(*a as i32 + b),
+                TypeId::Integer,
+            )),
+            (Val::Integer(a), Val::SmallInt(b)) => Ok(Value::new_with_type(
+                Val::Integer(a + *b as i32),
+                TypeId::Integer,
+            )),
+            _ => Err(format!(
+                "Cannot add values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
 
@@ -214,48 +219,58 @@ impl Value {
                 } else {
                     Value::new(Val::Null)
                 }
-            },
+            }
             TinyInt => {
                 if data.len() >= 1 {
                     let arr: [u8; 1] = data[0..1].try_into().expect("slice with incorrect length");
                     Value::new(i8::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             SmallInt => {
                 if data.len() >= 2 {
                     let arr: [u8; 2] = data[0..2].try_into().expect("slice with incorrect length");
                     Value::new(i16::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             Integer => {
                 if data.len() >= 4 {
                     let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
                     Value::new(i32::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             BigInt => {
                 if data.len() >= 8 {
                     let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
                     Value::new(i64::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             Decimal => {
                 if data.len() >= 8 {
                     let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
                     Value::new(f64::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             Timestamp => {
                 if data.len() >= 8 {
                     let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
                     Value::new(u64::from_le_bytes(arr))
-                } else { Value::new(Val::Null) }
-            },
-            VarChar | Char => {
-                match std::str::from_utf8(data) {
-                    Ok(s) => Value::new(s),
-                    Err(_) => Value::new(Val::Null),
+                } else {
+                    Value::new(Val::Null)
                 }
+            }
+            VarChar | Char => match std::str::from_utf8(data) {
+                Ok(s) => Value::new(s),
+                Err(_) => Value::new(Val::Null),
             },
             // For other types (including Vector), for now return a Null value.
             _ => Value::new(Val::Null),
@@ -276,31 +291,71 @@ impl Value {
 
         match (&self.value_, target_type) {
             // Numeric conversions
-            (Val::Integer(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
-            (Val::Integer(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::BigInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
-            (Val::BigInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::Decimal(f), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*f as i32), target_type)),
-            (Val::Decimal(f), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type)),
-            (Val::SmallInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
-            (Val::TinyInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
-            
+            (Val::Integer(i), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type))
+            }
+            (Val::Integer(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::BigInt(i), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
+            }
+            (Val::BigInt(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::Decimal(f), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*f as i32), target_type))
+            }
+            (Val::Decimal(f), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type))
+            }
+            (Val::SmallInt(i), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
+            }
+            (Val::TinyInt(i), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
+            }
+
             // String conversions
-            (Val::VarLen(s), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type)),
-            (Val::ConstLen(s), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type)),
-            
+            (Val::VarLen(s), TypeId::Char) => {
+                Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type))
+            }
+            (Val::ConstLen(s), TypeId::VarChar) => {
+                Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type))
+            }
+
             // Integer to String conversions
-            (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::SmallInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::TinyInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::Decimal(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
-            
+            (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::SmallInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::TinyInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::Decimal(f), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(f.to_string()),
+                target_type,
+            )),
+
             // Same type (should be handled by first check, but just in case)
-            (val, _) if self.type_id_ == target_type => Ok(Value::new_with_type(val.clone(), target_type)),
-            
+            (val, _) if self.type_id_ == target_type => {
+                Ok(Value::new_with_type(val.clone(), target_type))
+            }
+
             // Invalid conversions
-            _ => Err(format!("Cannot cast from {:?} to {:?}", self.type_id_, target_type))
+            _ => Err(format!(
+                "Cannot cast from {:?} to {:?}",
+                self.type_id_, target_type
+            )),
         }
     }
 
@@ -312,19 +367,20 @@ impl Value {
         S: Into<String>,
     {
         let values: Vec<Value> = values.into_iter().map(Into::into).collect();
-        
+
         // Store the field names in the first element of the vector
         let field_names_value = Value::new_vector(
-            field_names.into_iter()
+            field_names
+                .into_iter()
                 .map(|name| Value::new(name.into()))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
-        
+
         // Create a vector with field names as first element, followed by values
         let mut struct_vec = Vec::with_capacity(values.len() + 1);
         struct_vec.push(field_names_value);
         struct_vec.extend(values);
-        
+
         Value {
             value_: Val::Struct,
             size_: Size::Length(struct_vec.len()),
@@ -333,14 +389,14 @@ impl Value {
             struct_data: Some(struct_vec),
         }
     }
-    
+
     /// Gets a field from a struct by name
     pub fn get_struct_field(&self, field_name: &str) -> Option<&Value> {
         if let Some(struct_data) = &self.struct_data {
             if struct_data.is_empty() {
                 return None;
             }
-            
+
             // First element contains field names
             if let Val::Vector(field_names) = &struct_data[0].value_ {
                 // Find the index of the field name
@@ -356,7 +412,7 @@ impl Value {
         }
         None
     }
-    
+
     /// Checks if this value is a struct
     pub fn is_struct(&self) -> bool {
         self.type_id_ == TypeId::Struct && self.struct_data.is_some()
@@ -367,7 +423,8 @@ impl Value {
         if let Some(struct_data) = &self.struct_data {
             if let Some(first) = struct_data.first() {
                 if let Val::Vector(field_names) = &first.value_ {
-                    return field_names.iter()
+                    return field_names
+                        .iter()
                         .filter_map(|v| {
                             if let Val::VarLen(name) | Val::ConstLen(name) = &v.value_ {
                                 Some(name.clone())
@@ -508,8 +565,11 @@ impl Type for Value {
                 let b = other.as_bigint()?;
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
             }
-            _ => Err(format!("Cannot add values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            _ => Err(format!(
+                "Cannot add values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
 
@@ -540,8 +600,11 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a - b), TypeId::Decimal))
             }
-            _ => Err(format!("Cannot subtract values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            _ => Err(format!(
+                "Cannot subtract values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
 
@@ -572,8 +635,11 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a * b), TypeId::Decimal))
             }
-            _ => Err(format!("Cannot multiply values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            _ => Err(format!(
+                "Cannot multiply values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
 
@@ -607,8 +673,11 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a / b), TypeId::Decimal))
             }
-            _ => Err(format!("Cannot divide values of types {:?} and {:?}",
-                             self.get_type_id(), other.get_type_id()))
+            _ => Err(format!(
+                "Cannot divide values of types {:?} and {:?}",
+                self.get_type_id(),
+                other.get_type_id()
+            )),
         }
     }
 
@@ -624,7 +693,7 @@ impl Type for Value {
                     Value::new(Val::Null)
                 }
             }
-            _ => Value::new(Val::Null)
+            _ => Value::new(Val::Null),
         }
     }
 
@@ -654,7 +723,7 @@ impl Type for Value {
             Val::TinyInt(i) => Ok(*i as i32),
             Val::SmallInt(i) => Ok(*i as i32),
             Val::BigInt(i) => Ok(*i as i32),
-            _ => Err(format!("Cannot convert {:?} to integer", self.type_id_))
+            _ => Err(format!("Cannot convert {:?} to integer", self.type_id_)),
         }
     }
 
@@ -664,7 +733,7 @@ impl Type for Value {
             Val::Integer(i) => Ok(*i as i64),
             Val::SmallInt(i) => Ok(*i as i64),
             Val::TinyInt(i) => Ok(*i as i64),
-            _ => Err(format!("Cannot convert {:?} to bigint", self.type_id_))
+            _ => Err(format!("Cannot convert {:?} to bigint", self.type_id_)),
         }
     }
 
@@ -672,14 +741,14 @@ impl Type for Value {
         match &self.value_ {
             Val::SmallInt(i) => Ok(*i),
             Val::TinyInt(i) => Ok(*i as i16),
-            _ => Err(format!("Cannot convert {:?} to smallint", self.type_id_))
+            _ => Err(format!("Cannot convert {:?} to smallint", self.type_id_)),
         }
     }
 
     fn as_tinyint(&self) -> Result<i8, String> {
         match &self.value_ {
             Val::TinyInt(i) => Ok(*i),
-            _ => Err(format!("Cannot convert {:?} to tinyint", self.type_id_))
+            _ => Err(format!("Cannot convert {:?} to tinyint", self.type_id_)),
         }
     }
 
@@ -690,7 +759,7 @@ impl Type for Value {
             Val::BigInt(i) => Ok(*i as f64),
             Val::SmallInt(i) => Ok(*i as f64),
             Val::TinyInt(i) => Ok(*i as f64),
-            _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_))
+            _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_)),
         }
     }
 }
@@ -797,19 +866,20 @@ impl Display for Value {
             Val::Struct => {
                 if let Some(struct_data) = &self.struct_data {
                     let mut result = String::from("{");
-                    
+
                     if !struct_data.is_empty() {
                         let field_names = self.get_struct_field_names();
                         let values = self.get_struct_values();
-                        
-                        for (i, (name, value)) in field_names.iter().zip(values.iter()).enumerate() {
+
+                        for (i, (name, value)) in field_names.iter().zip(values.iter()).enumerate()
+                        {
                             if i > 0 {
                                 result.push_str(", ");
                             }
                             result.push_str(&format!("{}: {}", name, value));
                         }
                     }
-                    
+
                     result.push('}');
                     write!(f, "{}", result)
                 } else {
@@ -818,9 +888,8 @@ impl Display for Value {
             }
             Val::Vector(v) => {
                 // Format vector values using explicit ToString trait
-                let values: Vec<String> = v.iter()
-                    .map(|value| ToString::to_string(value))
-                    .collect();
+                let values: Vec<String> =
+                    v.iter().map(|value| ToString::to_string(value)).collect();
                 write!(f, "[{}]", values.join(", "))
             }
             Val::Integer(i) => write!(f, "{}", i),
@@ -838,7 +907,7 @@ impl Display for Value {
                 let hours = (secs / 3600) % 24;
                 let days = secs / 86400;
                 write!(f, "{} days {}:{}:{} UTC", days, hours, minutes, seconds)
-            },
+            }
             Val::Null => write!(f, "NULL"),
         }
     }
@@ -979,22 +1048,22 @@ mod unit_tests {
         assert_eq!(
             serialized_vector,
             vec![
-                9, 0, 0, 0,                 // Vector variant index
-                2, 0, 0, 0, 0, 0, 0, 0,     // Vector length (2)
-                3, 0, 0, 0,                 // First Value: Integer variant index
-                1, 0, 0, 0,                 // First Value: value (1)
-                0, 0, 0, 0,                 // First Value: Size::Length variant index
-                4, 0, 0, 0, 0, 0, 0, 0,     // First Value: size value (4)
-                0,                          // First Value: manage_data_ (false)
-                3, 0, 0, 0,                 // First Value: type_id_ (Integer)
-                0,                          // First Value: struct_data (None)
-                3, 0, 0, 0,                 // Second Value: Integer variant index
-                2, 0, 0, 0,                 // Second Value: value (2)
-                0, 0, 0, 0,                 // Second Value: Size::Length variant index
-                4, 0, 0, 0, 0, 0, 0, 0,     // Second Value: size value (4)
-                0,                          // Second Value: manage_data_ (false)
-                3, 0, 0, 0,                 // Second Value: type_id_ (Integer)
-                0                           // Second Value: struct_data (None)
+                9, 0, 0, 0, // Vector variant index
+                2, 0, 0, 0, 0, 0, 0, 0, // Vector length (2)
+                3, 0, 0, 0, // First Value: Integer variant index
+                1, 0, 0, 0, // First Value: value (1)
+                0, 0, 0, 0, // First Value: Size::Length variant index
+                4, 0, 0, 0, 0, 0, 0, 0, // First Value: size value (4)
+                0, // First Value: manage_data_ (false)
+                3, 0, 0, 0, // First Value: type_id_ (Integer)
+                0, // First Value: struct_data (None)
+                3, 0, 0, 0, // Second Value: Integer variant index
+                2, 0, 0, 0, // Second Value: value (2)
+                0, 0, 0, 0, // Second Value: Size::Length variant index
+                4, 0, 0, 0, 0, 0, 0, 0, // Second Value: size value (4)
+                0, // Second Value: manage_data_ (false)
+                3, 0, 0, 0, // Second Value: type_id_ (Integer)
+                0  // Second Value: struct_data (None)
             ]
         );
     }
@@ -1021,7 +1090,7 @@ mod unit_tests {
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]))
-            .expect("Serialization failed");
+        .expect("Serialization failed");
         let deserialized_vector: Val =
             bincode::deserialize(&binary_vector).expect("Deserialization failed");
         assert_eq!(
@@ -1128,11 +1197,8 @@ mod unit_tests {
         let float_value = Value::new(3.14);
         let bool_value = Value::new(true);
         let string_value = Value::new("Hello");
-        let vector_value = Value::new_vector(vec![
-            Value::new(1),
-            Value::new("two"),
-            Value::new(3.0),
-        ]);
+        let vector_value =
+            Value::new_vector(vec![Value::new(1), Value::new("two"), Value::new(3.0)]);
 
         // Test Display implementation - simple value representation
         assert_eq!(format!("{}", int_value), "42");
@@ -1577,12 +1643,12 @@ mod cast_tests {
 
         assert_eq!(big_val.get_type_id(), TypeId::BigInt);
         assert_eq!(dec_val.get_type_id(), TypeId::Decimal);
-        
+
         match big_val.get_val() {
             Val::BigInt(i) => assert_eq!(*i, 42i64),
             _ => panic!("Expected BigInt"),
         }
-        
+
         match dec_val.get_val() {
             Val::Decimal(f) => assert_eq!(*f, 42.0),
             _ => panic!("Expected Decimal"),
@@ -1593,7 +1659,7 @@ mod cast_tests {
     fn test_string_casts() {
         let var_val = Value::new("test");
         let const_val = var_val.cast_to(TypeId::Char).unwrap();
-        
+
         assert_eq!(const_val.get_type_id(), TypeId::Char);
         match const_val.get_val() {
             Val::ConstLen(s) => assert_eq!(s.as_str(), "test"),
@@ -1605,7 +1671,7 @@ mod cast_tests {
     fn test_null_casts() {
         let null_val = Value::new(Val::Null);
         let cast_null = null_val.cast_to(TypeId::Integer).unwrap();
-        
+
         assert!(cast_null.is_null());
         assert_eq!(cast_null.get_type_id(), TypeId::Integer);
     }
@@ -1614,7 +1680,7 @@ mod cast_tests {
     fn test_invalid_casts() {
         let int_val = Value::new(42);
         assert!(int_val.cast_to(TypeId::Boolean).is_err());
-        
+
         let str_val = Value::new("test");
         assert!(str_val.cast_to(TypeId::Integer).is_err());
     }

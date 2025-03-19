@@ -166,7 +166,8 @@ mod tests {
                     log_path.to_str().unwrap().to_string(),
                     100,
                 ));
-                let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+                let disk_scheduler =
+                    Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 
                 const BUFFER_POOL_SIZE: usize = 10;
                 const K: usize = 2;
@@ -195,7 +196,9 @@ mod tests {
                     transaction_manager.clone(), // Pass transaction manager
                 )));
 
-                let transaction = transaction_manager.begin(IsolationLevel::Serializable).unwrap();
+                let transaction = transaction_manager
+                    .begin(IsolationLevel::Serializable)
+                    .unwrap();
                 let transaction_context = Arc::new(TransactionContext::new(
                     transaction,
                     lock_manager.clone(),
@@ -318,9 +321,10 @@ mod tests {
                 assert_eq!(tuple.get_value(0), &Value::new(i));
             }
 
-            test_ctx
-                .transaction_manager()
-                .commit(test_ctx.transaction_context().get_transaction().clone(), test_ctx.buffer_pool_manager().clone());
+            test_ctx.transaction_manager().commit(
+                test_ctx.transaction_context().get_transaction().clone(),
+                test_ctx.buffer_pool_manager().clone(),
+            );
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();
@@ -377,9 +381,10 @@ mod tests {
             assert!(executor.next().is_some());
 
             // Commit transaction
-            test_ctx
-                .transaction_manager()
-                .commit(test_ctx.transaction_context().get_transaction().clone(), test_ctx.buffer_pool_manager().clone());
+            test_ctx.transaction_manager().commit(
+                test_ctx.transaction_context().get_transaction().clone(),
+                test_ctx.buffer_pool_manager().clone(),
+            );
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();

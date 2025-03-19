@@ -146,22 +146,17 @@ impl Type for SmallIntType {
 
     fn add(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::SmallInt(r) => {
-                r.checked_add(0)
-                    .map(Value::new)
-                    .ok_or_else(|| "SmallInt overflow in addition".to_string())
-            }
+            Val::SmallInt(r) => r
+                .checked_add(0)
+                .map(Value::new)
+                .ok_or_else(|| "SmallInt overflow in addition".to_string()),
             Val::TinyInt(r) => Ok(Value::new(*r as i16)),
-            Val::Integer(r) => {
-                i16::try_from(*r)
-                    .map(Value::new)
-                    .map_err(|_| "Integer overflow in addition".to_string())
-            }
-            Val::BigInt(r) => {
-                i16::try_from(*r)
-                    .map(Value::new)
-                    .map_err(|_| "Integer overflow in addition".to_string())
-            }
+            Val::Integer(r) => i16::try_from(*r)
+                .map(Value::new)
+                .map_err(|_| "Integer overflow in addition".to_string()),
+            Val::BigInt(r) => i16::try_from(*r)
+                .map(Value::new)
+                .map_err(|_| "Integer overflow in addition".to_string()),
             Val::Decimal(r) => Ok(Value::new(*r as i16)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-numeric types to SmallInt".to_string()),
@@ -170,22 +165,17 @@ impl Type for SmallIntType {
 
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::SmallInt(r) => {
-                r.checked_neg()
-                    .map(Value::new)
-                    .ok_or_else(|| "SmallInt overflow in subtraction".to_string())
-            }
+            Val::SmallInt(r) => r
+                .checked_neg()
+                .map(Value::new)
+                .ok_or_else(|| "SmallInt overflow in subtraction".to_string()),
             Val::TinyInt(r) => Ok(Value::new(-(*r as i16))),
-            Val::Integer(r) => {
-                i16::try_from(*r)
-                    .map(|v| Value::new(-v))
-                    .map_err(|_| "Integer overflow in subtraction".to_string())
-            }
-            Val::BigInt(r) => {
-                i16::try_from(*r)
-                    .map(|v| Value::new(-v))
-                    .map_err(|_| "Integer overflow in subtraction".to_string())
-            }
+            Val::Integer(r) => i16::try_from(*r)
+                .map(|v| Value::new(-v))
+                .map_err(|_| "Integer overflow in subtraction".to_string()),
+            Val::BigInt(r) => i16::try_from(*r)
+                .map(|v| Value::new(-v))
+                .map_err(|_| "Integer overflow in subtraction".to_string()),
             Val::Decimal(r) => Ok(Value::new(-(*r as i16))),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-numeric types from SmallInt".to_string()),
@@ -194,13 +184,13 @@ impl Type for SmallIntType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::SmallInt(r) => {
-                r.checked_mul(0)
-                    .map(Value::new)
-                    .ok_or_else(|| "SmallInt overflow in multiplication".to_string())
+            Val::SmallInt(r) => r
+                .checked_mul(0)
+                .map(Value::new)
+                .ok_or_else(|| "SmallInt overflow in multiplication".to_string()),
+            Val::TinyInt(_) | Val::Integer(_) | Val::BigInt(_) | Val::Decimal(_) => {
+                Ok(Value::new(0i16))
             }
-            Val::TinyInt(_) | Val::Integer(_) | Val::BigInt(_) |
-            Val::Decimal(_) => Ok(Value::new(0i16)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply SmallInt by non-numeric type".to_string()),
         }
@@ -213,8 +203,11 @@ impl Type for SmallIntType {
             Val::Integer(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::BigInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
-            Val::SmallInt(_) | Val::TinyInt(_) | Val::Integer(_) |
-            Val::BigInt(_) | Val::Decimal(_) => Ok(Value::new(0i16)),
+            Val::SmallInt(_)
+            | Val::TinyInt(_)
+            | Val::Integer(_)
+            | Val::BigInt(_)
+            | Val::Decimal(_) => Ok(Value::new(0i16)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide SmallInt by non-numeric type".to_string()),
         }
@@ -226,8 +219,9 @@ impl Type for SmallIntType {
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
             Val::Integer(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::SmallInt(_) | Val::TinyInt(_) | Val::Integer(_) |
-            Val::BigInt(_) => Value::new(0i16),
+            Val::SmallInt(_) | Val::TinyInt(_) | Val::Integer(_) | Val::BigInt(_) => {
+                Value::new(0i16)
+            }
             _ => Value::new(Val::Null),
         }
     }

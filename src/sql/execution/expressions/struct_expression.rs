@@ -30,7 +30,11 @@ pub struct StructExpression {
 }
 
 impl StructExpression {
-    pub fn new(values: Vec<Arc<Expression>>, fields: Vec<StructField>, return_type: Column) -> Self {
+    pub fn new(
+        values: Vec<Arc<Expression>>,
+        fields: Vec<StructField>,
+        return_type: Column,
+    ) -> Self {
         Self {
             values: values.clone(),
             fields,
@@ -43,29 +47,40 @@ impl StructExpression {
 impl ExpressionOps for StructExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let mut field_values = Vec::new();
-        
+
         // Evaluate each expression to get the field values
         for value in &self.values {
             field_values.push(value.evaluate(tuple, schema)?);
         }
-        
+
         // Create a vector of values for the struct
         let struct_value = Value::new_vector(field_values);
-        
+
         Ok(struct_value)
     }
 
-    fn evaluate_join(&self, left_tuple: &Tuple, left_schema: &Schema, right_tuple: &Tuple, right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        left_tuple: &Tuple,
+        left_schema: &Schema,
+        right_tuple: &Tuple,
+        right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         let mut field_values = Vec::new();
-        
+
         // Evaluate each expression in the join context
         for value in &self.values {
-            field_values.push(value.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?);
+            field_values.push(value.evaluate_join(
+                left_tuple,
+                left_schema,
+                right_tuple,
+                right_schema,
+            )?);
         }
-        
+
         // Create a vector of values for the struct
         let struct_value = Value::new_vector(field_values);
-        
+
         Ok(struct_value)
     }
 
@@ -98,35 +113,43 @@ impl ExpressionOps for StructExpression {
                 self.fields.len()
             )));
         }
-        
+
         // Validate each child expression
         for (i, value) in self.values.iter().enumerate() {
             value.validate(schema)?;
-            
+
             // Optionally, validate that the value type matches the field type
             let value_type = value.get_return_type().get_type();
             let field_type = self.fields[i].type_info.get_type();
-            
+
             if value_type != field_type && value_type != TypeId::Invalid {
                 // Use the correct format for the TypeMismatch error
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Field '{}' expects type {:?} but got {:?}",
-                    self.fields[i].name,
-                    field_type,
-                    value_type
+                    self.fields[i].name, field_type, value_type
                 )));
             }
         }
-        
+
         Ok(())
     }
 }
 
 impl Display for StructExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "STRUCT<{}>({})",
-               self.fields.iter().map(|f| format!("{}: {}", f.name, f.type_info)).collect::<Vec<_>>().join(", "),
-               self.values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
+        write!(
+            f,
+            "STRUCT<{}>({})",
+            self.fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, f.type_info))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.values
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
@@ -135,8 +158,8 @@ impl Display for StructExpression {
 mod tests {
     use super::*;
     use crate::common::rid::RID;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val;
 
@@ -153,10 +176,10 @@ mod tests {
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = create_test_schema();
         let values = vec![
-            Value::new(1),                  // id
-            Value::new("John Doe"),         // name
-            Value::new(30),                 // age
-            Value::new(50000.0),            // salary
+            Value::new(1),          // id
+            Value::new("John Doe"), // name
+            Value::new(30),         // age
+            Value::new(50000.0),    // salary
         ];
         let tuple = Tuple::new(&values, schema.clone(), RID::new(1, 1));
         (tuple, schema)
@@ -176,7 +199,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("John"),
             Column::new("name", TypeId::VarChar),
@@ -210,11 +233,17 @@ mod tests {
 
         // Create column reference expressions
         let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("name", TypeId::VarChar), vec![],
+            0,
+            1,
+            Column::new("name", TypeId::VarChar),
+            vec![],
         )));
 
         // Create struct expression
@@ -226,18 +255,18 @@ mod tests {
 
         // Evaluate the struct expression
         let result = struct_expr.evaluate(&tuple, &schema).unwrap();
-        
+
         // Verify the result is a vector
         if let Val::Vector(values) = result.get_val() {
             assert_eq!(values.len(), 2);
-            
+
             // Check first value (id)
             if let Val::Integer(id) = values[0].get_val() {
                 assert_eq!(*id, 1);
             } else {
                 panic!("Expected Integer value for id");
             }
-            
+
             // Check second value (name)
             if let Val::VarLen(name) = values[1].get_val() {
                 assert_eq!(name, "John Doe");
@@ -261,11 +290,17 @@ mod tests {
 
         // Create column reference expressions
         let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("name", TypeId::VarChar), vec![],
+            0,
+            1,
+            Column::new("name", TypeId::VarChar),
+            vec![],
         )));
 
         // Create struct expression with matching types
@@ -280,12 +315,18 @@ mod tests {
 
         // Create struct expression with mismatched types
         let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         // Using salary (Decimal) for a VarChar field
         let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 3, Column::new("salary", TypeId::Decimal), vec![],
+            0,
+            3,
+            Column::new("salary", TypeId::Decimal),
+            vec![],
         )));
 
         let invalid_struct_expr = StructExpression::new(
@@ -311,11 +352,17 @@ mod tests {
 
         // Create expressions with a mix of column references and constants
         let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("name", TypeId::VarChar), vec![],
+            0,
+            1,
+            Column::new("name", TypeId::VarChar),
+            vec![],
         )));
 
         let active_expr = Arc::new(Expression::Constant(ConstantExpression::new(
@@ -333,11 +380,11 @@ mod tests {
 
         // Evaluate the struct expression
         let result = struct_expr.evaluate(&tuple, &schema).unwrap();
-        
+
         // Verify the result
         if let Val::Vector(values) = result.get_val() {
             assert_eq!(values.len(), 3);
-            
+
             // Check constant value (active)
             if let Val::Boolean(active) = values[2].get_val() {
                 assert_eq!(*active, true);
@@ -363,7 +410,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("John"),
             Column::new("name", TypeId::VarChar),
@@ -400,7 +447,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             vec![],
         )));
-        
+
         let name_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("John"),
             Column::new("name", TypeId::VarChar),
@@ -420,7 +467,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             vec![],
         )));
-        
+
         let new_name_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("Jane"),
             Column::new("name", TypeId::VarChar),
@@ -429,7 +476,7 @@ mod tests {
 
         // Clone with new children
         let cloned_expr = struct_expr.clone_with_children(vec![new_id_expr, new_name_expr]);
-        
+
         // Verify the cloned expression
         if let Expression::Struct(cloned_struct) = cloned_expr.as_ref() {
             assert_eq!(cloned_struct.fields.len(), 2);
@@ -440,4 +487,4 @@ mod tests {
             panic!("Expected Struct expression");
         }
     }
-} 
+}

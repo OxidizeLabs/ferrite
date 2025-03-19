@@ -6,14 +6,14 @@ use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::window_plan::WindowNode;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use crate::types_db::types::{CmpBool, Type};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
@@ -25,9 +25,12 @@ struct TupleWithKeys {
 
 impl PartialEq for TupleWithKeys {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_keys.len() == other.sort_keys.len() && 
-        self.sort_keys.iter().zip(other.sort_keys.iter())
-            .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
+        self.sort_keys.len() == other.sort_keys.len()
+            && self
+                .sort_keys
+                .iter()
+                .zip(other.sort_keys.iter())
+                .all(|(a, b)| a.compare_equals(b) == CmpBool::CmpTrue)
     }
 }
 
@@ -46,7 +49,7 @@ impl Ord for TupleWithKeys {
                 CmpBool::CmpFalse => {
                     match a.compare_greater_than(b) {
                         CmpBool::CmpTrue => return Ordering::Greater,
-                        CmpBool::CmpFalse => continue,  // Equal, check next key
+                        CmpBool::CmpFalse => continue, // Equal, check next key
                         CmpBool::CmpNull => return Ordering::Equal,
                     }
                 }
@@ -92,8 +95,9 @@ impl WindowExecutor {
     fn evaluate_sort_keys(&self, tuple: &Tuple) -> Vec<Value> {
         let schema = self.child_executor.get_output_schema();
         let window_fn = &self.plan.get_window_functions()[0];
-        
-        window_fn.get_order_by()
+
+        window_fn
+            .get_order_by()
             .iter()
             .map(|expr| expr.evaluate(tuple, schema).unwrap())
             .collect()
@@ -108,7 +112,8 @@ impl WindowExecutor {
         let partition_exprs = window_fns[0].get_partition_by();
         let schema = self.child_executor.get_output_schema();
 
-        partition_exprs.iter()
+        partition_exprs
+            .iter()
             .map(|expr| expr.evaluate(tuple, schema).unwrap())
             .collect()
     }
@@ -118,7 +123,7 @@ impl AbstractExecutor for WindowExecutor {
     fn init(&mut self) {
         if !self.initialized {
             self.child_executor.init();
-            
+
             // Collect all tuples and their sort keys
             let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Tuple, RID)> = Vec::new();
             while let Some((tuple, rid)) = self.child_executor.next() {
@@ -128,9 +133,11 @@ impl AbstractExecutor for WindowExecutor {
             }
 
             // Group tuples by partition
-            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Tuple, RID)>> = HashMap::new();
+            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Tuple, RID)>> =
+                HashMap::new();
             for (partition_keys, sort_keys, tuple, rid) in all_tuples {
-                partitions_map.entry(partition_keys)
+                partitions_map
+                    .entry(partition_keys)
                     .or_insert_with(Vec::new)
                     .push((sort_keys, tuple, rid));
             }
@@ -141,13 +148,11 @@ impl AbstractExecutor for WindowExecutor {
                 for (a_val, b_val) in a.iter().zip(b.iter()) {
                     match a_val.compare_less_than(b_val) {
                         CmpBool::CmpTrue => return Ordering::Less,
-                        CmpBool::CmpFalse => {
-                            match a_val.compare_greater_than(b_val) {
-                                CmpBool::CmpTrue => return Ordering::Greater,
-                                CmpBool::CmpFalse => continue,
-                                CmpBool::CmpNull => return Ordering::Equal,
-                            }
-                        }
+                        CmpBool::CmpFalse => match a_val.compare_greater_than(b_val) {
+                            CmpBool::CmpTrue => return Ordering::Greater,
+                            CmpBool::CmpFalse => continue,
+                            CmpBool::CmpNull => return Ordering::Equal,
+                        },
                         CmpBool::CmpNull => return Ordering::Equal,
                     }
                 }
@@ -157,7 +162,7 @@ impl AbstractExecutor for WindowExecutor {
             // Sort each partition using binary heap
             for (partition_key, tuples) in partitions_map {
                 let mut heap = BinaryHeap::new();
-                
+
                 // Add tuples to heap
                 for (sort_keys, tuple, rid) in tuples {
                     heap.push(Reverse(TupleWithKeys {
@@ -197,12 +202,12 @@ impl AbstractExecutor for WindowExecutor {
         // Return next tuple from current partition
         if self.tuple_index < partition.len() {
             let (tuple, rid) = &partition[self.tuple_index];
-            
+
             // Create new tuple with row number
             let mut values = tuple.get_values().to_vec();
             values.push(Value::new((self.tuple_index + 1) as i32));
             let new_tuple = Tuple::new(&values, self.plan.get_output_schema().clone(), *rid);
-            
+
             // Advance indices
             self.tuple_index += 1;
             if self.tuple_index >= partition.len() {
@@ -230,12 +235,14 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType};
@@ -247,8 +254,6 @@ mod tests {
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
-    use crate::catalog::catalog::Catalog;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

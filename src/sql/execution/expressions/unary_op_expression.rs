@@ -46,7 +46,14 @@ impl UnaryOpExpression {
                         op, type_id
                     ));
                 }
-                Column::new("unary_numeric", if type_id == TypeId::Invalid { TypeId::Integer } else { type_id })
+                Column::new(
+                    "unary_numeric",
+                    if type_id == TypeId::Invalid {
+                        TypeId::Integer
+                    } else {
+                        type_id
+                    },
+                )
             }
             _ => return Err(format!("Unsupported unary operator: {:?}", op)),
         };

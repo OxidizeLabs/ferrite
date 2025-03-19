@@ -40,7 +40,7 @@ impl ExpressionOps for QualifiedWildcardExpression {
 
             if column.get_name().starts_with(&prefix) {
                 let value = tuple.get_value(i as usize);
-                 values.push(value.clone());
+                values.push(value.clone());
             }
         }
 
@@ -144,8 +144,8 @@ impl Display for QualifiedWildcardExpression {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::rid::RID;
     use super::*;
+    use crate::common::rid::RID;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val;
 
@@ -162,10 +162,10 @@ mod tests {
     fn create_test_tuple() -> Tuple {
         let schema = create_test_schema();
         let values = vec![
-            Value::new(1), // test.id
+            Value::new(1),      // test.id
             Value::new("John"), // test.name
-            Value::new(25), // test.age
-            Value::new(2), // other.id
+            Value::new(25),     // test.age
+            Value::new(2),      // other.id
             Value::new("data"), // other.data
         ];
         Tuple::new(&values, schema, RID::new(0, 0))
@@ -175,14 +175,14 @@ mod tests {
     fn test_evaluate_basic() {
         let schema = create_test_schema();
         let tuple = create_test_tuple();
-        
+
         let expr = QualifiedWildcardExpression::new(
             vec!["test".to_string()],
-            Column::new("test.*", TypeId::Vector)
+            Column::new("test.*", TypeId::Vector),
         );
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        
+
         // Should get a vector with test.id, test.name, and test.age
         match result.get_val() {
             Val::Vector(values) => {
@@ -209,20 +209,22 @@ mod tests {
         let left_tuple = Tuple::new(
             &vec![Value::new(1), Value::new("John")],
             left_schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
             &vec![Value::new(25), Value::new("data")],
             right_schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let expr = QualifiedWildcardExpression::new(
             vec!["left".to_string()],
-            Column::new("left.*", TypeId::Vector)
+            Column::new("left.*", TypeId::Vector),
         );
 
-        let result = expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+        let result = expr
+            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+            .unwrap();
 
         // Should get a vector with left.id, left.name, and left.age
         match result.get_val() {
@@ -243,14 +245,14 @@ mod tests {
         // Valid qualifier
         let expr = QualifiedWildcardExpression::new(
             vec!["test".to_string()],
-            Column::new("test.*", TypeId::Vector)
+            Column::new("test.*", TypeId::Vector),
         );
         assert!(expr.validate(&schema).is_ok());
 
         // Invalid qualifier
         let invalid_expr = QualifiedWildcardExpression::new(
             vec!["invalid".to_string()],
-            Column::new("invalid.*", TypeId::Vector)
+            Column::new("invalid.*", TypeId::Vector),
         );
         assert!(invalid_expr.validate(&schema).is_err());
     }
@@ -259,7 +261,7 @@ mod tests {
     fn test_display() {
         let expr = QualifiedWildcardExpression::new(
             vec!["schema".to_string(), "table".to_string()],
-            Column::new("schema.table.*", TypeId::Vector)
+            Column::new("schema.table.*", TypeId::Vector),
         );
         assert_eq!(expr.to_string(), "schema.table.*");
     }
@@ -268,18 +270,18 @@ mod tests {
     fn test_clone_with_children() {
         let expr = QualifiedWildcardExpression::new(
             vec!["test".to_string()],
-            Column::new("test.*", TypeId::Vector)
+            Column::new("test.*", TypeId::Vector),
         );
 
         let mock_child = Arc::new(Expression::Mock(
             crate::sql::execution::expressions::mock_expression::MockExpression::new(
                 "test".to_string(),
-                TypeId::Integer
-            )
+                TypeId::Integer,
+            ),
         ));
 
         let cloned = expr.clone_with_children(vec![mock_child]);
-        
+
         match cloned.as_ref() {
             Expression::QualifiedWildcard(qw) => {
                 assert_eq!(qw.qualifier, vec!["test".to_string()]);
@@ -292,11 +294,8 @@ mod tests {
     #[test]
     fn test_empty_qualifier() {
         let schema = create_test_schema();
-        
-        let expr = QualifiedWildcardExpression::new(
-            vec![],
-            Column::new("*", TypeId::Vector)
-        );
+
+        let expr = QualifiedWildcardExpression::new(vec![], Column::new("*", TypeId::Vector));
 
         // Empty qualifier should not match any columns
         assert!(expr.validate(&schema).is_err());
@@ -312,15 +311,15 @@ mod tests {
 
         let expr = QualifiedWildcardExpression::new(
             vec!["db".to_string(), "schema".to_string(), "table".to_string()],
-            Column::new("db.schema.table.*", TypeId::Vector)
+            Column::new("db.schema.table.*", TypeId::Vector),
         );
 
         assert!(expr.validate(&schema).is_ok());
-        
+
         let tuple = Tuple::new(
             &vec![Value::new(1), Value::new("test"), Value::new(2)],
             schema.clone(),
-            RID::new(0, 0)
+            RID::new(0, 0),
         );
 
         let result = expr.evaluate(&tuple, &schema).unwrap();

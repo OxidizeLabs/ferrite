@@ -24,7 +24,11 @@ pub struct GroupingSetsExpression {
 }
 
 impl GroupingSetsExpression {
-    pub fn new(grouping_type: GroupingType, groups: Vec<Vec<Arc<Expression>>>, return_type: Column) -> Self {
+    pub fn new(
+        grouping_type: GroupingType,
+        groups: Vec<Vec<Arc<Expression>>>,
+        return_type: Column,
+    ) -> Self {
         // Flatten all expressions into a single children vector
         let mut children = Vec::new();
         for group in &groups {
@@ -32,7 +36,7 @@ impl GroupingSetsExpression {
                 children.push(expr.clone());
             }
         }
-        
+
         Self {
             grouping_type,
             groups,
@@ -55,14 +59,20 @@ impl ExpressionOps for GroupingSetsExpression {
         // GroupingSets evaluation typically happens at a higher level in the execution engine
         // This method should not be called directly on a GroupingSetsExpression
         Err(ExpressionError::InvalidOperation(
-            "GroupingSetsExpression cannot be evaluated directly".to_string()
+            "GroupingSetsExpression cannot be evaluated directly".to_string(),
         ))
     }
 
-    fn evaluate_join(&self, _left_tuple: &Tuple, _left_schema: &Schema, _right_tuple: &Tuple, _right_schema: &Schema) -> Result<Value, ExpressionError> {
+    fn evaluate_join(
+        &self,
+        _left_tuple: &Tuple,
+        _left_schema: &Schema,
+        _right_tuple: &Tuple,
+        _right_schema: &Schema,
+    ) -> Result<Value, ExpressionError> {
         // GroupingSets evaluation typically happens at a higher level in the execution engine
         Err(ExpressionError::InvalidOperation(
-            "GroupingSetsExpression cannot be evaluated directly in a join".to_string()
+            "GroupingSetsExpression cannot be evaluated directly in a join".to_string(),
         ))
     }
 
@@ -86,7 +96,7 @@ impl ExpressionOps for GroupingSetsExpression {
         // Reconstruct the groups structure with the new children
         let mut new_groups = Vec::new();
         let mut child_idx = 0;
-        
+
         for group in &self.groups {
             let mut new_group = Vec::new();
             for _ in group {
@@ -99,7 +109,7 @@ impl ExpressionOps for GroupingSetsExpression {
                 new_groups.push(new_group);
             }
         }
-        
+
         Arc::new(Expression::GroupingSets(GroupingSetsExpression::new(
             self.grouping_type.clone(),
             new_groups,
@@ -124,11 +134,11 @@ impl Display for GroupingSetsExpression {
             GroupingType::Rollup => write!(f, "ROLLUP ("),
         }?;
 
-        let groups: Vec<String> = self.groups.iter()
+        let groups: Vec<String> = self
+            .groups
+            .iter()
             .map(|group| {
-                let exprs: Vec<String> = group.iter()
-                    .map(|e| e.to_string())
-                    .collect();
+                let exprs: Vec<String> = group.iter().map(|e| e.to_string()).collect();
                 format!("({})", exprs.join(", "))
             })
             .collect();
@@ -171,18 +181,15 @@ mod tests {
         let return_type = Column::new("grouping_sets", TypeId::Vector);
 
         // Create GroupingSetsExpression
-        let expr = GroupingSetsExpression::new(
-            GroupingType::GroupingSets,
-            groups,
-            return_type.clone(),
-        );
+        let expr =
+            GroupingSetsExpression::new(GroupingType::GroupingSets, groups, return_type.clone());
 
         // Verify properties
         assert_eq!(expr.get_grouping_type(), &GroupingType::GroupingSets);
         assert_eq!(expr.get_groups().len(), 3);
         assert_eq!(expr.get_return_type().get_name(), "grouping_sets");
         assert_eq!(expr.get_return_type().get_type(), TypeId::Vector);
-        
+
         // Verify children are properly flattened
         assert_eq!(expr.get_children().len(), 6); // 2 + 2 + 2 expressions
     }
@@ -202,11 +209,8 @@ mod tests {
         let return_type = Column::new("grouping_sets", TypeId::Vector);
 
         // Create GroupingSetsExpression
-        let expr = GroupingSetsExpression::new(
-            GroupingType::GroupingSets,
-            groups,
-            return_type.clone(),
-        );
+        let expr =
+            GroupingSetsExpression::new(GroupingType::GroupingSets, groups, return_type.clone());
 
         // Verify children access
         assert_eq!(expr.get_children().len(), 3);
@@ -236,21 +240,15 @@ mod tests {
             return_type.clone(),
         );
         assert!(grouping_sets.to_string().starts_with("GROUPING SETS"));
-        
+
         // Test CUBE
-        let cube = GroupingSetsExpression::new(
-            GroupingType::Cube,
-            groups.clone(),
-            return_type.clone(),
-        );
+        let cube =
+            GroupingSetsExpression::new(GroupingType::Cube, groups.clone(), return_type.clone());
         assert!(cube.to_string().starts_with("CUBE"));
-        
+
         // Test ROLLUP
-        let rollup = GroupingSetsExpression::new(
-            GroupingType::Rollup,
-            groups.clone(),
-            return_type.clone(),
-        );
+        let rollup =
+            GroupingSetsExpression::new(GroupingType::Rollup, groups.clone(), return_type.clone());
         assert!(rollup.to_string().starts_with("ROLLUP"));
     }
 
@@ -265,11 +263,8 @@ mod tests {
         let return_type = Column::new("grouping_sets", TypeId::Vector);
 
         // Create GroupingSetsExpression
-        let expr = GroupingSetsExpression::new(
-            GroupingType::GroupingSets,
-            groups,
-            return_type.clone(),
-        );
+        let expr =
+            GroupingSetsExpression::new(GroupingType::GroupingSets, groups, return_type.clone());
 
         // Create a schema
         let schema = Schema::new(vec![
@@ -296,11 +291,8 @@ mod tests {
         let return_type = Column::new("grouping_sets", TypeId::Vector);
 
         // Create GroupingSetsExpression
-        let expr = GroupingSetsExpression::new(
-            GroupingType::GroupingSets,
-            groups,
-            return_type.clone(),
-        );
+        let expr =
+            GroupingSetsExpression::new(GroupingType::GroupingSets, groups, return_type.clone());
 
         // Clone with new children
         let new_children = vec![new_expr1.clone(), new_expr2.clone()];
@@ -311,10 +303,11 @@ mod tests {
             assert_eq!(gs_expr.get_grouping_type(), &GroupingType::GroupingSets);
             assert_eq!(gs_expr.get_groups().len(), 1);
             assert_eq!(gs_expr.get_groups()[0].len(), 2);
-            
+
             // Check that the new expressions are used
             if let Expression::Constant(const_expr) = gs_expr.get_groups()[0][0].as_ref() {
-                if let crate::types_db::value::Val::Integer(val) = const_expr.get_value().get_val() {
+                if let crate::types_db::value::Val::Integer(val) = const_expr.get_value().get_val()
+                {
                     assert_eq!(*val, 10);
                 } else {
                     panic!("Expected Integer value");
@@ -338,27 +331,30 @@ mod tests {
         let return_type = Column::new("grouping_sets", TypeId::Vector);
 
         // Create GroupingSetsExpression
-        let expr = GroupingSetsExpression::new(
-            GroupingType::GroupingSets,
-            groups,
-            return_type.clone(),
-        );
+        let expr =
+            GroupingSetsExpression::new(GroupingType::GroupingSets, groups, return_type.clone());
 
         // Create a schema and tuple for testing
         let schema = Schema::new(vec![
             Column::new("const_1", TypeId::Integer),
             Column::new("const_2", TypeId::Integer),
         ]);
-        let tuple = Tuple::new(&[Value::new(1), Value::new(2)], schema.clone(), RID::new(1, 1));
+        let tuple = Tuple::new(
+            &[Value::new(1), Value::new(2)],
+            schema.clone(),
+            RID::new(1, 1),
+        );
 
         // Evaluate should return an error
         assert!(expr.evaluate(&tuple, &schema).is_err());
-        
+
         // Create a second tuple and schema for join evaluation
         let schema2 = Schema::new(vec![Column::new("const_3", TypeId::Integer)]);
         let tuple2 = Tuple::new(&[Value::new(3)], schema2.clone(), RID::new(2, 1));
-        
+
         // Evaluate join should return an error
-        assert!(expr.evaluate_join(&tuple, &schema, &tuple2, &schema2).is_err());
+        assert!(expr
+            .evaluate_join(&tuple, &schema, &tuple2, &schema2)
+            .is_err());
     }
-} 
+}

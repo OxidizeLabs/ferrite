@@ -15,7 +15,7 @@ pub struct IndexIterator {
     start_key: Option<Tuple>,
     end_key: Option<Tuple>,
     exhausted: bool,
-    last_key: Option<Value>,  // Track the last key we've processed
+    last_key: Option<Value>, // Track the last key we've processed
 }
 
 impl IndexIterator {
@@ -27,7 +27,7 @@ impl IndexIterator {
     ) -> Self {
         let mut iterator = Self {
             tree,
-            current_batch: Vec::new(),  // Don't pre-allocate since we'll replace it
+            current_batch: Vec::new(), // Don't pre-allocate since we'll replace it
             position: 0,
             start_key,
             end_key,
@@ -191,7 +191,12 @@ impl IndexIterator {
         {
             let tree_guard = self.tree.read();
             if let Some(end) = &self.end_key {
-                self.current_batch.append(tree_guard.scan_range(&seek_key, &end, true).unwrap().as_mut());
+                self.current_batch.append(
+                    tree_guard
+                        .scan_range(&seek_key, &end, true)
+                        .unwrap()
+                        .as_mut(),
+                );
             }
         } // tree_guard is dropped here
 

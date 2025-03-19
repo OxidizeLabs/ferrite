@@ -81,9 +81,9 @@ impl BoundExpression for BoundWindow {
         self.args.iter().any(|expr| expr.has_aggregation())
             || self.partition_by.iter().any(|expr| expr.has_aggregation())
             || self
-            .order_bys
-            .iter()
-            .any(|expr| expr.expr.has_aggregation())
+                .order_bys
+                .iter()
+                .any(|expr| expr.expr.has_aggregation())
     }
 
     fn has_window_function(&self) -> bool {

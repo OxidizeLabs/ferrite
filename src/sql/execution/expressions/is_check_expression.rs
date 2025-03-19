@@ -541,7 +541,10 @@ mod tests {
             IsCheckType::Null { negated: false },
             Column::new("result", TypeId::Boolean),
         );
-        assert_eq!(is_null.evaluate(&tuple, &schema).unwrap(), Value::new(false));
+        assert_eq!(
+            is_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(false)
+        );
     }
 
     #[test]
@@ -559,7 +562,10 @@ mod tests {
             IsCheckType::Null { negated: true },
             Column::new("result", TypeId::Boolean),
         );
-        assert_eq!(is_not_null.evaluate(&tuple, &schema).unwrap(), Value::new(false));
+        assert_eq!(
+            is_not_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(false)
+        );
 
         // Test non-NULL value
         let non_null_expr = Arc::new(Expression::Constant(ConstantExpression::new(
@@ -572,6 +578,9 @@ mod tests {
             IsCheckType::Null { negated: true },
             Column::new("result", TypeId::Boolean),
         );
-        assert_eq!(is_not_null.evaluate(&tuple, &schema).unwrap(), Value::new(true));
+        assert_eq!(
+            is_not_null.evaluate(&tuple, &schema).unwrap(),
+            Value::new(true)
+        );
     }
 }

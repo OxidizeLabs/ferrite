@@ -46,7 +46,7 @@ pub struct FileDiskManager {
     num_flushes: AtomicI32,
     num_writes: AtomicI32,
     flush_log: Arc<Mutex<bool>>,
-    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output=()> + Send>>>>,
+    flush_log_f: Arc<Mutex<Option<Box<dyn Future<Output = ()> + Send>>>>,
     metrics: DiskMetrics,
 }
 
@@ -341,7 +341,7 @@ impl FileDiskManager {
     /// # Arguments
     ///
     /// * `f` - A future to be executed when a log flush occurs.
-    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output=()> + Send>) {
+    pub fn set_flush_log_future(&self, f: Box<dyn Future<Output = ()> + Send>) {
         let mut flush_log_f = self.flush_log_f.lock();
         *flush_log_f = Some(f);
     }
@@ -1454,8 +1454,8 @@ mod tests {
             assert!(
                 elapsed
                     >= Duration::from_millis(
-                    FileDiskManager::RETRY_DELAY_MS * (FileDiskManager::MAX_RETRIES - 1) as u64
-                ),
+                        FileDiskManager::RETRY_DELAY_MS * (FileDiskManager::MAX_RETRIES - 1) as u64
+                    ),
                 "Should have waited appropriate retry delay time"
             );
         }

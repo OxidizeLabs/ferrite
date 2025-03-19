@@ -5,6 +5,7 @@ use crate::types_db::decimal_type;
 use crate::types_db::integer_type;
 use crate::types_db::invalid_type;
 use crate::types_db::smallint_type;
+use crate::types_db::struct_type;
 use crate::types_db::timestamp_type;
 use crate::types_db::tinyint_type;
 use crate::types_db::type_id::TypeId;
@@ -12,7 +13,6 @@ use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type;
 use crate::types_db::vector_type;
-use crate::types_db::struct_type;
 use std::mem::size_of;
 use std::sync::Arc;
 

@@ -1,8 +1,10 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
+use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
+use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction::UndoLink;
 use crate::concurrency::transaction::UndoLog;
@@ -17,8 +19,6 @@ use log::debug;
 use parking_lot::RwLock;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use crate::common::exception::PageError;
-use crate::concurrency::transaction::IsolationLevel;
 
 // Page Management
 pub struct TablePageManager {
@@ -99,7 +99,7 @@ impl TableHeap {
         // Create first page
         if let Some(page_guard) = bpm.new_page::<TablePage>() {
             let first_page_id = page_guard.read().get_page_id();
-            
+
             // Initialize the page
             {
                 let mut page = page_guard.write();
@@ -130,11 +130,11 @@ impl TableHeap {
     /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
     pub fn insert_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
         let _write_guard = self.latch.write();
-        
+
         // Get the last page
         let last_page_id = *self.last_page_id.read();
         let page_guard = self.get_page(last_page_id)?;
-        
+
         // Try to insert into current page
         {
             let mut page = page_guard.write();
@@ -144,7 +144,7 @@ impl TableHeap {
                 return Ok(rid);
             }
         }
-        
+
         // If we get here, we need a new page
         // Note: page_guard is dropped here before creating new page
         self.create_new_page_and_insert(meta, tuple)
@@ -175,8 +175,9 @@ impl TableHeap {
         // 1. If current transaction created the tuple, allow update
         // 2. If tuple is committed, allow update
         // 3. If tuple is uncommitted and created by another transaction, deny update
-        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id() && 
-           !current_meta.is_committed() {
+        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id()
+            && !current_meta.is_committed()
+        {
             return Err("Cannot update uncommitted tuple from another transaction".to_string());
         }
 
@@ -192,7 +193,7 @@ impl TableHeap {
             let undo_log = UndoLog {
                 is_deleted: false,
                 modified_fields: vec![true; tuple.get_column_count()],
-                tuple: current_tuple.clone(),  // Keep the old version
+                tuple: current_tuple.clone(), // Keep the old version
                 ts: current_meta.get_commit_timestamp(),
                 prev_version: UndoLink {
                     prev_txn: current_meta.get_creator_txn_id(),
@@ -202,7 +203,7 @@ impl TableHeap {
 
             // Append the undo log to the transaction and get its index
             let undo_link = txn.append_undo_log(undo_log);
-            
+
             // Create new meta with updated undo log index
             let mut new_meta = meta.clone();
             new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
@@ -213,7 +214,8 @@ impl TableHeap {
             // Get write lock and perform update
             let page_guard = self.get_page(rid.get_page_id())?;
             let mut page = page_guard.write();
-            return page.update_tuple(&new_meta, tuple, rid)
+            return page
+                .update_tuple(&new_meta, tuple, rid)
                 .map(|_| rid)
                 .map_err(|e| format!("Failed to update tuple: {}", e));
         }
@@ -246,9 +248,12 @@ impl TableHeap {
         // 1. If current transaction created the tuple, allow update
         // 2. If tuple is committed, allow update
         // 3. If tuple is uncommitted and created by another transaction, deny update
-        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id() && 
-           !current_meta.is_committed() {
-            return Err("Cannot update meta of uncommitted tuple from another transaction".to_string());
+        if current_meta.get_creator_txn_id() != meta.get_creator_txn_id()
+            && !current_meta.is_committed()
+        {
+            return Err(
+                "Cannot update meta of uncommitted tuple from another transaction".to_string(),
+            );
         }
 
         // Now perform the update
@@ -329,14 +334,14 @@ impl TableHeap {
                 if txn.is_tuple_visible(&meta) {
                     return Ok((meta, tuple));
                 }
-                
+
                 // If latest version isn't visible, check version chain
                 let txn_manager = txn_ctx.get_transaction_manager();
                 let mut current_link = txn_manager.get_undo_link(rid);
-                
+
                 while let Some(ref undo_link) = current_link {
                     let undo_log = txn_manager.get_undo_log(undo_link.clone());
-                    
+
                     let mut prev_meta = TupleMeta::new(undo_link.prev_txn);
                     prev_meta.set_commit_timestamp(undo_log.ts);
                     prev_meta.set_deleted(undo_log.is_deleted);
@@ -501,7 +506,7 @@ impl TableHeap {
     pub fn get_num_pages(&self) -> usize {
         let mut count = 0;
         let mut current_page_id = *self.first_page_id.read();
-        
+
         while current_page_id != INVALID_PAGE_ID {
             count += 1;
             if let Ok(page_guard) = self.get_page(current_page_id) {
@@ -556,7 +561,8 @@ impl TableHeap {
             Ok((meta, tuple)) => {
                 // Check if this version is visible to the transaction
                 if meta.get_creator_txn_id() == INVALID_TXN_ID
-                    || meta.get_creator_txn_id() == txn.get_transaction_id() {
+                    || meta.get_creator_txn_id() == txn.get_transaction_id()
+                {
                     // Tuple was created by this transaction or has no creator
                     Ok((meta, tuple))
                 } else {
@@ -573,27 +579,33 @@ impl TableHeap {
                     }
                 }
             }
-            Err(e) => Err(format!("Failed to get tuple: {}", e))
+            Err(e) => Err(format!("Failed to get tuple: {}", e)),
         }
     }
 
-    fn create_new_page_and_insert(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
+    fn create_new_page_and_insert(
+        &self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+    ) -> Result<RID, String> {
         // First check if tuple is too large for any page
-        let temp_page = TablePage::new(0);  // Temporary page just for size check
+        let temp_page = TablePage::new(0); // Temporary page just for size check
         if temp_page.is_tuple_too_large(tuple) {
             return Err("Tuple is too large to fit in a page".to_string());
         }
 
         // Get the current last page ID before creating new page
         let last_page_id = *self.last_page_id.read();
-        
+
         // Create new page
-        let new_page_guard = self.bpm.new_page::<TablePage>()
+        let new_page_guard = self
+            .bpm
+            .new_page::<TablePage>()
             .ok_or_else(|| "Failed to create new page".to_string())?;
         let new_page_id = new_page_guard.read().get_page_id();
-        
+
         debug!("Creating new page {} for tuple insertion", new_page_id);
-        
+
         // Initialize the new page first
         {
             let mut new_page = new_page_guard.write();
@@ -601,30 +613,35 @@ impl TableHeap {
             new_page.set_prev_page_id(last_page_id);
             new_page.set_dirty(true);
         }
-        
+
         // Now get and update the last page
         {
             let last_page_guard = self.get_page(last_page_id)?;
             debug!("Current last page is {}, updating links", last_page_id);
-            
+
             let mut last_page = last_page_guard.write();
             last_page.set_next_page_id(new_page_id);
             last_page.set_dirty(true);
         }
-        
+
         // Update table heap's last page pointer
         *self.last_page_id.write() = new_page_id;
-        
-        debug!("Page links updated, inserting tuple into new page {}", new_page_id);
-        
+
+        debug!(
+            "Page links updated, inserting tuple into new page {}",
+            new_page_id
+        );
+
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();
-        new_page.insert_tuple(meta, tuple)
+        new_page
+            .insert_tuple(meta, tuple)
             .ok_or_else(|| "Failed to insert tuple into new page".to_string())
     }
 
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard<TablePage>, String> {
-        self.bpm.fetch_page::<TablePage>(page_id)
+        self.bpm
+            .fetch_page::<TablePage>(page_id)
             .ok_or_else(|| format!("Failed to fetch page {}", page_id))
     }
 
@@ -651,7 +668,7 @@ impl TableHeap {
     // Internal methods use these instead of accessing latch directly
     fn with_read_lock<F, R>(&self, f: F) -> R
     where
-        F: FnOnce() -> R
+        F: FnOnce() -> R,
     {
         let _guard = self.latch.read();
         f()
@@ -659,20 +676,24 @@ impl TableHeap {
 
     fn with_write_lock<F, R>(&self, f: F) -> R
     where
-        F: FnOnce() -> R
+        F: FnOnce() -> R,
     {
         let _guard = self.latch.write();
         f()
     }
 
     // Basic storage operations without transaction logic
-    pub fn insert_tuple_internal(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
+    pub fn insert_tuple_internal(
+        &self,
+        meta: &TupleMeta,
+        tuple: &mut Tuple,
+    ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
-        
+
         // Get the last page
         let last_page_id = *self.last_page_id.read();
         let page_guard = self.get_page(last_page_id)?;
-        
+
         // Try to insert into current page
         {
             let mut page = page_guard.write();
@@ -682,7 +703,7 @@ impl TableHeap {
                 return Ok(rid);
             }
         }
-        
+
         // If we get here, we need a new page
         self.create_new_page_and_insert(meta, tuple)
     }
@@ -696,7 +717,7 @@ impl TableHeap {
         let _write_guard = self.latch.write();
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
-        
+
         page.update_tuple(meta, tuple, rid)
             .map(|_| rid)
             .map_err(|e| format!("Failed to update tuple: {}", e))
@@ -717,12 +738,7 @@ impl TableInfo {
     /// - `name`: The table name.
     /// - `table`: An owning pointer to the table heap.
     /// - `oid`: The unique OID for the table.
-    pub fn new(
-        schema: Schema,
-        name: String,
-        table: Arc<TableHeap>,
-        oid: TableOidT,
-    ) -> Self {
+    pub fn new(schema: Schema, name: String, table: Arc<TableHeap>, oid: TableOidT) -> Self {
         TableInfo {
             schema,
             name,
@@ -764,75 +780,80 @@ impl TupleStorage {
         }
     }
 
-    pub fn insert_tuple(
-        &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
-    ) -> Result<RID, String> {
+    pub fn insert_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
         // Get the last page or create a new one if none exists
         let page_guard = if *self.last_page_id.read() == INVALID_PAGE_ID {
             // Create first page
-            let new_page = self.bpm.new_page::<TablePage>()
+            let new_page = self
+                .bpm
+                .new_page::<TablePage>()
                 .ok_or("Failed to create new table page")?;
-            
+
             // Initialize the page
             {
                 let mut page = new_page.write();
                 page.init();
                 page.set_dirty(true);
             }
-            
+
             // Update page IDs
             *self.first_page_id.write() = new_page.get_page_id();
             *self.last_page_id.write() = new_page.get_page_id();
-            
+
             new_page
         } else {
             // Get existing last page
-            self.bpm.fetch_page::<TablePage>(*self.last_page_id.read())
+            self.bpm
+                .fetch_page::<TablePage>(*self.last_page_id.read())
                 .ok_or("Failed to fetch last page")?
         };
 
         let mut page = page_guard.write();
-        
+
         // Try to insert into current page
         if page.has_space_for(&mut *tuple) {
-            let rid = page.insert_tuple(meta, tuple)
+            let rid = page
+                .insert_tuple(meta, tuple)
                 .ok_or("Failed to insert tuple into page")?;
             page.set_dirty(true);
             Ok(rid)
         } else {
             // Current page is full, create new page
             drop(page); // Release write lock on current page
-            
-            let new_page_guard = self.bpm.new_page::<TablePage>()
+
+            let new_page_guard = self
+                .bpm
+                .new_page::<TablePage>()
                 .ok_or("Failed to create new table page")?;
-            
+
             let new_page_id = new_page_guard.get_page_id();
-            
+
             // Initialize the new page
             {
                 let mut new_page = new_page_guard.write();
                 new_page.init();
-                
+
                 // Set up page links
                 new_page.set_prev_page_id(*self.last_page_id.read());
                 new_page.set_dirty(true);
-                
+
                 // Try to insert tuple
-                let rid = new_page.insert_tuple(meta, tuple)
+                let rid = new_page
+                    .insert_tuple(meta, tuple)
                     .ok_or("Failed to insert tuple into new page")?;
-                
+
                 // Update the previous page's next pointer
-                if let Some(prev_guard) = self.bpm.fetch_page::<TablePage>(*self.last_page_id.read()) {
+                if let Some(prev_guard) =
+                    self.bpm.fetch_page::<TablePage>(*self.last_page_id.read())
+                {
                     let mut prev_page = prev_guard.write();
                     prev_page.set_next_page_id(new_page_id);
                     prev_page.set_dirty(true);
                 }
-                
+
                 // Update last page pointer
                 *self.last_page_id.write() = new_page_id;
-                
+
                 Ok(rid)
             }
         }
@@ -844,15 +865,18 @@ impl TupleStorage {
         tuple: &mut Tuple,
         rid: RID,
     ) -> Result<(), PageError> {
-        let page_guard = self.bpm.fetch_page::<TablePage>(rid.get_page_id())
+        let page_guard = self
+            .bpm
+            .fetch_page::<TablePage>(rid.get_page_id())
             .ok_or(PageError::NoPageReference)?;
-        
+
         let mut page = page_guard.write();
         page.update_tuple(meta, tuple, rid)
     }
 
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard<TablePage>, String> {
-        self.bpm.fetch_page::<TablePage>(page_id)
+        self.bpm
+            .fetch_page::<TablePage>(page_id)
             .ok_or_else(|| format!("Failed to fetch page {}", page_id))
     }
 }
@@ -927,7 +951,6 @@ impl Clone for TableHeap {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
@@ -937,6 +960,7 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
+    use std::collections::HashSet;
     use tempfile::TempDir;
 
     /// Basic test context for storage-only tests
@@ -953,8 +977,18 @@ mod tests {
             const K: usize = 2;
 
             let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join(format!("{name}.db")).to_str().unwrap().to_string();
-            let log_path = temp_dir.path().join(format!("{name}.log")).to_str().unwrap().to_string();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
@@ -998,18 +1032,23 @@ mod tests {
         let ctx = StorageTestContext::new("test_basic_storage");
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
-        
+
         // Test insert
         let (meta, mut tuple) = create_test_tuple(&schema);
-        let rid = table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
-        
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple)
+            .expect("Insert failed");
+
         // Verify page creation
-        let page_guard = table_heap.get_page(rid.get_page_id()).expect("Failed to get page");
+        let page_guard = table_heap
+            .get_page(rid.get_page_id())
+            .expect("Failed to get page");
         let page = page_guard.read();
         assert!(page.get_num_tuples() > 0);
-        
+
         // Test direct page access
-        let (stored_meta, stored_tuple) = page.get_tuple(&rid).expect("Failed to get tuple from page");
+        let (stored_meta, stored_tuple) =
+            page.get_tuple(&rid).expect("Failed to get tuple from page");
         assert_eq!(stored_meta, meta);
         assert_eq!(stored_tuple, tuple);
     }
@@ -1022,25 +1061,28 @@ mod tests {
 
         // Insert a fixed number of tuples (61 should be enough to create multiple pages)
         debug!("Inserting 61 tuples to fill multiple pages");
-        
+
         let mut page_ids = HashSet::new();
         let mut rids = Vec::new();
-        
+
         for i in 0..61 {
             let values = vec![
                 Value::new(i as i32),
-                Value::new(format!("name{}_with_some_padding_to_ensure_large_enough_tuple", i)),
-                Value::new(20 + i as i32)
+                Value::new(format!(
+                    "name{}_with_some_padding_to_ensure_large_enough_tuple",
+                    i
+                )),
+                Value::new(20 + i as i32),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0);
-            
+
             match table_heap.insert_tuple(&meta, &mut tuple) {
                 Ok(rid) => {
                     debug!("Inserted tuple {} with RID {:?}", i, rid);
                     page_ids.insert(rid.get_page_id());
                     rids.push(rid);
-                },
+                }
                 Err(e) => panic!("Failed to insert tuple {}: {}", i, e),
             }
         }
@@ -1054,23 +1096,43 @@ mod tests {
         for window in page_ids.windows(2) {
             let current_page_id = window[0];
             let next_page_id = window[1];
-            
-            let current_guard = table_heap.get_page(current_page_id).expect("Failed to get current page");
+
+            let current_guard = table_heap
+                .get_page(current_page_id)
+                .expect("Failed to get current page");
             let current_page = current_guard.read();
-            assert_eq!(current_page.get_next_page_id(), next_page_id, 
-                      "Page {} should link to next page {}", current_page_id, next_page_id);
-            
-            let next_guard = table_heap.get_page(next_page_id).expect("Failed to get next page");
+            assert_eq!(
+                current_page.get_next_page_id(),
+                next_page_id,
+                "Page {} should link to next page {}",
+                current_page_id,
+                next_page_id
+            );
+
+            let next_guard = table_heap
+                .get_page(next_page_id)
+                .expect("Failed to get next page");
             let next_page = next_guard.read();
-            assert_eq!(next_page.get_prev_page_id(), current_page_id,
-                      "Page {} should link back to previous page {}", next_page_id, current_page_id);
+            assert_eq!(
+                next_page.get_prev_page_id(),
+                current_page_id,
+                "Page {} should link back to previous page {}",
+                next_page_id,
+                current_page_id
+            );
         }
 
         // Verify first and last page pointers
-        assert_eq!(*table_heap.first_page_id.read(), page_ids[0], 
-                  "First page ID mismatch");
-        assert_eq!(*table_heap.last_page_id.read(), *page_ids.last().unwrap(), 
-                  "Last page ID mismatch");
+        assert_eq!(
+            *table_heap.first_page_id.read(),
+            page_ids[0],
+            "First page ID mismatch"
+        );
+        assert_eq!(
+            *table_heap.last_page_id.read(),
+            *page_ids.last().unwrap(),
+            "Last page ID mismatch"
+        );
     }
 
     #[test]
@@ -1081,19 +1143,20 @@ mod tests {
 
         // Create a tuple that's too large for a single page
         let large_string = "x".repeat(4000); // Close to page size
-        let values = vec![
-            Value::new(1),
-            Value::new(large_string),
-            Value::new(25)
-        ];
+        let values = vec![Value::new(1), Value::new(large_string), Value::new(25)];
         let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
         let meta = TupleMeta::new(0);
 
         // Attempt to insert should fail gracefully
         let result = table_heap.insert_tuple(&meta, &mut tuple);
-        assert!(result.is_err(), "Should fail to insert tuple larger than page size");
-        assert!(result.unwrap_err().contains("too large"), 
-                "Error should indicate tuple is too large");
+        assert!(
+            result.is_err(),
+            "Should fail to insert tuple larger than page size"
+        );
+        assert!(
+            result.unwrap_err().contains("too large"),
+            "Error should indicate tuple is too large"
+        );
     }
 
     #[test]
@@ -1104,22 +1167,26 @@ mod tests {
 
         // Insert initial tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
-        let rid = table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple)
+            .expect("Insert failed");
 
         // Create updated tuple
         let updated_values = vec![
             Value::new(1),
-            Value::new("Bob"),  // Changed from "Alice"
-            Value::new(30),     // Changed from 25
+            Value::new("Bob"), // Changed from "Alice"
+            Value::new(30),    // Changed from 25
         ];
         let mut updated_tuple = Tuple::new(&updated_values, schema.clone(), rid);
-        
+
         // Update the tuple
-        let updated_rid = table_heap.update_tuple(&meta, &mut updated_tuple, rid, None)
+        let updated_rid = table_heap
+            .update_tuple(&meta, &mut updated_tuple, rid, None)
             .expect("Update failed");
-        
+
         // Verify the update
-        let (_, retrieved_tuple) = table_heap.get_tuple(updated_rid)
+        let (_, retrieved_tuple) = table_heap
+            .get_tuple(updated_rid)
             .expect("Failed to get updated tuple");
         assert_eq!(retrieved_tuple.get_value(1), &Value::new("Bob"));
         assert_eq!(retrieved_tuple.get_value(2), &Value::new(30));
@@ -1133,14 +1200,20 @@ mod tests {
 
         // Insert initial tuple
         let (mut meta, mut tuple) = create_test_tuple(&schema);
-        let rid = table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple)
+            .expect("Insert failed");
 
         // Update tuple meta
         meta.set_commit_timestamp(100);
-        table_heap.update_tuple_meta(&meta, rid).expect("Meta update failed");
+        table_heap
+            .update_tuple_meta(&meta, rid)
+            .expect("Meta update failed");
 
         // Verify the meta update
-        let retrieved_meta = table_heap.get_tuple_meta(rid).expect("Failed to get tuple meta");
+        let retrieved_meta = table_heap
+            .get_tuple_meta(rid)
+            .expect("Failed to get tuple meta");
         assert_eq!(retrieved_meta.get_commit_timestamp(), 100);
     }
 
@@ -1156,20 +1229,24 @@ mod tests {
             let values = vec![
                 Value::new(i),
                 Value::new(format!("name{}", i)),
-                Value::new(20 + i)
+                Value::new(20 + i),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0);
-            let rid = table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
+            let rid = table_heap
+                .insert_tuple(&meta, &mut tuple)
+                .expect("Insert failed");
             rids.push(rid);
         }
 
         // Verify we can iterate through all pages and find all tuples
         let mut found_count = 0;
         let mut current_page_id = *table_heap.first_page_id.read();
-        
+
         while current_page_id != INVALID_PAGE_ID {
-            let page_guard = table_heap.get_page(current_page_id).expect("Failed to get page");
+            let page_guard = table_heap
+                .get_page(current_page_id)
+                .expect("Failed to get page");
             let page = page_guard.read();
             found_count += page.get_num_tuples() as usize;
             current_page_id = page.get_next_page_id();
@@ -1180,8 +1257,8 @@ mod tests {
 
     #[test]
     fn test_concurrent_access() {
-        use std::thread;
         use std::sync::Arc;
+        use std::thread;
 
         let ctx = StorageTestContext::new("test_concurrent_access");
         let table_heap = Arc::new(ctx.create_table_heap());
@@ -1189,7 +1266,9 @@ mod tests {
 
         // Insert initial tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
-        let rid = table_heap.insert_tuple(&meta, &mut tuple).expect("Insert failed");
+        let rid = table_heap
+            .insert_tuple(&meta, &mut tuple)
+            .expect("Insert failed");
 
         // Spawn multiple threads to read the tuple concurrently
         let mut handles = vec![];
@@ -1220,7 +1299,9 @@ mod tests {
 
         // Try to update non-existent tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
-        assert!(table_heap.update_tuple(&meta, &mut tuple, invalid_rid, None).is_err());
+        assert!(table_heap
+            .update_tuple(&meta, &mut tuple, invalid_rid, None)
+            .is_err());
 
         // Try to update tuple meta for non-existent tuple
         assert!(table_heap.update_tuple_meta(&meta, invalid_rid).is_err());
@@ -1234,11 +1315,7 @@ mod tests {
 
         // Create a tuple that's just small enough to fit
         let large_string = "x".repeat(3000); // Large but should fit
-        let values = vec![
-            Value::new(1),
-            Value::new(large_string),
-            Value::new(25)
-        ];
+        let values = vec![Value::new(1), Value::new(large_string), Value::new(25)];
         let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
         let meta = TupleMeta::new(0);
 
@@ -1247,15 +1324,10 @@ mod tests {
 
         // Now try with a slightly larger tuple that should fail
         let too_large_string = "x".repeat(4000);
-        let values = vec![
-            Value::new(1),
-            Value::new(too_large_string),
-            Value::new(25)
-        ];
+        let values = vec![Value::new(1), Value::new(too_large_string), Value::new(25)];
         let mut large_tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-        
+
         // This should fail
         assert!(table_heap.insert_tuple(&meta, &mut large_tuple).is_err());
     }
 }
-

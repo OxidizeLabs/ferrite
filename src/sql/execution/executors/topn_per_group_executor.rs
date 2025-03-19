@@ -2,19 +2,19 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::storage::table::tuple::Tuple;
-use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
+use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
 use log::{debug, trace};
 use parking_lot::RwLock;
-use std::sync::Arc;
-use std::collections::HashMap;
 use std::cmp::Ordering;
-use crate::types_db::types::{CmpBool, Type};
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
@@ -26,9 +26,12 @@ struct TupleWithKeys {
 
 impl PartialEq for TupleWithKeys {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_keys.len() == other.sort_keys.len() && 
-        self.sort_keys.iter().zip(other.sort_keys.iter())
-            .all(|(a, b)| a.compare_not_equals(b) == CmpBool::CmpTrue)
+        self.sort_keys.len() == other.sort_keys.len()
+            && self
+                .sort_keys
+                .iter()
+                .zip(other.sort_keys.iter())
+                .all(|(a, b)| a.compare_not_equals(b) == CmpBool::CmpTrue)
     }
 }
 
@@ -47,11 +50,11 @@ impl Ord for TupleWithKeys {
                 CmpBool::CmpFalse => {
                     match a.compare_greater_than(b) {
                         CmpBool::CmpTrue => return Ordering::Greater,
-                        CmpBool::CmpFalse => continue,  // Equal, check next key
-                        CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                        CmpBool::CmpFalse => continue, // Equal, check next key
+                        CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
                 }
-                CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
         Ordering::Equal
@@ -79,7 +82,8 @@ impl TopNPerGroupExecutor {
         debug!("Creating TopNPerGroupExecutor");
 
         let child_plan = plan.get_child().expect("TopNPerGroup should have a child");
-        let child = child_plan.create_executor(Arc::clone(&context))
+        let child = child_plan
+            .create_executor(Arc::clone(&context))
             .expect("Failed to create child executor");
 
         Self {
@@ -99,7 +103,8 @@ impl TopNPerGroupExecutor {
     /// Evaluates the sort keys for a tuple
     fn evaluate_sort_keys(&self, tuple: &Tuple) -> Vec<Value> {
         let schema = self.plan.get_output_schema();
-        let keys: Vec<Value> = self.plan
+        let keys: Vec<Value> = self
+            .plan
             .get_sort_expressions()
             .iter()
             .map(|expr| expr.evaluate(tuple, schema).unwrap())
@@ -111,7 +116,8 @@ impl TopNPerGroupExecutor {
     /// Evaluates the group keys for a tuple
     fn evaluate_group_keys(&self, tuple: &Tuple) -> Vec<Value> {
         let schema = self.plan.get_output_schema();
-        let keys: Vec<Value> = self.plan
+        let keys: Vec<Value> = self
+            .plan
             .get_group_expressions()
             .iter()
             .map(|expr| expr.evaluate(tuple, schema).unwrap())
@@ -128,11 +134,11 @@ impl TopNPerGroupExecutor {
                 CmpBool::CmpFalse => {
                     match a_val.compare_greater_than(b_val) {
                         CmpBool::CmpTrue => return Ordering::Greater,
-                        CmpBool::CmpFalse => continue,  // Equal, check next key
-                        CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                        CmpBool::CmpFalse => continue, // Equal, check next key
+                        CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
                 }
-                CmpBool::CmpNull => return Ordering::Equal,  // Treat NULL as equal
+                CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
         // If all values are equal or we run out of values, compare lengths
@@ -148,17 +154,20 @@ impl AbstractExecutor for TopNPerGroupExecutor {
 
         debug!("Initializing TopNPerGroupExecutor");
         self.child.init();
-        
+
         let n = self.plan.get_n();
         debug!("TopNPerGroup n value: {}", n);
-        
+
         // Process all input tuples and maintain top N per group
         while let Some((tuple, rid)) = self.child.next() {
             let sort_keys = self.evaluate_sort_keys(&tuple);
             let group_keys = self.evaluate_group_keys(&tuple);
-            
-            debug!("Processing tuple with sort keys: {:?}, group keys: {:?}", sort_keys, group_keys);
-            
+
+            debug!(
+                "Processing tuple with sort keys: {:?}, group keys: {:?}",
+                sort_keys, group_keys
+            );
+
             let tuple_with_keys = TupleWithKeys {
                 sort_keys,
                 tuple,
@@ -166,16 +175,22 @@ impl AbstractExecutor for TopNPerGroupExecutor {
             };
 
             // Get or create min-heap for this group
-            let group_heap = self.groups.entry(group_keys)
+            let group_heap = self
+                .groups
+                .entry(group_keys)
                 .or_insert_with(BinaryHeap::new);
 
             if group_heap.len() < n {
                 // Heap not full yet, add element
-                debug!("Group heap not full (size {}), adding tuple", group_heap.len());
+                debug!(
+                    "Group heap not full (size {}), adding tuple",
+                    group_heap.len()
+                );
                 group_heap.push(Reverse(tuple_with_keys));
             } else if let Some(Reverse(current_min)) = group_heap.peek() {
                 // Compare with smallest element in heap
-                if tuple_with_keys > *current_min {  // Changed comparison
+                if tuple_with_keys > *current_min {
+                    // Changed comparison
                     // Remove smallest and add new larger element
                     debug!("Replacing smallest element in group with larger tuple");
                     group_heap.pop();
@@ -186,9 +201,13 @@ impl AbstractExecutor for TopNPerGroupExecutor {
 
         // Store sorted group keys for iteration
         self.group_keys = self.groups.keys().cloned().collect();
-        self.group_keys.sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
-        
-        debug!("TopNPerGroupExecutor initialization complete. Number of groups: {}", self.groups.len());
+        self.group_keys
+            .sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
+
+        debug!(
+            "TopNPerGroupExecutor initialization complete. Number of groups: {}",
+            self.groups.len()
+        );
         self.initialized = true;
     }
 
@@ -202,8 +221,11 @@ impl AbstractExecutor for TopNPerGroupExecutor {
             if self.current_tuple_index < self.current_group_tuples.len() {
                 let result = &self.current_group_tuples[self.current_tuple_index];
                 self.current_tuple_index += 1;
-                debug!("Returning tuple from group {:?}, index {}", 
-                    self.current_group, self.current_tuple_index - 1);
+                debug!(
+                    "Returning tuple from group {:?}, index {}",
+                    self.current_group,
+                    self.current_tuple_index - 1
+                );
                 return Some((result.tuple.clone(), result.rid));
             }
 
@@ -218,7 +240,7 @@ impl AbstractExecutor for TopNPerGroupExecutor {
                 if let Some(heap) = self.groups.remove(&group_key) {
                     // Convert heap to sorted vector and reverse for descending order
                     let mut tuples: Vec<_> = heap.into_iter().map(|Reverse(t)| t).collect();
-                    tuples.sort_unstable_by(|a, b| b.cmp(a));  // Sort in descending order
+                    tuples.sort_unstable_by(|a, b| b.cmp(a)); // Sort in descending order
                     self.current_group_tuples = tuples;
                     self.current_tuple_index = 0;
                     continue;
@@ -253,16 +275,16 @@ mod tests {
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
 
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::sql::execution::transaction_context::TransactionContext;
-    use tempfile::TempDir;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-    use crate::types_db::type_id::TypeId;
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::types_db::type_id::TypeId;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -335,13 +357,37 @@ mod tests {
         // Create test tuples - two departments (1,2) with varying salaries
         let test_tuples = vec![
             // Department 1
-            Tuple::new(&[Value::new(1), Value::new(100)], schema.clone(), RID::new(0, 0)),
-            Tuple::new(&[Value::new(1), Value::new(200)], schema.clone(), RID::new(0, 1)),
-            Tuple::new(&[Value::new(1), Value::new(300)], schema.clone(), RID::new(0, 2)),
+            Tuple::new(
+                &[Value::new(1), Value::new(100)],
+                schema.clone(),
+                RID::new(0, 0),
+            ),
+            Tuple::new(
+                &[Value::new(1), Value::new(200)],
+                schema.clone(),
+                RID::new(0, 1),
+            ),
+            Tuple::new(
+                &[Value::new(1), Value::new(300)],
+                schema.clone(),
+                RID::new(0, 2),
+            ),
             // Department 2
-            Tuple::new(&[Value::new(2), Value::new(150)], schema.clone(), RID::new(0, 3)),
-            Tuple::new(&[Value::new(2), Value::new(250)], schema.clone(), RID::new(0, 4)),
-            Tuple::new(&[Value::new(2), Value::new(350)], schema.clone(), RID::new(0, 5)),
+            Tuple::new(
+                &[Value::new(2), Value::new(150)],
+                schema.clone(),
+                RID::new(0, 3),
+            ),
+            Tuple::new(
+                &[Value::new(2), Value::new(250)],
+                schema.clone(),
+                RID::new(0, 4),
+            ),
+            Tuple::new(
+                &[Value::new(2), Value::new(350)],
+                schema.clone(),
+                RID::new(0, 5),
+            ),
         ];
 
         // Create catalog
@@ -364,24 +410,21 @@ mod tests {
         )));
 
         // Convert tuples for mock scan
-        let test_data: Vec<(Vec<Value>, RID)> = test_tuples.into_iter()
+        let test_data: Vec<(Vec<Value>, RID)> = test_tuples
+            .into_iter()
             .map(|tuple| (tuple.get_values().to_vec(), tuple.get_rid()))
             .collect();
 
         // Create mock scan
         let mock_scan = Arc::new(
-            MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )
-            .with_tuples(test_data)
+            MockScanNode::new(schema.clone(), "test_table".to_string(), vec![])
+                .with_tuples(test_data),
         );
 
         // Create group by expression (department)
         let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
-            0,  // department column
+            0, // department column
             Column::new("department", TypeId::Integer),
             vec![],
         )));
@@ -389,14 +432,14 @@ mod tests {
         // Create sort expression (salary)
         let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
-            1,  // salary column
+            1, // salary column
             Column::new("salary", TypeId::Integer),
             vec![],
         )));
 
         // Create TopNPerGroup plan
         let topn_plan = Arc::new(TopNPerGroupNode::new(
-            2,  // top 2 per group
+            2, // top 2 per group
             vec![sort_expr],
             vec![group_expr],
             schema,
@@ -410,8 +453,8 @@ mod tests {
         // Verify results - should get top 2 salaries from each department
         // Department 1
         let result = executor.next().unwrap();
-        assert_eq!(result.0.get_value(0).as_integer().unwrap(), 1);  // dept
-        assert_eq!(result.0.get_value(1).as_integer().unwrap(), 300);  // salary
+        assert_eq!(result.0.get_value(0).as_integer().unwrap(), 1); // dept
+        assert_eq!(result.0.get_value(1).as_integer().unwrap(), 300); // salary
 
         let result = executor.next().unwrap();
         assert_eq!(result.0.get_value(0).as_integer().unwrap(), 1);

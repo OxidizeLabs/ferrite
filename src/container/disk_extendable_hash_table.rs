@@ -79,7 +79,10 @@ impl DiskExtendableHashTable {
 
             // Set up initial directory entry
             directory.set_bucket_page_id(0, bucket_page_id);
-            debug!("Set initial bucket page {} in directory at index 0", bucket_page_id);
+            debug!(
+                "Set initial bucket page {} in directory at index 0",
+                bucket_page_id
+            );
         }
 
         // Update header page with directory page ID
@@ -89,7 +92,10 @@ impl DiskExtendableHashTable {
             for i in 0..(1 << header_max_depth) {
                 header.set_directory_page_id(i, directory_page_id);
             }
-            debug!("Set directory page {} in header for all indices", directory_page_id);
+            debug!(
+                "Set directory page {} in header for all indices",
+                directory_page_id
+            );
         }
 
         Ok(Self {
@@ -335,9 +341,11 @@ impl DiskExtendableHashTable {
         // Update directory and redistribute entries
         {
             let mut directory = directory_page.write();
-            
+
             // Use the new directory page method to handle the split
-            if let Some(_split_bucket_index) = directory.update_directory_for_split(bucket_index, new_bucket_page_id) {
+            if let Some(_split_bucket_index) =
+                directory.update_directory_for_split(bucket_index, new_bucket_page_id)
+            {
                 // Redistribute entries between old and new buckets
                 let mut old_bucket = old_bucket_page.write();
                 let mut new_bucket = new_bucket_page.write();
@@ -359,7 +367,7 @@ impl DiskExtendableHashTable {
                         new_bucket.insert(key, value);
                     }
                 }
-                
+
                 return true;
             }
         }

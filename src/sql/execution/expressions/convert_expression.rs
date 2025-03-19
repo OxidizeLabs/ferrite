@@ -192,9 +192,9 @@ mod tests {
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = create_test_schema();
         let values = vec![
-            Value::new(42),                // int_col
-            Value::new("test string"),     // str_col
-            Value::new(3.14),              // dec_col
+            Value::new(42),            // int_col
+            Value::new("test string"), // str_col
+            Value::new(3.14),          // dec_col
         ];
         let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
         (tuple, schema)
@@ -206,7 +206,10 @@ mod tests {
 
         // Create a convert expression to convert integer to decimal
         let int_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("int_col", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("int_col", TypeId::Integer),
+            vec![],
         )));
 
         let convert_expr = ConvertExpression::new(
@@ -229,7 +232,10 @@ mod tests {
 
         // Try to convert string to integer (should fail gracefully)
         let str_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("str_col", TypeId::VarChar), vec![]
+            0,
+            1,
+            Column::new("str_col", TypeId::VarChar),
+            vec![],
         )));
 
         let convert_expr = ConvertExpression::new(
@@ -251,7 +257,10 @@ mod tests {
 
         // Test UTF8 charset conversion (should pass through)
         let str_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("str_col", TypeId::VarChar), vec![]
+            0,
+            1,
+            Column::new("str_col", TypeId::VarChar),
+            vec![],
         )));
 
         let convert_expr = ConvertExpression::new(
@@ -284,11 +293,7 @@ mod tests {
         let schema1 = Schema::new(vec![Column::new("left_int", TypeId::Integer)]);
         let schema2 = Schema::new(vec![Column::new("right_str", TypeId::VarChar)]);
 
-        let left_tuple = Tuple::new(
-            &vec![Value::new(123)],
-            schema1.clone(),
-            RID::new(0, 0),
-        );
+        let left_tuple = Tuple::new(&vec![Value::new(123)], schema1.clone(), RID::new(0, 0));
         let right_tuple = Tuple::new(
             &vec![Value::new("right value")],
             schema2.clone(),
@@ -296,7 +301,10 @@ mod tests {
         );
 
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("left_int", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("left_int", TypeId::Integer),
+            vec![],
         )));
 
         let convert_expr = ConvertExpression::new(
@@ -308,12 +316,9 @@ mod tests {
             Column::new("result", TypeId::VarChar),
         );
 
-        let result = convert_expr.evaluate_join(
-            &left_tuple,
-            &schema1,
-            &right_tuple,
-            &schema2,
-        ).unwrap();
+        let result = convert_expr
+            .evaluate_join(&left_tuple, &schema1, &right_tuple, &schema2)
+            .unwrap();
 
         assert_eq!(result.get_type_id(), TypeId::VarChar);
         assert_eq!(result.to_string(), "123");
@@ -322,7 +327,10 @@ mod tests {
     #[test]
     fn test_display() {
         let expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("test_col", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("test_col", TypeId::Integer),
+            vec![],
         )));
 
         // Test basic conversion
@@ -334,10 +342,7 @@ mod tests {
             vec![],
             Column::new("result", TypeId::Decimal),
         );
-        assert_eq!(
-            convert_expr.to_string(),
-            "CONVERT(test_col AS Decimal)"
-        );
+        assert_eq!(convert_expr.to_string(), "CONVERT(test_col AS Decimal)");
 
         // Test with TRY_CONVERT
         let try_convert_expr = ConvertExpression::new(
@@ -362,10 +367,7 @@ mod tests {
             vec![],
             Column::new("result", TypeId::VarChar),
         );
-        assert_eq!(
-            charset_expr.to_string(),
-            "CONVERT(test_col USING utf8)"
-        );
+        assert_eq!(charset_expr.to_string(), "CONVERT(test_col USING utf8)");
     }
 
     #[test]
@@ -374,7 +376,10 @@ mod tests {
 
         // Valid expression
         let valid_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("int_col", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("int_col", TypeId::Integer),
+            vec![],
         )));
 
         let convert_expr = ConvertExpression::new(
@@ -390,7 +395,10 @@ mod tests {
 
         // Invalid column reference
         let invalid_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 10, Column::new("nonexistent", TypeId::Integer), vec![]
+            0,
+            10,
+            Column::new("nonexistent", TypeId::Integer),
+            vec![],
         )));
 
         let invalid_expr = ConvertExpression::new(
@@ -408,7 +416,10 @@ mod tests {
     #[test]
     fn test_clone_with_children() {
         let expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("test_col", TypeId::Integer), vec![]
+            0,
+            0,
+            Column::new("test_col", TypeId::Integer),
+            vec![],
         )));
 
         let original = ConvertExpression::new(
@@ -433,7 +444,10 @@ mod tests {
 
         // Test cloning with new children
         let new_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, Column::new("other_col", TypeId::VarChar), vec![]
+            0,
+            1,
+            Column::new("other_col", TypeId::VarChar),
+            vec![],
         )));
         let clone_with_new = original.clone_with_children(vec![new_expr]);
         match clone_with_new.as_ref() {

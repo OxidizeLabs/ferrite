@@ -63,7 +63,11 @@ impl BPlusTree {
         let root_is_full = {
             let root_guard = self.root.read();
             let is_full = root_guard.keys.len() == self.order - 1;
-            debug!("Root node status: keys={}, is_full={}", root_guard.keys.len(), is_full);
+            debug!(
+                "Root node status: keys={}, is_full={}",
+                root_guard.keys.len(),
+                is_full
+            );
             is_full
         };
 
@@ -315,7 +319,6 @@ impl BPlusTree {
         Ok(entries)
     }
 
-
     /// Visualizes the B+ tree structure, showing:
     /// - Internal nodes with their keys
     /// - Leaf nodes with keys and values
@@ -486,12 +489,15 @@ impl BPlusTree {
 
         // For duplicate keys, we want to insert after existing equal keys
         // This ensures proper routing in internal nodes
-        let pos = keys.iter().position(|k| {
-            match k.compare_equals(key) {
-                CmpBool::CmpTrue => false, // Keep looking, want to insert after equals
-                _ => k.compare_greater_than(key) == CmpBool::CmpTrue
-            }
-        }).unwrap_or(keys.len());
+        let pos = keys
+            .iter()
+            .position(|k| {
+                match k.compare_equals(key) {
+                    CmpBool::CmpTrue => false, // Keep looking, want to insert after equals
+                    _ => k.compare_greater_than(key) == CmpBool::CmpTrue,
+                }
+            })
+            .unwrap_or(keys.len());
 
         debug!("Found insert position: {}", pos);
         pos
@@ -500,7 +506,10 @@ impl BPlusTree {
     // Update insert_non_full to maintain sorted order
     fn insert_non_full(&self, node: &mut BPlusTreeNode, key: Value, rid: RID) -> bool {
         debug!("Inserting into non-full node: key={:?}, rid={:?}", key, rid);
-        debug!("Current node: type={:?}, keys={:?}", node.node_type, node.keys);
+        debug!(
+            "Current node: type={:?}, keys={:?}",
+            node.node_type, node.keys
+        );
 
         match node.node_type {
             NodeType::Leaf => {
@@ -535,7 +544,10 @@ impl BPlusTree {
                     i += 1;
                 }
 
-                debug!("Inserting at position {}: key={:?}, rid={:?}", pos, key, rid);
+                debug!(
+                    "Inserting at position {}: key={:?}, rid={:?}",
+                    pos, key, rid
+                );
                 node.keys.insert(pos, key);
                 node.values.insert(pos, rid);
                 debug!("Leaf node after insertion: keys={:?}", node.keys);
@@ -547,20 +559,31 @@ impl BPlusTree {
 
                 // Ensure we don't go past the last child
                 let child_idx = if pos >= node.children.len() {
-                    debug!("Adjusting child index from {} to {}", pos, node.children.len() - 1);
+                    debug!(
+                        "Adjusting child index from {} to {}",
+                        pos,
+                        node.children.len() - 1
+                    );
                     node.children.len() - 1
                 } else {
                     pos
                 };
 
                 let child_arc = Arc::clone(&node.children[child_idx]);
-                debug!("Checking child node at position {} of {}", child_idx, node.children.len());
+                debug!(
+                    "Checking child node at position {} of {}",
+                    child_idx,
+                    node.children.len()
+                );
 
                 {
                     let mut child_guard = child_arc.write();
                     let needs_split = child_guard.keys.len() == self.order - 1;
-                    debug!("Child node status: keys={}, needs_split={}", 
-                           child_guard.keys.len(), needs_split);
+                    debug!(
+                        "Child node status: keys={}, needs_split={}",
+                        child_guard.keys.len(),
+                        needs_split
+                    );
 
                     if needs_split {
                         drop(child_guard);
@@ -573,7 +596,11 @@ impl BPlusTree {
 
                         // Again ensure we don't go past the last child
                         let new_child_idx = if new_pos >= node.children.len() {
-                            debug!("Adjusting new child index from {} to {}", new_pos, node.children.len() - 1);
+                            debug!(
+                                "Adjusting new child index from {} to {}",
+                                new_pos,
+                                node.children.len() - 1
+                            );
                             node.children.len() - 1
                         } else {
                             new_pos
@@ -618,8 +645,11 @@ impl BPlusTree {
                 let mut insert_pos = self.find_insert_position(&parent.keys, &split_key);
                 insert_pos = insert_pos.min(parent.keys.len());
 
-                debug!("Inserting separator key at position {} in parent (len={})", 
-                       insert_pos, parent.keys.len());
+                debug!(
+                    "Inserting separator key at position {} in parent (len={})",
+                    insert_pos,
+                    parent.keys.len()
+                );
 
                 parent.keys.insert(insert_pos, split_key);
                 parent.children.insert(insert_pos + 1, new_node_arc.clone());
@@ -654,13 +684,13 @@ impl BPlusTree {
                 debug!("Inserting middle key at position {} in parent", insert_pos);
 
                 parent.keys.insert(insert_pos, middle_key.clone());
-                parent.children.insert(insert_pos + 1, Arc::new(RwLock::new(new_node.clone())));
+                parent
+                    .children
+                    .insert(insert_pos + 1, Arc::new(RwLock::new(new_node.clone())));
 
                 debug!(
                     "Internal split complete - Left node: {:?}, Middle key: {:?}, Right node: {:?}",
-                    child_guard.keys,
-                    middle_key,
-                    new_node.keys
+                    child_guard.keys, middle_key, new_node.keys
                 );
             }
         }
@@ -680,8 +710,11 @@ impl BPlusTree {
             let min_keys = (self.order - 1) / 2;
 
             if child_guard.keys.len() >= min_keys {
-                debug!("Child has enough keys ({} >= {}), no rebalancing needed", 
-                       child_guard.keys.len(), min_keys);
+                debug!(
+                    "Child has enough keys ({} >= {}), no rebalancing needed",
+                    child_guard.keys.len(),
+                    min_keys
+                );
                 return;
             }
             drop(child_guard);
@@ -937,7 +970,11 @@ impl Index for BPlusTree {
         self.delete(&key, rid)
     }
 
-    fn scan_key(&self, key: &Tuple, _transaction: &Transaction) -> Result<Vec<(Value, RID)>, String> {
+    fn scan_key(
+        &self,
+        key: &Tuple,
+        _transaction: &Transaction,
+    ) -> Result<Vec<(Value, RID)>, String> {
         let result = self.scan_range(key, key, true).unwrap();
         debug!("Scan complete, found {} matching entries", result.len());
         Ok(result)
@@ -1072,7 +1109,6 @@ mod basic_behavior_tests {
     use crate::types_db::value::{Val, Value};
     use std::collections::HashSet;
 
-
     #[test]
     fn test_basic_insertion() {
         let schema = create_test_schema();
@@ -1103,7 +1139,9 @@ mod basic_behavior_tests {
         assert!(tree_write_guard.insert_entry(&tuple, rid, &Default::default()));
 
         // Verify the value exists
-        let result = tree_write_guard.scan_key(&tuple, &Default::default()).unwrap();
+        let result = tree_write_guard
+            .scan_key(&tuple, &Default::default())
+            .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].1, rid);
 
@@ -1111,7 +1149,9 @@ mod basic_behavior_tests {
         assert!(tree_write_guard.delete_entry(&tuple, rid, &Default::default()));
 
         // Verify the value is gone
-        let result2 = tree_write_guard.scan_key(&tuple, &Default::default()).unwrap();
+        let result2 = tree_write_guard
+            .scan_key(&tuple, &Default::default())
+            .unwrap();
         assert!(result2.is_empty());
     }
 
@@ -1214,7 +1254,11 @@ mod basic_behavior_tests {
         assert_eq!(result.len(), 1, "Expected single value for point query");
 
         // Verify the value
-        assert_eq!(result[0].0.compare_equals(&Value::new(3)), CmpBool::CmpTrue, "Expected value 3 in point query result");
+        assert_eq!(
+            result[0].0.compare_equals(&Value::new(3)),
+            CmpBool::CmpTrue,
+            "Expected value 3 in point query result"
+        );
     }
 
     #[test]
@@ -1286,7 +1330,9 @@ mod advanced_tests {
         let tree_guard = tree.read();
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("val{}", i), &schema);
-            let result = tree_guard.scan_key(&tuple, &Transaction::default()).unwrap();
+            let result = tree_guard
+                .scan_key(&tuple, &Transaction::default())
+                .unwrap();
             assert_eq!(result.len(), 1);
         }
     }
@@ -1474,7 +1520,11 @@ mod split_behavior_tests {
         // Insert keys in ascending order to force splits
         for i in 1..=7 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_write_guard.insert_entry(
+                &tuple,
+                RID::new(0, i as u32),
+                &Default::default()
+            ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1550,15 +1600,20 @@ mod split_behavior_tests {
         // Insert multiple entries with the same key
         for i in 1..=5 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_write_guard.insert_entry(
+                &tuple,
+                RID::new(0, i as u32),
+                &Default::default()
+            ));
             println!("\nAfter inserting duplicate 1 (#{}):", i);
             println!("{}", tree_write_guard.visualize());
         }
 
         // Collect all values
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_write_guard.scan_key(&search_tuple, &Default::default()).unwrap();
-
+        let result = tree_write_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
 
         assert_eq!(result.len(), 5, "Should find all 5 duplicate entries");
     }
@@ -1580,7 +1635,11 @@ mod split_behavior_tests {
 
         for &i in &insert_sequence {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_write_guard.insert_entry(
+                &tuple,
+                RID::new(0, i as u32),
+                &Default::default()
+            ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1620,7 +1679,11 @@ mod split_behavior_tests {
         for i in (1..=6).rev() {
             // Insert in reverse order
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_write_guard.insert_entry(
+                &tuple,
+                RID::new(0, i as u32),
+                &Default::default()
+            ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1663,16 +1726,25 @@ mod split_behavior_tests {
             let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
             assert!(
                 tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()),
-                "Failed to insert tuple {}", i
+                "Failed to insert tuple {}",
+                i
             );
-            println!("Tree after inserting tuple {}:\n{}", i, tree_guard.visualize());
+            println!(
+                "Tree after inserting tuple {}:\n{}",
+                i,
+                tree_guard.visualize()
+            );
         }
 
         println!("Tree after insertions:\n{}", tree_guard.visualize());
 
         // Verify internal node structure
         let root = tree_guard.root.read();
-        assert_eq!(root.node_type, NodeType::Internal, "Root should be internal");
+        assert_eq!(
+            root.node_type,
+            NodeType::Internal,
+            "Root should be internal"
+        );
         assert!(!root.keys.is_empty(), "Root should have routing keys");
 
         // Check each internal node has proper routing keys
@@ -1681,7 +1753,8 @@ mod split_behavior_tests {
             if child_node.node_type == NodeType::Internal {
                 assert!(
                     !child_node.keys.is_empty(),
-                    "Internal node at position {} should have routing keys", i
+                    "Internal node at position {} should have routing keys",
+                    i
                 );
             }
         }
@@ -1692,9 +1765,14 @@ mod split_behavior_tests {
             let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
             assert!(
                 tree_guard.delete_entry(&tuple, RID::new(0, i as u32), &Default::default()),
-                "Failed to delete tuple {}", i
+                "Failed to delete tuple {}",
+                i
             );
-            println!("Tree after deleting tuple {}:\n{}", i, tree_guard.visualize());
+            println!(
+                "Tree after deleting tuple {}:\n{}",
+                i,
+                tree_guard.visualize()
+            );
         }
     }
 }
@@ -1715,7 +1793,9 @@ mod scan_key_tests {
         let tree_guard = tree.write();
 
         let search_tuple = create_tuple(1, "value1", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert!(result.is_empty(), "Empty tree should return no results");
     }
 
@@ -1736,7 +1816,9 @@ mod scan_key_tests {
 
         // Search for non-existent key
         let search_tuple = create_tuple(10, "value10", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert!(
             result.is_empty(),
             "Should find no results for non-existent key"
@@ -1763,7 +1845,9 @@ mod scan_key_tests {
 
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert_eq!(
             result.len(),
             3,
@@ -1797,7 +1881,9 @@ mod scan_key_tests {
 
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert_eq!(
             result.len(),
             5,
@@ -1844,7 +1930,9 @@ mod scan_key_tests {
 
         // Search for key 1
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert_eq!(result.len(), 5, "Should find all 5 duplicates of key 1");
 
         // Verify correct RIDs were found
@@ -1873,11 +1961,19 @@ mod scan_key_tests {
 
         // Delete some duplicates using the exact same tuples we inserted
         assert!(
-            tree_guard.delete_entry(&inserted_tuples[1].0, inserted_tuples[1].1, &Default::default()),
+            tree_guard.delete_entry(
+                &inserted_tuples[1].0,
+                inserted_tuples[1].1,
+                &Default::default()
+            ),
             "Failed to delete second tuple"
         );
         assert!(
-            tree_guard.delete_entry(&inserted_tuples[3].0, inserted_tuples[3].1, &Default::default()),
+            tree_guard.delete_entry(
+                &inserted_tuples[3].0,
+                inserted_tuples[3].1,
+                &Default::default()
+            ),
             "Failed to delete fourth tuple"
         );
 
@@ -1885,7 +1981,9 @@ mod scan_key_tests {
 
         // Search for remaining duplicates
         let search_tuple = create_tuple(1, "value", &schema);
-        let result = tree_guard.scan_key(&search_tuple, &Default::default()).unwrap();
+        let result = tree_guard
+            .scan_key(&search_tuple, &Default::default())
+            .unwrap();
         assert_eq!(result.len(), 3, "Should find remaining 3 duplicates");
 
         // Verify correct RIDs remain

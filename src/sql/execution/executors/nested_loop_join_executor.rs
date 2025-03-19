@@ -244,7 +244,9 @@ mod tests {
     use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::sql::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -393,15 +395,20 @@ mod tests {
                 left_schema.clone(),
                 RID::new(0, 0),
             );
-            let rid = left_table.insert_tuple(
-                &left_tuple_meta,
-                &mut tuple,
-            ).expect("Failed to insert into left table");
-            debug!("Inserted into left table: id={}, value={} at RID={:?}", id, value, rid);
+            let rid = left_table
+                .insert_tuple(&left_tuple_meta, &mut tuple)
+                .expect("Failed to insert into left table");
+            debug!(
+                "Inserted into left table: id={}, value={} at RID={:?}",
+                id, value, rid
+            );
         }
 
         // Verify left table's first page ID
-        debug!("Left table first page ID: {}", left_table.get_first_page_id());
+        debug!(
+            "Left table first page ID: {}",
+            left_table.get_first_page_id()
+        );
 
         // Insert data into right table
         let right_data = vec![(1, "X"), (2, "Y"), (4, "Z")];
@@ -412,15 +419,20 @@ mod tests {
                 right_schema.clone(),
                 RID::new(0, 0),
             );
-            let rid = right_table.insert_tuple(
-                &right_tuple_meta,
-                &mut tuple,
-            ).expect("Failed to insert into right table");
-            debug!("Inserted into right table: id={}, data={} at RID={:?}", id, data, rid);
+            let rid = right_table
+                .insert_tuple(&right_tuple_meta, &mut tuple)
+                .expect("Failed to insert into right table");
+            debug!(
+                "Inserted into right table: id={}, data={} at RID={:?}",
+                id, data, rid
+            );
         }
 
         // Verify right table's first page ID
-        debug!("Right table first page ID: {}", right_table.get_first_page_id());
+        debug!(
+            "Right table first page ID: {}",
+            right_table.get_first_page_id()
+        );
 
         // Verify each table's contents separately
         {
@@ -442,7 +454,11 @@ mod tests {
             debug!("Starting left table scan");
             let mut left_tuples = Vec::new();
             while let Some((tuple, rid)) = left_executor.next() {
-                debug!("Left table scan tuple at RID {:?}: {:?}", rid, tuple.get_values());
+                debug!(
+                    "Left table scan tuple at RID {:?}: {:?}",
+                    rid,
+                    tuple.get_values()
+                );
                 left_tuples.push((tuple, rid));
             }
             assert_eq!(left_tuples.len(), 3, "Left table should have 3 tuples");
@@ -472,7 +488,11 @@ mod tests {
             debug!("Starting right table scan");
             let mut right_tuples = Vec::new();
             while let Some((tuple, rid)) = right_executor.next() {
-                debug!("Right table scan tuple at RID {:?}: {:?}", rid, tuple.get_values());
+                debug!(
+                    "Right table scan tuple at RID {:?}: {:?}",
+                    rid,
+                    tuple.get_values()
+                );
                 right_tuples.push((tuple, rid));
             }
             assert_eq!(right_tuples.len(), 3, "Right table should have 3 tuples");

@@ -19,7 +19,13 @@ pub struct MockExecutor {
 }
 
 impl MockExecutor {
-    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<MockScanNode>, current_index: usize, tuples: Vec<(Vec<Value>, RID)>, schema: Schema) -> Self {
+    pub fn new(
+        context: Arc<RwLock<ExecutionContext>>,
+        plan: Arc<MockScanNode>,
+        current_index: usize,
+        tuples: Vec<(Vec<Value>, RID)>,
+        schema: Schema,
+    ) -> Self {
         Self {
             context,
             plan,
@@ -50,10 +56,7 @@ impl AbstractExecutor for MockExecutor {
         let (values, rid) = &self.tuples[self.current_tuple_idx];
         self.current_tuple_idx += 1;
 
-        Some((
-            Tuple::new(values, self.schema.clone(), *rid),
-            *rid,
-        ))
+        Some((Tuple::new(values, self.schema.clone(), *rid), *rid))
     }
 
     fn get_output_schema(&self) -> &Schema {

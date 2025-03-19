@@ -111,8 +111,7 @@ impl DBInstance {
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
         log_manager.write().run_flush_thread();
 
-        let transaction_manager =
-            Arc::new(TransactionManager::new());
+        let transaction_manager = Arc::new(TransactionManager::new());
 
         // Initialize catalog with default values
         let catalog = Arc::new(RwLock::new(Catalog::new(

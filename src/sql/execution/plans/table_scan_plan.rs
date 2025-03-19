@@ -163,11 +163,7 @@ mod tests {
         ])
     }
 
-    fn create_test_table_info(
-        name: &str,
-        schema: Schema,
-        table_heap: Arc<TableHeap>,
-    ) -> TableInfo {
+    fn create_test_table_info(name: &str, schema: Schema, table_heap: Arc<TableHeap>) -> TableInfo {
         TableInfo::new(
             schema,
             name.to_string(),

@@ -910,7 +910,10 @@ mod unit_tests {
         let mock_expr = Arc::new(Expression::Mock(mock));
 
         // Create an array expression with mock child
-        let array_expr = Expression::Array(ArrayExpression::new(vec![mock_expr], Column::new("test", TypeId::Integer)));
+        let array_expr = Expression::Array(ArrayExpression::new(
+            vec![mock_expr],
+            Column::new("test", TypeId::Integer),
+        ));
 
         assert_eq!(array_expr.get_children().len(), 1);
         match &array_expr.get_children()[0].as_ref() {

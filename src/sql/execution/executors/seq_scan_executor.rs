@@ -6,11 +6,11 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::table_iterator::TableIterator;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
 pub struct SeqScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -74,19 +74,24 @@ impl AbstractExecutor for SeqScanExecutor {
 
         // Get the table's first page ID from the underlying table heap
         let first_page_id = self.table_heap.get_table_heap().get_first_page_id();
-        trace!("Table '{}' first page ID: {}", self.plan.get_table_name(), first_page_id);
+        trace!(
+            "Table '{}' first page ID: {}",
+            self.plan.get_table_name(),
+            first_page_id
+        );
 
         // Create iterator from first page to end of table
         let start_rid = RID::new(first_page_id, 0);
         let stop_rid = RID::new(u32::MAX as PageId, u32::MAX);
         trace!(
             "Creating table iterator with range: {:?} to {:?}",
-            start_rid, stop_rid
+            start_rid,
+            stop_rid
         );
 
         // Create new iterator with TransactionalTableHeap
         self.iterator = Some(TableIterator::new(
-            self.table_heap.clone(),  // Pass the TransactionalTableHeap directly
+            self.table_heap.clone(), // Pass the TransactionalTableHeap directly
             start_rid,
             stop_rid,
             None,
@@ -220,12 +225,12 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm(),
-            0,              // next_index_oid
-            0,              // next_table_oid
-            HashMap::new(), // tables
-            HashMap::new(), // indexes
-            HashMap::new(), // table_names
-            HashMap::new(), // index_names
+            0,                               // next_index_oid
+            0,                               // next_table_oid
+            HashMap::new(),                  // tables
+            HashMap::new(),                  // indexes
+            HashMap::new(),                  // table_names
+            HashMap::new(),                  // index_names
             ctx.transaction_manager.clone(), // Add transaction manager
         )
     }
@@ -257,7 +262,9 @@ mod tests {
 
         // Create transaction and table
         let table_name = "test_table";
-        let table_info = catalog.create_table(table_name.to_string(), schema.clone()).unwrap();
+        let table_info = catalog
+            .create_table(table_name.to_string(), schema.clone())
+            .unwrap();
         let table_heap = table_info.get_table_heap();
         let table_heap_guard = table_heap;
 
@@ -337,7 +344,9 @@ mod tests {
 
         // Create transaction and empty table
         let table_name = "empty_table";
-        let table_info = catalog.create_table(table_name.to_string(), schema.clone()).unwrap();
+        let table_info = catalog
+            .create_table(table_name.to_string(), schema.clone())
+            .unwrap();
 
         // Create scan plan and executor
         let plan = Arc::new(SeqScanPlanNode::new(
@@ -378,7 +387,9 @@ mod tests {
 
         // Create transaction and table
         let table_name = "test_reinit_table";
-        let table_info = catalog.create_table(table_name.to_string(), schema.clone()).unwrap();
+        let table_info = catalog
+            .create_table(table_name.to_string(), schema.clone())
+            .unwrap();
         let table_heap = table_info.get_table_heap();
         let table_heap_guard = table_heap;
 

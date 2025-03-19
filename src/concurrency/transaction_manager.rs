@@ -1,4 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::common::config::TableOidT;
 use crate::common::config::{PageId, Timestamp, TxnId, INVALID_TXN_ID};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
@@ -7,15 +8,14 @@ use crate::concurrency::transaction::{
 };
 use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::transaction_context::TransactionContext;
+use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use crate::storage::page::page_types::table_page::TablePage;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-use crate::common::config::TableOidT;
 
 #[derive(Debug)]
 pub struct PageVersionInfo {
@@ -117,14 +117,22 @@ impl TransactionManager {
     pub fn commit(&self, txn: Arc<Transaction>, bpm: Arc<BufferPoolManager>) -> bool {
         // Check if transaction is in a valid state to commit
         if txn.get_state() != TransactionState::Running {
-            log::debug!("Transaction {} not in running state: {:?}", txn.get_transaction_id(), txn.get_state());
+            log::debug!(
+                "Transaction {} not in running state: {:?}",
+                txn.get_transaction_id(),
+                txn.get_state()
+            );
             return false;
         }
 
         // Get next timestamp for commit
         let commit_ts = self.state.running_txns.read().get_next_ts();
-        log::debug!("Committing transaction {} with commit_ts {}", txn.get_transaction_id(), commit_ts);
-        
+        log::debug!(
+            "Committing transaction {} with commit_ts {}",
+            txn.get_transaction_id(),
+            commit_ts
+        );
+
         // Set transaction's commit timestamp and state
         txn.set_commit_ts(commit_ts);
         txn.set_state(TransactionState::Committed);
@@ -136,10 +144,13 @@ impl TransactionManager {
 
             watermark.remove_txn(txn.read_ts());
             watermark.update_commit_ts(commit_ts);
-            
+
             // Update transaction map with committed transaction
             txn_map.insert(txn.get_transaction_id(), txn.clone());
-            log::debug!("Updated watermark and transaction map for txn {}", txn.get_transaction_id());
+            log::debug!(
+                "Updated watermark and transaction map for txn {}",
+                txn.get_transaction_id()
+            );
         }
 
         // Update commit timestamps in undo logs
@@ -166,8 +177,12 @@ impl TransactionManager {
                             log::error!("Failed to update tuple metadata: {}", e);
                             return false;
                         }
-                        log::debug!("Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}", 
-                            rid, meta.get_creator_txn_id(), commit_ts);
+                        log::debug!(
+                            "Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}",
+                            rid,
+                            meta.get_creator_txn_id(),
+                            commit_ts
+                        );
                     }
                 }
             }
@@ -177,7 +192,11 @@ impl TransactionManager {
                 log::error!("Failed to flush page {}: {}", page_id, e);
                 return false;
             }
-            log::debug!("Flushed page {} for txn {}", page_id, txn.get_transaction_id());
+            log::debug!(
+                "Flushed page {} for txn {}",
+                page_id,
+                txn.get_transaction_id()
+            );
         }
 
         true
@@ -189,20 +208,21 @@ impl TransactionManager {
     /// - `txn`: The transaction to abort.
     pub fn abort(&self, txn: Arc<Transaction>) {
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted {
+        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
+        {
             panic!("txn not in running / tainted state");
         }
 
         // Get all modified tuples from write set
         let write_set = txn.get_write_set();
-        
+
         // Roll back changes using undo logs
         for (table_oid, rid) in write_set {
             if let Some(table_heap) = self.get_table_heap(table_oid) {
                 if let Some(undo_link) = self.get_undo_link(rid) {
                     // Get the undo log
                     let undo_log = self.get_undo_log(undo_link.clone());
-                    
+
                     // Restore the previous version
                     let mut meta = TupleMeta::new(undo_link.prev_txn);
                     meta.set_commit_timestamp(undo_log.ts);
@@ -220,9 +240,13 @@ impl TransactionManager {
                     let mut meta = TupleMeta::new(txn.get_transaction_id());
                     meta.set_deleted(true);
                     meta.set_commit_timestamp(0); // Set to 0 to ensure it's not visible
-                    
+
                     // Update the tuple metadata to mark it as deleted
-                    if let Some(page_guard) = table_heap.get_table_heap().get_bpm().fetch_page::<TablePage>(rid.get_page_id()) {
+                    if let Some(page_guard) = table_heap
+                        .get_table_heap()
+                        .get_bpm()
+                        .fetch_page::<TablePage>(rid.get_page_id())
+                    {
                         let mut page = page_guard.write();
                         if let Ok((_, _)) = page.get_tuple(&rid) {
                             if let Err(e) = page.update_tuple_meta(&meta, &rid) {
@@ -441,13 +465,14 @@ impl TransactionManager {
     /// Gets the undo link for a specific transaction
     pub fn get_undo_link_for_txn(&self, rid: RID, txn_id: TxnId) -> Option<UndoLink> {
         let version_info = self.state.version_info.read();
-        version_info.get(&rid.get_page_id())
-            .and_then(|page_info| {
-                page_info.prev_link.read()
-                    .get(&rid)
-                    .filter(|link| link.prev_txn == txn_id)
-                    .cloned()
-            })
+        version_info.get(&rid.get_page_id()).and_then(|page_info| {
+            page_info
+                .prev_link
+                .read()
+                .get(&rid)
+                .filter(|link| link.prev_txn == txn_id)
+                .cloned()
+        })
     }
 
     // Add method to register table heaps
@@ -746,10 +771,7 @@ mod tests {
         let ctx = TestContext::new("test_transaction_isolation");
 
         let (table_oid, table_heap) = ctx.create_test_table();
-        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
-            table_heap.clone(),
-            table_oid,
-        ));
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
 
         // Start two transactions
         let txn1 = ctx

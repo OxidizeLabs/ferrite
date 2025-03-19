@@ -1,10 +1,10 @@
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
+use sqlparser::ast::JoinConstraint;
 use sqlparser::ast::JoinOperator;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use sqlparser::ast::JoinConstraint;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedLoopJoinNode {
@@ -171,10 +171,16 @@ mod tests {
         let right_col = Column::new("emp_id", TypeId::Integer);
 
         let left_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, left_col, vec![],
+            0,
+            0,
+            left_col,
+            vec![],
         )));
         let right_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 0, right_col, vec![],
+            1,
+            0,
+            right_col,
+            vec![],
         )));
 
         let children = vec![
@@ -261,7 +267,10 @@ mod tests {
         assert_eq!(join_node.get_left_schema(), &left_schema);
         assert_eq!(join_node.get_right_schema(), &right_schema);
         assert_eq!(join_node.get_predicate(), &predicate);
-        assert_eq!(join_node.get_join_type(), &JoinOperator::Inner(JoinConstraint::None));
+        assert_eq!(
+            join_node.get_join_type(),
+            &JoinOperator::Inner(JoinConstraint::None)
+        );
         assert_eq!(join_node.get_left_key_expressions(), &vec![left_key]);
         assert_eq!(join_node.get_right_key_expressions(), &vec![right_key]);
         assert_eq!(join_node.get_left_child(), &children[0]);
@@ -351,4 +360,3 @@ mod tests {
         assert_eq!(join_node.get_type(), PlanType::NestedLoopJoin);
     }
 }
-

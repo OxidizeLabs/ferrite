@@ -26,7 +26,8 @@ impl Type for VectorType {
             Val::Vector(r) => {
                 let empty_vec = Vec::<i32>::new();
                 // Convert Value vector to i32 vector for comparison
-                let other_vec: Vec<i32> = r.iter()
+                let other_vec: Vec<i32> = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -51,7 +52,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 let empty_vec = Vec::<i32>::new();
-                let other_vec: Vec<i32> = r.iter()
+                let other_vec: Vec<i32> = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -74,7 +76,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 let empty_vec = Vec::<i32>::new();
-                let other_vec: Vec<i32> = r.iter()
+                let other_vec: Vec<i32> = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -91,7 +94,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 let empty_vec = Vec::<i32>::new();
-                let other_vec: Vec<i32> = r.iter()
+                let other_vec: Vec<i32> = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -108,7 +112,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 let empty_vec = Vec::<i32>::new();
-                let other_vec: Vec<i32> = r.iter()
+                let other_vec: Vec<i32> = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -159,7 +164,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 // Extract integer values for comparison
-                let min_val = r.iter()
+                let min_val = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -180,7 +186,8 @@ impl Type for VectorType {
         match other.get_val() {
             Val::Vector(r) => {
                 // Extract integer values for comparison
-                let max_val = r.iter()
+                let max_val = r
+                    .iter()
                     .filter_map(|v| match v.get_val() {
                         Val::Integer(i) => Some(*i),
                         _ => None,
@@ -201,7 +208,8 @@ impl Type for VectorType {
         match val.get_val() {
             Val::Vector(v) => {
                 // Extract and format integer values
-                let values: Vec<String> = v.iter()
+                let values: Vec<String> = v
+                    .iter()
                     .map(|value| match value.get_val() {
                         Val::Integer(i) => format!("{}", i),
                         Val::Null => "NULL".to_string(),
@@ -295,7 +303,7 @@ mod tests {
             Value::new(5i32),
             Value::new(3i32),
             Value::new(2i32),
-            Value::new(4i32)
+            Value::new(4i32),
         ]);
         let null = Value::new(Val::Null);
 

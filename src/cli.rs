@@ -137,8 +137,13 @@ impl CLI {
 
     fn rollback_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.get_transaction_factory().abort_transaction(txn_ctx.clone());
-            println!("Transaction {} rolled back successfully.", txn_ctx.get_transaction_id());
+            self.db
+                .get_transaction_factory()
+                .abort_transaction(txn_ctx.clone());
+            println!(
+                "Transaction {} rolled back successfully.",
+                txn_ctx.get_transaction_id()
+            );
         } else {
             println!("No active transaction to roll back.");
         }
@@ -147,8 +152,13 @@ impl CLI {
 
     fn cleanup_transaction(&mut self) {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            self.db.get_transaction_factory().abort_transaction(txn_ctx.clone());
-            println!("Active transaction {} rolled back during cleanup.", txn_ctx.get_transaction_id());
+            self.db
+                .get_transaction_factory()
+                .abort_transaction(txn_ctx.clone());
+            println!(
+                "Active transaction {} rolled back during cleanup.",
+                txn_ctx.get_transaction_id()
+            );
         }
     }
 

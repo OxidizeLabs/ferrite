@@ -104,7 +104,10 @@ impl ExpressionOps for LiteralValueExpression {
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
-        panic!("LiteralValueExpression has no children, tried to access index {}", child_idx);
+        panic!(
+            "LiteralValueExpression has no children, tried to access index {}",
+            child_idx
+        );
     }
 
     fn get_children(&self) -> &Vec<Arc<Expression>> {
@@ -155,16 +158,19 @@ mod tests {
     #[test]
     fn test_create_from_sql_value() {
         // Test numeric literals
-        let int_expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
+        let int_expr =
+            LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
         assert_eq!(int_expr.get_value(), &Value::new(42));
         assert_eq!(int_expr.get_return_type().get_type(), TypeId::Integer);
 
-        let float_expr = LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
+        let float_expr =
+            LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
         assert_eq!(float_expr.get_value(), &Value::new(3.14));
         assert_eq!(float_expr.get_return_type().get_type(), TypeId::Decimal);
 
         // Test string literals
-        let str_expr = LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap();
+        let str_expr =
+            LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap();
         assert_eq!(str_expr.get_value(), &Value::new("hello"));
         assert_eq!(str_expr.get_return_type().get_type(), TypeId::VarChar);
 
@@ -187,20 +193,23 @@ mod tests {
         // Create and evaluate a literal expression
         let expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
         let result = expr.evaluate(&tuple, &schema).unwrap();
-        
+
         assert_eq!(result, Value::new(42));
     }
 
     #[test]
     fn test_display() {
         // Test display formatting for different types
-        let int_expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
+        let int_expr =
+            LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
         assert_eq!(format!("{}", int_expr), "42");
 
-        let float_expr = LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
+        let float_expr =
+            LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
         assert_eq!(format!("{}", float_expr), "3.14");
 
-        let str_expr = LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap();
+        let str_expr =
+            LiteralValueExpression::new(SQLValue::SingleQuotedString("hello".to_string())).unwrap();
         assert_eq!(format!("{}", str_expr), "'hello'");
 
         let bool_expr = LiteralValueExpression::new(SQLValue::Boolean(true)).unwrap();
@@ -215,7 +224,7 @@ mod tests {
         // Test creating from Value objects
         let int_value = Value::new(42);
         let expr = LiteralValueExpression::from_value(int_value.clone());
-        
+
         assert_eq!(expr.get_value(), &int_value);
         assert_eq!(expr.get_return_type().get_type(), TypeId::Integer);
     }
@@ -231,8 +240,8 @@ mod tests {
     fn test_validate() {
         let schema = Schema::new(vec![Column::new("test", TypeId::Integer)]);
         let expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
-        
+
         // Validation should always succeed for literals
         assert!(expr.validate(&schema).is_ok());
     }
-} 
+}

@@ -109,7 +109,12 @@ impl Display for WindowNode {
 
         if f.alternate() {
             for (i, window_func) in self.window_functions.iter().enumerate() {
-                write!(f, "\n   Window Function {}: {:?}", i + 1, window_func.function_type)?;
+                write!(
+                    f,
+                    "\n   Window Function {}: {:?}",
+                    i + 1,
+                    window_func.function_type
+                )?;
                 write!(f, "\n     Expression: {}", window_func.function_expr)?;
 
                 if !window_func.partition_by.is_empty() {
@@ -211,14 +216,13 @@ mod tests {
             vec![order_expr],
         );
 
-        let node = WindowNode::new(
-            schema.clone(),
-            vec![window_func],
-            vec![],
-        );
+        let node = WindowNode::new(schema.clone(), vec![window_func], vec![]);
 
         assert_eq!(node.get_output_schema(), &schema);
         assert_eq!(node.get_window_functions().len(), 1);
-        assert_eq!(node.get_window_functions()[0].get_function_type(), WindowFunctionType::Rank);
+        assert_eq!(
+            node.get_window_functions()[0].get_function_type(),
+            WindowFunctionType::Rank
+        );
     }
 }

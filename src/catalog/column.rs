@@ -22,7 +22,7 @@ impl Column {
             TypeId::VarChar | TypeId::Char => length,
             TypeId::Vector => length * size_of::<f64>(),
             TypeId::Invalid => 0,
-            TypeId::Struct => length  // Struct size is determined by its fields' total size
+            TypeId::Struct => length, // Struct size is determined by its fields' total size
         }
     }
 
@@ -94,8 +94,11 @@ impl Column {
 impl Display for Column {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
-            write!(f, "Column(name: {}, type: {:?}, length: {}, offset: {})",
-                   self.column_name, self.column_type, self.length, self.column_offset)
+            write!(
+                f,
+                "Column(name: {}, type: {:?}, length: {}, offset: {})",
+                self.column_name, self.column_type, self.length, self.column_offset
+            )
         } else {
             write!(f, "{}({:?})", self.column_name, self.column_type)
         }
@@ -155,7 +158,10 @@ mod unit_tests {
     fn test_display_formatting() {
         let col = Column::new("age", TypeId::Integer);
         assert_eq!(format!("{}", col), "age(Integer)");
-        assert_eq!(format!("{:#}", col), "Column(name: age, type: Integer, length: 4, offset: 0)");
+        assert_eq!(
+            format!("{:#}", col),
+            "Column(name: age, type: Integer, length: 4, offset: 0)"
+        );
     }
 
     #[test]
@@ -198,10 +204,13 @@ mod unit_tests {
 
         for (type_id, expected_size) in test_cases {
             let col = Column::new(&format!("col_{:?}", type_id), type_id);
-            assert_eq!(col.get_storage_size(), expected_size, 
-                "Wrong size for type {:?}", type_id);
-            assert!(col.is_inlined(), 
-                "Type {:?} should be inlined", type_id);
+            assert_eq!(
+                col.get_storage_size(),
+                expected_size,
+                "Wrong size for type {:?}",
+                type_id
+            );
+            assert!(col.is_inlined(), "Type {:?} should be inlined", type_id);
         }
     }
 
@@ -223,7 +232,7 @@ mod unit_tests {
     fn test_replicate_with_offset() {
         let mut col = Column::new("original", TypeId::Integer);
         col.set_offset(42);
-        
+
         let replicated = col.replicate("copy");
         assert_eq!(replicated.get_name(), "copy");
         assert_eq!(replicated.get_type(), TypeId::Integer);
@@ -251,13 +260,13 @@ mod unit_tests {
     fn test_multiple_offset_updates() {
         let mut col = Column::new("test", TypeId::BigInt);
         assert_eq!(col.get_offset(), 0);
-        
+
         col.set_offset(10);
         assert_eq!(col.get_offset(), 10);
-        
+
         col.set_offset(20);
         assert_eq!(col.get_offset(), 20);
-        
+
         col.set_offset(0);
         assert_eq!(col.get_offset(), 0);
     }
@@ -267,11 +276,11 @@ mod unit_tests {
         let col = Column::new("original", TypeId::SmallInt);
         let col2 = col.with_name("second");
         let col3 = col2.with_name("third");
-        
+
         assert_eq!(col.get_name(), "original");
         assert_eq!(col2.get_name(), "second");
         assert_eq!(col3.get_name(), "third");
-        
+
         // Verify other properties remain unchanged
         assert_eq!(col3.get_type(), TypeId::SmallInt);
         assert_eq!(col3.get_storage_size(), 2);
@@ -320,8 +329,10 @@ mod unit_tests {
         let col3 = Column::new("name.with.dots", TypeId::Boolean);
 
         assert_eq!(format!("{}", col1), "(Integer)");
-        assert_eq!(format!("{:#}", col2), 
-            "Column(name: test, type: VarChar, length: 0, offset: 0)");
+        assert_eq!(
+            format!("{:#}", col2),
+            "Column(name: test, type: VarChar, length: 0, offset: 0)"
+        );
         assert_eq!(format!("{}", col3), "name.with.dots(Boolean)");
     }
 
@@ -335,7 +346,7 @@ mod unit_tests {
     #[test]
     fn test_multiple_mutations() {
         let mut col = Column::new("original", TypeId::Integer);
-        
+
         // Test multiple mutations in sequence
         col.set_offset(5);
         col.set_name("new_name".to_string());
@@ -365,7 +376,7 @@ mod unit_tests {
         let cloned = original.clone();
 
         assert_eq!(original, cloned);
-        
+
         // Verify deep copy
         let mut cloned2 = original.clone();
         cloned2.set_name("modified".to_string());
@@ -404,18 +415,20 @@ mod unit_tests {
             TypeId::TinyInt,
             TypeId::SmallInt,
             TypeId::Integer,
-            TypeId::BigInt
+            TypeId::BigInt,
         ];
-        
+
         let col = Column::new("test", types[0]);
         let mut last_size = col.get_storage_size();
-        
+
         // Verify size increases as we move to larger types
         for type_id in types.iter().skip(1) {
             let new_col = Column::new("test", *type_id);
             let new_size = new_col.get_storage_size();
-            assert!(new_size >= last_size, 
-                "Size should increase or stay same when moving to larger type");
+            assert!(
+                new_size >= last_size,
+                "Size should increase or stay same when moving to larger type"
+            );
             last_size = new_size;
         }
     }
@@ -450,11 +463,11 @@ mod unit_tests {
     #[test]
     fn test_serialization_consistency() {
         use serde_json;
-        
+
         let original = Column::new("test", TypeId::Integer);
         let serialized = serde_json::to_string(&original).unwrap();
         let deserialized: Column = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(original, deserialized);
         assert_eq!(original.get_name(), deserialized.get_name());
         assert_eq!(original.get_type(), deserialized.get_type());
@@ -466,7 +479,7 @@ mod unit_tests {
     fn test_consecutive_replications() {
         let original = Column::new("test", TypeId::Integer);
         let names = vec!["a", "b", "c", "d", "e"];
-        
+
         let mut current = original.clone();
         for name in names {
             current = current.replicate(name);

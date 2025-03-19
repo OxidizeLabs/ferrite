@@ -19,7 +19,7 @@ pub struct CollateExpression {
 impl CollateExpression {
     pub fn new(expr: Arc<Expression>, collation: String, return_type: Column) -> Self {
         let children = vec![expr.clone()];
-        
+
         Self {
             expr,
             collation,

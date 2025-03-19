@@ -70,7 +70,11 @@ impl AbstractPlanNode for IndexScanNode {
 
 impl Display for IndexScanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "→ IndexScan: {} using {}", self.table_name, self.index_name)?;
+        write!(
+            f,
+            "→ IndexScan: {} using {}",
+            self.table_name, self.index_name
+        )?;
 
         if f.alternate() {
             write!(f, "\n   Predicate Keys: [")?;
@@ -121,7 +125,10 @@ mod tests {
         // Create predicate key for id column
         let id_col = Column::new("id", TypeId::Integer);
         let pred_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, id_col, vec![],
+            0,
+            0,
+            id_col,
+            vec![],
         )));
 
         let scan_node = IndexScanNode::new(
@@ -155,7 +162,10 @@ mod tests {
 
         let id_col = Column::new("id", TypeId::Integer);
         let pred_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, id_col, vec![],
+            0,
+            0,
+            id_col,
+            vec![],
         )));
 
         let scan_node = IndexScanNode::new(
@@ -185,7 +195,10 @@ mod tests {
 
         let id_col = Column::new("id", TypeId::Integer);
         let pred_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, id_col, vec![],
+            0,
+            0,
+            id_col,
+            vec![],
         )));
 
         let scan_node = IndexScanNode::new(
@@ -198,7 +211,10 @@ mod tests {
         );
 
         // Test basic display
-        assert_eq!(scan_node.to_string(), "→ IndexScan: employees using emp_id_idx");
+        assert_eq!(
+            scan_node.to_string(),
+            "→ IndexScan: employees using emp_id_idx"
+        );
 
         // Test detailed display
         let detailed = format!("{:#}", scan_node);
@@ -217,12 +233,18 @@ mod tests {
         // Create multiple predicate keys
         let id_col = Column::new("id", TypeId::Integer);
         let age_col = Column::new("age", TypeId::Integer);
-        
+
         let id_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, id_col, vec![],
+            0,
+            0,
+            id_col,
+            vec![],
         )));
         let age_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2, age_col, vec![],
+            0,
+            2,
+            age_col,
+            vec![],
         )));
 
         let scan_node = IndexScanNode::new(

@@ -215,7 +215,11 @@ mod tests {
             init_test_logger();
             debug!("Creating new test context for: {}", test_name);
 
-            let log_file_path = format!("tests/data/{}_{}.log", test_name, chrono::Utc::now().timestamp());
+            let log_file_path = format!(
+                "tests/data/{}_{}.log",
+                test_name,
+                chrono::Utc::now().timestamp()
+            );
             let disk_manager = Arc::new(FileDiskManager::new(
                 "dummy.db".to_string(),
                 log_file_path.clone(),
@@ -251,7 +255,10 @@ mod tests {
 
         assert_eq!(ctx.log_manager.get_next_lsn(), 0);
         assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
-        assert_eq!(ctx.log_manager.get_log_buffer_size(), LOG_BUFFER_SIZE as usize);
+        assert_eq!(
+            ctx.log_manager.get_log_buffer_size(),
+            LOG_BUFFER_SIZE as usize
+        );
     }
 
     #[test]
@@ -262,11 +269,7 @@ mod tests {
         let prev_lsn = INVALID_LSN;
 
         // Create a begin transaction log record
-        let log_record = LogRecord::new_transaction_record(
-            txn_id,
-            prev_lsn,
-            LogRecordType::Begin,
-        );
+        let log_record = LogRecord::new_transaction_record(txn_id, prev_lsn, LogRecordType::Begin);
 
         // Append the log record
         let lsn = ctx.log_manager.append_log_record(&log_record);
@@ -285,11 +288,8 @@ mod tests {
 
         // Append multiple log records
         for i in 0..5 {
-            let log_record = LogRecord::new_transaction_record(
-                i as TxnId,
-                INVALID_LSN,
-                LogRecordType::Begin,
-            );
+            let log_record =
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
             let lsn = ctx.log_manager.append_log_record(&log_record);
             assert_eq!(lsn, i);
         }
@@ -321,11 +321,8 @@ mod tests {
 
         // Append some log records
         for i in 0..3 {
-            let log_record = LogRecord::new_transaction_record(
-                i as TxnId,
-                INVALID_LSN,
-                LogRecordType::Begin,
-            );
+            let log_record =
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
             ctx.log_manager.append_log_record(&log_record);
         }
 
@@ -339,11 +336,7 @@ mod tests {
         let mut next_lsn = 0;
 
         // Create all records first
-        let begin_record = LogRecord::new_transaction_record(
-            1,
-            INVALID_LSN,
-            LogRecordType::Begin,
-        );
+        let begin_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
 
         // Append begin record and get LSN
         let begin_lsn = {
@@ -357,11 +350,7 @@ mod tests {
         thread::sleep(Duration::from_millis(1));
 
         // Create and append commit record
-        let commit_record = LogRecord::new_transaction_record(
-            1,
-            begin_lsn,
-            LogRecordType::Commit,
-        );
+        let commit_record = LogRecord::new_transaction_record(1, begin_lsn, LogRecordType::Commit);
         let commit_lsn = ctx.log_manager.append_log_record(&commit_record);
         next_lsn += 1;
         assert_eq!(commit_lsn, 1);
@@ -369,19 +358,18 @@ mod tests {
         thread::sleep(Duration::from_millis(1));
 
         // Create and append abort record
-        let abort_record = LogRecord::new_transaction_record(
-            2,
-            INVALID_LSN,
-            LogRecordType::Abort,
-        );
+        let abort_record = LogRecord::new_transaction_record(2, INVALID_LSN, LogRecordType::Abort);
         let abort_lsn = ctx.log_manager.append_log_record(&abort_record);
         next_lsn += 1;
         assert_eq!(abort_lsn, 2);
 
         // Final verification
         let final_lsn = ctx.log_manager.get_next_lsn();
-        assert_eq!(final_lsn, next_lsn,
-                   "Expected LSN {} but got {}", next_lsn, final_lsn);
+        assert_eq!(
+            final_lsn, next_lsn,
+            "Expected LSN {} but got {}",
+            next_lsn, final_lsn
+        );
     }
 
     #[test]
@@ -389,11 +377,7 @@ mod tests {
         let mut ctx = TestContext::new("large_records_test");
 
         // Create a large log record
-        let log_record = LogRecord::new_transaction_record(
-            1,
-            INVALID_LSN,
-            LogRecordType::Begin,
-        );
+        let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
 
         // Append multiple large records
         for _ in 0..5 {
@@ -405,7 +389,9 @@ mod tests {
 
     #[test]
     fn test_concurrent_log_appends() {
-        let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new("concurrent_test")));
+        let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
+            "concurrent_test",
+        )));
         let thread_count = 5;
         let mut handles = vec![];
 
@@ -423,9 +409,7 @@ mod tests {
         }
 
         // Collect all LSNs
-        let lsns: Vec<Lsn> = handles.into_iter()
-            .map(|h| h.join().unwrap())
-            .collect();
+        let lsns: Vec<Lsn> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Verify LSNs are unique and sequential
         let mut unique_lsns: Vec<Lsn> = lsns.clone();
@@ -445,11 +429,8 @@ mod tests {
 
         // Append some records
         for i in 0..3 {
-            let log_record = LogRecord::new_transaction_record(
-                i as TxnId,
-                INVALID_LSN,
-                LogRecordType::Begin,
-            );
+            let log_record =
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
             ctx.log_manager.append_log_record(&log_record);
         }
 

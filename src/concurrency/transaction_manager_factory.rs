@@ -40,8 +40,7 @@ impl TransactionManagerFactory {
     }
 
     pub fn abort_transaction(&self, ctx: Arc<TransactionContext>) {
-        self.transaction_manager
-            .abort(ctx.get_transaction())
+        self.transaction_manager.abort(ctx.get_transaction())
     }
 
     pub fn get_lock_manager(&self) -> Arc<LockManager> {

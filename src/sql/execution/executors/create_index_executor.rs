@@ -72,14 +72,19 @@ impl AbstractExecutor for CreateIndexExecutor {
 
             // First check if the table exists
             if catalog_guard.get_table(table_name).is_none() {
-                warn!("Cannot create index '{}' - table '{}' does not exist", index_name, table_name);
+                warn!(
+                    "Cannot create index '{}' - table '{}' does not exist",
+                    index_name, table_name
+                );
                 self.executed = true; // Mark as executed since we can't retry this
                 return None;
             }
 
             // Check if index already exists
             let existing_indexes = catalog_guard.get_table_indexes(table_name);
-            let index_exists = existing_indexes.iter().any(|idx| idx.get_index_name() == index_name);
+            let index_exists = existing_indexes
+                .iter()
+                .any(|idx| idx.get_index_name() == index_name);
 
             if index_exists {
                 self.executed = true; // Mark as executed since we found the index
@@ -236,12 +241,12 @@ mod tests {
     fn create_catalog(ctx: &TestContext) -> Catalog {
         Catalog::new(
             ctx.bpm.clone(),
-            0,              // next_index_oid
-            0,              // next_table_oid
-            HashMap::new(), // tables
-            HashMap::new(), // indexes
-            HashMap::new(), // table_names
-            HashMap::new(), // index_names
+            0,                               // next_index_oid
+            0,                               // next_table_oid
+            HashMap::new(),                  // tables
+            HashMap::new(),                  // indexes
+            HashMap::new(),                  // table_names
+            HashMap::new(),                  // index_names
             ctx.transaction_manager.clone(), // Add transaction manager
         )
     }
@@ -260,7 +265,6 @@ mod tests {
 
         execution_context
     }
-
 
     #[test]
     fn test_create_index_basic() {
@@ -318,12 +322,12 @@ mod tests {
             test_context.transaction_context.clone(),
         )));
 
-        let columns = vec![0, 1];  // Using both columns for the index
+        let columns = vec![0, 1]; // Using both columns for the index
 
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),     // Fix: table name should be first
-            "test_index".to_string(),     // Fix: index name should be second
+            "test_table".to_string(), // Fix: table name should be first
+            "test_index".to_string(), // Fix: index name should be second
             columns,
             false,
         ));
@@ -432,8 +436,8 @@ mod tests {
         for i in 0..3 {
             let plan = Arc::new(CreateIndexPlanNode::new(
                 schema.clone(),
-                "test_table".to_string(),     // Fix: table name should be first
-                format!("test_index_{}", i),  // Fix: index name should be second
+                "test_table".to_string(), // Fix: table name should be first
+                format!("test_index_{}", i), // Fix: index name should be second
                 columns.clone(),
                 false,
             ));
@@ -476,8 +480,8 @@ mod tests {
         // Create first index
         let plan1 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),     // Fix: table name should be first
-            "test_index".to_string(),     // Fix: index name should be second
+            "test_table".to_string(), // Fix: table name should be first
+            "test_index".to_string(), // Fix: index name should be second
             key_attrs.clone(),
             false,
         ));
@@ -497,8 +501,8 @@ mod tests {
         // Try to create duplicate index without IF NOT EXISTS
         let plan2 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),     // Fix: table name should be first
-            "test_index".to_string(),     // Fix: index name should be second
+            "test_table".to_string(), // Fix: table name should be first
+            "test_index".to_string(), // Fix: index name should be second
             key_attrs.clone(),
             false,
         ));
@@ -517,8 +521,8 @@ mod tests {
         // Try to create duplicate index with IF NOT EXISTS
         let plan3 = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
-            "test_table".to_string(),     // Fix: table name should be first
-            "test_index".to_string(),     // Fix: index name should be second
+            "test_table".to_string(), // Fix: table name should be first
+            "test_index".to_string(), // Fix: index name should be second
             key_attrs,
             true,
         ));
@@ -531,7 +535,11 @@ mod tests {
         {
             let catalog_guard = catalog.read();
             let indexes = catalog_guard.get_table_indexes("test_table");
-            assert_eq!(indexes.len(), 1, "IF NOT EXISTS should not create duplicate");
+            assert_eq!(
+                indexes.len(),
+                1,
+                "IF NOT EXISTS should not create duplicate"
+            );
         }
     }
 }

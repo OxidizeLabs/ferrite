@@ -1,10 +1,10 @@
-use crate::storage::page::page::Page;
-use std::any::Any;
-use crate::storage::page::page::PAGE_TYPE_OFFSET;
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
+use crate::storage::page::page::Page;
+use crate::storage::page::page::PAGE_TYPE_OFFSET;
 use crate::storage::page::page::{PageTrait, PageType, PageTypeId};
 use log::{debug, info, warn};
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -124,7 +124,7 @@ impl ExtendableHTableDirectoryPage {
     /// Gets the split image index for a bucket at the given index
     pub fn get_split_image_index(&self, bucket_idx: u32) -> u32 {
         let local_depth = self.get_local_depth(bucket_idx);
-        
+
         // Handle case where local_depth is 0
         if local_depth == 0 {
             debug!(
@@ -133,11 +133,11 @@ impl ExtendableHTableDirectoryPage {
             );
             return bucket_idx + 1;
         }
-        
+
         // Calculate split image using the distinguishing bit at the local depth position
         let distinguishing_bit = 1 << (local_depth - 1);
         let split_idx = bucket_idx ^ distinguishing_bit;
-        
+
         debug!(
             "Calculating split image for bucket_idx={}, local_depth={}, distinguishing_bit={}, split_idx={}",
             bucket_idx, local_depth, distinguishing_bit, split_idx
@@ -187,7 +187,11 @@ impl ExtendableHTableDirectoryPage {
     }
 
     /// Updates directory entries for a bucket split
-    pub fn update_directory_for_split(&mut self, bucket_idx: usize, new_page_id: PageId) -> Option<usize> {
+    pub fn update_directory_for_split(
+        &mut self,
+        bucket_idx: usize,
+        new_page_id: PageId,
+    ) -> Option<usize> {
         let local_depth = self.get_local_depth(bucket_idx as u32);
         let new_local_depth = local_depth + 1;
 
@@ -207,14 +211,15 @@ impl ExtendableHTableDirectoryPage {
         // Calculate masks for redistribution
         let mask = (1 << local_depth) - 1;
         let distinguishing_bit = 1 << local_depth;
-        
+
         debug!(
             "Split masks: mask={}, distinguishing_bit={}, global_depth={}",
             mask, distinguishing_bit, self.global_depth
         );
 
         // Get the old bucket page ID
-        let old_bucket_page_id = self.get_bucket_page_id(bucket_idx)
+        let old_bucket_page_id = self
+            .get_bucket_page_id(bucket_idx)
             .expect("Bucket being split must exist");
 
         // Update directory entries
@@ -222,23 +227,29 @@ impl ExtendableHTableDirectoryPage {
             if (i & mask) == (bucket_idx & mask) {
                 // Update local depth for all affected entries
                 self.set_local_depth(i, new_local_depth);
-                
+
                 // Determine which entries point to new bucket
                 if i & distinguishing_bit != 0 {
                     self.set_bucket_page_id(i, new_page_id);
-                    debug!("Directory entry {} now points to new bucket {}", i, new_page_id);
+                    debug!(
+                        "Directory entry {} now points to new bucket {}",
+                        i, new_page_id
+                    );
                 } else {
                     self.set_bucket_page_id(i, old_bucket_page_id);
-                    debug!("Directory entry {} keeps old bucket {}", i, old_bucket_page_id);
+                    debug!(
+                        "Directory entry {} keeps old bucket {}",
+                        i, old_bucket_page_id
+                    );
                 }
             }
         }
 
         // Get split image index for returning
         let split_idx = self.get_split_image_index(bucket_idx as u32) as usize;
-        
+
         debug!(
-            "Directory split complete: bucket_idx={}, split_idx={}, new_local_depth={}", 
+            "Directory split complete: bucket_idx={}, split_idx={}, new_local_depth={}",
             bucket_idx, split_idx, new_local_depth
         );
 
@@ -336,7 +347,7 @@ impl ExtendableHTableDirectoryPage {
     pub fn deserialize(&mut self, buffer: &[u8]) {
         self.data.copy_from_slice(buffer);
         self.global_depth = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
-        
+
         // Consider deserializing other fields from the buffer as well
         // This might include local_depths and bucket_page_ids
     }
@@ -497,7 +508,7 @@ impl ExtendableHTableDirectoryPage {
     /// Splits a bucket by incrementing its local depth and redistributing entries
     pub fn split_bucket(&mut self, bucket_index: usize, new_bucket_page_id: PageId) {
         let local_depth = self.get_local_depth(bucket_index as u32);
-        
+
         // Check if we need to grow the directory
         if local_depth >= self.global_depth {
             if !self.grow_directory() {
@@ -505,34 +516,41 @@ impl ExtendableHTableDirectoryPage {
                 return;
             }
         }
-        
+
         // Calculate masks for redistribution
         let mask = (1 << local_depth) - 1;
         let split_point = 1 << local_depth;
         let new_local_depth = local_depth + 1;
-        
+
         debug!(
             "Splitting bucket {} with local_depth {} to new_local_depth {}, split_point {}",
             bucket_index, local_depth, new_local_depth, split_point
         );
 
         // Get the old bucket page ID
-        let old_bucket_page_id = self.get_bucket_page_id(bucket_index)
+        let old_bucket_page_id = self
+            .get_bucket_page_id(bucket_index)
             .expect("Bucket being split must exist");
-        
+
         // Update directory entries
         for i in 0..(1 << self.global_depth) {
             if (i & mask) == (bucket_index & mask) {
                 // Update local depth for all affected entries
                 self.set_local_depth(i, new_local_depth);
-                
+
                 // Determine which entries point to new bucket
                 if i & split_point != 0 {
                     self.set_bucket_page_id(i, new_bucket_page_id);
-                    debug!("Directory entry {} now points to new bucket {}", i, new_bucket_page_id);
+                    debug!(
+                        "Directory entry {} now points to new bucket {}",
+                        i, new_bucket_page_id
+                    );
                 } else {
                     self.set_bucket_page_id(i, old_bucket_page_id);
-                    debug!("Directory entry {} keeps old bucket {}", i, old_bucket_page_id);
+                    debug!(
+                        "Directory entry {} keeps old bucket {}",
+                        i, old_bucket_page_id
+                    );
                 }
             }
         }
@@ -624,8 +642,7 @@ impl PageTrait for ExtendableHTableDirectoryPage {
     }
 
     fn get_page_type(&self) -> PageType {
-        PageType::from_u8(self.data[PAGE_TYPE_OFFSET])
-            .unwrap_or(PageType::Invalid)
+        PageType::from_u8(self.data[PAGE_TYPE_OFFSET]).unwrap_or(PageType::Invalid)
     }
 
     fn is_dirty(&self) -> bool {
@@ -745,7 +762,7 @@ mod tests {
         let split_result = page.update_directory_for_split(0, 101);
         assert!(split_result.is_some());
         let split_idx = split_result.unwrap();
-        
+
         // Verify directory state after split
         assert_eq!(page.get_local_depth(0), 2); // Original bucket depth increased
         assert_eq!(page.get_local_depth(split_idx as u32), 2); // Split bucket has same depth
@@ -767,7 +784,7 @@ mod tests {
         // Update should trigger directory growth
         let split_result = page.update_directory_for_split(0, 101);
         assert!(split_result.is_some());
-        
+
         // Verify directory grew
         assert_eq!(page.get_global_depth(), 2); // Grew to accommodate new local depth
         assert_eq!(page.get_size(), 4);
@@ -777,7 +794,7 @@ mod tests {
     fn test_max_depth_limit_for_split() {
         initialize_logger();
         let mut page = create_directory_page();
-        
+
         // Setup with small max_depth
         page.init(2); // max_depth = 2
         page.set_bucket_page_id(0, 100);
@@ -803,26 +820,38 @@ mod tests {
         page.init(4);
         page.global_depth = 2;
         page.set_bucket_page_id(0, 100);
-        
+
         // Test case 1: local_depth = 1
         page.set_local_depth(0, 1);
         let split_idx = page.get_split_image_index(0);
-        assert_eq!(split_idx, 1, "With local_depth=1, split image of 0 should be 1 (0^1)");
+        assert_eq!(
+            split_idx, 1,
+            "With local_depth=1, split image of 0 should be 1 (0^1)"
+        );
 
         // Test case 2: local_depth = 2
         page.set_local_depth(0, 2);
         let split_idx = page.get_split_image_index(0);
-        assert_eq!(split_idx, 2, "With local_depth=2, split image of 0 should be 2 (0^2)");
+        assert_eq!(
+            split_idx, 2,
+            "With local_depth=2, split image of 0 should be 2 (0^2)"
+        );
 
         // Test case 3: bucket_idx = 1, local_depth = 2
         page.set_local_depth(1, 2);
         let split_idx = page.get_split_image_index(1);
-        assert_eq!(split_idx, 3, "With local_depth=2, split image of 1 should be 3 (1^2)");
+        assert_eq!(
+            split_idx, 3,
+            "With local_depth=2, split image of 1 should be 3 (1^2)"
+        );
 
         // Test case 4: bucket_idx = 2, local_depth = 2
         page.set_local_depth(2, 2);
         let split_idx = page.get_split_image_index(2);
-        assert_eq!(split_idx, 0, "With local_depth=2, split image of 2 should be 0 (2^2)");
+        assert_eq!(
+            split_idx, 0,
+            "With local_depth=2, split image of 2 should be 0 (2^2)"
+        );
     }
 
     #[test]
@@ -843,7 +872,7 @@ mod tests {
         assert!(page.get_global_depth() >= page.get_local_depth(0));
         assert!(page.get_global_depth() >= page.get_local_depth(split1 as u32));
         assert!(page.get_global_depth() >= page.get_local_depth(split2 as u32));
-        
+
         // Verify size is consistent with global depth
         assert_eq!(page.get_size(), 1 << page.get_global_depth());
     }

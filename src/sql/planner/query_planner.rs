@@ -12,7 +12,6 @@ pub struct QueryPlanner {
     plan_builder: LogicalPlanBuilder,
 }
 
-
 impl QueryPlanner {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         Self {

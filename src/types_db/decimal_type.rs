@@ -140,8 +140,11 @@ impl Type for DecimalType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
-            Val::SmallInt(_) | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
+            Val::Decimal(_)
+            | Val::BigInt(_)
+            | Val::Integer(_)
+            | Val::SmallInt(_)
+            | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Decimal by non-numeric type".to_string()),
         }
@@ -154,8 +157,11 @@ impl Type for DecimalType {
             Val::Integer(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::SmallInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::TinyInt(r) if *r == 0 => Err("Division by zero".to_string()),
-            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
-            Val::SmallInt(_) | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
+            Val::Decimal(_)
+            | Val::BigInt(_)
+            | Val::Integer(_)
+            | Val::SmallInt(_)
+            | Val::TinyInt(_) => Ok(Value::new(0.0f64)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide Decimal by non-numeric type".to_string()),
         }
@@ -168,8 +174,11 @@ impl Type for DecimalType {
             Val::Integer(r) if *r == 0 => Value::new(Val::Null),
             Val::SmallInt(r) if *r == 0 => Value::new(Val::Null),
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::Decimal(_) | Val::BigInt(_) | Val::Integer(_) |
-            Val::SmallInt(_) | Val::TinyInt(_) => Value::new(0.0f64),
+            Val::Decimal(_)
+            | Val::BigInt(_)
+            | Val::Integer(_)
+            | Val::SmallInt(_)
+            | Val::TinyInt(_) => Value::new(0.0f64),
             _ => Value::new(Val::Null),
         }
     }

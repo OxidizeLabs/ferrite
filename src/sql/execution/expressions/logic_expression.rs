@@ -85,12 +85,10 @@ impl LogicExpression {
                 Self::get_bool_as_cmp_bool(lhs),
                 Self::get_bool_as_cmp_bool(rhs),
             ),
-            LogicType::Not => {
-                match lhs.get_val() {
-                    Val::Boolean(b) => CmpBool::from(!b),
-                    _ => CmpBool::CmpNull,
-                }
-            }
+            LogicType::Not => match lhs.get_val() {
+                Val::Boolean(b) => CmpBool::from(!b),
+                _ => CmpBool::CmpNull,
+            },
         }
     }
 
@@ -350,20 +348,21 @@ mod unit_tests {
         assert_eq!(and_expr.to_string(), "(true AND false)");
 
         // Detailed format
-        assert_eq!(format!("{:#}", and_expr), "(Constant(true) AND Constant(false))");
+        assert_eq!(
+            format!("{:#}", and_expr),
+            "(Constant(true) AND Constant(false))"
+        );
 
         // Test OR expression
-        let or_expr = Expression::Logic(LogicExpression::new(
-            left,
-            right,
-            LogicType::Or,
-            vec![],
-        ));
+        let or_expr = Expression::Logic(LogicExpression::new(left, right, LogicType::Or, vec![]));
 
         // Basic format
         assert_eq!(or_expr.to_string(), "(true OR false)");
 
         // Detailed format
-        assert_eq!(format!("{:#}", or_expr), "(Constant(true) OR Constant(false))");
+        assert_eq!(
+            format!("{:#}", or_expr),
+            "(Constant(true) OR Constant(false))"
+        );
     }
 }

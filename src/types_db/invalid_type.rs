@@ -89,9 +89,15 @@ mod tests {
         assert_eq!(invalid_type.compare_equals(&val), CmpBool::CmpNull);
         assert_eq!(invalid_type.compare_not_equals(&val), CmpBool::CmpNull);
         assert_eq!(invalid_type.compare_less_than(&val), CmpBool::CmpNull);
-        assert_eq!(invalid_type.compare_less_than_equals(&val), CmpBool::CmpNull);
+        assert_eq!(
+            invalid_type.compare_less_than_equals(&val),
+            CmpBool::CmpNull
+        );
         assert_eq!(invalid_type.compare_greater_than(&val), CmpBool::CmpNull);
-        assert_eq!(invalid_type.compare_greater_than_equals(&val), CmpBool::CmpNull);
+        assert_eq!(
+            invalid_type.compare_greater_than_equals(&val),
+            CmpBool::CmpNull
+        );
         assert_eq!(invalid_type.compare_equals(&null), CmpBool::CmpNull);
     }
 

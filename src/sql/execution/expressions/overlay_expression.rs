@@ -129,11 +129,11 @@ impl ExpressionOps for OverlayExpression {
                 std::cmp::min(start_pos + replace_len, base_text.len())
             };
             format!(
-                    "{}{}{}",
-                    &base_text[0..start_pos],
-                    overlay_text,
-                    &base_text[end_pos..]
-                )
+                "{}{}{}",
+                &base_text[0..start_pos],
+                overlay_text,
+                &base_text[end_pos..]
+            )
         };
 
         Ok(Value::new(result))

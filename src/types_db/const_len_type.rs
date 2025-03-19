@@ -7,7 +7,9 @@ use std::fmt;
 pub const DEFAULT_CHAR_LENGTH: usize = 255;
 
 /// Global instance of CharType for use in disk storage
-pub static CHAR_TYPE_INSTANCE: CharType = CharType { length: DEFAULT_CHAR_LENGTH };
+pub static CHAR_TYPE_INSTANCE: CharType = CharType {
+    length: DEFAULT_CHAR_LENGTH,
+};
 
 // Implementation for CharType (fixed-length strings)
 #[derive(Debug, Clone, PartialEq)]
@@ -138,11 +140,12 @@ impl Type for CharType {
                     Value::new(Val::ConstLen(normalized))
                 } else {
                     Value::new(Val::ConstLen(
-                        normalized.chars()
+                        normalized
+                            .chars()
                             .filter(|c| !c.is_whitespace())
                             .min()
                             .map(|c| self.normalize_string(&c.to_string()))
-                            .unwrap_or_else(|| self.normalize_string(""))
+                            .unwrap_or_else(|| self.normalize_string("")),
                     ))
                 }
             }
@@ -158,11 +161,12 @@ impl Type for CharType {
                     Value::new(Val::ConstLen(normalized))
                 } else {
                     Value::new(Val::ConstLen(
-                        normalized.chars()
+                        normalized
+                            .chars()
                             .filter(|c| !c.is_whitespace())
                             .max()
                             .map(|c| self.normalize_string(&c.to_string()))
-                            .unwrap_or_else(|| self.normalize_string(""))
+                            .unwrap_or_else(|| self.normalize_string("")),
                     ))
                 }
             }
@@ -212,7 +216,7 @@ mod tests {
 
         // Test equals (with padding)
         assert_eq!(char_type.compare_equals(&empty), CmpBool::CmpTrue); // "     " == "     "
-        assert_eq!(char_type.compare_equals(&hi), CmpBool::CmpFalse);  // "     " != "hi   "
+        assert_eq!(char_type.compare_equals(&hi), CmpBool::CmpFalse); // "     " != "hi   "
         assert_eq!(char_type.compare_equals(&null), CmpBool::CmpNull);
 
         // Test less than (with padding)
@@ -248,12 +252,24 @@ mod tests {
         let null = Value::new(Val::Null);
 
         // Test min/max (should maintain padding)
-        assert_eq!(Type::to_string(&char_type, &Type::min(&char_type, &empty)), "     ");
-        assert_eq!(Type::to_string(&char_type, &Type::min(&char_type, &hello)), "e    ");
+        assert_eq!(
+            Type::to_string(&char_type, &Type::min(&char_type, &empty)),
+            "     "
+        );
+        assert_eq!(
+            Type::to_string(&char_type, &Type::min(&char_type, &hello)),
+            "e    "
+        );
         assert_eq!(Type::min(&char_type, &null), Value::new(Val::Null));
 
-        assert_eq!(Type::to_string(&char_type, &Type::max(&char_type, &empty)), "     ");
-        assert_eq!(Type::to_string(&char_type, &Type::max(&char_type, &hello)), "o    ");
+        assert_eq!(
+            Type::to_string(&char_type, &Type::max(&char_type, &empty)),
+            "     "
+        );
+        assert_eq!(
+            Type::to_string(&char_type, &Type::max(&char_type, &hello)),
+            "o    "
+        );
         assert_eq!(Type::max(&char_type, &null), Value::new(Val::Null));
     }
 }

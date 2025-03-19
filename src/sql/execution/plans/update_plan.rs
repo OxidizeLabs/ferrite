@@ -16,11 +16,12 @@ pub struct UpdateNode {
 }
 
 impl UpdateNode {
-    pub fn new(output_schema: Schema,
-               table_name: String,
-               table_id: TableOidT,
-               target_expressions: Vec<Arc<Expression>>,
-               children: Vec<PlanNode>,
+    pub fn new(
+        output_schema: Schema,
+        table_name: String,
+        table_id: TableOidT,
+        target_expressions: Vec<Arc<Expression>>,
+        children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema,

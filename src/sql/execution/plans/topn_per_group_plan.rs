@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopNPerGroupNode {
     output_schema: Schema,
-    n: usize,  // number of rows to return per group
+    n: usize,                                // number of rows to return per group
     sort_expressions: Vec<Arc<Expression>>,  // expressions to sort by
     group_expressions: Vec<Arc<Expression>>, // expressions to group by
     children: Vec<PlanNode>,

@@ -168,12 +168,9 @@ impl NestedIndexJoinExecutor {
         ));
 
         // Create new executor with dummy child
-        let mut index_scan_executor = IndexScanExecutor::new(
-            dummy_executor,
-            self.context.clone(), 
-            index_scan_plan
-        );
-        
+        let mut index_scan_executor =
+            IndexScanExecutor::new(dummy_executor, self.context.clone(), index_scan_plan);
+
         index_scan_executor.init();
         self.current_index_executor = Some(index_scan_executor);
 
@@ -461,10 +458,7 @@ mod tests {
                 RID::new(0, 0),
             );
             let rid = left_table
-                .insert_tuple(
-                    &left_tuple_meta,
-                    &mut tuple,
-                )
+                .insert_tuple(&left_tuple_meta, &mut tuple)
                 .expect("Failed to insert into left table");
             debug!(
                 "Inserted into left table: id={}, value={} at RID={:?}",
@@ -488,10 +482,7 @@ mod tests {
                 RID::new(0, 0),
             );
             let rid = right_table
-                .insert_tuple(
-                    &right_tuple_meta,
-                    &mut tuple,
-                )
+                .insert_tuple(&right_tuple_meta, &mut tuple)
                 .expect("Failed to insert into right table");
             debug!(
                 "Inserted into right table: id={}, data={} at RID={:?}",

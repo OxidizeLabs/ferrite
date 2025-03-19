@@ -6,9 +6,9 @@ use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
 use bincode;
+use log;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use log;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
@@ -49,8 +49,9 @@ impl TupleMeta {
     pub fn is_committed(&self) -> bool {
         let committed = self.commit_timestamp != Timestamp::MAX;
         log::debug!(
-            "TupleMeta.is_committed(): commit_ts={}, is_committed={}", 
-            self.commit_timestamp, committed
+            "TupleMeta.is_committed(): commit_ts={}, is_committed={}",
+            self.commit_timestamp,
+            committed
         );
         committed
     }
@@ -92,8 +93,10 @@ impl TupleMeta {
         // The tuple is visible if its commit timestamp is less than the watermark
         let visible = self.commit_timestamp <= watermark.get_watermark();
         log::debug!(
-            "Tuple visibility based on watermark: commit_ts={} <= watermark={} = {}", 
-            self.commit_timestamp, watermark.get_watermark(), visible
+            "Tuple visibility based on watermark: commit_ts={} <= watermark={} = {}",
+            self.commit_timestamp,
+            watermark.get_watermark(),
+            visible
         );
         visible
     }
@@ -274,10 +277,10 @@ impl Tuple {
     pub fn combine(&self, other: &Tuple) -> Self {
         let mut combined_values = self.values.clone();
         combined_values.extend(other.values.clone());
-        
+
         Self {
             values: combined_values,
-            rid: self.rid,  // Keep the left tuple's RID
+            rid: self.rid, // Keep the left tuple's RID
         }
     }
 

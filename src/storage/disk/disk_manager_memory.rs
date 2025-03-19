@@ -62,11 +62,19 @@ impl DiskIO for DiskManagerMemory {
         }
     }
 
-    fn write_page_with_retry(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+    fn write_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
         todo!()
     }
 
-    fn read_page_with_retry(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+    fn read_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
         todo!()
     }
 }
@@ -203,11 +211,19 @@ impl DiskIO for DiskManagerUnlimitedMemory {
         Ok(())
     }
 
-    fn write_page_with_retry(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+    fn write_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &[u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
         todo!()
     }
 
-    fn read_page_with_retry(&self, page_id: PageId, page_data: &mut [u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
+    fn read_page_with_retry(
+        &self,
+        page_id: PageId,
+        page_data: &mut [u8; DB_PAGE_SIZE as usize],
+    ) -> IoResult<()> {
         todo!()
     }
 }

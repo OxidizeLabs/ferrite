@@ -133,7 +133,10 @@ impl AbstractExecutor for InsertExecutor {
                 let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
 
                 // Use TransactionalTableHeap's insert_tuple method
-                match self.txn_table_heap.insert_tuple(&tuple_meta, &mut tuple, txn_ctx) {
+                match self
+                    .txn_table_heap
+                    .insert_tuple(&tuple_meta, &mut tuple, txn_ctx)
+                {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
                         Some((tuple, rid))
@@ -217,7 +220,8 @@ mod tests {
 
             // Create disk components
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_scheduler =
+                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
 
             // Create buffer pool manager
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
@@ -241,7 +245,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                transaction_manager.clone(),  // Pass transaction manager
+                transaction_manager.clone(), // Pass transaction manager
             )));
 
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
@@ -259,9 +263,7 @@ mod tests {
             }
         }
 
-        fn create_executor_context(
-            &self,
-        ) -> Arc<RwLock<ExecutionContext>> {
+        fn create_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
             Arc::new(RwLock::new(ExecutionContext::new(
                 Arc::clone(&self.buffer_pool),
                 Arc::clone(&self.catalog),
