@@ -723,7 +723,13 @@ impl Type for Value {
             Val::TinyInt(i) => Ok(*i as i32),
             Val::SmallInt(i) => Ok(*i as i32),
             Val::BigInt(i) => Ok(*i as i32),
-            _ => Err(format!("Cannot convert {:?} to integer", self.type_id_)),
+            Val::Decimal(f) => Ok(*f as i32),
+            Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
+            Val::Timestamp(t) => Ok(*t as i32),
+            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to integer: {}", e)),
+            Val::Vector(v) => Ok(v.len() as i32),
+            Val::Null => Err("Cannot convert NULL to integer".to_string()),
+            Val::Struct => Ok(1), // Struct is considered as 1
         }
     }
 
@@ -733,7 +739,13 @@ impl Type for Value {
             Val::Integer(i) => Ok(*i as i64),
             Val::SmallInt(i) => Ok(*i as i64),
             Val::TinyInt(i) => Ok(*i as i64),
-            _ => Err(format!("Cannot convert {:?} to bigint", self.type_id_)),
+            Val::Decimal(f) => Ok(*f as i64),
+            Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
+            Val::Timestamp(t) => Ok(*t as i64),
+            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to bigint: {}", e)),
+            Val::Vector(v) => Ok(v.len() as i64),
+            Val::Null => Err("Cannot convert NULL to bigint".to_string()),
+            Val::Struct => Ok(1), // Struct is considered as 1
         }
     }
 
@@ -741,14 +753,31 @@ impl Type for Value {
         match &self.value_ {
             Val::SmallInt(i) => Ok(*i),
             Val::TinyInt(i) => Ok(*i as i16),
-            _ => Err(format!("Cannot convert {:?} to smallint", self.type_id_)),
+            Val::Integer(i) => Ok(*i as i16),
+            Val::BigInt(i) => Ok(*i as i16),
+            Val::Decimal(f) => Ok(*f as i16),
+            Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
+            Val::Timestamp(t) => Ok(*t as i16),
+            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to smallint: {}", e)),
+            Val::Vector(v) => Ok(v.len() as i16),
+            Val::Null => Err("Cannot convert NULL to smallint".to_string()),
+            Val::Struct => Ok(1), // Struct is considered as 1
         }
     }
 
     fn as_tinyint(&self) -> Result<i8, String> {
         match &self.value_ {
             Val::TinyInt(i) => Ok(*i),
-            _ => Err(format!("Cannot convert {:?} to tinyint", self.type_id_)),
+            Val::SmallInt(i) => Ok(*i as i8),
+            Val::Integer(i) => Ok(*i as i8),
+            Val::BigInt(i) => Ok(*i as i8),
+            Val::Decimal(f) => Ok(*f as i8),
+            Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
+            Val::Timestamp(t) => Ok(*t as i8),
+            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to tinyint: {}", e)),
+            Val::Vector(v) => Ok(v.len() as i8),
+            Val::Null => Err("Cannot convert NULL to tinyint".to_string()),
+            Val::Struct => Ok(1), // Struct is considered as 1
         }
     }
 
@@ -759,7 +788,28 @@ impl Type for Value {
             Val::BigInt(i) => Ok(*i as f64),
             Val::SmallInt(i) => Ok(*i as f64),
             Val::TinyInt(i) => Ok(*i as f64),
-            _ => Err(format!("Cannot convert {:?} to decimal", self.type_id_)),
+            Val::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Val::Timestamp(t) => Ok(*t as f64),
+            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to decimal: {}", e)),
+            Val::Vector(v) => Ok(v.len() as f64),
+            Val::Null => Err("Cannot convert NULL to decimal".to_string()),
+            Val::Struct => Ok(1.0), // Struct is considered as 1.0
+        }
+    }
+
+    fn as_bool(&self) -> Result<bool, String> {
+        match &self.value_ {
+            Val::Boolean(b) => Ok(*b),
+            Val::Integer(i) => Ok(*i != 0),
+            Val::BigInt(i) => Ok(*i != 0),
+            Val::SmallInt(i) => Ok(*i != 0),
+            Val::TinyInt(i) => Ok(*i != 0),
+            Val::Decimal(f) => Ok(*f != 0.0),
+            Val::Timestamp(t) => Ok(*t != 0),
+            Val::VarLen(s) | Val::ConstLen(s) => Ok(!s.is_empty()),
+            Val::Vector(v) => Ok(!v.is_empty()),
+            Val::Null => Ok(false),
+            Val::Struct => Ok(true), // Struct is considered true as it's a non-null value
         }
     }
 }
