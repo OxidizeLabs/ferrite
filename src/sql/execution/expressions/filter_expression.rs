@@ -1,14 +1,10 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
-use crate::common::rid::RID;
-use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
-use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
-use crate::types_db::value::Val::Null;
 use crate::types_db::value::Value;
 use log::trace;
 use std::fmt;

@@ -50,19 +50,19 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
 async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
     // Initialize logger with custom format for server
-    Builder::new()
-        .filter_level(log::LevelFilter::Debug)
-        .format(|buf, record| {
-            use std::io::Write;
-            writeln!(
-                buf,
-                "{} [{}] [Server] {}",
-                chrono::Local::now().format("%H:%M:%S"),
-                record.level(),
-                record.args()
-            )
-        })
-        .init();
+    // Builder::new()
+    //     .filter_level(log::LevelFilter::Debug)
+    //     .format(|buf, record| {
+    //         use std::io::Write;
+    //         writeln!(
+    //             buf,
+    //             "{} [{}] [Server] {}",
+    //             chrono::Local::now().format("%H:%M:%S"),
+    //             record.level(),
+    //             record.args()
+    //         )
+    //     })
+    //     .init();
 
     // Create config with server enabled
     let mut config = DBConfig::default();
