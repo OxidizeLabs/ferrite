@@ -121,7 +121,8 @@ impl Display for NestedIndexJoinNode {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use sqlparser::ast::JoinConstraint;
+use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;

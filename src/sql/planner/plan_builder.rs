@@ -244,6 +244,7 @@ impl LogicalPlanBuilder {
             }
 
             let agg_schema = Schema::new(agg_columns);
+            let agg_schema_clone = agg_schema.clone();
 
             // Create aggregation plan node
             current_plan = LogicalPlan::aggregate(
@@ -255,8 +256,8 @@ impl LogicalPlanBuilder {
 
             // Apply HAVING clause if it exists
             if let Some(having) = &select.having {
-                // Use the original schema for parsing the HAVING clause to ensure all columns are available
-                let having_expr = self.expression_parser.parse_expression(having, &schema)?;
+                // Use the schema after aggregation for parsing the HAVING clause
+                let having_expr = self.expression_parser.parse_expression(having, &agg_schema_clone)?;
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name

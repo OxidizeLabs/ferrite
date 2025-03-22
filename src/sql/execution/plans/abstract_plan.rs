@@ -203,7 +203,7 @@ impl PlanNode {
                 result.push_str(&format!(
                     "{}   Predicate: {}\n",
                     indent,
-                    node.get_filter_predicate()
+                    node.get_filter_expression()
                 ));
                 result.push_str(
                     &node
