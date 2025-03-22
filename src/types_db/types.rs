@@ -167,6 +167,9 @@ pub trait Type {
     fn as_decimal(&self) -> Result<f64, String> {
         Err("Cannot convert to decimal".to_string())
     }
+    fn as_bool(&self) -> Result<bool, String> {
+        Err("Cannot convert to boolean".to_string())
+    }
 }
 
 impl From<bool> for CmpBool {
