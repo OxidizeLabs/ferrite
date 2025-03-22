@@ -3,7 +3,6 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::sql::execution::expressions::filter_expression::{FilterExpression, FilterType};
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::storage::table::tuple::Tuple;
