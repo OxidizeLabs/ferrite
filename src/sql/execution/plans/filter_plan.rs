@@ -1,6 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
-use crate::sql::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::filter_expression::{FilterExpression, FilterType};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -11,7 +12,7 @@ pub struct FilterNode {
     output_schema: Schema,
     table_oid_t: TableOidT,
     table_name: String,
-    predicate: Arc<Expression>,
+    filter_expr: Arc<FilterExpression>,
     children: Vec<PlanNode>,
 }
 
@@ -23,11 +24,54 @@ impl FilterNode {
         predicate: Arc<Expression>,
         children: Vec<PlanNode>,
     ) -> Self {
+        Self::new_where(output_schema, table_oid_t, table_name, predicate, children)
+    }
+
+    pub fn new_where(
+        output_schema: Schema,
+        table_oid_t: TableOidT,
+        table_name: String,
+        predicate: Arc<Expression>,
+        children: Vec<PlanNode>,
+    ) -> Self {
+        let return_type = if output_schema.get_column_count() > 0 {
+            output_schema.get_column(0).unwrap().clone()
+        } else {
+            // If schema is empty, use the predicate's return type
+            predicate.get_return_type().clone()
+        };
+        
+        let filter_expr = Arc::new(FilterExpression::new_where(
+            predicate,
+            return_type,
+        ));
         Self {
             output_schema,
             table_oid_t,
             table_name,
+            filter_expr,
+            children,
+        }
+    }
+
+    pub fn new_having(
+        output_schema: Schema,
+        table_oid_t: TableOidT,
+        table_name: String,
+        aggregate: Arc<Expression>,
+        predicate: Arc<Expression>,
+        children: Vec<PlanNode>,
+    ) -> Self {
+        let filter_expr = Arc::new(FilterExpression::new_having(
+            aggregate,
             predicate,
+            output_schema.get_column(0).unwrap().clone(), // Use first column as return type
+        ));
+        Self {
+            output_schema,
+            table_oid_t,
+            table_name,
+            filter_expr,
             children,
         }
     }
@@ -40,8 +84,8 @@ impl FilterNode {
         &self.table_name
     }
 
-    pub fn get_filter_predicate(&self) -> &Expression {
-        &self.predicate
+    pub fn get_filter_expression(&self) -> &FilterExpression {
+        &self.filter_expr
     }
 
     pub fn get_child_plan(&self) -> &PlanNode {
@@ -66,9 +110,26 @@ impl AbstractPlanNode for FilterNode {
 impl Display for FilterNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
-            // Detailed format
+            // Detailed format - use internal representation
             write!(f, "→ Filter")?;
-            write!(f, "\n   Predicate: {:#}", self.predicate)?;
+            write!(
+                f,
+                "\n   Filter Type: {:?}",
+                self.filter_expr.get_filter_type()
+            )?;
+            match self.filter_expr.get_filter_type() {
+                FilterType::Where => {
+                    write!(f, "\n   Predicate: {:#}", self.filter_expr.get_predicate())?;
+                }
+                FilterType::Having => {
+                    write!(
+                        f,
+                        "\n   Aggregate: {:#}",
+                        self.filter_expr.get_aggregate().as_ref().unwrap()
+                    )?;
+                    write!(f, "\n   Predicate: {:#}", self.filter_expr.get_predicate())?;
+                }
+            }
             write!(f, "\n   Table: {}", self.table_name)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
 
@@ -77,8 +138,18 @@ impl Display for FilterNode {
                 write!(f, "   Child {}: {:#}", i + 1, child)?;
             }
         } else {
-            // Basic format
-            write!(f, "Filter {}", self.predicate)?
+            // Basic format - use user-friendly representation
+            match self.filter_expr.get_filter_type() {
+                FilterType::Where => {
+                    write!(f, "Filter WHERE {}", self.filter_expr.get_predicate())?
+                }
+                FilterType::Having => write!(
+                    f,
+                    "Filter HAVING {} {}",
+                    self.filter_expr.get_aggregate().as_ref().unwrap(),
+                    self.filter_expr.get_predicate()
+                )?,
+            }
         }
         Ok(())
     }
@@ -157,7 +228,7 @@ mod tests {
             let predicate = create_comparison(col_ref, constant, ComparisonType::GreaterThan);
 
             let scan_node = create_seq_scan(schema.clone(), "test_table");
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema,
                 1,
                 "test_table".to_string(),
@@ -255,7 +326,7 @@ mod tests {
                 vec![],
             ));
 
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema.clone(),
                 42,
                 "test_table".to_string(),
@@ -279,7 +350,7 @@ mod tests {
                 vec![],
             ));
 
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema.clone(),
                 0,
                 "empty_table".to_string(),
@@ -322,7 +393,7 @@ mod tests {
                     vec![],
                 ));
 
-                let filter_node = FilterNode::new(
+                let filter_node = FilterNode::new_where(
                     schema.clone(),
                     0,
                     "test_table".to_string(),
@@ -330,7 +401,10 @@ mod tests {
                     vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
-                assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                assert_eq!(
+                    filter_node.get_filter_expression().get_predicate(),
+                    Arc::from(predicate.clone())
+                );
             }
         }
 
@@ -353,7 +427,7 @@ mod tests {
                     vec![],
                 ));
 
-                let filter_node = FilterNode::new(
+                let filter_node = FilterNode::new_where(
                     schema.clone(),
                     0,
                     "test_table".to_string(),
@@ -361,7 +435,10 @@ mod tests {
                     vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
-                assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                assert_eq!(
+                    filter_node.get_filter_expression().get_predicate(),
+                    Arc::from(predicate.clone())
+                );
             }
         }
 
@@ -386,7 +463,7 @@ mod tests {
                     vec![],
                 ));
 
-                let filter_node = FilterNode::new(
+                let filter_node = FilterNode::new_where(
                     schema.clone(),
                     0,
                     "test_table".to_string(),
@@ -394,7 +471,10 @@ mod tests {
                     vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
-                assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                assert_eq!(
+                    filter_node.get_filter_expression().get_predicate(),
+                    Arc::from(predicate.clone())
+                );
             }
         }
 
@@ -416,7 +496,7 @@ mod tests {
                     vec![],
                 ));
 
-                let filter_node = FilterNode::new(
+                let filter_node = FilterNode::new_where(
                     schema.clone(),
                     0,
                     "test_table".to_string(),
@@ -424,7 +504,10 @@ mod tests {
                     vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
-                assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                assert_eq!(
+                    filter_node.get_filter_expression().get_predicate(),
+                    Arc::from(predicate.clone())
+                );
             }
         }
 
@@ -455,7 +538,7 @@ mod tests {
                         vec![],
                     ));
 
-                    let filter_node = FilterNode::new(
+                    let filter_node = FilterNode::new_where(
                         schema.clone(),
                         0,
                         "test_table".to_string(),
@@ -463,7 +546,10 @@ mod tests {
                         vec![create_seq_scan(schema.clone(), "test_table")],
                     );
 
-                    assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                    assert_eq!(
+                        filter_node.get_filter_expression().get_predicate(),
+                        Arc::from(predicate.clone())
+                    );
                 }
             }
         }
@@ -479,7 +565,7 @@ mod tests {
                 vec![], // empty children vector
             ));
 
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema.clone(),
                 0,
                 "test_table".to_string(),
@@ -487,7 +573,14 @@ mod tests {
                 vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            assert_eq!(filter_node.get_filter_predicate().get_children().len(), 0);
+            assert_eq!(
+                filter_node
+                    .get_filter_expression()
+                    .get_predicate()
+                    .get_children()
+                    .len(),
+                0
+            );
         }
 
         #[test]
@@ -516,7 +609,7 @@ mod tests {
                     vec![],
                 ));
 
-                let filter_node = FilterNode::new(
+                let filter_node = FilterNode::new_where(
                     schema.clone(),
                     0,
                     "test_table".to_string(),
@@ -524,7 +617,10 @@ mod tests {
                     vec![create_seq_scan(schema.clone(), "test_table")],
                 );
 
-                assert_eq!(filter_node.get_filter_predicate(), &predicate);
+                assert_eq!(
+                    filter_node.get_filter_expression().get_predicate(),
+                    Arc::from(predicate.clone())
+                );
             }
         }
 
@@ -549,7 +645,7 @@ mod tests {
                 vec![],
             ));
 
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema.clone(),
                 0,
                 "test_table".to_string(),
@@ -557,10 +653,13 @@ mod tests {
                 vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            assert_eq!(filter_node.get_filter_predicate(), &id_pred);
+            assert_eq!(
+                filter_node.get_filter_expression().get_predicate(),
+                Arc::from(id_pred.clone())
+            );
 
             // Test with the second predicate
-            let filter_node2 = FilterNode::new(
+            let filter_node2 = FilterNode::new_where(
                 schema.clone(),
                 0,
                 "test_table".to_string(),
@@ -568,7 +667,10 @@ mod tests {
                 vec![create_seq_scan(schema.clone(), "test_table")],
             );
 
-            assert_eq!(filter_node2.get_filter_predicate(), &value_pred);
+            assert_eq!(
+                filter_node2.get_filter_expression().get_predicate(),
+                Arc::from(value_pred.clone())
+            );
         }
     }
 
@@ -588,7 +690,7 @@ mod tests {
                 vec![],
             ));
 
-            let filter_node = FilterNode::new(
+            let filter_node = FilterNode::new_where(
                 schema,
                 0,
                 "test_table".to_string(),
@@ -621,7 +723,7 @@ mod tests {
                 vec![],
             ));
 
-            let filter_node1 = FilterNode::new(
+            let filter_node1 = FilterNode::new_where(
                 schema.clone(),
                 0,
                 "test_table".to_string(),
@@ -629,7 +731,7 @@ mod tests {
                 vec![child.clone()],
             );
 
-            let filter_node2 = FilterNode::new(
+            let filter_node2 = FilterNode::new_where(
                 schema,
                 0,
                 "test_table".to_string(),
@@ -653,7 +755,7 @@ mod tests {
             let basic_str = format!("{}", filter_node);
 
             println!("Basic display: {}", basic_str);
-            assert!(basic_str.contains("Filter (value > 25)"));
+            assert!(basic_str.contains("Filter WHERE (value > 25)"));
         }
 
         #[test]
@@ -675,7 +777,7 @@ mod tests {
             let node_string = plan_node.to_string();
 
             println!("Plan node string: {}", node_string);
-            assert!(node_string.contains("Filter (value > 25)"));
+            assert!(node_string.contains("Filter WHERE (value > 25)"));
         }
 
         #[test]
@@ -685,7 +787,7 @@ mod tests {
             let outer_predicate = create_test_predicate("id < 100");
 
             let scan_node = create_seq_scan(schema.clone(), "test_table");
-            let inner_filter = FilterNode::new(
+            let inner_filter = FilterNode::new_where(
                 schema.clone(),
                 1,
                 "test_table".to_string(),
@@ -693,7 +795,7 @@ mod tests {
                 vec![scan_node],
             );
 
-            let outer_filter = FilterNode::new(
+            let outer_filter = FilterNode::new_where(
                 schema,
                 1,
                 "test_table".to_string(),
@@ -703,7 +805,7 @@ mod tests {
 
             // Test basic format
             let basic_str = format!("{}", outer_filter);
-            assert!(basic_str.contains("Filter (id < 100)"));
+            assert!(basic_str.contains("Filter WHERE (id < 100)"));
 
             // Test detailed format
             let detailed_str = format!("{:#}", outer_filter);
