@@ -3,6 +3,7 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
+use crate::sql::execution::expressions::filter_expression::{FilterExpression, FilterType};
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::storage::table::tuple::Tuple;
@@ -32,20 +33,20 @@ impl FilterExecutor {
         }
     }
 
-    fn apply_predicate(&self, tuple: &Tuple) -> bool {
-        let predicate = self.plan.get_filter_predicate();
+    fn apply_filter(&self, tuple: &Tuple) -> bool {
+        let filter_expr = self.plan.get_filter_expression();
         debug!(
-            "Evaluating predicate on tuple with values: {:?}",
+            "Evaluating filter expression on tuple with values: {:?}",
             tuple.get_values()
         );
 
         let schema = self.child_executor.get_output_schema();
 
-        match predicate.evaluate(tuple, schema) {
+        match filter_expr.evaluate(tuple, schema) {
             Ok(value) => match value.get_val() {
                 Val::Boolean(b) => {
                     debug!(
-                        "Predicate evaluation result: {}, for tuple: {:?}",
+                        "Filter evaluation result: {}, for tuple: {:?}",
                         b,
                         tuple.get_values()
                     );
@@ -53,14 +54,14 @@ impl FilterExecutor {
                 }
                 _ => {
                     error!(
-                        "Predicate evaluation returned non-boolean value: {:?}",
+                        "Filter evaluation returned non-boolean value: {:?}",
                         value
                     );
                     false
                 }
             },
             Err(e) => {
-                error!("Failed to evaluate predicate: {}", e);
+                error!("Failed to evaluate filter: {}", e);
                 false
             }
         }
@@ -77,14 +78,14 @@ impl AbstractExecutor for FilterExecutor {
         debug!("Initializing FilterExecutor");
         self.child_executor.init();
 
-        let predicate = self.plan.get_filter_predicate();
+        let filter_expr = self.plan.get_filter_expression();
         let schema = self.child_executor.get_output_schema();
 
-        // Validate predicate against schema
-        if let Err(e) = predicate.validate(schema) {
-            error!("Invalid predicate for schema: {}", e);
+        // Validate filter expression against schema
+        if let Err(e) = filter_expr.validate(schema) {
+            error!("Invalid filter expression for schema: {}", e);
             // We continue initialization but log the error
-            // The executor will return no results for invalid predicates
+            // The executor will return no results for invalid filters
         }
 
         self.initialized = true;
@@ -102,11 +103,11 @@ impl AbstractExecutor for FilterExecutor {
                 Some((tuple, rid)) => {
                     debug!("Processing tuple with RID {:?}", rid);
 
-                    if self.apply_predicate(&tuple) {
+                    if self.apply_filter(&tuple) {
                         debug!("Found matching tuple with RID {:?}", rid);
                         return Some((tuple, rid));
                     } else {
-                        debug!("Tuple did not match predicate, continuing...");
+                        debug!("Tuple did not match filter, continuing...");
                         continue;
                     }
                 }
@@ -139,6 +140,7 @@ mod tests {
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::comparison_expression::{
         ComparisonExpression, ComparisonType,
@@ -300,7 +302,7 @@ mod tests {
             vec![],
         ));
 
-        Arc::new(FilterNode::new(
+        Arc::new(FilterNode::new_where(
             schema.clone(),
             0,
             "test_table".to_string(),
@@ -309,40 +311,47 @@ mod tests {
         ))
     }
 
-    fn create_invalid_age_filter(
-        age: i32,
-        comparison_type: ComparisonType,
+    fn create_having_filter(
+        aggregate_type: AggregationType,
+        threshold: i32,
         schema: &Schema,
     ) -> Arc<FilterNode> {
-        // Create column reference for age
-        let age_col = Column::new("age", TypeId::Integer);
-        let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
-            0,
-            age_col.clone(),
-            vec![],
+        // Create aggregate expression for salary column
+        let salary_col_idx = schema.get_column_index("salary").unwrap();
+        let salary_col = schema.get_column(salary_col_idx).unwrap().clone();
+        let agg_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
+            aggregate_type,
+            vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0,  // table index
+                salary_col_idx,  // use the actual column index
+                salary_col.clone(),
+                vec![],
+            )))],
+            salary_col.clone(),
+            "".to_string(),
         )));
 
         // Create constant expression for comparison
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(age),
-            age_col,
+            Value::new(threshold),
+            salary_col.clone(),  // use clone here
             vec![],
         )));
 
         // Create predicate
-        let predicate = Expression::Comparison(ComparisonExpression::new(
-            col_expr,
+        let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            agg_expr.clone(),
             const_expr,
-            comparison_type,
+            ComparisonType::GreaterThan,
             vec![],
-        ));
+        )));
 
-        Arc::new(FilterNode::new(
+        Arc::new(FilterNode::new_having(
             schema.clone(),
             0,
             "test_table".to_string(),
-            Arc::from(predicate),
+            agg_expr,
+            predicate,
             vec![PlanNode::Empty],
         ))
     }
@@ -352,6 +361,7 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
+            Column::new("salary", TypeId::Decimal),
         ])
     }
 
@@ -374,18 +384,19 @@ mod tests {
         transaction_context: &Arc<TransactionContext>,
     ) {
         let test_data = vec![
-            (1, "Alice", 25),
-            (2, "Bob", 30),
-            (3, "Charlie", 35),
-            (4, "David", 28),
-            (5, "Eve", 32),
+            (1, "Alice", 25, 50000.0),
+            (2, "Bob", 30, 75000.0),
+            (3, "Charlie", 35, 100000.0),
+            (4, "David", 28, 65000.0),
+            (5, "Eve", 32, 85000.0),
         ];
 
-        for (id, name, age) in test_data {
+        for (id, name, age, salary) in test_data {
             let values = vec![
                 Value::new(id),
                 Value::new(name.to_string()),
                 Value::new(age),
+                Value::new(salary),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(transaction_context.get_transaction_id());
@@ -393,6 +404,11 @@ mod tests {
                 .insert_tuple(&meta, &mut tuple, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
+    }
+
+    // Add this helper function for comparing floating-point numbers
+    fn compare_floats(a: &f64, b: &f64) -> std::cmp::Ordering {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
     }
 
     #[test]
@@ -650,8 +666,21 @@ mod tests {
 
         // Create a filter with an empty schema to simulate invalid predicate
         let empty_schema = Schema::new(vec![]);
-        let invalid_filter_plan =
-            create_invalid_age_filter(25, ComparisonType::Equal, &empty_schema);
+        
+        // Create a simple predicate that doesn't depend on schema columns
+        let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(true),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+
+        let invalid_filter_plan = Arc::new(FilterNode::new_where(
+            empty_schema,
+            0,
+            "test_table".to_string(),
+            predicate,
+            vec![PlanNode::Empty],
+        ));
 
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
@@ -667,6 +696,415 @@ mod tests {
         // Should initialize but return no results due to invalid predicate
         executor.init();
         assert!(executor.next().is_none());
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_having_filter() {
+        let test_context = TestContext::new("having_filter_test");
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create catalog and table
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
+
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
+
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info,
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
+
+        // Create HAVING filter for COUNT(*) > 3
+        let filter_plan = create_having_filter(AggregationType::CountStar, 3, &schema);
+
+        // Create and initialize filter executor
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
+        executor.init();
+
+        // Collect filtered results
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            let age = match tuple.get_value(2).get_val() {
+                Val::Integer(a) => *a,
+                _ => panic!("Expected integer value for age"),
+            };
+            results.push(age);
+        }
+
+        // Sort results for consistent comparison
+        results.sort();
+
+        // Verify results - should return all ages since we have 5 rows > 3
+        assert_eq!(results.len(), 5, "Should find all rows since count > 3");
+        assert_eq!(results, vec![25, 28, 30, 32, 35]);
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_having_filter_no_matches() {
+        let test_context = TestContext::new("having_filter_no_matches_test");
+        let schema = create_test_schema();
+
+        // Create catalog with the test table
+        let mut catalog = create_catalog(&test_context);
+        catalog.create_table("test_table".to_string(), schema.clone());
+        let catalog = Arc::new(RwLock::new(catalog));
+
+        // Create HAVING filter for COUNT(*) > 10 (no matches)
+        let filter_plan = create_having_filter(AggregationType::CountStar, 10, &schema);
+
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create an empty executor as the child executor
+        let child_executor = Box::new(EmptyExecutor::new(
+            Arc::clone(&executor_context),
+            schema.clone(),
+        ));
+
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
+        executor.init();
+
+        // Should not return any results
+        assert!(executor.next().is_none());
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_having_avg_filter() {
+        let test_context = TestContext::new("having_avg_test");
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create catalog and table
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
+
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
+
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info,
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
+
+        // Create HAVING filter for AVG(salary) > 70000
+        let filter_plan = create_having_filter(AggregationType::Avg, 70000, &schema);
+
+        // Create and initialize filter executor
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
+        executor.init();
+
+        // Collect filtered results
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            let salary = match tuple.get_value(3).get_val() {
+                Val::Decimal(s) => *s,
+                _ => panic!("Expected decimal value for salary"),
+            };
+            results.push(salary);
+        }
+
+        // Sort results for consistent comparison
+        results.sort_by(compare_floats);
+
+        // Verify results - should return all salaries since avg > 70000
+        assert_eq!(results.len(), 5, "Should find all rows since avg salary > 70000");
+        assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_having_max_filter() {
+        let test_context = TestContext::new("having_max_test");
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create catalog and table
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
+
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
+
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info,
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
+
+        // Create HAVING filter for MAX(salary) > 90000
+        let filter_plan = create_having_filter(AggregationType::Max, 90000, &schema);
+
+        // Create and initialize filter executor
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
+        executor.init();
+
+        // Collect filtered results
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            let salary = match tuple.get_value(3).get_val() {
+                Val::Decimal(s) => *s,
+                _ => panic!("Expected decimal value for salary"),
+            };
+            results.push(salary);
+        }
+
+        // Sort results for consistent comparison
+        results.sort_by(compare_floats);
+
+        // Verify results - should return all salaries since max > 90000
+        assert_eq!(results.len(), 5, "Should find all rows since max salary > 90000");
+        assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
+
+        // Verify cleanup
+        drop(executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_where_and_having_sequence() {
+        let test_context = TestContext::new("where_having_sequence_test");
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create catalog and table
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
+
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data
+        setup_test_table(&txn_table_heap, &schema, transaction_context);
+
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info.clone(),
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
+
+        // Create WHERE filter for age > 30
+        let where_filter = create_age_filter(30, ComparisonType::GreaterThan, &schema);
+
+        // Create HAVING filter for AVG(salary) > 70000
+        let having_filter = create_having_filter(AggregationType::Avg, 70000, &schema);
+
+        // Create and initialize filter executors
+        let mut where_executor = FilterExecutor::new(child_executor, executor_context.clone(), where_filter);
+        where_executor.init();
+
+        let mut having_executor = FilterExecutor::new(
+            Box::new(where_executor),
+            executor_context,
+            having_filter,
+        );
+        having_executor.init();
+
+        // Collect filtered results
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = having_executor.next() {
+            let salary = match tuple.get_value(3).get_val() {
+                Val::Decimal(s) => *s,
+                _ => panic!("Expected decimal value for salary"),
+            };
+            results.push(salary);
+        }
+
+        // Sort results for consistent comparison
+        results.sort_by(compare_floats);
+
+        // Verify results - should return salaries of people over 30 with avg > 70000
+        assert_eq!(results.len(), 3, "Should find 3 rows matching both conditions");
+        assert_eq!(results, vec![75000.0, 85000.0, 100000.0]);
+
+        // Verify cleanup
+        drop(having_executor);
+        assert!(test_context._temp_dir.path().exists());
+    }
+
+    #[test]
+    fn test_having_with_null_values() {
+        let test_context = TestContext::new("having_null_test");
+        let schema = create_test_schema();
+        let transaction_context = test_context.transaction_context();
+
+        // Create catalog and table
+        let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
+        let table_info = {
+            let mut catalog_guard = catalog.write();
+            catalog_guard
+                .create_table("test_table".to_string(), schema.clone())
+                .unwrap()
+        };
+
+        // Create transactional table heap
+        let txn_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt(),
+        ));
+
+        // Set up test data with some NULL values
+        let test_data = vec![
+            (1, "Alice", 25, 50000.0),
+            (2, "Bob", 30, 75000.0),
+            (3, "Charlie", 35, 100000.0),
+            (4, "David", 28, 65000.0),
+            (5, "Eve", 32, 85000.0),
+            (6, "Frank", 40, 0.0), // Zero salary
+            (7, "Grace", 45, 0.0), // Zero salary
+        ];
+
+        for (id, name, age, salary) in test_data {
+            let values = vec![
+                Value::new(id),
+                Value::new(name.to_string()),
+                Value::new(age),
+                Value::new(salary),
+            ];
+            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let meta = TupleMeta::new(transaction_context.get_transaction_id());
+            txn_table_heap
+                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                .expect("Failed to insert tuple");
+        }
+
+        // Create executor context
+        let executor_context = create_test_executor_context(&test_context, Arc::clone(&catalog));
+
+        // Create table scan plan
+        let table_scan_plan = Arc::new(TableScanNode::new(
+            table_info,
+            Arc::new(schema.clone()),
+            None,
+        ));
+
+        // Create table scan executor
+        let child_executor = Box::new(TableScanExecutor::new(
+            Arc::clone(&executor_context),
+            table_scan_plan,
+        ));
+
+        // Create HAVING filter for AVG(salary) > 70000
+        let filter_plan = create_having_filter(AggregationType::Avg, 70000, &schema);
+
+        // Create and initialize filter executor
+        let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
+        executor.init();
+
+        // Collect filtered results
+        let mut results = Vec::new();
+        while let Some((tuple, _)) = executor.next() {
+            let salary = match tuple.get_value(3).get_val() {
+                Val::Decimal(s) => *s,
+                _ => panic!("Expected decimal value for salary"),
+            };
+            results.push(salary);
+        }
+
+        // Sort results for consistent comparison
+        results.sort_by(compare_floats);
+
+        // Verify results - should return all non-zero salaries since avg > 70000
+        assert_eq!(results.len(), 5, "Should find 5 rows with non-zero salaries");
+        assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
         drop(executor);
