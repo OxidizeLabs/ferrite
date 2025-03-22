@@ -498,11 +498,12 @@ impl ExpressionOps for Expression {
                 // Validate column reference exists in schema
                 let col_idx = expr.get_column_index();
                 if col_idx >= schema.get_column_count() as usize {
-                    return Err(ExpressionError::InvalidColumnReference(format!(
+                    let error = ExpressionError::InvalidColumnReference(format!(
                         "Column index {} out of bounds for schema with {} columns",
                         col_idx,
                         schema.get_column_count()
-                    )));
+                    ));
+                    return Err(error);
                 }
                 Ok(())
             }

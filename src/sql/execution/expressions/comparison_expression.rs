@@ -5,7 +5,9 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
+use crate::types_db::value::Val::Null;
 use crate::types_db::value::Value;
+use log::debug;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -94,14 +96,19 @@ impl ExpressionOps for ComparisonExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
+        debug!(
+            "Evaluating comparison - lhs: {:?}, rhs: {:?}, comp_type: {:?}",
+            lhs, rhs, self.comp_type
+        );
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
 
-        let bool_result = match comparison_result {
-            CmpBool::CmpTrue => true,
-            CmpBool::CmpFalse | CmpBool::CmpNull => false,
+        let result = match comparison_result {
+            CmpBool::CmpTrue => Value::new(true),
+            CmpBool::CmpFalse => Value::new(false),
+            CmpBool::CmpNull => Value::new(Null),
         };
 
-        Ok(Value::new(bool_result))
+        Ok(result)
     }
 
     fn evaluate_join(
@@ -119,12 +126,13 @@ impl ExpressionOps for ComparisonExpression {
             .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
 
-        let bool_result = match comparison_result {
-            CmpBool::CmpTrue => true,
-            CmpBool::CmpFalse | CmpBool::CmpNull => false,
+        let result = match comparison_result {
+            CmpBool::CmpTrue => Value::new(true),
+            CmpBool::CmpFalse => Value::new(false),
+            CmpBool::CmpNull => Value::new(Null),
         };
 
-        Ok(Value::new(bool_result))
+        Ok(result)
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -207,29 +215,33 @@ impl Display for ComparisonExpression {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::common::logger::initialize_logger;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]
     fn comparison_expression() {
+        initialize_logger();
+
         let schema = Schema::new(vec![
             Column::new("col1", TypeId::Integer),
             Column::new("col2", TypeId::Integer),
         ]);
         let rid = RID::new(0, 0);
 
-        let tuple = Tuple::new(&*vec![Value::new(5), Value::new(10)], schema.clone(), rid);
+        let left_tuple = Tuple::new(&*vec![Value::new(5), Value::new(10)], schema.clone(), rid);
+        let right_tuple = Tuple::new(&*vec![Value::new(10), Value::new(15)], schema.clone(), rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,
-            0,
+            0, // tuple_index
+            0, // column_index
             schema.get_column(0).unwrap().clone(),
             vec![],
         )));
 
         let col2 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1,
-            1,
+            1, // tuple_index
+            1, // column_index
             schema.get_column(1).unwrap().clone(),
             vec![],
         )));
@@ -241,7 +253,9 @@ mod unit_tests {
             vec![],
         ));
 
-        let result = less_than_expr.evaluate(&tuple, &schema).unwrap();
+        let result = less_than_expr
+            .evaluate_join(&left_tuple, &schema, &right_tuple, &schema)
+            .unwrap();
         assert_eq!(result, Value::new(true));
 
         let equal_expr = Expression::Comparison(ComparisonExpression::new(
@@ -251,7 +265,9 @@ mod unit_tests {
             vec![],
         ));
 
-        let result = equal_expr.evaluate(&tuple, &schema).unwrap();
+        let result = equal_expr
+            .evaluate_join(&left_tuple, &schema, &right_tuple, &schema)
+            .unwrap();
         assert_eq!(result, Value::new(false));
 
         assert_eq!(less_than_expr.to_string(), "(col1 < col2)");

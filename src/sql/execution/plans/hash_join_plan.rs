@@ -146,6 +146,7 @@ impl Display for HashJoinNode {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::JoinConstraint;
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;

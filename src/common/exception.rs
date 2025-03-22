@@ -192,6 +192,8 @@ pub enum ExpressionError {
     KeyNotFound(String),
     #[error("InvalidReturnType: {0}")]
     InvalidReturnType(String),
+    #[error("InvalidExpression: {0}")]
+    InvalidExpression(String),
 }
 
 #[derive(Debug, Error)]
