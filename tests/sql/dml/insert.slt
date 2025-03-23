@@ -1,0 +1,89 @@
+# Insert Operation Tests
+
+# Setup test tables
+statement ok
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    age INTEGER,
+    email TEXT UNIQUE
+);
+
+statement ok
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    price DECIMAL(10,2) NOT NULL CHECK (price > 0)
+);
+
+# Test basic insert
+statement ok
+INSERT INTO users (id, name, age, email) 
+VALUES (1, 'Alice', 25, 'alice@test.com');
+
+# Verify insert
+query ITIT
+SELECT * FROM users ORDER BY id;
+----
+1 Alice 25 alice@test.com
+
+# Test multiple row insert
+statement ok
+INSERT INTO users (id, name, age, email) VALUES 
+    (2, 'Bob', 30, 'bob@test.com'),
+    (3, 'Charlie', 35, 'charlie@test.com');
+
+# Verify multiple inserts
+query ITIT
+SELECT * FROM users ORDER BY id;
+----
+1 Alice 25 alice@test.com
+2 Bob 30 bob@test.com
+3 Charlie 35 charlie@test.com
+
+# Test insert with NULL values
+statement ok
+INSERT INTO users (id, name, age, email)
+VALUES (4, 'Dave', NULL, NULL);
+
+# Test insert with default column values
+statement ok
+INSERT INTO users (id, name)
+VALUES (5, 'Eve');
+
+# Error Cases
+
+# Test duplicate primary key
+statement error
+INSERT INTO users (id, name) VALUES (1, 'Duplicate');
+
+# Test violating NOT NULL constraint
+statement error
+INSERT INTO users (id, name) VALUES (6, NULL);
+
+# Test violating UNIQUE constraint
+statement error
+INSERT INTO users (id, name, email) VALUES (6, 'Frank', 'alice@test.com');
+
+# Test inserting invalid data type
+statement error
+INSERT INTO users (id, name, age) VALUES ('invalid', 'Grace', 'not_a_number');
+
+# Test CHECK constraint
+statement error
+INSERT INTO products (id, name, price) VALUES (1, 'Invalid', -10.00);
+
+# Test inserting with SELECT
+statement ok
+INSERT INTO products (id, name, price)
+SELECT id, name, 10.00 
+FROM users 
+WHERE age IS NOT NULL;
+
+# Verify insert from select
+query ITR
+SELECT * FROM products ORDER BY id;
+----
+1 Alice 10.00
+2 Bob 10.00
+3 Charlie 10.00 

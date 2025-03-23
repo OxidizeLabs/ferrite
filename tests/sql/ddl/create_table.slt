@@ -1,0 +1,67 @@
+# Table Creation Tests
+
+# Test basic table creation
+statement ok
+CREATE TABLE users (
+    id INTEGER,
+    name TEXT,
+    age INTEGER,
+    email TEXT
+);
+
+# Test creating table with primary key
+statement ok
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    price DECIMAL(10,2)
+);
+
+# Test creating table with foreign key
+statement ok
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER,
+    product_id INTEGER,
+    quantity INTEGER,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+# Error Cases
+
+# Test duplicate table creation
+statement error
+CREATE TABLE users (id INTEGER);
+
+# Test invalid column type
+statement error
+CREATE TABLE invalid_table (
+    id INVALID_TYPE
+);
+
+# Test invalid foreign key reference
+statement error
+CREATE TABLE invalid_fk (
+    id INTEGER,
+    user_id INTEGER,
+    FOREIGN KEY (user_id) REFERENCES nonexistent_table(id)
+);
+
+# Test creating table with default values
+statement ok
+CREATE TABLE settings (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+# Test creating table with check constraints
+statement ok
+CREATE TABLE employees (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    salary DECIMAL(10,2) CHECK (salary > 0),
+    age INTEGER CHECK (age >= 18)
+); 
