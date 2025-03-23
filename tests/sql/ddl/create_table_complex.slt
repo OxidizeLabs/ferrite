@@ -1,0 +1,58 @@
+# Complex Type Table Creation Tests
+
+# Test creating table with all supported types
+statement ok
+CREATE TABLE all_types (
+    bool_field BOOLEAN,
+    tiny_int_field TINYINT,
+    small_int_field SMALLINT,
+    int_field INTEGER,
+    big_int_field BIGINT,
+    decimal_field DECIMAL,
+    timestamp_field TIMESTAMP,
+    varchar_field VARCHAR,
+    char_field CHAR,
+    vector_field VECTOR,
+    struct_field STRUCT
+);
+
+# Test creating table with nested types
+statement ok
+CREATE TABLE nested_data (
+    id INTEGER,
+    metadata STRUCT,
+    tags VECTOR,
+    description VARCHAR,
+    created_at TIMESTAMP
+);
+
+# Test creating table with mixed complex types
+statement ok
+CREATE TABLE complex_data (
+    id INTEGER,
+    user_data STRUCT,
+    preferences VECTOR,
+    settings STRUCT,
+    history VECTOR,
+    last_updated TIMESTAMP
+);
+
+# Error Cases
+
+# Test invalid complex type
+statement error
+CREATE TABLE invalid_complex (
+    id INTEGER,
+    invalid_vector VECTOR(10),
+    invalid_struct STRUCT(id INTEGER)
+);
+
+# Test invalid nested type
+statement error
+CREATE TABLE invalid_nested (
+    id INTEGER,
+    data STRUCT(
+        nested_vector VECTOR(5),
+        nested_struct STRUCT
+    )
+); 

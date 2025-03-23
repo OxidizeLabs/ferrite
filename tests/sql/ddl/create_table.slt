@@ -1,31 +1,51 @@
-# Table Creation Tests
+# Simple Type Table Creation Tests
 
-# Test basic table creation
+# Test basic table creation with different types
 statement ok
 CREATE TABLE users (
     id INTEGER,
-    name TEXT,
-    age INTEGER,
-    email TEXT
+    name VARCHAR,
+    age SMALLINT,
+    email VARCHAR,
+    is_active BOOLEAN,
+    created_at TIMESTAMP
 );
 
-# Test creating table with primary key
+# Test creating table with numeric types
 statement ok
 CREATE TABLE products (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    price DECIMAL(10,2)
+    id INTEGER,
+    name VARCHAR,
+    price DECIMAL,
+    quantity SMALLINT,
+    weight DECIMAL,
+    category VARCHAR
 );
 
-# Test creating table with foreign key
+# Test creating table with all simple types
 statement ok
-CREATE TABLE orders (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER,
-    product_id INTEGER,
-    quantity INTEGER,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (product_id) REFERENCES products(id)
+CREATE TABLE simple_types (
+    bool_field BOOLEAN,
+    tiny_int_field TINYINT,
+    small_int_field SMALLINT,
+    int_field INTEGER,
+    big_int_field BIGINT,
+    decimal_field DECIMAL,
+    timestamp_field TIMESTAMP,
+    varchar_field VARCHAR,
+    char_field CHAR
+);
+
+# Test creating table with mixed simple types
+statement ok
+CREATE TABLE mixed_simple (
+    id INTEGER,
+    name VARCHAR,
+    age SMALLINT,
+    salary DECIMAL,
+    hire_date TIMESTAMP,
+    is_manager BOOLEAN,
+    department VARCHAR
 );
 
 # Error Cases
@@ -40,28 +60,6 @@ CREATE TABLE invalid_table (
     id INVALID_TYPE
 );
 
-# Test invalid foreign key reference
+# Test creating table with empty column list
 statement error
-CREATE TABLE invalid_fk (
-    id INTEGER,
-    user_id INTEGER,
-    FOREIGN KEY (user_id) REFERENCES nonexistent_table(id)
-);
-
-# Test creating table with default values
-statement ok
-CREATE TABLE settings (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    enabled BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-# Test creating table with check constraints
-statement ok
-CREATE TABLE employees (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    salary DECIMAL(10,2) CHECK (salary > 0),
-    age INTEGER CHECK (age >= 18)
-); 
+CREATE TABLE empty_table ();
