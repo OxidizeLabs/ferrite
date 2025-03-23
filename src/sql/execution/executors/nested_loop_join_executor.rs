@@ -1,14 +1,24 @@
+use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
+use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+use crate::sql::execution::expressions::comparison_expression::{
+    ComparisonExpression, ComparisonType,
+};
+use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Val;
+use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::{Val, Value};
 use log::{debug, trace};
 use parking_lot::RwLock;
+use sqlparser::ast::{JoinConstraint, JoinOperator as JoinType};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct NestedLoopJoinExecutor {
@@ -78,42 +88,15 @@ impl NestedLoopJoinExecutor {
 
     fn reset_right_executor(&mut self) -> bool {
         if let Some(children) = &mut self.children_executors {
-            let right_plan = self.plan.get_right_child().clone();
-            debug!("Resetting right executor with plan: {:?}", right_plan);
-
-            // Create a fresh executor for the right side
-            match right_plan.create_executor(self.context.clone()) {
-                Ok(mut new_executor) => {
-                    new_executor.init();
-                    debug!(
-                        "Right executor reset and initialized with schema: {:?}",
-                        new_executor.get_output_schema()
-                    );
-
-                    // Verify the first tuple from the right executor
-                    if let Some((first_tuple, _)) = new_executor.next() {
-                        debug!(
-                            "First tuple from reset right executor: {:?}",
-                            first_tuple.get_values()
-                        );
-                    }
-
-                    // Reset the executor
-                    new_executor.init();
-
-                    // Replace the existing right executor
-                    children[1] = new_executor;
-                    self.right_exhausted = false;
-                    true
-                }
-                Err(e) => {
-                    debug!("Failed to create right executor: {:?}", e);
-                    false
-                }
+            let right_plan = self.plan.get_right_child();
+            if let Ok(mut right_executor) = right_plan.create_executor(self.context.clone()) {
+                right_executor.init();
+                children[1] = right_executor;
+                self.right_exhausted = false;
+                return true;
             }
-        } else {
-            false
         }
+        false
     }
 }
 
@@ -198,8 +181,10 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                     let left_tuple = self.current_left_tuple.as_ref().unwrap();
                     debug!("Checking right tuple: {:?}", right_tuple.0.get_values());
 
-                    // Check if the tuples satisfy the join condition
-                    if self.evaluate_predicate(&left_tuple.0, &right_tuple.0) {
+                    // For cross joins or when predicate evaluates to true
+                    if matches!(self.plan.get_join_type(), JoinType::CrossJoin)
+                        || self.evaluate_predicate(&left_tuple.0, &right_tuple.0)
+                    {
                         debug!(
                             "Found matching tuples - left: {:?}, right: {:?}",
                             left_tuple.0.get_values(),
@@ -237,40 +222,33 @@ mod tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
-    use crate::sql::execution::expressions::abstract_expression::Expression;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::{
-        ComparisonExpression, ComparisonType,
-    };
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+    use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::TupleMeta;
-    use crate::types_db::type_id::TypeId;
-    use crate::types_db::types::{CmpBool, Type};
-    use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::{JoinConstraint, JoinOperator};
-    use std::collections::HashMap;
-
-    use crate::catalog::column::Column;
-    use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
+    use crate::types_db::value::Value;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
+        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         catalog: Arc<RwLock<Catalog>>,
         _temp_dir: TempDir,
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
@@ -291,9 +269,9 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
                 disk_scheduler,
@@ -301,10 +279,11 @@ mod tests {
                 replacer.clone(),
             ));
 
-            // Create transaction manager and lock manager first
+            // Create transaction manager and lock manager
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
 
+            // Create transaction with ID 0 and ReadUncommitted isolation level
             let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
@@ -312,416 +291,635 @@ mod tests {
                 transaction_manager.clone(),
             ));
 
+            // Create catalog
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 0,
                 0,
-                HashMap::default(),
-                HashMap::default(),
-                HashMap::default(),
-                HashMap::default(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
                 transaction_manager.clone(),
             )));
 
             Self {
                 bpm,
+                transaction_manager,
                 transaction_context,
                 catalog,
                 _temp_dir: temp_dir,
             }
         }
-
-        pub fn bpm(&self) -> Arc<BufferPoolManager> {
-            self.bpm.clone()
-        }
-
-        pub fn transaction_context(&self) -> Arc<TransactionContext> {
-            self.transaction_context.clone()
-        }
-
-        pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
-            self.catalog.clone()
-        }
     }
 
     #[test]
-    fn test_nested_loop_join_executor() {
-        let ctx = TestContext::new("test_nested_loop_join_executor");
+    fn test_cross_join() {
+        let ctx = TestContext::new("cross_join_test");
 
         // Create schemas for both tables
-        let left_schema = Schema::new(vec![
+        let users_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
-            Column::new("value", TypeId::VarChar),
+            Column::new("name", TypeId::VarChar),
         ]);
 
-        let right_schema = Schema::new(vec![
+        let posts_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
-            Column::new("data", TypeId::VarChar),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
         ]);
 
-        // Create tables with different OIDs
-        let left_table_info = {
-            let mut catalog_guard = ctx.catalog.write();
-            catalog_guard
-                .create_table("left_table".to_string(), left_schema.clone())
-                .unwrap()
-        };
-        let right_table_info = {
-            let mut catalog_guard = ctx.catalog.write();
-            catalog_guard
-                .create_table("right_table".to_string(), right_schema.clone())
+        // Create tables in catalog
+        let users_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("users".to_string(), users_schema.clone())
                 .unwrap()
         };
 
-        // Verify table OIDs are different
-        assert_ne!(
-            left_table_info.get_table_oidt(),
-            right_table_info.get_table_oidt(),
-            "Left and right tables must have different OIDs"
-        );
+        let posts_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("posts".to_string(), posts_schema.clone())
+                .unwrap()
+        };
 
-        let left_table = left_table_info.get_table_heap();
-        let right_table = right_table_info.get_table_heap();
+        // Create mock data for users table
+        let users_data = vec![
+            vec![Value::new(1), Value::new("Alice")],
+            vec![Value::new(2), Value::new("Bob")],
+        ];
 
-        debug!("Left table OID: {}", left_table_info.get_table_oidt());
-        debug!("Right table OID: {}", right_table_info.get_table_oidt());
+        // Create mock data for posts table
+        let posts_data = vec![
+            vec![Value::new(1), Value::new(1), Value::new("Post 1")],
+            vec![Value::new(2), Value::new(1), Value::new("Post 2")],
+            vec![Value::new(3), Value::new(2), Value::new("Post 3")],
+        ];
 
-        // Insert data into left table
-        let left_data = vec![(1, "A"), (2, "B"), (3, "C")];
-        let left_tuple_meta = TupleMeta::new(0);
-        for (id, value) in left_data {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(id), Value::new(value.to_string())],
-                left_schema.clone(),
-                RID::new(0, 0),
-            );
-            let rid = left_table
-                .insert_tuple(&left_tuple_meta, &mut tuple)
-                .expect("Failed to insert into left table");
-            debug!(
-                "Inserted into left table: id={}, value={} at RID={:?}",
-                id, value, rid
-            );
-        }
-
-        // Verify left table's first page ID
-        debug!(
-            "Left table first page ID: {}",
-            left_table.get_first_page_id()
-        );
-
-        // Insert data into right table
-        let right_data = vec![(1, "X"), (2, "Y"), (4, "Z")];
-        let right_tuple_meta = TupleMeta::new(0);
-        for (id, data) in right_data {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(id), Value::new(data.to_string())],
-                right_schema.clone(),
-                RID::new(0, 0),
-            );
-            let rid = right_table
-                .insert_tuple(&right_tuple_meta, &mut tuple)
-                .expect("Failed to insert into right table");
-            debug!(
-                "Inserted into right table: id={}, data={} at RID={:?}",
-                id, data, rid
-            );
-        }
-
-        // Verify right table's first page ID
-        debug!(
-            "Right table first page ID: {}",
-            right_table.get_first_page_id()
-        );
-
-        // Verify each table's contents separately
+        // Insert data into tables
         {
-            let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
-                ctx.bpm(),
-                ctx.catalog(),
-                ctx.transaction_context(),
-            )));
+            let catalog = ctx.catalog.read();
+            let users_table = catalog
+                .get_table_by_oid(users_table_info.get_table_oidt())
+                .unwrap();
+            let posts_table = catalog
+                .get_table_by_oid(posts_table_info.get_table_oidt())
+                .unwrap();
 
-            // Verify left table
-            let left_scan = SeqScanPlanNode::new(
-                left_schema.clone(),
-                left_table_info.get_table_oidt(),
-                "left_table".to_string(),
-            );
-            let mut left_executor = SeqScanExecutor::new(exec_ctx.clone(), Arc::new(left_scan));
-            left_executor.init();
-
-            debug!("Starting left table scan");
-            let mut left_tuples = Vec::new();
-            while let Some((tuple, rid)) = left_executor.next() {
-                debug!(
-                    "Left table scan tuple at RID {:?}: {:?}",
-                    rid,
-                    tuple.get_values()
-                );
-                left_tuples.push((tuple, rid));
-            }
-            assert_eq!(left_tuples.len(), 3, "Left table should have 3 tuples");
-
-            // Verify the values match what we inserted
-            for (tuple, _) in left_tuples {
-                let values = tuple.get_values();
-                let id = values[0].get_val();
-                let value = values[1].get_val();
-                match id {
-                    Val::Integer(1) => assert_eq!(*value, Val::VarLen("A".to_string())),
-                    Val::Integer(2) => assert_eq!(*value, Val::VarLen("B".to_string())),
-                    Val::Integer(3) => assert_eq!(*value, Val::VarLen("C".to_string())),
-                    _ => panic!("Unexpected ID in left table: {:?}", id),
-                }
+            for row in users_data {
+                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                users_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
             }
 
-            // Verify right table
-            let right_scan = SeqScanPlanNode::new(
-                right_schema.clone(),
-                right_table_info.get_table_oidt(),
-                "right_table".to_string(),
-            );
-            let mut right_executor = SeqScanExecutor::new(exec_ctx.clone(), Arc::new(right_scan));
-            right_executor.init();
-
-            debug!("Starting right table scan");
-            let mut right_tuples = Vec::new();
-            while let Some((tuple, rid)) = right_executor.next() {
-                debug!(
-                    "Right table scan tuple at RID {:?}: {:?}",
-                    rid,
-                    tuple.get_values()
-                );
-                right_tuples.push((tuple, rid));
-            }
-            assert_eq!(right_tuples.len(), 3, "Right table should have 3 tuples");
-
-            // Verify the values match what we inserted
-            for (tuple, _) in right_tuples {
-                let values = tuple.get_values();
-                let id = values[0].get_val();
-                let data = values[1].get_val();
-                match id {
-                    Val::Integer(1) => assert_eq!(*data, Val::VarLen("X".to_string())),
-                    Val::Integer(2) => assert_eq!(*data, Val::VarLen("Y".to_string())),
-                    Val::Integer(4) => assert_eq!(*data, Val::VarLen("Z".to_string())),
-                    _ => panic!("Unexpected ID in right table: {:?}", id),
-                }
+            for row in posts_data {
+                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                posts_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
             }
         }
-
-        // Create sequential scan plans with correct table OIDs
-        let left_scan = SeqScanPlanNode::new(
-            left_schema.clone(),
-            left_table_info.get_table_oidt(),
-            "left_table".to_string(),
-        );
-        debug!("Created left scan plan: {:?}", left_scan);
-
-        let right_scan = SeqScanPlanNode::new(
-            right_schema.clone(),
-            right_table_info.get_table_oidt(),
-            "right_table".to_string(),
-        );
-        debug!("Created right scan plan: {:?}", right_scan);
-
-        // Create join predicate (left.id = right.id)
-        let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, // tuple_index = 0 for left table
-            0, // column_index for id
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )));
-        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, // tuple_index = 1 for right table
-            0, // column_index for id
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )));
-
-        let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
-            left_col.clone(),
-            right_col.clone(),
-            ComparisonType::Equal,
-            vec![], // Don't need to add children here since they're already in left_col and right_col
-        )));
-
-        // Create nested loop join plan
-        let join_plan = Arc::new(NestedLoopJoinNode::new(
-            left_schema,
-            right_schema,
-            predicate,
-            JoinOperator::Inner(JoinConstraint::None),
-            vec![left_col],
-            vec![right_col],
-            vec![PlanNode::SeqScan(left_scan), PlanNode::SeqScan(right_scan)], // Convert directly to PlanNode
-        ));
 
         // Create execution context
-        let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
-            ctx.bpm(),
-            ctx.catalog(),
-            ctx.transaction_context(),
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
         )));
 
-        // Create and initialize join executor
-        let mut join_executor = NestedLoopJoinExecutor::new(exec_ctx, join_plan);
+        // Create left and right child plans
+        let left_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            users_schema.clone(),
+            users_table_info.get_table_oidt(),
+            "users".to_string(),
+        ));
+
+        let right_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            posts_schema.clone(),
+            posts_table_info.get_table_oidt(),
+            "posts".to_string(),
+        ));
+
+        // Create join plan with constant TRUE predicate
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            users_schema.clone(),
+            posts_schema.clone(),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(true),
+                Column::new("", TypeId::Boolean),
+                vec![],
+            ))),
+            JoinType::CrossJoin,
+            vec![],
+            vec![],
+            vec![left_plan, right_plan],
+        ));
+
+        // Create join executor
+        let mut join_executor = NestedLoopJoinExecutor::new(execution_context.clone(), join_plan);
+
+        // Initialize executor
         join_executor.init();
 
-        // Collect and verify results
-        let mut results = Vec::new();
-        while let Some((tuple, _)) = join_executor.next() {
-            results.push(tuple);
+        // Verify results
+        let mut result_count = 0;
+        while let Some(_) = join_executor.next() {
+            result_count += 1;
         }
 
-        // Should have 2 matching rows (id=1 and id=2)
-        assert_eq!(results.len(), 2);
-
-        // Verify the joined results
-        for tuple in results {
-            let values = tuple.get_values();
-            assert_eq!(values.len(), 4); // 2 columns from each table
-
-            let left_id = values.get(0).unwrap();
-            let left_value = values.get(1).unwrap();
-            let right_id = values.get(2).unwrap();
-            let right_data = values.get(3).unwrap();
-
-            // IDs should match
-            assert_eq!(left_id, right_id);
-
-            // Verify the correct pairs are joined
-            match left_id.get_val() {
-                Val::Integer(1) => {
-                    assert_eq!(
-                        left_value.compare_equals(&Value::new("A")),
-                        CmpBool::CmpTrue
-                    );
-                    assert_eq!(
-                        right_data.compare_equals(&Value::new("X")),
-                        CmpBool::CmpTrue
-                    );
-                }
-                Val::Integer(2) => {
-                    assert_eq!(
-                        left_value.compare_equals(&Value::new("B")),
-                        CmpBool::CmpTrue
-                    );
-                    assert_eq!(
-                        right_data.compare_equals(&Value::new("Y")),
-                        CmpBool::CmpTrue
-                    );
-                }
-                _ => panic!("Unexpected join result"),
-            }
-        }
+        // We expect 6 rows (2 users × 3 posts)
+        assert_eq!(result_count, 6);
     }
 
     #[test]
-    fn test_join_predicate() {
-        initialize_logger();
-        // Create simple schemas
-        let left_schema = Schema::new(vec![
+    fn test_empty_join() {
+        let ctx = TestContext::new("empty_join_test");
+
+        // Create schemas for both tables
+        let users_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
-            Column::new("value", TypeId::VarChar),
-        ]);
-        let right_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("data", TypeId::VarChar),
+            Column::new("name", TypeId::VarChar),
         ]);
 
-        // Create join predicate (left.id = right.id)
+        let posts_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        // Create tables in catalog (but don't insert any data)
+        let users_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("users".to_string(), users_schema.clone())
+                .unwrap()
+        };
+
+        let posts_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("posts".to_string(), posts_schema.clone())
+                .unwrap()
+        };
+
+        // Create execution context
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
+        )));
+
+        // Create left and right child plans
+        let left_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            users_schema.clone(),
+            users_table_info.get_table_oidt(),
+            "users".to_string(),
+        ));
+
+        let right_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            posts_schema.clone(),
+            posts_table_info.get_table_oidt(),
+            "posts".to_string(),
+        ));
+
+        // Create join plan with constant TRUE predicate
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            users_schema.clone(),
+            posts_schema.clone(),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(true),
+                Column::new("", TypeId::Boolean),
+                vec![],
+            ))),
+            JoinType::CrossJoin,
+            vec![],
+            vec![],
+            vec![left_plan, right_plan],
+        ));
+
+        // Create join executor
+        let mut join_executor = NestedLoopJoinExecutor::new(execution_context.clone(), join_plan);
+
+        // Initialize executor
+        join_executor.init();
+
+        // Verify results
+        let mut result_count = 0;
+        while let Some(_) = join_executor.next() {
+            result_count += 1;
+        }
+
+        // We expect 0 rows since both tables are empty
+        assert_eq!(result_count, 0);
+    }
+
+    #[test]
+    fn test_inner_join_with_predicate() {
+        let ctx = TestContext::new("inner_join_test");
+
+        // Create schemas for both tables
+        let users_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let posts_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        // Create tables in catalog
+        let users_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("users".to_string(), users_schema.clone())
+                .unwrap()
+        };
+
+        let posts_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("posts".to_string(), posts_schema.clone())
+                .unwrap()
+        };
+
+        // Create mock data for users table
+        let users_data = vec![
+            vec![Value::new(1), Value::new("Alice")],
+            vec![Value::new(2), Value::new("Bob")],
+            vec![Value::new(3), Value::new("Charlie")],
+        ];
+
+        // Create mock data for posts table
+        let posts_data = vec![
+            vec![Value::new(1), Value::new(1), Value::new("Post 1")],
+            vec![Value::new(2), Value::new(1), Value::new("Post 2")],
+            vec![Value::new(3), Value::new(2), Value::new("Post 3")],
+        ];
+
+        // Insert data into tables
+        {
+            let catalog = ctx.catalog.read();
+            let users_table = catalog
+                .get_table_by_oid(users_table_info.get_table_oidt())
+                .unwrap();
+            let posts_table = catalog
+                .get_table_by_oid(posts_table_info.get_table_oidt())
+                .unwrap();
+
+            for row in users_data {
+                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                users_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
+            }
+
+            for row in posts_data {
+                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                posts_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
+            }
+        }
+
+        // Create execution context
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
+        )));
+
+        // Create left and right child plans
+        let left_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            users_schema.clone(),
+            users_table_info.get_table_oidt(),
+            "users".to_string(),
+        ));
+
+        let right_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            posts_schema.clone(),
+            posts_table_info.get_table_oidt(),
+            "posts".to_string(),
+        ));
+
+        // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, // tuple_index = 0 for left table
-            0, // column_index for id
-            Column::new("id", TypeId::Integer),
-            vec![],
-        )));
-        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, // tuple_index = 1 for right table
-            0, // column_index for id
+            0, // tuple index
+            0, // column index
             Column::new("id", TypeId::Integer),
             vec![],
         )));
 
-        // Verify column references are set up correctly
-        if let Expression::ColumnRef(left_expr) = left_col.as_ref() {
-            debug!(
-                "Left column reference - tuple_index: {}, column_index: {}",
-                left_expr.get_tuple_index(),
-                left_expr.get_column_index()
-            );
-        }
-        if let Expression::ColumnRef(right_expr) = right_col.as_ref() {
-            debug!(
-                "Right column reference - tuple_index: {}, column_index: {}",
-                right_expr.get_tuple_index(),
-                right_expr.get_column_index()
-            );
-        }
+        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            1, // tuple index
+            1, // column index
+            Column::new("user_id", TypeId::Integer),
+            vec![],
+        )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
             left_col.clone(),
             right_col.clone(),
             ComparisonType::Equal,
+            vec![left_col, right_col],
+        )));
+
+        // Create join plan
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            users_schema.clone(),
+            posts_schema.clone(),
+            predicate,
+            JoinType::Inner(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![left_plan, right_plan],
+        ));
+
+        // Create join executor
+        let mut join_executor = NestedLoopJoinExecutor::new(execution_context.clone(), join_plan);
+
+        // Initialize executor
+        join_executor.init();
+
+        // Verify results
+        let mut result_count = 0;
+        let mut alice_posts = 0;
+        let mut bob_posts = 0;
+        let mut charlie_posts = 0;
+
+        while let Some((tuple, _)) = join_executor.next() {
+            result_count += 1;
+            let values = tuple.get_values();
+            let user_name = values[1].to_string();
+            match user_name.as_str() {
+                "Alice" => alice_posts += 1,
+                "Bob" => bob_posts += 1,
+                "Charlie" => charlie_posts += 1,
+                _ => panic!("Unexpected user: {}", user_name),
+            }
+        }
+
+        // We expect 3 rows total:
+        // - Alice has 2 posts
+        // - Bob has 1 post
+        // - Charlie has 0 posts
+        assert_eq!(result_count, 3);
+        assert_eq!(alice_posts, 2);
+        assert_eq!(bob_posts, 1);
+        assert_eq!(charlie_posts, 0);
+    }
+
+    #[test]
+    fn test_join_one_empty() {
+        let ctx = TestContext::new("join_one_empty_test");
+
+        // Create schemas for both tables
+        let users_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let posts_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        // Create tables in catalog
+        let users_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("users".to_string(), users_schema.clone())
+                .unwrap()
+        };
+
+        let posts_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("posts".to_string(), posts_schema.clone())
+                .unwrap()
+        };
+
+        // Only insert data into users table
+        {
+            let catalog = ctx.catalog.read();
+            let users_table = catalog
+                .get_table_by_oid(users_table_info.get_table_oidt())
+                .unwrap();
+
+            let users_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+            ];
+
+            for row in users_data {
+                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                users_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
+            }
+        }
+
+        // Create execution context
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
+        )));
+
+        // Create left and right child plans
+        let left_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            users_schema.clone(),
+            users_table_info.get_table_oidt(),
+            "users".to_string(),
+        ));
+
+        let right_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            posts_schema.clone(),
+            posts_table_info.get_table_oidt(),
+            "posts".to_string(),
+        ));
+
+        // Create join plan with constant TRUE predicate for cross join
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            users_schema.clone(),
+            posts_schema.clone(),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(true),
+                Column::new("", TypeId::Boolean),
+                vec![],
+            ))),
+            JoinType::CrossJoin,
+            vec![],
+            vec![],
+            vec![left_plan, right_plan],
+        ));
+
+        // Create join executor
+        let mut join_executor = NestedLoopJoinExecutor::new(execution_context.clone(), join_plan);
+
+        // Initialize executor
+        join_executor.init();
+
+        // Verify results - should be empty since one table is empty
+        let mut result_count = 0;
+        while let Some(_) = join_executor.next() {
+            result_count += 1;
+        }
+
+        assert_eq!(result_count, 0);
+    }
+
+    #[test]
+    fn test_join_no_matches() {
+        let ctx = TestContext::new("join_no_matches_test");
+
+        // Create schemas for both tables
+        let users_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let posts_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        // Create tables in catalog
+        let users_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("users".to_string(), users_schema.clone())
+                .unwrap()
+        };
+
+        let posts_table_info = {
+            let mut catalog = ctx.catalog.write();
+            catalog
+                .create_table("posts".to_string(), posts_schema.clone())
+                .unwrap()
+        };
+
+        // Insert data with no matching user_ids
+        {
+            let catalog = ctx.catalog.read();
+            let users_table = catalog
+                .get_table_by_oid(users_table_info.get_table_oidt())
+                .unwrap();
+            let posts_table = catalog
+                .get_table_by_oid(posts_table_info.get_table_oidt())
+                .unwrap();
+
+            // Users with IDs 1 and 2
+            let users_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+            ];
+
+            // Posts with user_ids 3 and 4 (no matching users)
+            let posts_data = vec![
+                vec![Value::new(1), Value::new(3), Value::new("Post 1")],
+                vec![Value::new(2), Value::new(4), Value::new("Post 2")],
+            ];
+
+            for row in users_data {
+                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                users_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
+            }
+
+            for row in posts_data {
+                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let meta = TupleMeta::new(0);
+                posts_table
+                    .get_table_heap()
+                    .insert_tuple(&meta, &mut tuple)
+                    .unwrap();
+            }
+        }
+
+        // Create execution context
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
+        )));
+
+        // Create left and right child plans
+        let left_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            users_schema.clone(),
+            users_table_info.get_table_oidt(),
+            "users".to_string(),
+        ));
+
+        let right_plan = PlanNode::SeqScan(SeqScanPlanNode::new(
+            posts_schema.clone(),
+            posts_table_info.get_table_oidt(),
+            "posts".to_string(),
+        ));
+
+        // Create join predicate (users.id = posts.user_id)
+        let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, // tuple index
+            0, // column index
+            Column::new("id", TypeId::Integer),
             vec![],
         )));
 
-        // Verify the predicate's column references
-        if let Expression::Comparison(comp) = predicate.as_ref() {
-            if let Expression::ColumnRef(left_expr) = comp.get_left().as_ref() {
-                debug!(
-                    "Predicate left column reference - tuple_index: {}, column_index: {}",
-                    left_expr.get_tuple_index(),
-                    left_expr.get_column_index()
-                );
-            }
-            if let Expression::ColumnRef(right_expr) = comp.get_right().as_ref() {
-                debug!(
-                    "Predicate right column reference - tuple_index: {}, column_index: {}",
-                    right_expr.get_tuple_index(),
-                    right_expr.get_column_index()
-                );
-            }
+        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            1, // tuple index
+            1, // column index
+            Column::new("user_id", TypeId::Integer),
+            vec![],
+        )));
+
+        let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            left_col.clone(),
+            right_col.clone(),
+            ComparisonType::Equal,
+            vec![left_col, right_col],
+        )));
+
+        // Create join plan
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            users_schema.clone(),
+            posts_schema.clone(),
+            predicate,
+            JoinType::Inner(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![left_plan, right_plan],
+        ));
+
+        // Create join executor
+        let mut join_executor = NestedLoopJoinExecutor::new(execution_context.clone(), join_plan);
+
+        // Initialize executor
+        join_executor.init();
+
+        // Verify results - should be empty since there are no matching user_ids
+        let mut result_count = 0;
+        while let Some(_) = join_executor.next() {
+            result_count += 1;
         }
 
-        // Create test tuples
-        let left_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("A")],
-            left_schema.clone(),
-            RID::new(0, 0),
-        );
-        let right_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("X")],
-            right_schema.clone(),
-            RID::new(0, 0),
-        );
-
-        debug!("Left tuple values: {:?}", left_tuple.get_values());
-        debug!("Right tuple values: {:?}", right_tuple.get_values());
-        debug!("Left schema: {:?}", left_schema);
-        debug!("Right schema: {:?}", right_schema);
-        debug!("Predicate: {:?}", predicate);
-
-        // Test predicate evaluation
-        let result = predicate
-            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
-            .unwrap();
-
-        debug!("Predicate evaluation result: {:?}", result);
-
-        match result.get_val() {
-            Val::Boolean(b) => {
-                debug!("Boolean result: {}", b);
-                assert!(b, "Predicate should evaluate to true for matching IDs");
-            }
-            other => {
-                panic!(
-                    "Expected boolean result from predicate evaluation, got: {:?}",
-                    other
-                );
-            }
-        }
+        assert_eq!(result_count, 0);
     }
 }
