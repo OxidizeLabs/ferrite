@@ -10,6 +10,7 @@ pub struct Column {
     column_type: TypeId,
     length: usize,
     column_offset: usize,
+    is_primary_key: bool,
 }
 
 impl Column {
@@ -32,6 +33,7 @@ impl Column {
             column_type,
             length: Self::type_size(column_type, 0),
             column_offset: 0,
+            is_primary_key: false,
         }
     }
 
@@ -45,6 +47,7 @@ impl Column {
             column_type,
             length: Self::type_size(column_type, length),
             column_offset: 0,
+            is_primary_key: false,
         }
     }
 
@@ -88,6 +91,24 @@ impl Column {
 
     pub fn set_name(&mut self, name: String) {
         self.column_name = name;
+    }
+
+    pub fn new_primary_key(column_name: &str, column_type: TypeId) -> Self {
+        Self {
+            column_name: column_name.to_string(),
+            column_type,
+            length: Self::type_size(column_type, 0),
+            column_offset: 0,
+            is_primary_key: true,
+        }
+    }
+
+    pub fn is_primary_key(&self) -> bool {
+        self.is_primary_key
+    }
+
+    pub fn set_primary_key(&mut self, is_primary_key: bool) {
+        self.is_primary_key = is_primary_key;
     }
 }
 
@@ -487,5 +508,121 @@ mod unit_tests {
             assert_eq!(current.get_type(), TypeId::Integer);
             assert_eq!(current.get_storage_size(), 4);
         }
+    }
+
+    #[test]
+    fn test_primary_key_creation() {
+        let pk_col = Column::new_primary_key("id", TypeId::Integer);
+        assert!(pk_col.is_primary_key());
+        assert_eq!(pk_col.get_name(), "id");
+        assert_eq!(pk_col.get_type(), TypeId::Integer);
+        assert_eq!(pk_col.get_storage_size(), 4);
+    }
+
+    #[test]
+    fn test_primary_key_modification() {
+        let mut col = Column::new("id", TypeId::Integer);
+        assert!(!col.is_primary_key());
+        
+        col.set_primary_key(true);
+        assert!(col.is_primary_key());
+        
+        col.set_primary_key(false);
+        assert!(!col.is_primary_key());
+    }
+
+    #[test]
+    fn test_primary_key_replication() {
+        let pk_col = Column::new_primary_key("id", TypeId::Integer);
+        let replicated = pk_col.replicate("id_copy");
+        assert!(replicated.is_primary_key());
+        assert_eq!(replicated.get_name(), "id_copy");
+    }
+
+    #[test]
+    fn test_primary_key_with_name() {
+        let pk_col = Column::new_primary_key("id", TypeId::Integer);
+        let renamed = pk_col.with_name("new_id");
+        assert!(renamed.is_primary_key());
+        assert_eq!(renamed.get_name(), "new_id");
+    }
+
+    #[test]
+    fn test_primary_key_serialization() {
+        use serde_json;
+        
+        let original = Column::new_primary_key("id", TypeId::Integer);
+        let serialized = serde_json::to_string(&original).unwrap();
+        let deserialized: Column = serde_json::from_str(&serialized).unwrap();
+        
+        assert!(deserialized.is_primary_key());
+        assert_eq!(original.get_name(), deserialized.get_name());
+        assert_eq!(original.get_type(), deserialized.get_type());
+    }
+
+    #[test]
+    fn test_primary_key_comparison() {
+        let pk_col1 = Column::new_primary_key("id", TypeId::Integer);
+        let pk_col2 = Column::new_primary_key("id", TypeId::Integer);
+        let non_pk_col = Column::new("id", TypeId::Integer);
+        
+        assert_eq!(pk_col1, pk_col2);
+        assert_ne!(pk_col1, non_pk_col);
+    }
+
+    #[test]
+    fn test_primary_key_clone() {
+        let original = Column::new_primary_key("id", TypeId::Integer);
+        let cloned = original.clone();
+        
+        assert!(cloned.is_primary_key());
+        assert_eq!(original.get_name(), cloned.get_name());
+        assert_eq!(original.get_type(), cloned.get_type());
+    }
+
+    #[test]
+    fn test_primary_key_display() {
+        let pk_col = Column::new_primary_key("id", TypeId::Integer);
+        let display_str = format!("{}", pk_col);
+        assert_eq!(display_str, "id(Integer)");
+        
+        let debug_str = format!("{:#}", pk_col);
+        assert!(debug_str.contains("id"));
+        assert!(debug_str.contains("Integer"));
+    }
+
+    #[test]
+    fn test_primary_key_with_different_types() {
+        let types = vec![
+            TypeId::Boolean,
+            TypeId::TinyInt,
+            TypeId::SmallInt,
+            TypeId::Integer,
+            TypeId::BigInt,
+            TypeId::VarChar,
+        ];
+        
+        for type_id in types {
+            let pk_col = Column::new_primary_key("id", type_id);
+            assert!(pk_col.is_primary_key());
+            assert_eq!(pk_col.get_name(), "id");
+            assert_eq!(pk_col.get_type(), type_id);
+        }
+    }
+
+    #[test]
+    fn test_primary_key_changes_preserve_other_properties() {
+        let mut col = Column::new("id", TypeId::Integer);
+        col.set_offset(10);
+        
+        col.set_primary_key(true);
+        assert!(col.is_primary_key());
+        assert_eq!(col.get_offset(), 10);
+        assert_eq!(col.get_storage_size(), 4);
+        
+        col.set_primary_key(false);
+        assert!(!col.is_primary_key());
+        assert_eq!(col.get_offset(), 10);
+        assert_eq!(col.get_storage_size(), 4);
     }
 }

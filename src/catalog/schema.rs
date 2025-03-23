@@ -10,6 +10,7 @@ pub struct Schema {
     length: u32,
     tuple_is_inlined: bool,
     unlined_columns: Vec<u32>,
+    primary_key_columns: Vec<usize>,
 }
 
 impl Schema {
@@ -39,6 +40,7 @@ impl Schema {
             columns: columns_processed,
             length: curr_offset as u32,
             unlined_columns: uninlined_columns,
+            primary_key_columns: Vec::new(),
         }
     }
 
@@ -49,6 +51,7 @@ impl Schema {
             length: from.length,
             tuple_is_inlined: from.tuple_is_inlined,
             unlined_columns: from.unlined_columns.clone(),
+            primary_key_columns: from.primary_key_columns.clone(),
         }
     }
 
@@ -203,6 +206,14 @@ impl Schema {
 
         Schema::new(merged_columns)
     }
+
+    pub fn get_primary_key_columns(&self) -> &Vec<usize> {
+        &self.primary_key_columns
+    }
+
+    pub fn set_primary_key_columns(&mut self, columns: Vec<usize>) {
+        self.primary_key_columns = columns;
+    }
 }
 
 impl PartialEq for Schema {
@@ -211,6 +222,7 @@ impl PartialEq for Schema {
             && self.length == other.length
             && self.tuple_is_inlined == other.tuple_is_inlined
             && self.unlined_columns == other.unlined_columns
+            && self.primary_key_columns == other.primary_key_columns
     }
 }
 
@@ -249,6 +261,7 @@ impl Default for Schema {
             length: 0,
             tuple_is_inlined: true,
             unlined_columns: Vec::new(),
+            primary_key_columns: Vec::new(),
         }
     }
 }
@@ -384,5 +397,69 @@ mod unit_tests {
         let uninlined = schema.get_unlined_columns();
         assert_eq!(uninlined.len(), 1); // Only VarChar is uninlined
         assert_eq!(uninlined[0], 2); // VarChar is at index 2
+    }
+
+    #[test]
+    fn test_primary_key_operations() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ];
+        let mut schema = Schema::new(columns);
+
+        // Test initial state (empty primary key)
+        assert!(schema.get_primary_key_columns().is_empty());
+
+        // Test setting single primary key
+        schema.set_primary_key_columns(vec![0]); // Set 'id' as primary key
+        assert_eq!(schema.get_primary_key_columns(), &vec![0]);
+
+        // Test setting multiple primary keys
+        schema.set_primary_key_columns(vec![0, 2]); // Set 'id' and 'age' as primary keys
+        assert_eq!(schema.get_primary_key_columns(), &vec![0, 2]);
+
+        // Test clearing primary keys
+        schema.set_primary_key_columns(vec![]);
+        assert!(schema.get_primary_key_columns().is_empty());
+
+        // Test setting primary keys with invalid indices
+        schema.set_primary_key_columns(vec![5]); // Index out of bounds
+        assert_eq!(schema.get_primary_key_columns(), &vec![5]); // Note: Currently no bounds checking
+    }
+
+    #[test]
+    fn test_primary_key_serialization() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ];
+        let mut schema = Schema::new(columns);
+        schema.set_primary_key_columns(vec![0]);
+
+        // Test that primary keys are preserved during serialization
+        let serialized = bincode::serialize(&schema).unwrap();
+        let deserialized: Schema = bincode::deserialize(&serialized).unwrap();
+
+        assert_eq!(schema.get_primary_key_columns(), deserialized.get_primary_key_columns());
+    }
+
+    #[test]
+    fn test_primary_key_copy() {
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+        ];
+        let mut original_schema = Schema::new(columns);
+        original_schema.set_primary_key_columns(vec![0, 2]);
+
+        // Test that primary keys are preserved when copying schema
+        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 1, 2]);
+        assert_eq!(original_schema.get_primary_key_columns(), copied_schema.get_primary_key_columns());
+
+        // Test that primary keys are preserved when copying subset of columns
+        let partial_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+        assert_eq!(original_schema.get_primary_key_columns(), partial_schema.get_primary_key_columns());
     }
 }
