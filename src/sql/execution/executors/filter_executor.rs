@@ -3,6 +3,7 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
+use crate::sql::execution::expressions::filter_expression::FilterType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::storage::table::tuple::Tuple;
@@ -16,6 +17,8 @@ pub struct FilterExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<FilterNode>,
     initialized: bool,
+    group_tuples: Vec<Tuple>,
+    current_group_idx: usize,
 }
 
 impl FilterExecutor {
@@ -29,23 +32,33 @@ impl FilterExecutor {
             context,
             plan,
             initialized: false,
+            group_tuples: Vec::new(),
+            current_group_idx: 0,
         }
     }
 
     fn apply_filter(&self, tuple: &Tuple) -> bool {
         let filter_expr = self.plan.get_filter_expression();
+        let schema = self.child_executor.get_output_schema();
+
+        match filter_expr.get_filter_type() {
+            FilterType::Where => self.apply_where_filter(tuple, schema),
+            FilterType::Having => self.apply_having_filter(tuple, schema),
+        }
+    }
+
+    fn apply_where_filter(&self, tuple: &Tuple, schema: &Schema) -> bool {
+        let filter_expr = self.plan.get_filter_expression();
         debug!(
-            "Evaluating filter expression on tuple with values: {:?}",
+            "Evaluating WHERE filter on tuple with values: {:?}",
             tuple.get_values()
         );
-
-        let schema = self.child_executor.get_output_schema();
 
         match filter_expr.evaluate(tuple, schema) {
             Ok(value) => match value.get_val() {
                 Val::Boolean(b) => {
                     debug!(
-                        "Filter evaluation result: {}, for tuple: {:?}",
+                        "WHERE filter evaluation result: {}, for tuple: {:?}",
                         b,
                         tuple.get_values()
                     );
@@ -53,14 +66,48 @@ impl FilterExecutor {
                 }
                 _ => {
                     error!(
-                        "Filter evaluation returned non-boolean value: {:?}",
+                        "WHERE filter evaluation returned non-boolean value: {:?}",
                         value
                     );
                     false
                 }
             },
             Err(e) => {
-                error!("Failed to evaluate filter: {}", e);
+                error!("Failed to evaluate WHERE filter: {}", e);
+                false
+            }
+        }
+    }
+
+    fn apply_having_filter(&self, tuple: &Tuple, schema: &Schema) -> bool {
+        let filter_expr = self.plan.get_filter_expression();
+        debug!(
+            "Evaluating HAVING filter on tuple with values: {:?}",
+            tuple.get_values()
+        );
+
+        // For HAVING clauses, evaluate the filter expression directly
+        // The FilterExpression will handle evaluating the aggregate and predicate
+        match filter_expr.evaluate(tuple, schema) {
+            Ok(value) => match value.get_val() {
+                Val::Boolean(b) => {
+                    debug!(
+                        "HAVING filter evaluation result: {}, for tuple: {:?}",
+                        b,
+                        tuple.get_values()
+                    );
+                    *b
+                }
+                _ => {
+                    error!(
+                        "HAVING filter evaluation returned non-boolean value: {:?}",
+                        value
+                    );
+                    false
+                }
+            },
+            Err(e) => {
+                error!("Failed to evaluate HAVING filter: {}", e);
                 false
             }
         }
@@ -80,11 +127,11 @@ impl AbstractExecutor for FilterExecutor {
         let filter_expr = self.plan.get_filter_expression();
         let schema = self.child_executor.get_output_schema();
 
-        // Validate filter expression against schema
-        if let Err(e) = filter_expr.validate(schema) {
-            error!("Invalid filter expression for schema: {}", e);
-            // We continue initialization but log the error
-            // The executor will return no results for invalid filters
+        if matches!(filter_expr.get_filter_type(), FilterType::Having) {
+            debug!("Collecting tuples for HAVING clause");
+            while let Some((tuple, _)) = self.child_executor.next() {
+                self.group_tuples.push(tuple);
+            }
         }
 
         self.initialized = true;
@@ -97,23 +144,38 @@ impl AbstractExecutor for FilterExecutor {
             self.init();
         }
 
-        loop {
-            match self.child_executor.next() {
-                Some((tuple, rid)) => {
-                    debug!("Processing tuple with RID {:?}", rid);
-
-                    if self.apply_filter(&tuple) {
-                        debug!("Found matching tuple with RID {:?}", rid);
-                        return Some((tuple, rid));
-                    } else {
-                        debug!("Tuple did not match filter, continuing...");
-                        continue;
+        match self.plan.get_filter_expression().get_filter_type() {
+            FilterType::Where => {
+                loop {
+                    match self.child_executor.next() {
+                        Some((tuple, rid)) => {
+                            debug!("Processing tuple with RID {:?}", rid);
+                            if self.apply_filter(&tuple) {
+                                debug!("Found matching tuple with RID {:?}", rid);
+                                return Some((tuple, rid));
+                            }
+                            debug!("Tuple did not match filter, continuing...");
+                        }
+                        None => {
+                            debug!("No more tuples from child executor");
+                            return None;
+                        }
                     }
                 }
-                None => {
-                    debug!("No more tuples from child executor");
-                    return None;
+            }
+            FilterType::Having => {
+                while self.current_group_idx < self.group_tuples.len() {
+                    let tuple = self.group_tuples[self.current_group_idx].clone();
+                    let rid = tuple.get_rid();
+                    self.current_group_idx += 1;
+
+                    if self.apply_filter(&tuple) {
+                        debug!("Found matching tuple for HAVING clause");
+                        return Some((tuple, rid));
+                    }
                 }
+                debug!("No more tuples matching HAVING clause");
+                None
             }
         }
     }
@@ -1110,3 +1172,4 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 }
+
