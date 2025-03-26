@@ -67,6 +67,13 @@ impl FilterExpression {
     pub fn get_aggregate(&self) -> &Option<Arc<Expression>> {
         &self.aggregate
     }
+
+    fn contains_aggregate(expr: &Expression) -> bool {
+        match expr {
+            Expression::Aggregate(_) => true,
+            _ => expr.get_children().iter().any(|child| Self::contains_aggregate(child)),
+        }
+    }
 }
 
 impl ExpressionOps for FilterExpression {
@@ -82,21 +89,20 @@ impl ExpressionOps for FilterExpression {
                 }
             }
             FilterType::Having => {
-                // For HAVING clauses, evaluate aggregate first, then predicate
+                // For HAVING clauses, evaluate aggregate first against the original schema
                 let agg_result = self.aggregate.as_ref()
                     .ok_or_else(|| ExpressionError::InvalidExpression("Missing aggregate for HAVING clause".to_string()))?
                     .evaluate(tuple, schema)?;
-                
+
                 // Create a new schema with just the aggregate column
                 let agg_schema = Schema::new(vec![self.aggregate.as_ref().unwrap().get_return_type().clone()]);
                 
-                // Create a new tuple with just the aggregate result for predicate evaluation
-                let agg_tuple = Tuple::new(&[agg_result.clone()], agg_schema.clone(), tuple.get_rid());
+                // Create a new tuple with just the aggregate result
+                let agg_tuple = Tuple::new(&[agg_result], agg_schema.clone(), tuple.get_rid());
                 
-                // Evaluate the predicate against the aggregate result
+                // Now evaluate the predicate against the aggregate tuple and schema
                 let pred_result = self.predicate.evaluate(&agg_tuple, &agg_schema)?;
                 
-                // If predicate is true, return true
                 if pred_result.as_bool().unwrap_or(false) {
                     Ok(Value::new(true))
                 } else {
@@ -124,7 +130,7 @@ impl ExpressionOps for FilterExpression {
                 }
             }
             FilterType::Having => {
-                // For HAVING clauses, evaluate aggregate first, then predicate
+                // For HAVING clauses, evaluate aggregate first against the joined schemas
                 let agg_result = self.aggregate.as_ref()
                     .ok_or_else(|| ExpressionError::InvalidExpression("Missing aggregate for HAVING clause".to_string()))?
                     .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
@@ -132,13 +138,12 @@ impl ExpressionOps for FilterExpression {
                 // Create a new schema with just the aggregate column
                 let agg_schema = Schema::new(vec![self.aggregate.as_ref().unwrap().get_return_type().clone()]);
                 
-                // Create a new tuple with just the aggregate result for predicate evaluation
-                let agg_tuple = Tuple::new(&[agg_result.clone()], agg_schema.clone(), left_tuple.get_rid());
+                // Create a new tuple with just the aggregate result
+                let agg_tuple = Tuple::new(&[agg_result], agg_schema.clone(), left_tuple.get_rid());
                 
-                // Evaluate the predicate against the aggregate result
+                // Now evaluate the predicate against the aggregate tuple and schema
                 let pred_result = self.predicate.evaluate(&agg_tuple, &agg_schema)?;
                 
-                // If predicate is true, return true
                 if pred_result.as_bool().unwrap_or(false) {
                     Ok(Value::new(true))
                 } else {
@@ -202,6 +207,13 @@ impl ExpressionOps for FilterExpression {
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         match self.filter_type {
             FilterType::Where => {
+                // Check for aggregate functions in WHERE clause
+                if Self::contains_aggregate(&self.predicate) {
+                    return Err(ExpressionError::InvalidExpression(
+                        "Aggregate functions are not allowed in WHERE clauses".to_string(),
+                    ));
+                }
+
                 // Validate the predicate
                 trace!("FilterExpression: Validating WHERE predicate against schema with {} columns", schema.get_column_count());
                 
