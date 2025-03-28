@@ -10,6 +10,11 @@ pub const PAGE_TYPE_TABLE: u8 = 2;
 pub const PAGE_TYPE_HASH_TABLE_DIRECTORY: u8 = 3;
 pub const PAGE_TYPE_HASH_TABLE_BUCKET: u8 = 4;
 pub const PAGE_TYPE_HASH_TABLE_HEADER: u8 = 5;
+pub const PAGE_TYPE_BTREE_HEADER: u8 = 6;
+pub const PAGE_TYPE_BTREE_INTERNAL: u8 = 7;
+pub const PAGE_TYPE_BTREE_LEAF: u8 = 8;
+
+
 
 // Page header format (first few bytes of data)
 pub const PAGE_TYPE_OFFSET: usize = 0;
@@ -24,6 +29,9 @@ pub enum PageType {
     HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY as isize,
     HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET as isize,
     HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER as isize,
+    BTreeHeader = PAGE_TYPE_BTREE_HEADER as isize,
+    BTreeInternal = PAGE_TYPE_BTREE_INTERNAL as isize,
+    BTreeLeaf = PAGE_TYPE_BTREE_LEAF as isize,
 }
 
 // Keep PageTrait as the main trait for dynamic dispatch
@@ -88,7 +96,10 @@ impl PageType {
             PAGE_TYPE_HASH_TABLE_DIRECTORY => Some(Self::HashTableDirectory),
             PAGE_TYPE_HASH_TABLE_BUCKET => Some(Self::HashTableBucket),
             PAGE_TYPE_HASH_TABLE_HEADER => Some(Self::HashTableHeader),
-            _ => None,
+            PAGE_TYPE_BTREE_HEADER => Some(Self::BTreeHeader),
+            PAGE_TYPE_BTREE_INTERNAL => Some(Self::BTreeInternal),
+            PAGE_TYPE_BTREE_LEAF => Some(Self::BTreeLeaf),
+            _ => None
         }
     }
 
