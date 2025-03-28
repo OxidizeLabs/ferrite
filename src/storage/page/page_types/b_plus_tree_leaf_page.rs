@@ -292,3 +292,150 @@ Page for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
         unimplemented!("BPlusTreeLeafPage::new() is not supported. Use new_with_options() instead.")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper function to create a test page
+    fn create_test_page() -> BPlusTreeLeafPage<i32, i32, fn(&i32, &i32) -> std::cmp::Ordering> {
+        BPlusTreeLeafPage::new_with_options(1, 4, i32::cmp)
+    }
+
+    #[test]
+    fn test_new_page() {
+        let page = create_test_page();
+        assert_eq!(page.get_page_id(), 1);
+        assert_eq!(page.get_size(), 0);
+        assert_eq!(page.get_max_size(), 4);
+        assert_eq!(page.get_min_size(), 2);
+        assert_eq!(page.get_pin_count(), 1);
+        assert!(!page.is_dirty());
+    }
+
+    #[test]
+    fn test_insert_and_get() {
+        let mut page = create_test_page();
+        
+        // Test inserting values
+        assert!(page.insert_key_value(1, 100));
+        assert!(page.insert_key_value(2, 200));
+        assert!(page.insert_key_value(3, 300));
+        
+        // Test getting values
+        assert_eq!(page.get_key_at(0), Some(&1));
+        assert_eq!(page.get_value_at(0), Some(&100));
+        assert_eq!(page.get_key_at(1), Some(&2));
+        assert_eq!(page.get_value_at(1), Some(&200));
+        assert_eq!(page.get_key_at(2), Some(&3));
+        assert_eq!(page.get_value_at(2), Some(&300));
+        
+        // Test out of bounds
+        assert_eq!(page.get_key_at(3), None);
+        assert_eq!(page.get_value_at(3), None);
+    }
+
+    #[test]
+    fn test_set_and_remove() {
+        let mut page = create_test_page();
+        
+        // Insert initial values
+        page.insert_key_value(1, 100);
+        page.insert_key_value(2, 200);
+        
+        // Test setting values
+        assert!(page.set_key_at(0, 10));
+        assert!(page.set_value_at(0, 1000));
+        assert_eq!(page.get_key_at(0), Some(&10));
+        assert_eq!(page.get_value_at(0), Some(&1000));
+        
+        // Test removing values
+        assert!(page.remove_key_value_at(0));
+        assert_eq!(page.get_size(), 1);
+        assert_eq!(page.get_key_at(0), Some(&2));
+        assert_eq!(page.get_value_at(0), Some(&200));
+    }
+
+    #[test]
+    fn test_next_page_id() {
+        let mut page = create_test_page();
+        
+        // Test setting and getting next page ID
+        page.set_next_page_id(Some(2));
+        assert_eq!(page.get_next_page_id(), Some(2));
+        
+        page.set_next_page_id(None);
+        assert_eq!(page.get_next_page_id(), None);
+    }
+
+    #[test]
+    fn test_find_key_index() {
+        let mut page = create_test_page();
+        
+        // Insert sorted values
+        page.insert_key_value(1, 100);
+        page.insert_key_value(3, 300);
+        page.insert_key_value(5, 500);
+        
+        // Test finding indices
+        assert_eq!(page.find_key_index(&0), 0);  // Before first key
+        assert_eq!(page.find_key_index(&1), 0);  // Exact match
+        assert_eq!(page.find_key_index(&2), 1);  // Between keys
+        assert_eq!(page.find_key_index(&3), 1);  // Exact match
+        assert_eq!(page.find_key_index(&4), 2);  // Between keys
+        assert_eq!(page.find_key_index(&5), 2);  // Exact match
+        assert_eq!(page.find_key_index(&6), 3);  // After last key
+    }
+
+    #[test]
+    fn test_page_full() {
+        let mut page = create_test_page();
+        
+        // Fill the page
+        assert!(page.insert_key_value(1, 100));
+        assert!(page.insert_key_value(2, 200));
+        assert!(page.insert_key_value(3, 300));
+        assert!(page.insert_key_value(4, 400));
+        
+        // Try to insert when full
+        assert!(!page.insert_key_value(5, 500));
+        assert_eq!(page.get_size(), 4);
+    }
+
+    #[test]
+    fn test_reset_memory() {
+        let mut page = create_test_page();
+        
+        // Fill the page with data
+        page.insert_key_value(1, 100);
+        page.insert_key_value(2, 200);
+        page.set_next_page_id(Some(2));
+        page.set_dirty(true);
+        
+        // Reset the page
+        page.reset_memory();
+        
+        // Verify reset state
+        assert_eq!(page.get_size(), 0);
+        assert_eq!(page.get_next_page_id(), None);
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_page_type(), PageType::BTreeLeaf);
+    }
+
+    #[test]
+    fn test_pin_count() {
+        let mut page = create_test_page();
+        
+        // Test pin count operations
+        assert_eq!(page.get_pin_count(), 1);
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 2);
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
+        
+        // Test pin count doesn't go below 0
+        page.decrement_pin_count();
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 0);
+    }
+}
