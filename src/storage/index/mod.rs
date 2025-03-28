@@ -1,11 +1,10 @@
 pub mod b_plus_tree;
-pub mod b_plus_tree_i;
 pub mod b_plus_tree_index;
 pub mod extendable_hash_table_index;
 pub mod generic_key;
 pub mod hash_comparator;
 pub mod index;
-pub mod index_iterator;
+pub mod index_iterator_mem;
 pub mod int_comparator;
 pub mod linear_probe_hash_table_index;
 pub mod stl_comparator_wrapper;
@@ -13,4 +12,3 @@ pub mod stl_equal_wrapper;
 pub mod stl_hash_wrapper;
 pub mod stl_ordered;
 pub mod stl_unordered;
-// mod b_plus_tree_z;

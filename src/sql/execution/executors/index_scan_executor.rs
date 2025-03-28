@@ -8,7 +8,7 @@ use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::storage::index::index::IndexInfo;
-use crate::storage::index::index_iterator::IndexIterator;
+use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
