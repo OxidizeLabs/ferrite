@@ -205,6 +205,7 @@ impl<KeyType: Send + Sync + 'static, ValueType: Send + Sync + 'static, KeyCompar
         self.max_size = 0;
         self.page_type = IndexPageType::InvalidIndexPage;
         self.is_dirty = false;
+        self.pin_count = 0;
         self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
     }
 
@@ -248,5 +249,171 @@ impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> D
             .field("pin_count", &self.pin_count)
             .field("is_dirty", &self.is_dirty)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::config::PageId;
+
+    // Dummy types for testing
+    #[derive(Debug)]
+    struct TestKey;
+    #[derive(Debug)]
+    struct TestValue;
+    #[derive(Debug)]
+    struct TestComparator;
+
+    fn create_test_page() -> BPlusTreePage<TestKey, TestValue, TestComparator> {
+        BPlusTreePage::new(IndexPageType::LeafPage, 100)
+    }
+
+    #[test]
+    fn test_page_creation() {
+        let page = create_test_page();
+        assert_eq!(page.get_page_type(), PageType::BTreeLeaf);
+        assert_eq!(page.get_size(), 0);
+        assert_eq!(page.get_max_size(), 100);
+        assert_eq!(page.get_min_size(), 50);
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_pin_count(), 0);
+    }
+
+    #[test]
+    fn test_page_type_operations() {
+        let mut page = create_test_page();
+        
+        // Test leaf page type
+        page.set_page_type(IndexPageType::LeafPage);
+        assert!(page.is_leaf_page());
+        assert_eq!(page.get_page_type(), PageType::BTreeLeaf);
+
+        // Test internal page type
+        page.set_page_type(IndexPageType::InternalPage);
+        assert!(!page.is_leaf_page());
+        assert_eq!(page.get_page_type(), PageType::BTreeInternal);
+    }
+
+    #[test]
+    fn test_size_operations() {
+        let mut page = create_test_page();
+        
+        // Test setting size
+        page.set_size(50);
+        assert_eq!(page.get_size(), 50);
+
+        // Test increasing size
+        page.increase_size(30);
+        assert_eq!(page.get_size(), 80);
+
+        // Test setting max size
+        page.set_max_size(200);
+        assert_eq!(page.get_max_size(), 200);
+        assert_eq!(page.get_min_size(), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Size cannot exceed max_size")]
+    fn test_size_exceed_max() {
+        let mut page = create_test_page();
+        page.set_size(150); // Should panic as it exceeds max_size of 100
+    }
+
+    #[test]
+    #[should_panic(expected = "Exceeding max size of the page")]
+    fn test_increase_size_exceed_max() {
+        let mut page = create_test_page();
+        page.increase_size(150); // Should panic as it would exceed max_size
+    }
+
+    #[test]
+    fn test_pin_count_operations() {
+        let mut page = create_test_page();
+        
+        // Test increment
+        page.increment_pin_count();
+        assert_eq!(page.get_pin_count(), 1);
+
+        // Test decrement
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 0);
+
+        // Test decrement below zero
+        page.decrement_pin_count();
+        assert_eq!(page.get_pin_count(), 0);
+    }
+
+    #[test]
+    fn test_dirty_flag() {
+        let mut page = create_test_page();
+        
+        // Test setting dirty flag
+        page.set_dirty(true);
+        assert!(page.is_dirty());
+
+        page.set_dirty(false);
+        assert!(!page.is_dirty());
+    }
+
+    #[test]
+    fn test_serialization_deserialization() {
+        let mut original_page = create_test_page();
+        original_page.set_page_type(IndexPageType::LeafPage);
+        original_page.set_size(50);
+        original_page.set_max_size(100);
+
+        // Create a buffer for serialization
+        let mut buffer = [0u8; 12];
+        
+        // Test serialization
+        original_page.serialize_header(&mut buffer);
+
+        // Create a new page for deserialization
+        let mut new_page = create_test_page();
+        
+        // Test deserialization
+        new_page.deserialize_header(&buffer);
+
+        // Verify all fields match
+        assert_eq!(new_page.get_page_type(), original_page.get_page_type());
+        assert_eq!(new_page.get_size(), original_page.get_size());
+        assert_eq!(new_page.get_max_size(), original_page.get_max_size());
+    }
+
+    #[test]
+    fn test_page_data_operations() {
+        let mut page = create_test_page();
+        let test_data = [1, 2, 3, 4, 5];
+
+        // Test setting data
+        assert!(page.set_data(0, &test_data).is_ok());
+        assert_eq!(&page.get_data()[0..5], &test_data);
+        assert!(page.is_dirty());
+
+        // Test setting data with invalid offset
+        assert!(page.set_data(DB_PAGE_SIZE as usize - 4, &[1, 2, 3, 4, 5]).is_err());
+    }
+
+    #[test]
+    fn test_reset_memory() {
+        let mut page = create_test_page();
+        
+        // Set some initial state
+        page.set_page_type(IndexPageType::LeafPage);
+        page.set_size(50);
+        page.set_dirty(true);
+        page.increment_pin_count();
+
+        // Reset memory
+        page.reset_memory();
+
+        // Verify reset state
+        assert_eq!(page.get_page_type(), PageType::Invalid);
+        assert_eq!(page.get_size(), 0);
+        assert_eq!(page.get_max_size(), 0);
+        assert!(!page.is_dirty());
+        assert_eq!(page.get_pin_count(), 0);
+        assert_eq!(page.get_page_id(), INVALID_PAGE_ID);
     }
 }
