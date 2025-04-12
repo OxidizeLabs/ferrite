@@ -1237,8 +1237,8 @@ mod complex_behaviour {
                 SUM(o.amount) as total_spent
              FROM users u
              LEFT JOIN orders o ON u.id = o.user_id
-             GROUP BY u.id, u.name
-             HAVING COUNT(o.id) > 0
+             GROUP BY u.id, u.name, o.id
+             HAVING COUNT(o.id) > 0 OR COUNT(o.id) IS NULL
              ORDER BY total_spent DESC
              LIMIT 10",
             // Multiple joins with filtering
