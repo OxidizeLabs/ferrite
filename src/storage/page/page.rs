@@ -13,8 +13,7 @@ pub const PAGE_TYPE_HASH_TABLE_HEADER: u8 = 5;
 pub const PAGE_TYPE_BTREE_HEADER: u8 = 6;
 pub const PAGE_TYPE_BTREE_INTERNAL: u8 = 7;
 pub const PAGE_TYPE_BTREE_LEAF: u8 = 8;
-
-
+pub const PAGE_TYPE_BTREE_NODE: u8 = 9;
 
 // Page header format (first few bytes of data)
 pub const PAGE_TYPE_OFFSET: usize = 0;
@@ -32,6 +31,7 @@ pub enum PageType {
     BTreeHeader = PAGE_TYPE_BTREE_HEADER as isize,
     BTreeInternal = PAGE_TYPE_BTREE_INTERNAL as isize,
     BTreeLeaf = PAGE_TYPE_BTREE_LEAF as isize,
+    BTreeNode = PAGE_TYPE_BTREE_NODE as isize,
 }
 
 // Keep PageTrait as the main trait for dynamic dispatch
