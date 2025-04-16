@@ -163,7 +163,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `Arc<RwLock<Page>>`.
-    pub fn fetch_page<T: Page>(&self, page_id: PageId) -> Option<PageGuard<T>> {
+    pub fn fetch_page<T: Page + 'static>(&self, page_id: PageId) -> Option<PageGuard<T>> {
         trace!("Fetching page {} of type {:?}", page_id, T::TYPE_ID);
 
         if page_id == INVALID_PAGE_ID || page_id >= self.next_page_id.load(Ordering::SeqCst) {
@@ -669,7 +669,7 @@ impl BufferPoolManager {
 
         Arc::new(RwLock::new(new_page))
     }
-    
+
     fn update_page_metadata<P: PageTrait + 'static>(
         &self,
         frame_id: FrameId,

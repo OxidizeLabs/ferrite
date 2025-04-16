@@ -1,4 +1,3 @@
-use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
@@ -8,13 +7,11 @@ use crate::sql::execution::expressions::column_value_expression::ColumnRefExpres
 use crate::sql::execution::expressions::comparison_expression::{
     ComparisonExpression, ComparisonType,
 };
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{Val, Value};
+use crate::types_db::value::Val;
 use log::{debug, trace};
 use parking_lot::RwLock;
 use sqlparser::ast::{JoinConstraint, JoinOperator as JoinType};
