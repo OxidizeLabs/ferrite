@@ -6,7 +6,7 @@ use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::index::b_plus_tree_i::BPlusTree;
+use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::index::{Index, IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;

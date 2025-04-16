@@ -135,6 +135,7 @@ pub enum PageError {
     TupleInvalid,
     SerializationError,
     DeserializationError,
+    OffsetOutOfBounds,
 }
 
 #[derive(Debug)]
@@ -307,6 +308,9 @@ impl Display for PageError {
             }
             PageError::DeserializationError => {
                 write!(f, "Invalid Deserialization")
+            }
+            PageError::OffsetOutOfBounds => {
+                write!(f, "OffsetOutOfBounds")
             }
         }
     }

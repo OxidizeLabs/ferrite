@@ -720,6 +720,8 @@ impl LogicalPlanBuilder {
     ) -> Result<Box<LogicalPlan>, String> {
         let table_name = create_table.name.to_string();
 
+        // let a = create_table.columns.iter().collect();
+
         // Check if table already exists
         {
             let catalog = self.expression_parser.catalog();
