@@ -10,6 +10,7 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
+use crate::recovery::wal_manager::WALManager;
 use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
@@ -50,6 +51,7 @@ pub struct DBInstance {
     execution_engine: Arc<Mutex<ExecutionEngine>>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     log_manager: Arc<RwLock<LogManager>>,
+    wal_manager: Arc<WALManager>,
     config: DBConfig,
     writer: Arc<Mutex<dyn ResultWriter>>,
     client_sessions: Arc<Mutex<HashMap<u64, ClientSession>>>,
@@ -125,15 +127,21 @@ impl DBInstance {
             transaction_manager,
         )));
 
+        // Initialize WAL manager
+        let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
+
         // Initialize transaction components
-        let transaction_factory =
-            Arc::new(TransactionManagerFactory::new(buffer_pool_manager.clone()));
+        let transaction_factory = Arc::new(TransactionManagerFactory::with_wal_manager(
+            buffer_pool_manager.clone(),
+            wal_manager.clone(),
+        ));
 
         // Initialize execution engine
         let execution_engine = Arc::new(Mutex::new(ExecutionEngine::new(
             catalog.clone(),
             buffer_pool_manager.clone(),
             transaction_factory.clone(),
+            wal_manager.clone(),
         )));
 
         Ok(Self {
@@ -143,6 +151,7 @@ impl DBInstance {
             execution_engine,
             checkpoint_manager: None,
             log_manager,
+            wal_manager,
             config,
             writer: Arc::new(Mutex::new(CliResultWriter::new())),
             client_sessions: Arc::new(Mutex::new(HashMap::new())),

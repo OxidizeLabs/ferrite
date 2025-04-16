@@ -3,6 +3,7 @@ use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
+use crate::recovery::wal_manager::WALManager;
 use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
@@ -28,6 +29,7 @@ pub struct ExecutionEngine {
     catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_factory: Arc<TransactionManagerFactory>,
+    wal_manager: Arc<WALManager>,
 }
 
 impl ExecutionEngine {
@@ -35,6 +37,7 @@ impl ExecutionEngine {
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         transaction_factory: Arc<TransactionManagerFactory>,
+        wal_manager: Arc<WALManager>,
     ) -> Self {
         Self {
             planner: QueryPlanner::new(catalog.clone()),
@@ -42,6 +45,7 @@ impl ExecutionEngine {
             catalog,
             buffer_pool_manager,
             transaction_factory,
+            wal_manager,
         }
     }
 
@@ -295,9 +299,16 @@ impl ExecutionEngine {
 
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
+        
+        // Write commit record to WAL
+        let transaction = txn_ctx.get_transaction();
+        let lsn = self.wal_manager.write_commit_record(transaction.as_ref());
+        
+        // Update transaction's LSN
+        transaction.set_prev_lsn(lsn);
 
         // Attempt to commit
-        match txn_manager.commit(txn_ctx.get_transaction(), self.buffer_pool_manager.clone()) {
+        match txn_manager.commit(transaction, self.buffer_pool_manager.clone()) {
             true => {
                 debug!("Transaction committed successfully");
                 Ok(true)
@@ -307,6 +318,25 @@ impl ExecutionEngine {
                 Ok(false)
             }
         }
+    }
+
+    fn abort_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
+        debug!("Aborting transaction {}", txn_ctx.get_transaction_id());
+
+        // Get transaction manager
+        let txn_manager = self.transaction_factory.get_transaction_manager();
+        
+        // Write abort record to WAL
+        let transaction = txn_ctx.get_transaction();
+        let lsn = self.wal_manager.write_abort_record(transaction.as_ref());
+        
+        // Update transaction's LSN
+        transaction.set_prev_lsn(lsn);
+
+        // Attempt to abort
+        txn_manager.abort(transaction);
+        debug!("Transaction aborted successfully");
+        Ok(true)
     }
 }
 
@@ -399,7 +429,14 @@ mod tests {
             let transaction_context =
                 Arc::new(TransactionContext::new(txn, lock_manager, txn_manager));
 
-            let transaction_factory = Arc::new(TransactionManagerFactory::new(bpm.clone()));
+            // Create WAL manager with the log manager
+            let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
+
+            // Create transaction factory with WAL manager
+            let transaction_factory = Arc::new(TransactionManagerFactory::with_wal_manager(
+                bpm.clone(),
+                wal_manager.clone(),
+            ));
 
             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
                 bpm.clone(),
@@ -407,7 +444,7 @@ mod tests {
                 transaction_context.clone(),
             )));
 
-            let engine = ExecutionEngine::new(catalog.clone(), bpm.clone(), transaction_factory);
+            let engine = ExecutionEngine::new(catalog.clone(), bpm.clone(), transaction_factory, wal_manager);
 
             let planner = QueryPlanner::new(catalog.clone());
 
