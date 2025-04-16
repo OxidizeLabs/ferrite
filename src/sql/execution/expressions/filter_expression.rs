@@ -97,8 +97,14 @@ impl ExpressionOps for FilterExpression {
                 // Create a new schema with just the aggregate column
                 let agg_schema = Schema::new(vec![self.aggregate.as_ref().unwrap().get_return_type().clone()]);
                 
+                // Log the aggregate result
+                trace!("FilterExpression: Evaluated aggregate result: {:?}", agg_result);
+                
                 // Create a new tuple with just the aggregate result
                 let agg_tuple = Tuple::new(&[agg_result], agg_schema.clone(), tuple.get_rid());
+                
+                // Log the new tuple structure
+                trace!("FilterExpression: Created new tuple with values: {:?}", agg_tuple.get_values());
                 
                 // Now evaluate the predicate against the aggregate tuple and schema
                 let pred_result = self.predicate.evaluate(&agg_tuple, &agg_schema)?;
