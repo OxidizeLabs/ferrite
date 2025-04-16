@@ -1,16 +1,16 @@
-use std::any::Any;
-use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use std::any::Any;
+use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
 
 /// Enumeration for page types in a B+ tree.
 #[derive(Debug, PartialEq, Eq)]
 pub enum IndexPageType {
     InvalidIndexPage = 0,
-    LeafPage,
-    InternalPage,
+    BPlusTreeLeafPage,
+    BPlusTreeInternalPage,
 }
 
 /// The `BPlusTreePage` struct serves as a header part for each B+ tree page
@@ -31,7 +31,9 @@ pub struct BPlusTreePage<KeyType, ValueType, KeyComparator> {
     _marker: PhantomData<(KeyType, ValueType, KeyComparator)>,
 }
 
-impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> BPlusTreePage<KeyType, ValueType, KeyComparator> {
+impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync>
+    BPlusTreePage<KeyType, ValueType, KeyComparator>
+{
     /// Prevents creating BPlusTreePage instances directly.
     pub fn new(page_type: IndexPageType, max_size: usize) -> Self {
         Self {
@@ -48,7 +50,7 @@ impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> B
 
     /// Returns true if this is a leaf page.
     pub fn is_leaf_page(&self) -> bool {
-        self.page_type == IndexPageType::LeafPage
+        self.page_type == IndexPageType::BPlusTreeLeafPage
     }
 
     /// Sets the page type of this B+ tree page.
@@ -100,8 +102,8 @@ impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> B
         // Format: PageType (4) | CurrentSize (4) | MaxSize (4)
         let page_type_value = match self.page_type {
             IndexPageType::InvalidIndexPage => 0u32,
-            IndexPageType::LeafPage => 1u32,
-            IndexPageType::InternalPage => 2u32,
+            IndexPageType::BPlusTreeLeafPage => 1u32,
+            IndexPageType::BPlusTreeInternalPage => 2u32,
         };
 
         // Write page type (4 bytes)
@@ -117,37 +119,36 @@ impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> B
     /// Deserializes the page header from bytes
     pub fn deserialize_header(&mut self, buffer: &[u8]) {
         // Read page type (4 bytes)
-        let page_type_value = u32::from_le_bytes([
-            buffer[0], buffer[1], buffer[2], buffer[3]
-        ]);
+        let page_type_value = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
         self.page_type = match page_type_value {
             0 => IndexPageType::InvalidIndexPage,
-            1 => IndexPageType::LeafPage,
-            2 => IndexPageType::InternalPage,
+            1 => IndexPageType::BPlusTreeLeafPage,
+            2 => IndexPageType::BPlusTreeInternalPage,
             _ => IndexPageType::InvalidIndexPage, // Default for invalid values
         };
 
         // Read current size (4 bytes)
-        self.size = u32::from_le_bytes([
-            buffer[4], buffer[5], buffer[6], buffer[7]
-        ]) as usize;
+        self.size = u32::from_le_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as usize;
 
         // Read max size (4 bytes)
-        self.max_size = u32::from_le_bytes([
-            buffer[8], buffer[9], buffer[10], buffer[11]
-        ]) as usize;
+        self.max_size = u32::from_le_bytes([buffer[8], buffer[9], buffer[10], buffer[11]]) as usize;
     }
 }
 
-impl<KeyType: Send + Sync + 'static, ValueType: Send + Sync + 'static, KeyComparator: Send + Sync + 'static> PageTrait for BPlusTreePage<KeyType, ValueType, KeyComparator> {
+impl<
+        KeyType: Send + Sync + 'static,
+        ValueType: Send + Sync + 'static,
+        KeyComparator: Send + Sync + 'static,
+    > PageTrait for BPlusTreePage<KeyType, ValueType, KeyComparator>
+{
     fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
     fn get_page_type(&self) -> PageType {
         match self.page_type {
-            IndexPageType::LeafPage => PageType::BTreeLeaf,
-            IndexPageType::InternalPage => PageType::BTreeInternal,
+            IndexPageType::BPlusTreeLeafPage => PageType::BTreeLeaf,
+            IndexPageType::BPlusTreeInternalPage => PageType::BTreeInternal,
             IndexPageType::InvalidIndexPage => PageType::Invalid,
         }
     }
@@ -218,7 +219,12 @@ impl<KeyType: Send + Sync + 'static, ValueType: Send + Sync + 'static, KeyCompar
     }
 }
 
-impl<KeyType: Send + Sync + 'static, ValueType: Send + Sync + 'static, KeyComparator: Send + Sync + 'static> Page for BPlusTreePage<KeyType, ValueType, KeyComparator> {
+impl<
+        KeyType: Send + Sync + 'static,
+        ValueType: Send + Sync + 'static,
+        KeyComparator: Send + Sync + 'static,
+    > Page for BPlusTreePage<KeyType, ValueType, KeyComparator>
+{
     fn new(page_id: PageId) -> Self {
         let mut page = Self {
             data: Box::new([0; DB_PAGE_SIZE as usize]),
@@ -235,11 +241,15 @@ impl<KeyType: Send + Sync + 'static, ValueType: Send + Sync + 'static, KeyCompar
     }
 }
 
-impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> PageTypeId for BPlusTreePage<KeyType, ValueType, KeyComparator> {
+impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> PageTypeId
+    for BPlusTreePage<KeyType, ValueType, KeyComparator>
+{
     const TYPE_ID: PageType = PageType::BTreeLeaf;
 }
 
-impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> Debug for BPlusTreePage<KeyType, ValueType, KeyComparator> {
+impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> Debug
+    for BPlusTreePage<KeyType, ValueType, KeyComparator>
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BPlusTreePage")
             .field("page_id", &self.page_id)
@@ -255,7 +265,6 @@ impl<KeyType: Send + Sync, ValueType: Send + Sync, KeyComparator: Send + Sync> D
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::config::PageId;
 
     // Dummy types for testing
     #[derive(Debug)]
@@ -266,7 +275,7 @@ mod tests {
     struct TestComparator;
 
     fn create_test_page() -> BPlusTreePage<TestKey, TestValue, TestComparator> {
-        BPlusTreePage::new(IndexPageType::LeafPage, 100)
+        BPlusTreePage::new(IndexPageType::BPlusTreeLeafPage, 100)
     }
 
     #[test]
@@ -283,14 +292,14 @@ mod tests {
     #[test]
     fn test_page_type_operations() {
         let mut page = create_test_page();
-        
+
         // Test leaf page type
-        page.set_page_type(IndexPageType::LeafPage);
+        page.set_page_type(IndexPageType::BPlusTreeLeafPage);
         assert!(page.is_leaf_page());
         assert_eq!(page.get_page_type(), PageType::BTreeLeaf);
 
         // Test internal page type
-        page.set_page_type(IndexPageType::InternalPage);
+        page.set_page_type(IndexPageType::BPlusTreeInternalPage);
         assert!(!page.is_leaf_page());
         assert_eq!(page.get_page_type(), PageType::BTreeInternal);
     }
@@ -298,7 +307,7 @@ mod tests {
     #[test]
     fn test_size_operations() {
         let mut page = create_test_page();
-        
+
         // Test setting size
         page.set_size(50);
         assert_eq!(page.get_size(), 50);
@@ -330,7 +339,7 @@ mod tests {
     #[test]
     fn test_pin_count_operations() {
         let mut page = create_test_page();
-        
+
         // Test increment
         page.increment_pin_count();
         assert_eq!(page.get_pin_count(), 1);
@@ -347,7 +356,7 @@ mod tests {
     #[test]
     fn test_dirty_flag() {
         let mut page = create_test_page();
-        
+
         // Test setting dirty flag
         page.set_dirty(true);
         assert!(page.is_dirty());
@@ -359,19 +368,19 @@ mod tests {
     #[test]
     fn test_serialization_deserialization() {
         let mut original_page = create_test_page();
-        original_page.set_page_type(IndexPageType::LeafPage);
+        original_page.set_page_type(IndexPageType::BPlusTreeLeafPage);
         original_page.set_size(50);
         original_page.set_max_size(100);
 
         // Create a buffer for serialization
         let mut buffer = [0u8; 12];
-        
+
         // Test serialization
         original_page.serialize_header(&mut buffer);
 
         // Create a new page for deserialization
         let mut new_page = create_test_page();
-        
+
         // Test deserialization
         new_page.deserialize_header(&buffer);
 
@@ -392,15 +401,17 @@ mod tests {
         assert!(page.is_dirty());
 
         // Test setting data with invalid offset
-        assert!(page.set_data(DB_PAGE_SIZE as usize - 4, &[1, 2, 3, 4, 5]).is_err());
+        assert!(page
+            .set_data(DB_PAGE_SIZE as usize - 4, &[1, 2, 3, 4, 5])
+            .is_err());
     }
 
     #[test]
     fn test_reset_memory() {
         let mut page = create_test_page();
-        
+
         // Set some initial state
-        page.set_page_type(IndexPageType::LeafPage);
+        page.set_page_type(IndexPageType::BPlusTreeLeafPage);
         page.set_size(50);
         page.set_dirty(true);
         page.increment_pin_count();

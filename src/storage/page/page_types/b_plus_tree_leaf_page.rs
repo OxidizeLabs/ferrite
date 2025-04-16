@@ -1,19 +1,27 @@
-use std::any::Any;
-use std::fmt::{Debug, Formatter};
-use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType};
+use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
+use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 
 /// Leaf page structure for B+ Tree
-pub struct BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
+pub struct BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+{
     // Array of keys
-    keys: Vec<KeyType>,
+    keys: Vec<K>,
     // Array of values (RIDs in most cases)
-    values: Vec<ValueType>,
+    values: Vec<V>,
     // Next leaf page ID for linked list of leaves
     next_page_id: Option<PageId>,
     // KeyComparator function
-    comparator: KeyComparator,
+    comparator: C,
     // Page data
     data: Box<[u8; DB_PAGE_SIZE as usize]>,
     // Page ID
@@ -28,10 +36,27 @@ pub struct BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
     max_size: usize,
 }
 
-impl<KeyType: Clone + Sync + Send + 'static, ValueType: Clone + Sync + Send + 'static, KeyComparator: Fn(&KeyType, &KeyType) -> std::cmp::Ordering + Sync + Send + 'static>
-BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
-    pub fn new_with_options(page_id: PageId, max_size: usize, comparator: KeyComparator) -> Self {
-        let mut page = Self {
+impl<
+        K: Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+        C: Fn(&K, &K) -> Ordering + 'static + Send + Sync,
+    > PageTypeId for BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+{
+    const TYPE_ID: PageType = PageType::BTreeLeaf;
+}
+
+impl<K, V, C> BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+{
+    pub fn new_with_options(page_id: PageId, max_size: usize, comparator: C) -> Self {
+        Self {
             keys: Vec::with_capacity(max_size),
             values: Vec::with_capacity(max_size),
             next_page_id: None,
@@ -42,13 +67,10 @@ BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
             is_dirty: false,
             size: 0,
             max_size,
-        };
-        page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
-        page
+        }
     }
 
-    /// Get the key at the given index
-    pub fn get_key_at(&self, index: usize) -> Option<&KeyType> {
+    pub fn get_key_at(&self, index: usize) -> Option<&K> {
         if index < self.size {
             Some(&self.keys[index])
         } else {
@@ -56,8 +78,7 @@ BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
         }
     }
 
-    /// Get the value at the given index
-    pub fn get_value_at(&self, index: usize) -> Option<&ValueType> {
+    pub fn get_value_at(&self, index: usize) -> Option<&V> {
         if index < self.size {
             Some(&self.values[index])
         } else {
@@ -65,158 +86,250 @@ BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
         }
     }
 
-    /// Set the key at the given index
-    pub fn set_key_at(&mut self, index: usize, key: KeyType) -> bool {
+    pub fn set_key_at(&mut self, index: usize, key: K) -> bool {
         if index < self.size {
             self.keys[index] = key;
+            self.is_dirty = true;
             true
         } else {
             false
         }
     }
 
-    /// Set the value at the given index
-    pub fn set_value_at(&mut self, index: usize, value: ValueType) -> bool {
+    pub fn set_value_at(&mut self, index: usize, value: V) -> bool {
         if index < self.size {
             self.values[index] = value;
+            self.is_dirty = true;
             true
         } else {
             false
         }
     }
 
-    /// Get next leaf page id (for leaf node linked list traversal)
     pub fn get_next_page_id(&self) -> Option<PageId> {
         self.next_page_id
     }
 
-    /// Set next leaf page id
     pub fn set_next_page_id(&mut self, page_id: Option<PageId>) {
         self.next_page_id = page_id;
+        self.is_dirty = true;
     }
 
-    /// Find the index of the first key greater than or equal to the target key
-    pub fn find_key_index(&self, key: &KeyType) -> usize {
-        match self.keys[0..self.size].binary_search_by(|k| (self.comparator)(k, key)) {
-            Ok(index) => index, // Exact match
-            Err(index) => index, // Insert position
+    pub fn find_key_index(&self, key: &K) -> usize {
+        // Binary search implementation for better performance
+        let mut low = 0;
+        let mut high = self.size;
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let cmp = (self.comparator)(key, &self.keys[mid]);
+
+            if cmp == std::cmp::Ordering::Equal {
+                return mid;
+            } else if cmp == std::cmp::Ordering::Less {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
         }
+
+        low
     }
 
-    /// Insert a new key-value pair into the leaf page
-    pub fn insert_key_value(&mut self, key: KeyType, value: ValueType) -> bool {
+    pub fn insert_key_value(&mut self, key: K, value: V) -> bool {
         if self.size >= self.max_size {
-            return false; // Page is full
+            return false;
         }
 
         let index = self.find_key_index(&key);
 
-        // Insert key and value at appropriate position
-        self.keys.insert(index, key);
-        self.values.insert(index, value);
+        // Check if key already exists
+        if index < self.size
+            && (self.comparator)(&key, &self.keys[index]) == std::cmp::Ordering::Equal
+        {
+            // Update value if key exists
+            self.values[index] = value;
+        } else {
+            // Insert new key-value pair
+            self.keys.insert(index, key);
+            self.values.insert(index, value);
+            self.size += 1;
+        }
 
-        // Increase page size
-        self.size += 1;
-
+        self.is_dirty = true;
         true
     }
 
-    /// Remove a key-value pair at the given index from the leaf page
     pub fn remove_key_value_at(&mut self, index: usize) -> bool {
         if index >= self.size {
             return false;
         }
 
-        // Remove key and value
         self.keys.remove(index);
         self.values.remove(index);
-
-        // Decrease page size
         self.size -= 1;
+        self.is_dirty = true;
 
         true
     }
 
-    /// Get the current size of this page
     pub fn get_size(&self) -> usize {
         self.size
     }
 
-    /// Get the maximum size of this page
     pub fn get_max_size(&self) -> usize {
         self.max_size
     }
 
-    /// Get the minimum size (50% of the maximum size) of this page
     pub fn get_min_size(&self) -> usize {
-        self.max_size / 2
+        // B+ tree common practice is to keep at least half full
+        (self.max_size + 1) / 2
     }
 
-    /// Serialize the leaf page to bytes
     pub fn serialize(&self, buffer: &mut [u8]) {
-        // First serialize the header (12 bytes)
-        // Format: PageType (4) | CurrentSize (4) | MaxSize (4)
-        buffer[0..4].copy_from_slice(&(Self::TYPE_ID as u32).to_le_bytes());
-        buffer[4..8].copy_from_slice(&(self.size as u32).to_le_bytes());
-        buffer[8..12].copy_from_slice(&(self.max_size as u32).to_le_bytes());
+        // Simple serialization using bincode for keys and values
+        // Format:
+        // [size: u32][max_size: u32][next_page_id: Option<PageId>][keys][values]
+        let mut cursor = 0;
 
-        // Serialize the next_page_id (8 bytes)
-        let next_page_bytes = match self.next_page_id {
-            Some(id) => id.to_le_bytes(),
-            None => [0u8; 8], // 0 for None
-        };
-        buffer[12..20].copy_from_slice(&next_page_bytes);
+        // Write size
+        let size_bytes = self.size.to_ne_bytes();
+        buffer[cursor..cursor + size_bytes.len()].copy_from_slice(&size_bytes);
+        cursor += size_bytes.len();
 
-        // Serialize the keys and values
-        // This is a simplified version - in real implementation,
-        // you would need to know the size of KeyType and ValueType and properly serialize them
+        // Write max_size
+        let max_size_bytes = self.max_size.to_ne_bytes();
+        buffer[cursor..cursor + max_size_bytes.len()].copy_from_slice(&max_size_bytes);
+        cursor += max_size_bytes.len();
+
+        // Write next_page_id
+        let next_page_id_bytes =
+            bincode::serialize(&self.next_page_id).expect("Failed to serialize next_page_id");
+        let next_page_id_len = next_page_id_bytes.len() as u32;
+        buffer[cursor..cursor + 4].copy_from_slice(&next_page_id_len.to_ne_bytes());
+        cursor += 4;
+        buffer[cursor..cursor + next_page_id_bytes.len()].copy_from_slice(&next_page_id_bytes);
+        cursor += next_page_id_bytes.len();
+
+        // Write keys and values
+        for i in 0..self.size {
+            // This is a simplified approach and assumes KeyType and ValueType can be serialized
+            // In a real implementation, you might need type-specific serialization logic
+            let key_bytes = bincode::serialize(&self.keys[i]).expect("Failed to serialize key");
+            let key_len = key_bytes.len() as u32;
+            buffer[cursor..cursor + 4].copy_from_slice(&key_len.to_ne_bytes());
+            cursor += 4;
+            buffer[cursor..cursor + key_bytes.len()].copy_from_slice(&key_bytes);
+            cursor += key_bytes.len();
+
+            let value_bytes =
+                bincode::serialize(&self.values[i]).expect("Failed to serialize value");
+            let value_len = value_bytes.len() as u32;
+            buffer[cursor..cursor + 4].copy_from_slice(&value_len.to_ne_bytes());
+            cursor += 4;
+            buffer[cursor..cursor + value_bytes.len()].copy_from_slice(&value_bytes);
+            cursor += value_bytes.len();
+        }
     }
 
-    /// Deserialize the leaf page from bytes
     pub fn deserialize(&mut self, buffer: &[u8]) {
-        // First deserialize the header (12 bytes)
-        // Format: PageType (4) | CurrentSize (4) | MaxSize (4)
-        self.size = u32::from_le_bytes([
-            buffer[4], buffer[5], buffer[6], buffer[7]
-        ]) as usize;
-        self.max_size = u32::from_le_bytes([
-            buffer[8], buffer[9], buffer[10], buffer[11]
-        ]) as usize;
+        let mut cursor = 0;
 
-        // Deserialize the next_page_id (8 bytes)
-        let next_page_id_bytes = [
-            buffer[12], buffer[13], buffer[14], buffer[15],
-            buffer[16], buffer[17], buffer[18], buffer[19],
-        ];
-        let next_page_id = u64::from_le_bytes(next_page_id_bytes);
-        self.next_page_id = if next_page_id == 0 { None } else { Some(next_page_id) };
+        // Read size
+        let mut size_bytes = [0u8; size_of::<usize>()];
+        size_bytes.copy_from_slice(&buffer[cursor..cursor + size_of::<usize>()]);
+        self.size = usize::from_ne_bytes(size_bytes);
+        cursor += size_of::<usize>();
 
-        // Deserialize the keys and values
-        // This would depend on the actual KeyType and ValueType
+        // Read max_size
+        let mut max_size_bytes = [0u8; size_of::<usize>()];
+        max_size_bytes.copy_from_slice(&buffer[cursor..cursor + size_of::<usize>()]);
+        self.max_size = usize::from_ne_bytes(max_size_bytes);
+        cursor += size_of::<usize>();
+
+        // Read next_page_id
+        let mut next_page_id_len_bytes = [0u8; 4];
+        next_page_id_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
+        let next_page_id_len = u32::from_ne_bytes(next_page_id_len_bytes) as usize;
+        cursor += 4;
+        self.next_page_id = bincode::deserialize(&buffer[cursor..cursor + next_page_id_len])
+            .expect("Failed to deserialize next_page_id");
+        cursor += next_page_id_len;
+
+        // Clear existing keys and values
+        self.keys.clear();
+        self.values.clear();
+
+        // Ensure capacity
+        self.keys.reserve(self.size);
+        self.values.reserve(self.size);
+
+        // Read keys and values
+        for _ in 0..self.size {
+            let mut key_len_bytes = [0u8; 4];
+            key_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
+            let key_len = u32::from_ne_bytes(key_len_bytes) as usize;
+            cursor += 4;
+            let key: K = bincode::deserialize(&buffer[cursor..cursor + key_len])
+                .expect("Failed to deserialize key");
+            cursor += key_len;
+
+            let mut value_len_bytes = [0u8; 4];
+            value_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
+            let value_len = u32::from_ne_bytes(value_len_bytes) as usize;
+            cursor += 4;
+            let value: V = bincode::deserialize(&buffer[cursor..cursor + value_len])
+                .expect("Failed to deserialize value");
+            cursor += value_len;
+
+            self.keys.push(key);
+            self.values.push(value);
+        }
     }
 }
 
-impl<KeyType: Clone + Send + Sync + 'static, ValueType: Clone + Send + Sync + 'static, KeyComparator: Fn(&KeyType, &KeyType) -> std::cmp::Ordering + 'static + Send + Sync>
-Debug for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
+impl<K, V, C> Debug for BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BPlusTreeLeafPage {{ page_id: {}, size: {}, next_page_id: {:?} }}", 
-            self.page_id, self.size, self.next_page_id)
+        write!(
+            f,
+            "BPlusTreeLeafPage {{ page_id: {}, size: {}/{}, next_page_id: {:?}, keys: [",
+            self.page_id, self.size, self.max_size, self.next_page_id
+        )?;
+
+        // Only print up to 10 keys to avoid cluttering the debug output
+        let max_display = std::cmp::min(10, self.size);
+        for i in 0..max_display {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{:?}", &self.keys[i])?;
+        }
+
+        if self.size > max_display {
+            write!(f, ", ... ({} more)", self.size - max_display)?;
+        }
+
+        write!(f, "] }}")
     }
 }
 
-impl<KeyType: Clone + Send + Sync + 'static, ValueType: Clone + Send + Sync + 'static, KeyComparator: Fn(&KeyType, &KeyType) -> std::cmp::Ordering + 'static + Send + Sync>
-PageTypeId for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
-    const TYPE_ID: PageType = PageType::BTreeLeaf;
-}
-
-impl<KeyType: Clone + Send + Sync + 'static, ValueType: Clone + Send + Sync + 'static, KeyComparator: Fn(&KeyType, &KeyType) -> std::cmp::Ordering + 'static + Send + Sync>
-PageTrait for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
+impl<K, V, C> PageTrait for BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+{
     fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
     fn get_page_type(&self) -> PageType {
-        PageType::from_u8(self.data[PAGE_TYPE_OFFSET]).unwrap_or(PageType::Invalid)
+        PageType::BTreeLeaf
     }
 
     fn is_dirty(&self) -> bool {
@@ -250,14 +363,17 @@ PageTrait for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
     }
 
     fn set_data(&mut self, offset: usize, new_data: &[u8]) -> Result<(), PageError> {
-        if offset + new_data.len() > self.data.len() {
-            return Err(PageError::InvalidOffset {
-                offset,
-                page_size: self.data.len(),
-            });
+        if offset + new_data.len() > DB_PAGE_SIZE as usize {
+            return Err(PageError::OffsetOutOfBounds);
         }
+
         self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
         self.is_dirty = true;
+
+        // Create a temporary copy to avoid the borrowing conflict
+        let data_copy = self.data.clone();
+        self.deserialize(&*data_copy);
+
         Ok(())
     }
 
@@ -266,13 +382,13 @@ PageTrait for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
     }
 
     fn reset_memory(&mut self) {
-        self.data.fill(0);
         self.keys.clear();
         self.values.clear();
         self.next_page_id = None;
         self.size = 0;
         self.is_dirty = false;
-        self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
+        self.pin_count = 0;
+        self.data.fill(0);
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -284,12 +400,15 @@ PageTrait for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
     }
 }
 
-impl<KeyType: Clone + Send + Sync + 'static, ValueType: Clone + Send + Sync + 'static, KeyComparator: Fn(&KeyType, &KeyType) -> std::cmp::Ordering + 'static + Send + Sync>
-Page for BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> {
-    fn new(page_id: PageId) -> Self {
-        // This implementation is not supported as we need a comparator and max_size
-        // The caller should use new_with_options instead
-        unimplemented!("BPlusTreeLeafPage::new() is not supported. Use new_with_options() instead.")
+impl<K, V, C> Page for BPlusTreeLeafPage<K, V, C>
+where
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
+{
+    fn new(_page_id: PageId) -> Self {
+        // This approach requires the caller to provide the comparator
+        unimplemented!("Please use new_with_options instead to provide a comparator")
     }
 }
 
@@ -316,12 +435,12 @@ mod tests {
     #[test]
     fn test_insert_and_get() {
         let mut page = create_test_page();
-        
+
         // Test inserting values
         assert!(page.insert_key_value(1, 100));
         assert!(page.insert_key_value(2, 200));
         assert!(page.insert_key_value(3, 300));
-        
+
         // Test getting values
         assert_eq!(page.get_key_at(0), Some(&1));
         assert_eq!(page.get_value_at(0), Some(&100));
@@ -329,7 +448,7 @@ mod tests {
         assert_eq!(page.get_value_at(1), Some(&200));
         assert_eq!(page.get_key_at(2), Some(&3));
         assert_eq!(page.get_value_at(2), Some(&300));
-        
+
         // Test out of bounds
         assert_eq!(page.get_key_at(3), None);
         assert_eq!(page.get_value_at(3), None);
@@ -338,17 +457,17 @@ mod tests {
     #[test]
     fn test_set_and_remove() {
         let mut page = create_test_page();
-        
+
         // Insert initial values
         page.insert_key_value(1, 100);
         page.insert_key_value(2, 200);
-        
+
         // Test setting values
         assert!(page.set_key_at(0, 10));
         assert!(page.set_value_at(0, 1000));
         assert_eq!(page.get_key_at(0), Some(&10));
         assert_eq!(page.get_value_at(0), Some(&1000));
-        
+
         // Test removing values
         assert!(page.remove_key_value_at(0));
         assert_eq!(page.get_size(), 1);
@@ -359,11 +478,11 @@ mod tests {
     #[test]
     fn test_next_page_id() {
         let mut page = create_test_page();
-        
+
         // Test setting and getting next page ID
         page.set_next_page_id(Some(2));
         assert_eq!(page.get_next_page_id(), Some(2));
-        
+
         page.set_next_page_id(None);
         assert_eq!(page.get_next_page_id(), None);
     }
@@ -371,32 +490,32 @@ mod tests {
     #[test]
     fn test_find_key_index() {
         let mut page = create_test_page();
-        
+
         // Insert sorted values
         page.insert_key_value(1, 100);
         page.insert_key_value(3, 300);
         page.insert_key_value(5, 500);
-        
+
         // Test finding indices
-        assert_eq!(page.find_key_index(&0), 0);  // Before first key
-        assert_eq!(page.find_key_index(&1), 0);  // Exact match
-        assert_eq!(page.find_key_index(&2), 1);  // Between keys
-        assert_eq!(page.find_key_index(&3), 1);  // Exact match
-        assert_eq!(page.find_key_index(&4), 2);  // Between keys
-        assert_eq!(page.find_key_index(&5), 2);  // Exact match
-        assert_eq!(page.find_key_index(&6), 3);  // After last key
+        assert_eq!(page.find_key_index(&0), 0); // Before first key
+        assert_eq!(page.find_key_index(&1), 0); // Exact match
+        assert_eq!(page.find_key_index(&2), 1); // Between keys
+        assert_eq!(page.find_key_index(&3), 1); // Exact match
+        assert_eq!(page.find_key_index(&4), 2); // Between keys
+        assert_eq!(page.find_key_index(&5), 2); // Exact match
+        assert_eq!(page.find_key_index(&6), 3); // After last key
     }
 
     #[test]
     fn test_page_full() {
         let mut page = create_test_page();
-        
+
         // Fill the page
         assert!(page.insert_key_value(1, 100));
         assert!(page.insert_key_value(2, 200));
         assert!(page.insert_key_value(3, 300));
         assert!(page.insert_key_value(4, 400));
-        
+
         // Try to insert when full
         assert!(!page.insert_key_value(5, 500));
         assert_eq!(page.get_size(), 4);
@@ -405,16 +524,16 @@ mod tests {
     #[test]
     fn test_reset_memory() {
         let mut page = create_test_page();
-        
+
         // Fill the page with data
         page.insert_key_value(1, 100);
         page.insert_key_value(2, 200);
         page.set_next_page_id(Some(2));
         page.set_dirty(true);
-        
+
         // Reset the page
         page.reset_memory();
-        
+
         // Verify reset state
         assert_eq!(page.get_size(), 0);
         assert_eq!(page.get_next_page_id(), None);
@@ -425,14 +544,14 @@ mod tests {
     #[test]
     fn test_pin_count() {
         let mut page = create_test_page();
-        
+
         // Test pin count operations
         assert_eq!(page.get_pin_count(), 1);
         page.increment_pin_count();
         assert_eq!(page.get_pin_count(), 2);
         page.decrement_pin_count();
         assert_eq!(page.get_pin_count(), 1);
-        
+
         // Test pin count doesn't go below 0
         page.decrement_pin_count();
         page.decrement_pin_count();

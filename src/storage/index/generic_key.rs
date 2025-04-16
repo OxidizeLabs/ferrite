@@ -5,7 +5,7 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 
 /// A generic key used for indexing with opaque data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct GenericKey<T, const N: usize> {
     /// The fixed-size array holding the key data.
     data: [u8; N],
