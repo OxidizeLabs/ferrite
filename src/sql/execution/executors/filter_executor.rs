@@ -2,25 +2,16 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::abstract_executor::BaseExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-use crate::sql::execution::expressions::filter_expression::{FilterExpression, FilterType};
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+use crate::sql::execution::expressions::filter_expression::FilterType;
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
-use crate::sql::execution::plans::table_scan_plan::TableScanNode;
-use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use log::{debug, error, info};
+use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -103,7 +94,7 @@ impl FilterExecutor {
         }
 
         let filter_expr = self.plan.get_filter_expression();
-        
+
         // Get aggregate expression safely with clone() to avoid ownership issues
         let agg_expr = match filter_expr.get_aggregate().as_ref() {
             Some(expr) => expr.clone(),
@@ -112,7 +103,7 @@ impl FilterExecutor {
                 return false;
             }
         };
-        
+
         debug!(
             "Processing aggregate expression for HAVING filter: {:?}",
             agg_expr
@@ -126,7 +117,7 @@ impl FilterExecutor {
         // For HAVING clauses, we need to evaluate the aggregate expression across all tuples
         // and then apply the predicate to determine if any tuples should be returned.
         // If the aggregate condition is met, ALL tuples should be returned.
-        
+
         // First, compute the aggregate value from all group tuples
         let agg_value = match &*agg_expr {
             Expression::Aggregate(agg) => {
@@ -134,15 +125,15 @@ impl FilterExecutor {
                     AggregationType::CountStar => {
                         let count = self.group_tuples.len() as i64;
                         Value::new_with_type(Val::BigInt(count), TypeId::BigInt)
-                    },
+                    }
                     AggregationType::Count => {
                         let count = self.group_tuples.len() as i64;
                         Value::new_with_type(Val::BigInt(count), TypeId::BigInt)
-                    },
+                    }
                     AggregationType::Sum => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut sum_val: Option<Value> = None;
-                        
+
                         for t in &self.group_tuples {
                             if let Ok(val) = col_expr.evaluate(t, schema) {
                                 if let Some(ref mut sum) = sum_val {
@@ -152,14 +143,14 @@ impl FilterExecutor {
                                 }
                             }
                         }
-                        
+
                         sum_val.unwrap_or_else(|| Value::new(Val::Null))
-                    },
+                    }
                     AggregationType::Avg => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut sum_val: Option<Value> = None;
                         let mut count = 0;
-                        
+
                         for t in &self.group_tuples {
                             if let Ok(val) = col_expr.evaluate(t, schema) {
                                 if !val.is_null() {
@@ -172,22 +163,31 @@ impl FilterExecutor {
                                 }
                             }
                         }
-                        
+
                         if let Some(sum) = sum_val {
                             if count > 0 {
                                 match sum.get_type_id() {
                                     TypeId::Integer => {
                                         let int_val = sum.as_integer().unwrap();
-                                        Value::new_with_type(Val::Decimal(int_val as f64 / count as f64), TypeId::Decimal)
-                                    },
+                                        Value::new_with_type(
+                                            Val::Decimal(int_val as f64 / count as f64),
+                                            TypeId::Decimal,
+                                        )
+                                    }
                                     TypeId::BigInt => {
                                         let bigint_val = sum.as_bigint().unwrap();
-                                        Value::new_with_type(Val::Decimal(bigint_val as f64 / count as f64), TypeId::Decimal)
-                                    },
+                                        Value::new_with_type(
+                                            Val::Decimal(bigint_val as f64 / count as f64),
+                                            TypeId::Decimal,
+                                        )
+                                    }
                                     TypeId::Decimal => {
                                         let decimal_val = sum.as_decimal().unwrap();
-                                        Value::new_with_type(Val::Decimal(decimal_val / count as f64), TypeId::Decimal)
-                                    },
+                                        Value::new_with_type(
+                                            Val::Decimal(decimal_val / count as f64),
+                                            TypeId::Decimal,
+                                        )
+                                    }
                                     _ => Value::new(Val::Null),
                                 }
                             } else {
@@ -196,11 +196,11 @@ impl FilterExecutor {
                         } else {
                             Value::new(Val::Null)
                         }
-                    },
+                    }
                     AggregationType::Min => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut min_val: Option<Value> = None;
-                        
+
                         for t in &self.group_tuples {
                             if let Ok(val) = col_expr.evaluate(t, schema) {
                                 if !val.is_null() {
@@ -214,18 +214,19 @@ impl FilterExecutor {
                                 }
                             }
                         }
-                        
+
                         min_val.unwrap_or_else(|| Value::new(Val::Null))
-                    },
+                    }
                     AggregationType::Max => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut max_val: Option<Value> = None;
-                        
+
                         for t in &self.group_tuples {
                             if let Ok(val) = col_expr.evaluate(t, schema) {
                                 if !val.is_null() {
                                     if let Some(ref max) = max_val {
-                                        if matches!(val.compare_greater_than(max), CmpBool::CmpTrue) {
+                                        if matches!(val.compare_greater_than(max), CmpBool::CmpTrue)
+                                        {
                                             max_val = Some(val);
                                         }
                                     } else {
@@ -234,29 +235,29 @@ impl FilterExecutor {
                                 }
                             }
                         }
-                        
+
                         max_val.unwrap_or_else(|| Value::new(Val::Null))
-                    },
+                    }
                     AggregationType::StdDev | AggregationType::Variance => {
                         // For testing purposes, return null for these aggregates
                         Value::new(Val::Null)
                     }
                 }
-            },
+            }
             _ => {
                 error!("Expected aggregate expression in HAVING clause");
                 return false;
             }
         };
-        
+
         // Create a clone of agg_value for debug logging to avoid borrow issues
         let agg_value_for_debug = agg_value.clone();
         debug!("Computed aggregate value: {:?}", agg_value_for_debug);
-        
+
         // Create a tuple with just the aggregate value for evaluation
         let agg_schema = Schema::new(vec![agg_expr.get_return_type().clone()]);
         let agg_tuple = Tuple::new(&vec![agg_value], agg_schema.clone(), RID::new(0, 0));
-        
+
         // Now evaluate the predicate on this aggregate tuple
         let predicate = filter_expr.get_predicate();
         match predicate.evaluate(&agg_tuple, &agg_schema) {
@@ -264,8 +265,7 @@ impl FilterExecutor {
                 Val::Boolean(b) => {
                     debug!(
                         "HAVING filter evaluation result: {}, for aggregate value: {:?}",
-                        b,
-                        agg_value_for_debug
+                        b, agg_value_for_debug
                     );
                     *b
                 }
@@ -316,24 +316,22 @@ impl AbstractExecutor for FilterExecutor {
         }
 
         match self.plan.get_filter_expression().get_filter_type() {
-            FilterType::Where => {
-                loop {
-                    match self.child_executor.next() {
-                        Some((tuple, rid)) => {
-                            debug!("Processing tuple with RID {:?}", rid);
-                            if self.apply_filter(&tuple) {
-                                debug!("Found matching tuple with RID {:?}", rid);
-                                return Some((tuple, rid));
-                            }
-                            debug!("Tuple did not match filter, continuing...");
+            FilterType::Where => loop {
+                match self.child_executor.next() {
+                    Some((tuple, rid)) => {
+                        debug!("Processing tuple with RID {:?}", rid);
+                        if self.apply_filter(&tuple) {
+                            debug!("Found matching tuple with RID {:?}", rid);
+                            return Some((tuple, rid));
                         }
-                        None => {
-                            debug!("No more tuples from child executor");
-                            return None;
-                        }
+                        debug!("Tuple did not match filter, continuing...");
+                    }
+                    None => {
+                        debug!("No more tuples from child executor");
+                        return None;
                     }
                 }
-            }
+            },
             FilterType::Having => {
                 while self.current_group_idx < self.group_tuples.len() {
                     let tuple = self.group_tuples[self.current_group_idx].clone();
@@ -372,7 +370,9 @@ mod tests {
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
-    use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
+    use crate::sql::execution::expressions::aggregate_expression::{
+        AggregateExpression, AggregationType,
+    };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::comparison_expression::{
         ComparisonExpression, ComparisonType,
@@ -554,8 +554,8 @@ mod tests {
         let agg_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             aggregate_type.clone(),
             vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0,  // table index
-                salary_col_idx,  // use the actual column index
+                0,              // table index
+                salary_col_idx, // use the actual column index
                 salary_col.clone(),
                 vec![],
             )))],
@@ -565,28 +565,47 @@ mod tests {
 
         // Create a new schema with just the aggregate column
         let agg_schema = Schema::new(vec![agg_expr.get_return_type().clone()]);
-        
-        debug!("Created aggregate schema with {} column(s)", agg_schema.get_column_count());
+
+        debug!(
+            "Created aggregate schema with {} column(s)",
+            agg_schema.get_column_count()
+        );
 
         // Create a constant with the correct type based on the aggregate function
         let agg_return_type = agg_expr.get_return_type();
         let const_value = match &aggregate_type {
-            AggregationType::CountStar | AggregationType::Count => Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt),
+            AggregationType::CountStar | AggregationType::Count => {
+                Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
+            }
             AggregationType::Sum => match agg_return_type.get_type() {
-                TypeId::BigInt => Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt),
-                TypeId::Decimal => Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal),
+                TypeId::BigInt => {
+                    Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
+                }
+                TypeId::Decimal => {
+                    Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal)
+                }
                 _ => Value::new_with_type(Val::Integer(threshold), TypeId::Integer),
             },
-            AggregationType::Min | AggregationType::Max | AggregationType::Avg | 
-            AggregationType::StdDev | AggregationType::Variance => match agg_return_type.get_type() {
-                TypeId::BigInt => Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt),
-                TypeId::Decimal => Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal),
+            AggregationType::Min
+            | AggregationType::Max
+            | AggregationType::Avg
+            | AggregationType::StdDev
+            | AggregationType::Variance => match agg_return_type.get_type() {
+                TypeId::BigInt => {
+                    Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
+                }
+                TypeId::Decimal => {
+                    Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal)
+                }
                 _ => Value::new_with_type(Val::Integer(threshold), TypeId::Integer),
             },
         };
-        
-        debug!("Created constant value with type: {:?}", const_value.get_type_id());
-        
+
+        debug!(
+            "Created constant value with type: {:?}",
+            const_value.get_type_id()
+        );
+
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             const_value,
             agg_return_type.clone(),
@@ -595,12 +614,12 @@ mod tests {
 
         // Create column reference for the aggregate result (index 0 in the aggregate schema)
         let agg_result_col_ref = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0,  // table index
-            0,  // column index in the aggregate schema (always 0)
+            0, // table index
+            0, // column index in the aggregate schema (always 0)
             agg_expr.get_return_type().clone(),
             vec![],
         )));
-        
+
         debug!("Created column reference for aggregate result at index 0");
 
         // Create predicate using the column reference to the aggregate result
@@ -934,7 +953,7 @@ mod tests {
 
         // Create a filter with an empty schema to simulate invalid predicate
         let empty_schema = Schema::new(vec![]);
-        
+
         // Create a simple predicate that doesn't depend on schema columns
         let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(true),
@@ -1132,7 +1151,11 @@ mod tests {
         results.sort_by(compare_floats);
 
         // Verify results - should return all salaries since avg > 70000
-        assert_eq!(results.len(), 5, "Should find all rows since avg salary > 70000");
+        assert_eq!(
+            results.len(),
+            5,
+            "Should find all rows since avg salary > 70000"
+        );
         assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
@@ -1201,7 +1224,11 @@ mod tests {
         results.sort_by(compare_floats);
 
         // Verify results - should return all salaries since max > 90000
-        assert_eq!(results.len(), 5, "Should find all rows since max salary > 90000");
+        assert_eq!(
+            results.len(),
+            5,
+            "Should find all rows since max salary > 90000"
+        );
         assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
@@ -1256,14 +1283,12 @@ mod tests {
         let having_filter = create_having_filter(AggregationType::Avg, 70000, &schema);
 
         // Create and initialize filter executors
-        let mut where_executor = FilterExecutor::new(child_executor, executor_context.clone(), where_filter);
+        let mut where_executor =
+            FilterExecutor::new(child_executor, executor_context.clone(), where_filter);
         where_executor.init();
 
-        let mut having_executor = FilterExecutor::new(
-            Box::new(where_executor),
-            executor_context,
-            having_filter,
-        );
+        let mut having_executor =
+            FilterExecutor::new(Box::new(where_executor), executor_context, having_filter);
         having_executor.init();
 
         // Collect filtered results
@@ -1280,7 +1305,11 @@ mod tests {
         results.sort_by(compare_floats);
 
         // Verify results - should return salaries of people over 30 with avg > 70000
-        assert_eq!(results.len(), 3, "Should find 3 rows matching both conditions");
+        assert_eq!(
+            results.len(),
+            3,
+            "Should find 3 rows matching both conditions"
+        );
         assert_eq!(results, vec![75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
@@ -1371,7 +1400,11 @@ mod tests {
         results.sort_by(compare_floats);
 
         // Verify results - should return all non-zero salaries since avg > 70000
-        assert_eq!(results.len(), 5, "Should find 5 rows with non-zero salaries");
+        assert_eq!(
+            results.len(),
+            5,
+            "Should find 5 rows with non-zero salaries"
+        );
         assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
@@ -1379,4 +1412,3 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 }
-

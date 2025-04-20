@@ -726,7 +726,9 @@ impl Type for Value {
             Val::Decimal(f) => Ok(*f as i32),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i32),
-            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to integer: {}", e)),
+            Val::VarLen(s) | Val::ConstLen(s) => s
+                .parse()
+                .map_err(|e| format!("Cannot convert string to integer: {}", e)),
             Val::Vector(v) => Ok(v.len() as i32),
             Val::Null => Err("Cannot convert NULL to integer".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
@@ -742,7 +744,9 @@ impl Type for Value {
             Val::Decimal(f) => Ok(*f as i64),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i64),
-            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to bigint: {}", e)),
+            Val::VarLen(s) | Val::ConstLen(s) => s
+                .parse()
+                .map_err(|e| format!("Cannot convert string to bigint: {}", e)),
             Val::Vector(v) => Ok(v.len() as i64),
             Val::Null => Err("Cannot convert NULL to bigint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
@@ -758,7 +762,9 @@ impl Type for Value {
             Val::Decimal(f) => Ok(*f as i16),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i16),
-            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to smallint: {}", e)),
+            Val::VarLen(s) | Val::ConstLen(s) => s
+                .parse()
+                .map_err(|e| format!("Cannot convert string to smallint: {}", e)),
             Val::Vector(v) => Ok(v.len() as i16),
             Val::Null => Err("Cannot convert NULL to smallint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
@@ -774,7 +780,9 @@ impl Type for Value {
             Val::Decimal(f) => Ok(*f as i8),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i8),
-            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to tinyint: {}", e)),
+            Val::VarLen(s) | Val::ConstLen(s) => s
+                .parse()
+                .map_err(|e| format!("Cannot convert string to tinyint: {}", e)),
             Val::Vector(v) => Ok(v.len() as i8),
             Val::Null => Err("Cannot convert NULL to tinyint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
@@ -790,7 +798,9 @@ impl Type for Value {
             Val::TinyInt(i) => Ok(*i as f64),
             Val::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Val::Timestamp(t) => Ok(*t as f64),
-            Val::VarLen(s) | Val::ConstLen(s) => s.parse().map_err(|e| format!("Cannot convert string to decimal: {}", e)),
+            Val::VarLen(s) | Val::ConstLen(s) => s
+                .parse()
+                .map_err(|e| format!("Cannot convert string to decimal: {}", e)),
             Val::Vector(v) => Ok(v.len() as f64),
             Val::Null => Err("Cannot convert NULL to decimal".to_string()),
             Val::Struct => Ok(1.0), // Struct is considered as 1.0

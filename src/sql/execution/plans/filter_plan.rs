@@ -40,11 +40,8 @@ impl FilterNode {
             // If schema is empty, use the predicate's return type
             predicate.get_return_type().clone()
         };
-        
-        let filter_expr = Arc::new(FilterExpression::new_where(
-            predicate,
-            return_type,
-        ));
+
+        let filter_expr = Arc::new(FilterExpression::new_where(predicate, return_type));
         Self {
             output_schema,
             table_oid_t,

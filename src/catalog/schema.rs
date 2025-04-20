@@ -441,7 +441,10 @@ mod unit_tests {
         let serialized = bincode::serialize(&schema).unwrap();
         let deserialized: Schema = bincode::deserialize(&serialized).unwrap();
 
-        assert_eq!(schema.get_primary_key_columns(), deserialized.get_primary_key_columns());
+        assert_eq!(
+            schema.get_primary_key_columns(),
+            deserialized.get_primary_key_columns()
+        );
     }
 
     #[test]
@@ -456,10 +459,16 @@ mod unit_tests {
 
         // Test that primary keys are preserved when copying schema
         let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 1, 2]);
-        assert_eq!(original_schema.get_primary_key_columns(), copied_schema.get_primary_key_columns());
+        assert_eq!(
+            original_schema.get_primary_key_columns(),
+            copied_schema.get_primary_key_columns()
+        );
 
         // Test that primary keys are preserved when copying subset of columns
         let partial_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
-        assert_eq!(original_schema.get_primary_key_columns(), partial_schema.get_primary_key_columns());
+        assert_eq!(
+            original_schema.get_primary_key_columns(),
+            partial_schema.get_primary_key_columns()
+        );
     }
 }

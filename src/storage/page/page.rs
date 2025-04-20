@@ -99,7 +99,7 @@ impl PageType {
             PAGE_TYPE_BTREE_HEADER => Some(Self::BTreeHeader),
             PAGE_TYPE_BTREE_INTERNAL => Some(Self::BTreeInternal),
             PAGE_TYPE_BTREE_LEAF => Some(Self::BTreeLeaf),
-            _ => None
+            _ => None,
         }
     }
 

@@ -1,9 +1,8 @@
-use std::any::Any;
-use std::mem;
-use crate::common::config::{DB_PAGE_SIZE, PageId, INVALID_PAGE_ID};
+use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
-
+use std::any::Any;
+use std::mem;
 
 /// The header page for a B+ tree.
 /// This page keeps track of the root page ID and other metadata about the B+ tree.
@@ -125,21 +124,36 @@ impl BPlusTreeHeaderPage {
 
         // Read root page ID
         let root_page_id = PageId::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-            data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
         ]);
         offset += 8;
 
         // Read tree height
         let tree_height = u32::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
         ]);
         offset += 4;
 
         // Read number of keys
         let num_keys = u64::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-            data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
         ]) as usize;
 
         let mut page = Self::new(page_id);
@@ -322,8 +336,14 @@ mod tests {
         let serialized = original_page.serialize();
         let deserialized = BPlusTreeHeaderPage::deserialize(&serialized, 1);
 
-        assert_eq!(deserialized.get_root_page_id(), original_page.get_root_page_id());
-        assert_eq!(deserialized.get_tree_height(), original_page.get_tree_height());
+        assert_eq!(
+            deserialized.get_root_page_id(),
+            original_page.get_root_page_id()
+        );
+        assert_eq!(
+            deserialized.get_tree_height(),
+            original_page.get_tree_height()
+        );
         assert_eq!(deserialized.get_num_keys(), original_page.get_num_keys());
     }
 
@@ -400,17 +420,17 @@ mod tests {
 
 #[cfg(test)]
 mod integration_tests {
-    use crate::storage::page::page_types::b_plus_tree_header_page::INVALID_PAGE_ID;
-    use std::sync::Arc;
-    use parking_lot::RwLock;
-    use tempfile::tempdir;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::{LRUKReplacer, AccessType};
+    use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::page::page::{Page, PageTrait};
     use crate::storage::page::page_guard::PageGuard;
     use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
+    use crate::storage::page::page_types::b_plus_tree_header_page::INVALID_PAGE_ID;
+    use parking_lot::RwLock;
+    use std::sync::Arc;
+    use tempfile::tempdir;
 
     #[test]
     fn test_header_page_in_buffer_pool() {
@@ -420,25 +440,31 @@ mod integration_tests {
 
         // Create dependencies for buffer pool manager
         let db_file_path = db_file.to_string_lossy().to_string();
-        let log_file_path = temp_dir.path().join("test.log").to_string_lossy().to_string();
+        let log_file_path = temp_dir
+            .path()
+            .join("test.log")
+            .to_string_lossy()
+            .to_string();
         let disk_manager = Arc::new(FileDiskManager::new(
             db_file_path,
             log_file_path,
-            4096  // Standard page size as buffer size
+            4096, // Standard page size as buffer size
         ));
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2))); // 10 frames, K=2
 
         // Create buffer pool manager with all required parameters
         let buffer_pool_manager = BufferPoolManager::new(
-            10,                  // pool_size
-            disk_scheduler,      // disk_scheduler
-            disk_manager,        // disk_manager
-            replacer             // replacer
+            10,             // pool_size
+            disk_scheduler, // disk_scheduler
+            disk_manager,   // disk_manager
+            replacer,       // replacer
         );
 
         // Allocate a page for the header page
-        let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager.new_page().expect("Failed to allocate new page");
+        let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager
+            .new_page()
+            .expect("Failed to allocate new page");
         let header_page_id = page.get_page_id();
 
         // Create and write a header page
@@ -460,7 +486,8 @@ mod integration_tests {
 
         // Fetch and verify the header page
         {
-            let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager.fetch_page(header_page_id)
+            let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager
+                .fetch_page(header_page_id)
                 .expect("Failed to fetch header page");
 
             // Get the raw data and deserialize

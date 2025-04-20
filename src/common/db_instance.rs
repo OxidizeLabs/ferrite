@@ -10,6 +10,7 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
+use crate::recovery::log_recovery::LogRecoveryManager;
 use crate::recovery::wal_manager::WALManager;
 use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::execution_context::ExecutionContext;
@@ -23,6 +24,7 @@ use log::error;
 use log::{debug, info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Configuration options for DB instance
@@ -52,6 +54,7 @@ pub struct DBInstance {
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     log_manager: Arc<RwLock<LogManager>>,
     wal_manager: Arc<WALManager>,
+    recovery_manager: Option<Arc<LogRecoveryManager>>,
     config: DBConfig,
     writer: Arc<Mutex<dyn ResultWriter>>,
     client_sessions: Arc<Mutex<HashMap<u64, ClientSession>>>,
@@ -89,6 +92,10 @@ impl Default for DBConfig {
 impl DBInstance {
     /// Creates a new DB instance with the given configuration
     pub fn new(config: DBConfig) -> Result<Self, DBError> {
+        // Check if database and log files already exist
+        let db_file_exists = Path::new(&config.db_filename).exists();
+        let log_file_exists = Path::new(&config.db_log_filename).exists();
+
         // Initialize disk components
         let disk_manager = Arc::new(FileDiskManager::new(
             config.db_filename.clone(),
@@ -110,7 +117,7 @@ impl DBInstance {
         ));
 
         // Initialize recovery components
-        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager)));
+        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
         log_manager.write().run_flush_thread();
 
         let transaction_manager = Arc::new(TransactionManager::new());
@@ -144,6 +151,28 @@ impl DBInstance {
             wal_manager.clone(),
         )));
 
+        // Create recovery manager and run recovery if needed
+        let recovery_manager = if db_file_exists && log_file_exists && config.enable_logging {
+            info!("Existing database and log files found, running recovery...");
+            let recovery_manager = Arc::new(LogRecoveryManager::new(
+                disk_manager,
+                buffer_pool_manager.clone(),
+                log_manager.clone(),
+            ));
+
+            // Start recovery process
+            if let Err(e) = recovery_manager.start_recovery() {
+                error!("Failed to recover database: {}", e);
+                return Err(DBError::Recovery(format!("Recovery failed: {}", e)));
+            }
+
+            info!("Database recovery completed successfully");
+            Some(recovery_manager)
+        } else {
+            info!("No existing database files or logging disabled, skipping recovery");
+            None
+        };
+
         Ok(Self {
             buffer_pool_manager,
             catalog,
@@ -152,6 +181,7 @@ impl DBInstance {
             checkpoint_manager: None,
             log_manager,
             wal_manager,
+            recovery_manager,
             config,
             writer: Arc::new(Mutex::new(CliResultWriter::new())),
             client_sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -797,5 +827,98 @@ impl DBInstance {
                 Err(e)
             }
         }
+    }
+
+    /// Checks if database and log files exist at the configured paths
+    pub fn files_exist(&self) -> (bool, bool) {
+        let db_file_exists = Path::new(&self.config.db_filename).exists();
+        let log_file_exists = Path::new(&self.config.db_log_filename).exists();
+        (db_file_exists, log_file_exists)
+    }
+
+    /// Gets the recovery manager if it exists
+    pub fn get_recovery_manager(&self) -> Option<&Arc<LogRecoveryManager>> {
+        self.recovery_manager.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn get_unique_path() -> String {
+        let start = SystemTime::now();
+        let since_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+        let timestamp =
+            since_epoch.as_secs() * 1000 + since_epoch.subsec_nanos() as u64 / 1_000_000;
+        format!("test_{}", timestamp)
+    }
+
+    /// Helper to clean up test files
+    fn cleanup_files(config: &DBConfig) {
+        let _ = fs::remove_file(&config.db_filename);
+        let _ = fs::remove_file(&config.db_log_filename);
+    }
+
+    #[test]
+    fn test_recovery_integration() {
+        // Create a unique test path
+        let test_prefix = get_unique_path();
+        let db_file = format!("tests/data/{}.db", test_prefix);
+        let log_file = format!("tests/data/{}.log", test_prefix);
+
+        // Create parent directory if it doesn't exist
+        fs::create_dir_all("tests/data").unwrap();
+
+        // Create configuration
+        let mut config = DBConfig::default();
+        config.db_filename = db_file.clone();
+        config.db_log_filename = log_file.clone();
+        config.enable_logging = true;
+
+        // First session - create DB for the first time (no recovery)
+        {
+            let db_instance = DBInstance::new(config.clone()).unwrap();
+            let (db_exists, log_exists) = db_instance.files_exist();
+            assert!(db_exists, "Database file should exist after initialization");
+            assert!(log_exists, "Log file should exist after initialization");
+            assert!(
+                db_instance.get_recovery_manager().is_none(),
+                "No recovery manager should be created on first run"
+            );
+
+            // Execute a simple transaction to create some log records
+            let mut writer = CliResultWriter::new();
+            db_instance
+                .execute_sql(
+                    "CREATE TABLE test (id INTEGER, value VARCHAR);",
+                    IsolationLevel::ReadCommitted,
+                    &mut writer,
+                )
+                .unwrap();
+        }
+
+        // Second session - open existing DB (should trigger recovery)
+        {
+            let db_instance = DBInstance::new(config.clone()).unwrap();
+            assert!(
+                db_instance.get_recovery_manager().is_some(),
+                "Recovery manager should be created on second run"
+            );
+
+            // Validate recovery worked by checking if table exists
+            let mut writer = CliResultWriter::new();
+            let result = db_instance.execute_sql(
+                "SELECT * FROM test;",
+                IsolationLevel::ReadCommitted,
+                &mut writer,
+            );
+            assert!(result.is_ok(), "Should be able to query recovered table");
+        }
+
+        // Clean up test files
+        cleanup_files(&config);
     }
 }

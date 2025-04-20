@@ -523,10 +523,10 @@ mod unit_tests {
     fn test_primary_key_modification() {
         let mut col = Column::new("id", TypeId::Integer);
         assert!(!col.is_primary_key());
-        
+
         col.set_primary_key(true);
         assert!(col.is_primary_key());
-        
+
         col.set_primary_key(false);
         assert!(!col.is_primary_key());
     }
@@ -550,11 +550,11 @@ mod unit_tests {
     #[test]
     fn test_primary_key_serialization() {
         use serde_json;
-        
+
         let original = Column::new_primary_key("id", TypeId::Integer);
         let serialized = serde_json::to_string(&original).unwrap();
         let deserialized: Column = serde_json::from_str(&serialized).unwrap();
-        
+
         assert!(deserialized.is_primary_key());
         assert_eq!(original.get_name(), deserialized.get_name());
         assert_eq!(original.get_type(), deserialized.get_type());
@@ -565,7 +565,7 @@ mod unit_tests {
         let pk_col1 = Column::new_primary_key("id", TypeId::Integer);
         let pk_col2 = Column::new_primary_key("id", TypeId::Integer);
         let non_pk_col = Column::new("id", TypeId::Integer);
-        
+
         assert_eq!(pk_col1, pk_col2);
         assert_ne!(pk_col1, non_pk_col);
     }
@@ -574,7 +574,7 @@ mod unit_tests {
     fn test_primary_key_clone() {
         let original = Column::new_primary_key("id", TypeId::Integer);
         let cloned = original.clone();
-        
+
         assert!(cloned.is_primary_key());
         assert_eq!(original.get_name(), cloned.get_name());
         assert_eq!(original.get_type(), cloned.get_type());
@@ -585,7 +585,7 @@ mod unit_tests {
         let pk_col = Column::new_primary_key("id", TypeId::Integer);
         let display_str = format!("{}", pk_col);
         assert_eq!(display_str, "id(Integer)");
-        
+
         let debug_str = format!("{:#}", pk_col);
         assert!(debug_str.contains("id"));
         assert!(debug_str.contains("Integer"));
@@ -601,7 +601,7 @@ mod unit_tests {
             TypeId::BigInt,
             TypeId::VarChar,
         ];
-        
+
         for type_id in types {
             let pk_col = Column::new_primary_key("id", type_id);
             assert!(pk_col.is_primary_key());
@@ -614,12 +614,12 @@ mod unit_tests {
     fn test_primary_key_changes_preserve_other_properties() {
         let mut col = Column::new("id", TypeId::Integer);
         col.set_offset(10);
-        
+
         col.set_primary_key(true);
         assert!(col.is_primary_key());
         assert_eq!(col.get_offset(), 10);
         assert_eq!(col.get_storage_size(), 4);
-        
+
         col.set_primary_key(false);
         assert!(!col.is_primary_key());
         assert_eq!(col.get_offset(), 10);
