@@ -241,7 +241,6 @@ impl<
         Some(self.values[left].clone())
     }
 
-
     /// Remove a key and its corresponding value (child pointer) from the internal page
     pub fn remove_key_value_at(&mut self, index: usize) -> bool {
         if index >= self.size {
@@ -446,7 +445,6 @@ impl<
             self.pin_count -= 1;
         }
     }
-
 
     fn get_data(&self) -> &[u8; DB_PAGE_SIZE as usize] {
         &self.data
@@ -665,9 +663,9 @@ mod tests {
         assert_eq!(page.get_value_at(3), Some(300));
 
         // Test finding child for a key
-        assert_eq!(page.find_child_for_key(&3), Some(100));  // 3 < 7, so leftmost
-        assert_eq!(page.find_child_for_key(&7), Some(400));  // Equal to 7
-        assert_eq!(page.find_child_for_key(&8), Some(400));  // 7 <= 8 < 10
+        assert_eq!(page.find_child_for_key(&3), Some(100)); // 3 < 7, so leftmost
+        assert_eq!(page.find_child_for_key(&7), Some(400)); // Equal to 7
+        assert_eq!(page.find_child_for_key(&8), Some(400)); // 7 <= 8 < 10
         assert_eq!(page.find_child_for_key(&12), Some(200)); // 10 <= 12 < 15
         assert_eq!(page.find_child_for_key(&20), Some(300)); // 20 >= 15, so rightmost
     }
@@ -675,18 +673,16 @@ mod tests {
 
 #[cfg(test)]
 mod more_tests {
-    use std::cmp::Ordering;
     use super::*;
+    use std::cmp::Ordering;
 
     fn int_comparator(a: &i32, b: &i32) -> Ordering {
         a.cmp(b)
     }
 
-    fn verify_internal_node_invariants<C>(
-        page: &BPlusTreeInternalPage<i32, C>,
-    ) -> bool
+    fn verify_internal_node_invariants<C>(page: &BPlusTreeInternalPage<i32, C>) -> bool
     where
-        C: Fn(&i32, &i32) -> Ordering + Send + Sync + 'static + Clone
+        C: Fn(&i32, &i32) -> Ordering + Send + Sync + 'static + Clone,
     {
         // Check size constraints
         if page.get_size() == 0 {
@@ -695,31 +691,36 @@ mod more_tests {
 
         // Check that size matches actual elements
         if page.get_size() != page.values.len() {
-            println!("Size mismatch: get_size()={}, values.len()={}",
-                     page.get_size(), page.values.len());
+            println!(
+                "Size mismatch: get_size()={}, values.len()={}",
+                page.get_size(),
+                page.values.len()
+            );
             return false;
         }
 
         // Check key count is exactly one less than value count
         if page.get_size() > 0 && page.keys.len() != page.values.len() - 1 {
-            println!("Key-value relationship violated: keys.len()={}, values.len()={}",
-                     page.keys.len(), page.values.len());
+            println!(
+                "Key-value relationship violated: keys.len()={}, values.len()={}",
+                page.keys.len(),
+                page.values.len()
+            );
             return false;
         }
 
         // Check keys are in sorted order
         for i in 1..page.keys.len() {
-            let prev_key = &page.keys[i-1];
+            let prev_key = &page.keys[i - 1];
             let curr_key = &page.keys[i];
             if (page.comparator)(prev_key, curr_key) != Ordering::Less {
-                println!("Keys not in sorted order at indices {} and {}", i-1, i);
+                println!("Keys not in sorted order at indices {} and {}", i - 1, i);
                 return false;
             }
         }
 
         true
     }
-
 
     #[test]
     fn test_basic_insertion_order() {
@@ -873,13 +874,13 @@ mod more_tests {
         // [ptr=500] [key=20] [ptr=200] [key=50] [ptr=500] [key=80] [ptr=800]
 
         // Test finding the appropriate child for different keys
-        assert_eq!(page.find_child_for_key(&10), Some(500));  // < 20, so leftmost
-        assert_eq!(page.find_child_for_key(&20), Some(200));  // = 20
-        assert_eq!(page.find_child_for_key(&35), Some(200));  // Between 20 and 50
-        assert_eq!(page.find_child_for_key(&50), Some(500));  // = 50
-        assert_eq!(page.find_child_for_key(&65), Some(500));  // Between 50 and 80
-        assert_eq!(page.find_child_for_key(&80), Some(800));  // = 80
-        assert_eq!(page.find_child_for_key(&90), Some(800));  // > 80, so rightmost
+        assert_eq!(page.find_child_for_key(&10), Some(500)); // < 20, so leftmost
+        assert_eq!(page.find_child_for_key(&20), Some(200)); // = 20
+        assert_eq!(page.find_child_for_key(&35), Some(200)); // Between 20 and 50
+        assert_eq!(page.find_child_for_key(&50), Some(500)); // = 50
+        assert_eq!(page.find_child_for_key(&65), Some(500)); // Between 50 and 80
+        assert_eq!(page.find_child_for_key(&80), Some(800)); // = 80
+        assert_eq!(page.find_child_for_key(&90), Some(800)); // > 80, so rightmost
 
         assert!(verify_internal_node_invariants(&page));
     }

@@ -2390,7 +2390,7 @@ impl ExpressionParser {
                 Ok(children)
             }
             FunctionArguments::Subquery(_) => {
-                return Err("Subquery function arguments not yet supported".to_string());
+                Err("Subquery function arguments not yet supported".to_string())
             }
             FunctionArguments::List(list) => {
                 for arg in &list.args {

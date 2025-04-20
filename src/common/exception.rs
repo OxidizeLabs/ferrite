@@ -257,6 +257,9 @@ pub enum DBError {
 
     #[error("SqlError error: {0}")]
     SqlError(String),
+
+    #[error("Recovery error: {0}")]
+    Recovery(String),
 }
 
 impl Error for PageError {}

@@ -214,6 +214,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
                     DBError::OptimizeError(msg) => format!("Optimization Error: {}", msg),
                     DBError::SqlError(msg) => format!("SQL Error: {}", msg),
                     DBError::Client(msg) => format!("Database Error: {}", msg),
+                    DBError::Recovery(msg) => format!("Recovery Error: {}", msg),
                 };
                 eprintln!("\n{}\n", error_msg);
             }

@@ -112,30 +112,40 @@ impl ExpressionOps for ColumnRefExpression {
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Check if the column index is within bounds of the schema
-        println!("ColumnRefExpression::validate - column_index: {}, schema columns: {}", 
-            self.column_index, schema.get_column_count());
-            
+        println!(
+            "ColumnRefExpression::validate - column_index: {}, schema columns: {}",
+            self.column_index,
+            schema.get_column_count()
+        );
+
         if self.column_index >= schema.get_column_count() as usize {
             let error = ExpressionError::InvalidColumnIndex(self.column_index);
-            println!("ColumnRefExpression::validate - column index out of bounds, returning: {:?}", error);
+            println!(
+                "ColumnRefExpression::validate - column index out of bounds, returning: {:?}",
+                error
+            );
             return Err(error);
         }
 
         // Get the column from schema and verify type matches
-        let schema_column = schema
-            .get_column(self.column_index)
-            .ok_or_else(|| {
-                let error = ExpressionError::InvalidColumnIndex(self.column_index);
-                println!("ColumnRefExpression::validate - column not found, returning: {:?}", error);
+        let schema_column = schema.get_column(self.column_index).ok_or_else(|| {
+            let error = ExpressionError::InvalidColumnIndex(self.column_index);
+            println!(
+                "ColumnRefExpression::validate - column not found, returning: {:?}",
                 error
-            })?;
+            );
+            error
+        })?;
 
         if schema_column.get_type() != self.ret_type.get_type() {
             let error = ExpressionError::TypeMismatch {
                 expected: self.ret_type.get_type(),
                 actual: schema_column.get_type(),
             };
-            println!("ColumnRefExpression::validate - type mismatch, returning: {:?}", error);
+            println!(
+                "ColumnRefExpression::validate - type mismatch, returning: {:?}",
+                error
+            );
             return Err(error);
         }
 

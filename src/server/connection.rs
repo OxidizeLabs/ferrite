@@ -43,6 +43,7 @@ fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), se
             DBError::Validation(msg) => format!("Validation Error: {}", msg),
             DBError::TableNotFound(msg) => format!("TableNotFound Error: {}", msg),
             DBError::OptimizeError(msg) => format!("OptimizeError Error: {}", msg),
+            DBError::Recovery(msg) => format!("RecoveryError Error: {}", msg),
         };
         debug!("{}", format_log(client_id, "Details", &details));
     }
@@ -144,6 +145,7 @@ fn format_client_error(error: &(dyn StdError + 'static)) -> String {
             DBError::OptimizeError(msg) => format!("Optimization Error: {}", msg),
             DBError::SqlError(msg) => format!("SQL Error: {}", msg),
             DBError::Client(msg) => format!("Database Error: {}", msg),
+            DBError::Recovery(msg) => format!("Recovery Error: {}", msg),
         }
     } else {
         error.to_string()

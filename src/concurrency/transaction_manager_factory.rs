@@ -25,7 +25,7 @@ impl TransactionManagerFactory {
             wal_manager: None,
         }
     }
-    
+
     pub fn with_wal_manager(
         buffer_pool_manager: Arc<BufferPoolManager>,
         wal_manager: Arc<WALManager>,
@@ -43,7 +43,7 @@ impl TransactionManagerFactory {
 
     pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
         let txn = self.transaction_manager.begin(isolation_level).unwrap();
-        
+
         // Write begin record to WAL if WAL manager is available
         if let Some(wal_manager) = &self.wal_manager {
             let lsn = wal_manager.write_begin_record(txn.as_ref());

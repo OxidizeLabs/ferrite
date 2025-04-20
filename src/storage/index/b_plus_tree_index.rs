@@ -1,4 +1,5 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::common::config::DB_PAGE_SIZE;
 use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
@@ -23,7 +24,6 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
-use crate::common::config::DB_PAGE_SIZE;
 
 /// Trait for types that can be used as keys in indexes
 pub trait KeyType: Sized + Clone + PartialEq + PartialOrd {
@@ -130,13 +130,13 @@ impl TypedBPlusTreeIndex {
         comparator: I32Comparator,
         metadata: IndexInfo,
         buffer_pool_manager: Arc<BufferPoolManager>,
-
     ) -> Self {
         let index = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
             comparator,
-            metadata, buffer_pool_manager,
+            metadata,
+            buffer_pool_manager,
             100,
-            100
+            100,
         );
 
         Self {
@@ -238,7 +238,15 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: Clone + Sync + Send + Debug + 'static + Display + KeyType + Serialize + for<'de> Deserialize<'de>,
+    K: Clone
+        + Sync
+        + Send
+        + Debug
+        + 'static
+        + Display
+        + KeyType
+        + Serialize
+        + for<'de> Deserialize<'de>,
     V: Clone + Sync + Send + 'static + ValueType + Serialize + for<'de> Deserialize<'de>,
     C: Fn(&K, &K) -> Ordering + Sync + Send + 'static + Clone + KeyComparator<K>,
 {
@@ -248,7 +256,7 @@ where
         let mut page: BPlusTreeLeafPage<_, V, _> = BPlusTreeLeafPage::new_with_options(
             page_id,
             self.leaf_max_size,
-            self.comparator.clone()
+            self.comparator.clone(),
         );
 
         // Serialize page data to prepare for storage
@@ -267,7 +275,7 @@ where
         let mut page = BPlusTreeInternalPage::new_with_options(
             page_id,
             self.internal_max_size,
-            self.comparator.clone()
+            self.comparator.clone(),
         );
 
         // Serialize page data to prepare for storage

@@ -257,7 +257,9 @@ impl LogicalPlanBuilder {
             // Apply HAVING clause if it exists
             if let Some(having) = &select.having {
                 // Use the schema after aggregation for parsing the HAVING clause
-                let having_expr = self.expression_parser.parse_expression(having, &agg_schema_clone)?;
+                let having_expr = self
+                    .expression_parser
+                    .parse_expression(having, &agg_schema_clone)?;
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name
@@ -808,12 +810,12 @@ impl LogicalPlanBuilder {
 
         for table_with_joins in &select.from {
             let table_plan = self.process_table_with_joins(table_with_joins)?;
-            
+
             if let Some(existing_plan) = current_plan {
                 // If we already have a plan, create a cross join with the new table
                 let left_schema = existing_plan.get_schema().clone();
                 let right_schema = table_plan.get_schema().clone();
-                
+
                 current_plan = Some(Box::new(LogicalPlan::new(
                     LogicalPlanType::NestedLoopJoin {
                         left_schema,
@@ -835,54 +837,50 @@ impl LogicalPlanBuilder {
         current_plan.ok_or_else(|| "Failed to create join plan".to_string())
     }
 
-    fn process_table_with_joins(&self, table_with_joins: &TableWithJoins) -> Result<Box<LogicalPlan>, String> {
+    fn process_table_with_joins(
+        &self,
+        table_with_joins: &TableWithJoins,
+    ) -> Result<Box<LogicalPlan>, String> {
         // First process the base table
         let mut current_plan = self.process_table_factor(&table_with_joins.relation)?;
 
         // Process each join
         for join in &table_with_joins.joins {
             let right_plan = self.process_table_factor(&join.relation)?;
-            
+
             let left_schema = current_plan.get_schema().clone();
             let right_schema = right_plan.get_schema().clone();
-            let joined_schema = Schema::merge_with_aliases(
-                &left_schema,
-                &right_schema,
-                None,
-                None,
-            );
+            let joined_schema = Schema::merge_with_aliases(&left_schema, &right_schema, None, None);
 
             // Get the join condition if it exists
             let predicate = match &join.join_operator {
-                JoinOperator::Inner(constraint) |
-                JoinOperator::LeftOuter(constraint) |
-                JoinOperator::RightOuter(constraint) |
-                JoinOperator::FullOuter(constraint) => {
-                    match constraint {
-                        JoinConstraint::On(expr) => {
-                            self.expression_parser.parse_expression(expr, &joined_schema)?
-                        }
-                        _ => return Err("Only ON constraints are supported for joins".to_string()),
+                JoinOperator::Inner(constraint)
+                | JoinOperator::LeftOuter(constraint)
+                | JoinOperator::RightOuter(constraint)
+                | JoinOperator::FullOuter(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for joins".to_string()),
+                },
+                JoinOperator::CrossJoin => Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("TRUE", TypeId::Boolean),
+                    vec![],
+                )),
+                JoinOperator::LeftSemi(constraint)
+                | JoinOperator::RightSemi(constraint)
+                | JoinOperator::LeftAnti(constraint)
+                | JoinOperator::RightAnti(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => {
+                        return Err(
+                            "Only ON constraints are supported for semi/anti joins".to_string()
+                        )
                     }
-                }
-                JoinOperator::CrossJoin => {
-                    Expression::Constant(ConstantExpression::new(
-                        Value::new(true),
-                        Column::new("TRUE", TypeId::Boolean),
-                        vec![],
-                    ))
-                }
-                JoinOperator::LeftSemi(constraint) |
-                JoinOperator::RightSemi(constraint) |
-                JoinOperator::LeftAnti(constraint) |
-                JoinOperator::RightAnti(constraint) => {
-                    match constraint {
-                        JoinConstraint::On(expr) => {
-                            self.expression_parser.parse_expression(expr, &joined_schema)?
-                        }
-                        _ => return Err("Only ON constraints are supported for semi/anti joins".to_string()),
-                    }
-                }
+                },
                 _ => return Err(format!("Unsupported join type: {:?}", join.join_operator)),
             };
 
@@ -923,9 +921,11 @@ impl LogicalPlanBuilder {
 
                 Ok(LogicalPlan::table_scan(table_name, schema, table_oid))
             }
-            TableFactor::Derived { subquery, alias, .. } => {
+            TableFactor::Derived {
+                subquery, alias, ..
+            } => {
                 let mut plan = self.build_query_plan(subquery)?;
-                
+
                 // Apply alias if provided
                 if let Some(table_alias) = alias {
                     let alias_name = table_alias.name.value.clone();
@@ -940,19 +940,22 @@ impl LogicalPlanBuilder {
                     }
                     plan = Box::new(LogicalPlan::new(
                         LogicalPlanType::Projection {
-                            expressions: vec![],  // Will be filled by projection
+                            expressions: vec![], // Will be filled by projection
                             schema: Schema::new(aliased_columns),
                             column_mappings: vec![],
                         },
                         vec![plan],
                     ));
                 }
-                
+
                 Ok(plan)
             }
-            TableFactor::NestedJoin { table_with_joins, alias } => {
+            TableFactor::NestedJoin {
+                table_with_joins,
+                alias,
+            } => {
                 let mut plan = self.process_table_with_joins(table_with_joins)?;
-                
+
                 // Apply alias if provided
                 if let Some(table_alias) = alias {
                     let alias_name = table_alias.name.value.clone();
@@ -967,14 +970,14 @@ impl LogicalPlanBuilder {
                     }
                     plan = Box::new(LogicalPlan::new(
                         LogicalPlanType::Projection {
-                            expressions: vec![],  // Will be filled by projection
+                            expressions: vec![], // Will be filled by projection
                             schema: Schema::new(aliased_columns),
                             column_mappings: vec![],
                         },
                         vec![plan],
                     ));
                 }
-                
+
                 Ok(plan)
             }
             _ => Err(format!("Unsupported table factor type: {:?}", table_factor)),
@@ -1701,11 +1704,7 @@ mod tests {
 
         fn setup_test_table(fixture: &mut TestContext) {
             fixture
-                .create_table(
-                    "test_sales",
-                    "region VARCHAR(255), amount DECIMAL",
-                    false,
-                )
+                .create_table("test_sales", "region VARCHAR(255), amount DECIMAL", false)
                 .unwrap();
         }
 

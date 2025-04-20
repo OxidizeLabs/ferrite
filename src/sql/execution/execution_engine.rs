@@ -17,11 +17,11 @@ use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info};
+use md5;
 use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
-use md5;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -299,11 +299,11 @@ impl ExecutionEngine {
 
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        
+
         // Write commit record to WAL
         let transaction = txn_ctx.get_transaction();
         let lsn = self.wal_manager.write_commit_record(transaction.as_ref());
-        
+
         // Update transaction's LSN
         transaction.set_prev_lsn(lsn);
 
@@ -325,11 +325,11 @@ impl ExecutionEngine {
 
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        
+
         // Write abort record to WAL
         let transaction = txn_ctx.get_transaction();
         let lsn = self.wal_manager.write_abort_record(transaction.as_ref());
-        
+
         // Update transaction's LSN
         transaction.set_prev_lsn(lsn);
 
@@ -444,7 +444,12 @@ mod tests {
                 transaction_context.clone(),
             )));
 
-            let engine = ExecutionEngine::new(catalog.clone(), bpm.clone(), transaction_factory, wal_manager);
+            let engine = ExecutionEngine::new(
+                catalog.clone(),
+                bpm.clone(),
+                transaction_factory,
+                wal_manager,
+            );
 
             let planner = QueryPlanner::new(catalog.clone());
 
@@ -1308,21 +1313,24 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        ctx.create_test_table("users", users_schema.clone()).unwrap();
+        ctx.create_test_table("users", users_schema.clone())
+            .unwrap();
 
         // Create posts table
         let posts_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("title", TypeId::VarChar),
         ]);
-        ctx.create_test_table("posts", posts_schema.clone()).unwrap();
+        ctx.create_test_table("posts", posts_schema.clone())
+            .unwrap();
 
         // Insert test data for users
         let users_data = vec![
             vec![Value::new(1), Value::new("Alice")],
             vec![Value::new(2), Value::new("Bob")],
         ];
-        ctx.insert_tuples("users", users_data, users_schema).unwrap();
+        ctx.insert_tuples("users", users_data, users_schema)
+            .unwrap();
 
         // Insert test data for posts
         let posts_data = vec![
@@ -1330,30 +1338,33 @@ mod tests {
             vec![Value::new(2), Value::new("Post 2")],
             vec![Value::new(3), Value::new("Post 3")],
         ];
-        ctx.insert_tuples("posts", posts_data, posts_schema).unwrap();
+        ctx.insert_tuples("posts", posts_data, posts_schema)
+            .unwrap();
 
         // Test cases for cross joins
         let test_cases = vec![
             (
                 "SELECT * FROM users, posts",
-                6,  // 2 users × 3 posts = 6 rows
-                4,  // 2 columns from users + 2 columns from posts = 4 columns
+                6, // 2 users × 3 posts = 6 rows
+                4, // 2 columns from users + 2 columns from posts = 4 columns
             ),
             (
                 "SELECT users.name, posts.title FROM users, posts",
-                6,  // 2 users × 3 posts = 6 rows
-                2,  // Only name and title columns
+                6, // 2 users × 3 posts = 6 rows
+                2, // Only name and title columns
             ),
             (
                 "SELECT u.name, p.title FROM users u, posts p",
-                6,  // 2 users × 3 posts = 6 rows
-                2,  // Only name and title columns
+                6, // 2 users × 3 posts = 6 rows
+                2, // Only name and title columns
             ),
         ];
 
         for (sql, expected_rows, expected_cols) in test_cases {
             let mut writer = TestResultWriter::new();
-            let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap_or_else(|e| panic!("Query execution failed for '{}': {:?}", sql, e));
 
             assert!(success, "Query execution failed for: {}", sql);
@@ -1383,10 +1394,22 @@ mod tests {
             if sql == "SELECT * FROM users, posts" {
                 // Verify first row structure
                 let first_row = &rows[0];
-                assert!(first_row[0].get_type_id() == TypeId::Integer, "First column should be users.id");
-                assert!(first_row[1].get_type_id() == TypeId::VarChar, "Second column should be users.name");
-                assert!(first_row[2].get_type_id() == TypeId::Integer, "Third column should be posts.id");
-                assert!(first_row[3].get_type_id() == TypeId::VarChar, "Fourth column should be posts.title");
+                assert!(
+                    first_row[0].get_type_id() == TypeId::Integer,
+                    "First column should be users.id"
+                );
+                assert!(
+                    first_row[1].get_type_id() == TypeId::VarChar,
+                    "Second column should be users.name"
+                );
+                assert!(
+                    first_row[2].get_type_id() == TypeId::Integer,
+                    "Third column should be posts.id"
+                );
+                assert!(
+                    first_row[3].get_type_id() == TypeId::VarChar,
+                    "Fourth column should be posts.title"
+                );
 
                 // Verify we have all combinations
                 let mut seen_combinations = Vec::new();
@@ -1436,22 +1459,44 @@ mod tests {
         let test_data = vec![
             // c values chosen to make it easy to verify against average
             // average of c values will be 150
-            vec![Value::new(100), Value::new(10), Value::new(100), Value::new(1), Value::new(1)],  // b*10 = 100
-            vec![Value::new(100), Value::new(20), Value::new(200), Value::new(1), Value::new(1)],  // a*2 = 200
-            vec![Value::new(100), Value::new(30), Value::new(150), Value::new(1), Value::new(1)],  // b*10 = 300
+            vec![
+                Value::new(100),
+                Value::new(10),
+                Value::new(100),
+                Value::new(1),
+                Value::new(1),
+            ], // b*10 = 100
+            vec![
+                Value::new(100),
+                Value::new(20),
+                Value::new(200),
+                Value::new(1),
+                Value::new(1),
+            ], // a*2 = 200
+            vec![
+                Value::new(100),
+                Value::new(30),
+                Value::new(150),
+                Value::new(1),
+                Value::new(1),
+            ], // b*10 = 300
         ];
 
         ctx.insert_tuples("t1", test_data, table_schema).unwrap();
 
         // Execute the same query as the main test
-        let sql = "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
+        let sql =
+            "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
         let mut writer = TestResultWriter::new();
-        let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+        let success = ctx
+            .engine
+            .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
         assert!(success, "Query execution failed");
 
         // Get the results
         let rows = writer.get_rows();
-        
+
         // Print debug info
         println!("Average of c values should be 150");
         println!("Results:");
@@ -1463,7 +1508,8 @@ mod tests {
         assert_eq!(rows.len(), 3, "Expected 3 rows in result");
 
         // Convert results to integers for easier comparison
-        let results: Vec<i32> = rows.iter()
+        let results: Vec<i32> = rows
+            .iter()
             .map(|row| row[0].to_string().parse::<i32>().unwrap())
             .collect();
 
@@ -1494,44 +1540,228 @@ mod tests {
 
         // Insert the same test data as in the original test
         let test_data = vec![
-            vec![Value::new(104), Value::new(100), Value::new(102), Value::new(101), Value::new(103)],
-            vec![Value::new(107), Value::new(105), Value::new(106), Value::new(108), Value::new(109)],
-            vec![Value::new(111), Value::new(112), Value::new(113), Value::new(114), Value::new(110)],
-            vec![Value::new(115), Value::new(118), Value::new(119), Value::new(116), Value::new(117)],
-            vec![Value::new(121), Value::new(124), Value::new(123), Value::new(122), Value::new(120)],
-            vec![Value::new(127), Value::new(129), Value::new(125), Value::new(128), Value::new(126)],
-            vec![Value::new(131), Value::new(130), Value::new(134), Value::new(133), Value::new(132)],
-            vec![Value::new(138), Value::new(139), Value::new(137), Value::new(136), Value::new(135)],
-            vec![Value::new(142), Value::new(143), Value::new(141), Value::new(140), Value::new(144)],
-            vec![Value::new(149), Value::new(145), Value::new(147), Value::new(148), Value::new(146)],
-            vec![Value::new(153), Value::new(151), Value::new(150), Value::new(154), Value::new(152)],
-            vec![Value::new(159), Value::new(158), Value::new(155), Value::new(156), Value::new(157)],
-            vec![Value::new(163), Value::new(160), Value::new(161), Value::new(164), Value::new(162)],
-            vec![Value::new(168), Value::new(167), Value::new(166), Value::new(169), Value::new(165)],
-            vec![Value::new(174), Value::new(170), Value::new(172), Value::new(171), Value::new(173)],
-            vec![Value::new(179), Value::new(175), Value::new(176), Value::new(178), Value::new(177)],
-            vec![Value::new(182), Value::new(181), Value::new(184), Value::new(183), Value::new(180)],
-            vec![Value::new(188), Value::new(186), Value::new(187), Value::new(185), Value::new(189)],
-            vec![Value::new(191), Value::new(194), Value::new(193), Value::new(190), Value::new(192)],
-            vec![Value::new(199), Value::new(198), Value::new(195), Value::new(196), Value::new(197)],
-            vec![Value::new(201), Value::new(200), Value::new(202), Value::new(203), Value::new(204)],
-            vec![Value::new(205), Value::new(206), Value::new(208), Value::new(207), Value::new(209)],
-            vec![Value::new(213), Value::new(211), Value::new(214), Value::new(212), Value::new(210)],
-            vec![Value::new(216), Value::new(218), Value::new(215), Value::new(217), Value::new(219)],
-            vec![Value::new(220), Value::new(223), Value::new(224), Value::new(222), Value::new(221)],
-            vec![Value::new(229), Value::new(228), Value::new(225), Value::new(226), Value::new(227)],
-            vec![Value::new(234), Value::new(232), Value::new(231), Value::new(233), Value::new(230)],
-            vec![Value::new(239), Value::new(236), Value::new(235), Value::new(238), Value::new(237)],
-            vec![Value::new(243), Value::new(240), Value::new(244), Value::new(241), Value::new(242)],
-            vec![Value::new(245), Value::new(249), Value::new(247), Value::new(248), Value::new(246)]
+            vec![
+                Value::new(104),
+                Value::new(100),
+                Value::new(102),
+                Value::new(101),
+                Value::new(103),
+            ],
+            vec![
+                Value::new(107),
+                Value::new(105),
+                Value::new(106),
+                Value::new(108),
+                Value::new(109),
+            ],
+            vec![
+                Value::new(111),
+                Value::new(112),
+                Value::new(113),
+                Value::new(114),
+                Value::new(110),
+            ],
+            vec![
+                Value::new(115),
+                Value::new(118),
+                Value::new(119),
+                Value::new(116),
+                Value::new(117),
+            ],
+            vec![
+                Value::new(121),
+                Value::new(124),
+                Value::new(123),
+                Value::new(122),
+                Value::new(120),
+            ],
+            vec![
+                Value::new(127),
+                Value::new(129),
+                Value::new(125),
+                Value::new(128),
+                Value::new(126),
+            ],
+            vec![
+                Value::new(131),
+                Value::new(130),
+                Value::new(134),
+                Value::new(133),
+                Value::new(132),
+            ],
+            vec![
+                Value::new(138),
+                Value::new(139),
+                Value::new(137),
+                Value::new(136),
+                Value::new(135),
+            ],
+            vec![
+                Value::new(142),
+                Value::new(143),
+                Value::new(141),
+                Value::new(140),
+                Value::new(144),
+            ],
+            vec![
+                Value::new(149),
+                Value::new(145),
+                Value::new(147),
+                Value::new(148),
+                Value::new(146),
+            ],
+            vec![
+                Value::new(153),
+                Value::new(151),
+                Value::new(150),
+                Value::new(154),
+                Value::new(152),
+            ],
+            vec![
+                Value::new(159),
+                Value::new(158),
+                Value::new(155),
+                Value::new(156),
+                Value::new(157),
+            ],
+            vec![
+                Value::new(163),
+                Value::new(160),
+                Value::new(161),
+                Value::new(164),
+                Value::new(162),
+            ],
+            vec![
+                Value::new(168),
+                Value::new(167),
+                Value::new(166),
+                Value::new(169),
+                Value::new(165),
+            ],
+            vec![
+                Value::new(174),
+                Value::new(170),
+                Value::new(172),
+                Value::new(171),
+                Value::new(173),
+            ],
+            vec![
+                Value::new(179),
+                Value::new(175),
+                Value::new(176),
+                Value::new(178),
+                Value::new(177),
+            ],
+            vec![
+                Value::new(182),
+                Value::new(181),
+                Value::new(184),
+                Value::new(183),
+                Value::new(180),
+            ],
+            vec![
+                Value::new(188),
+                Value::new(186),
+                Value::new(187),
+                Value::new(185),
+                Value::new(189),
+            ],
+            vec![
+                Value::new(191),
+                Value::new(194),
+                Value::new(193),
+                Value::new(190),
+                Value::new(192),
+            ],
+            vec![
+                Value::new(199),
+                Value::new(198),
+                Value::new(195),
+                Value::new(196),
+                Value::new(197),
+            ],
+            vec![
+                Value::new(201),
+                Value::new(200),
+                Value::new(202),
+                Value::new(203),
+                Value::new(204),
+            ],
+            vec![
+                Value::new(205),
+                Value::new(206),
+                Value::new(208),
+                Value::new(207),
+                Value::new(209),
+            ],
+            vec![
+                Value::new(213),
+                Value::new(211),
+                Value::new(214),
+                Value::new(212),
+                Value::new(210),
+            ],
+            vec![
+                Value::new(216),
+                Value::new(218),
+                Value::new(215),
+                Value::new(217),
+                Value::new(219),
+            ],
+            vec![
+                Value::new(220),
+                Value::new(223),
+                Value::new(224),
+                Value::new(222),
+                Value::new(221),
+            ],
+            vec![
+                Value::new(229),
+                Value::new(228),
+                Value::new(225),
+                Value::new(226),
+                Value::new(227),
+            ],
+            vec![
+                Value::new(234),
+                Value::new(232),
+                Value::new(231),
+                Value::new(233),
+                Value::new(230),
+            ],
+            vec![
+                Value::new(239),
+                Value::new(236),
+                Value::new(235),
+                Value::new(238),
+                Value::new(237),
+            ],
+            vec![
+                Value::new(243),
+                Value::new(240),
+                Value::new(244),
+                Value::new(241),
+                Value::new(242),
+            ],
+            vec![
+                Value::new(245),
+                Value::new(249),
+                Value::new(247),
+                Value::new(248),
+                Value::new(246),
+            ],
         ];
 
         ctx.insert_tuples("t1", test_data, table_schema).unwrap();
 
         // Execute the query
-        let sql = "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
+        let sql =
+            "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
         let mut writer = TestResultWriter::new();
-        let success = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).unwrap();
+        let success = ctx
+            .engine
+            .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
         assert!(success, "Query execution failed");
 
         // Get the results
@@ -1545,21 +1775,30 @@ mod tests {
         }
 
         // Join values with newlines and compute hash
-        let data = rows.iter()
+        let data = rows
+            .iter()
             .map(|row| row[0].to_string())
             .collect::<Vec<String>>()
-            .join("\n") + "\n";
+            .join("\n")
+            + "\n";
 
-        println!("\nFinal string being hashed (between ===):\n===\n{}===", data);
+        println!(
+            "\nFinal string being hashed (between ===):\n===\n{}===",
+            data
+        );
         println!("String length: {}", data.len());
         println!("Bytes: {:?}", data.as_bytes());
-        
+
         let digest = md5::compute(data.as_bytes());
         let hash = format!("{:x}", digest);
         println!("Computed hash: {}", hash);
 
         // The expected hash from the original test
         let expected_hash = "3c13dee48d9356ae19af2515e05e6b54";
-        assert_eq!(hash, expected_hash, "Hash mismatch - expected {}, got {}", expected_hash, hash);
+        assert_eq!(
+            hash, expected_hash,
+            "Hash mismatch - expected {}, got {}",
+            expected_hash, hash
+        );
     }
 }
