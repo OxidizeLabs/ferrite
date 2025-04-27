@@ -9,18 +9,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use std::sync::Mutex;
 
-/// LogManager maintains a separate thread that is awakened whenever the log buffer is full or whenever a timeout
+/// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
 #[derive(Debug)]
 pub struct LogManager {
+    state: Arc<LogManagerState>,
+}
+
+#[derive(Debug)]
+struct LogManagerState {
     next_lsn: AtomicU64,
     persistent_lsn: AtomicU64,
-    log_buffer: Arc<RwLock<LogBuffer>>,
-    flush_thread: Option<thread::JoinHandle<()>>,
-    stop_flag: Arc<AtomicBool>,
+    log_buffer: RwLock<LogBuffer>,
+    flush_thread: Mutex<Option<thread::JoinHandle<()>>>,
+    stop_flag: AtomicBool,
     disk_manager: Arc<FileDiskManager>,
-    log_queue: (Sender<LogRecord>, Receiver<LogRecord>),
+    log_queue: (Sender<Arc<LogRecord>>, Receiver<Arc<LogRecord>>),
 }
 
 #[derive(Debug)]
@@ -72,58 +78,136 @@ impl LogManager {
         let (sender, receiver) = bounded(1000); // Bounded channel for backpressure
 
         Self {
-            next_lsn: AtomicU64::new(0),
-            persistent_lsn: AtomicU64::new(INVALID_LSN),
-            log_buffer: Arc::new(RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize))),
-            flush_thread: None,
-            stop_flag: Arc::new(AtomicBool::new(false)),
-            disk_manager,
-            log_queue: (sender, receiver),
+            state: Arc::new(LogManagerState {
+                next_lsn: AtomicU64::new(0),
+                persistent_lsn: AtomicU64::new(INVALID_LSN),
+                log_buffer: RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize)),
+                flush_thread: Mutex::new(None),
+                stop_flag: AtomicBool::new(false),
+                disk_manager,
+                log_queue: (sender, receiver),
+            }),
         }
     }
 
     /// Runs the flush thread which writes the log buffer's content to the disk.
     pub fn run_flush_thread(&mut self) {
-        let disk_manager = Arc::clone(&self.disk_manager);
-        let stop_flag = Arc::clone(&self.stop_flag);
-        let receiver = self.log_queue.1.clone();
+        let state = Arc::clone(&self.state);
 
-        self.flush_thread = Some(thread::spawn(move || {
+        let thread = thread::spawn(move || {
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
+            let mut batch_start_lsn: Option<Lsn> = None;
+            let mut max_lsn_in_batch: Lsn = INVALID_LSN;
+            let mut last_flush_time = std::time::Instant::now();
+            let flush_interval = Duration::from_millis(10);
 
-            while !stop_flag.load(Ordering::SeqCst) {
+            while !state.stop_flag.load(Ordering::SeqCst) {
+                let mut records_processed = false;
+
                 // Process queued log records
-                while let Ok(record) = receiver.try_recv() {
+                while let Ok(record) = state.log_queue.1.try_recv() {
+                    records_processed = true;
+                    let record_lsn = record.get_lsn();
+
+                    // Track highest LSN in this batch
+                    if record_lsn > max_lsn_in_batch {
+                        max_lsn_in_batch = record_lsn;
+                    }
+
+                    // Track first LSN in this batch if not set
+                    if batch_start_lsn.is_none() {
+                        batch_start_lsn = Some(record_lsn);
+                    }
+
                     let bytes = record.to_string();
                     if !flush_buffer.append(bytes.as_bytes()) {
                         // Buffer full, flush it
                         if !flush_buffer.is_empty() {
-                            if let Err(e) = disk_manager.write_log(flush_buffer.get_data()) {
+                            if let Err(e) = state.disk_manager.write_log(flush_buffer.get_data()) {
                                 error!("Failed to write log to disk: {}", e);
+                            } else {
+                                // Update persistent LSN after successful flush
+                                state.persistent_lsn.store(max_lsn_in_batch, Ordering::SeqCst);
+                                debug!("Flushed log buffer, persistent LSN updated to {}", max_lsn_in_batch);
                             }
                             flush_buffer.clear();
+                            batch_start_lsn = Some(record_lsn);
+                            max_lsn_in_batch = record_lsn;
                         }
-                        // Try append again
+                        // Try append again with fresh buffer
                         flush_buffer.append(bytes.as_bytes());
                     }
+
+                    // Check if record is a commit - force flush if it is
+                    if record.is_commit() {
+                        if !flush_buffer.is_empty() {
+                            if let Err(e) = state.disk_manager.write_log(flush_buffer.get_data()) {
+                                error!("Failed to write log to disk on commit: {}", e);
+                            } else {
+                                state.persistent_lsn.store(max_lsn_in_batch, Ordering::SeqCst);
+                                debug!("Flushed log buffer for commit, persistent LSN updated to {}", max_lsn_in_batch);
+                            }
+                            flush_buffer.clear();
+                            batch_start_lsn = None;
+                            max_lsn_in_batch = INVALID_LSN;
+                        }
+                    }
                 }
 
-                // Periodically flush if buffer not empty
-                if !flush_buffer.is_empty() {
-                    if let Err(e) = disk_manager.write_log(flush_buffer.get_data()) {
-                        error!("Failed to write log to disk: {}", e);
+                // Periodically flush if buffer not empty and either:
+                // 1. It's been too long since last flush
+                // 2. No new records but buffer has content
+                let now = std::time::Instant::now();
+                if !flush_buffer.is_empty() &&
+                    (now.duration_since(last_flush_time) >= flush_interval || !records_processed) {
+                    if let Err(e) = state.disk_manager.write_log(flush_buffer.get_data()) {
+                        error!("Failed to write log to disk in periodic flush: {}", e);
+                    } else {
+                        state.persistent_lsn.store(max_lsn_in_batch, Ordering::SeqCst);
+                        debug!("Periodic flush, persistent LSN updated to {}", max_lsn_in_batch);
                     }
                     flush_buffer.clear();
+                    batch_start_lsn = None;
+                    max_lsn_in_batch = INVALID_LSN;
+                    last_flush_time = now;
                 }
 
-                thread::sleep(Duration::from_millis(10));
+                if !records_processed {
+                    thread::sleep(Duration::from_millis(5));
+                }
             }
-        }));
+
+            // Final flush before exiting
+            if !flush_buffer.is_empty() {
+                if let Err(e) = state.disk_manager.write_log(flush_buffer.get_data()) {
+                    error!("Failed to write log to disk during shutdown: {}", e);
+                } else if max_lsn_in_batch != INVALID_LSN {
+                    state.persistent_lsn.store(max_lsn_in_batch, Ordering::SeqCst);
+                }
+            }
+        });
+
+        // Store the thread handle, handle potential mutex poisoning gracefully
+        if let Ok(mut flush_thread) = self.state.flush_thread.lock() {
+            *flush_thread = Some(thread);
+        } else {
+            error!("Failed to acquire flush thread mutex - it may be poisoned");
+        }
     }
 
     pub fn shut_down(&mut self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.flush_thread.take() {
+        self.state.stop_flag.store(true, Ordering::SeqCst);
+        
+        // Handle mutex poisoning gracefully
+        let thread_handle = if let Ok(mut guard) = self.state.flush_thread.lock() {
+            guard.take()
+        } else {
+            error!("Failed to acquire flush thread mutex during shutdown - it may be poisoned");
+            None
+        };
+        
+        // Join the thread if we got a valid handle
+        if let Some(handle) = thread_handle {
             handle.join().unwrap_or_else(|e| {
                 error!("Flush thread panicked: {:?}", e);
             });
@@ -137,21 +221,28 @@ impl LogManager {
     ///
     /// # Returns
     /// The log sequence number (LSN) of the appended log record.
-    pub fn append_log_record(&mut self, log_record: &LogRecord) -> Lsn {
-        let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
+    pub fn append_log_record(&mut self, log_record: Arc<LogRecord>) -> Lsn {
+        // Assign a new LSN atomically
+        let lsn = self.state.next_lsn.fetch_add(1, Ordering::SeqCst);
 
-        // Clone the record before sending
-        if let Err(e) = self.log_queue.0.send(log_record.clone()) {
+        // Send log record to processing queue
+        if let Err(e) = self.state.log_queue.0.send(log_record.clone()) {
             error!("Failed to queue log record: {}", e);
-            // Handle error appropriately
+            // Consider implementing retry logic or returning an error
         }
 
-        // For commit records, wait for flush
+        // For commit records, ensure durability by waiting for buffer to be flushed
         if log_record.is_commit() {
-            // Wait for buffer to be flushed
-            while !self.log_buffer.read().is_empty() {
+            // Signal the flush thread that this is a commit record
+            // Wait for confirmation that it has been flushed
+            trace!("Waiting for commit record with LSN {} to be flushed", lsn);
+
+            // Wait for buffer to be flushed (observe persistent_lsn ≥ lsn)
+            while self.state.persistent_lsn.load(Ordering::SeqCst) < lsn {
                 thread::sleep(Duration::from_millis(1));
             }
+
+            debug!("Commit record with LSN {} has been flushed", lsn);
         }
 
         lsn
@@ -159,14 +250,14 @@ impl LogManager {
 
     /// Returns the next log sequence number (LSN).
     pub fn get_next_lsn(&self) -> Lsn {
-        let lsn = self.next_lsn.load(Ordering::SeqCst);
+        let lsn = self.state.next_lsn.load(Ordering::SeqCst);
         trace!("Retrieved next LSN: {}", lsn);
         lsn
     }
 
     /// Returns the persistent log sequence number (LSN).
     pub fn get_persistent_lsn(&self) -> Lsn {
-        let lsn = self.persistent_lsn.load(Ordering::SeqCst);
+        let lsn = self.state.persistent_lsn.load(Ordering::SeqCst);
         trace!("Retrieved persistent LSN: {}", lsn);
         lsn
     }
@@ -177,11 +268,11 @@ impl LogManager {
     /// - `lsn`: The log sequence number to set.
     pub fn set_persistent_lsn(&mut self, lsn: Lsn) {
         debug!("Setting persistent LSN to {}", lsn);
-        self.persistent_lsn.store(lsn, Ordering::SeqCst);
+        self.state.persistent_lsn.store(lsn, Ordering::SeqCst);
     }
 
     pub fn get_log_buffer_size(&self) -> usize {
-        let size = self.log_buffer.read().data.len();
+        let size = self.state.log_buffer.read().data.len();
         trace!("Retrieved log buffer size: {}", size);
         size
     }
@@ -269,10 +360,10 @@ mod tests {
         let prev_lsn = INVALID_LSN;
 
         // Create a begin transaction log record
-        let log_record = LogRecord::new_transaction_record(txn_id, prev_lsn, LogRecordType::Begin);
+        let log_record = Arc::new(LogRecord::new_transaction_record(txn_id, prev_lsn, LogRecordType::Begin));
 
         // Append the log record
-        let lsn = ctx.log_manager.append_log_record(&log_record);
+        let lsn = ctx.log_manager.append_log_record(log_record);
         assert_eq!(lsn, 0); // First LSN should be 0
 
         // Verify LSN was incremented
@@ -288,9 +379,10 @@ mod tests {
 
         // Append multiple log records
         for i in 0..5 {
-            let log_record =
-                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
-            let lsn = ctx.log_manager.append_log_record(&log_record);
+            let log_record = Arc::new(
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin)
+            );
+            let lsn = ctx.log_manager.append_log_record(log_record);
             assert_eq!(lsn, i);
         }
 
@@ -321,9 +413,10 @@ mod tests {
 
         // Append some log records
         for i in 0..3 {
-            let log_record =
-                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
-            ctx.log_manager.append_log_record(&log_record);
+            let log_record = Arc::new(
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin)
+            );
+            ctx.log_manager.append_log_record(log_record);
         }
 
         // Shutdown should complete cleanly
@@ -336,11 +429,11 @@ mod tests {
         let mut next_lsn = 0;
 
         // Create all records first
-        let begin_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
+        let begin_record = Arc::new(LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin));
 
         // Append begin record and get LSN
         let begin_lsn = {
-            let lsn = ctx.log_manager.append_log_record(&begin_record);
+            let lsn = ctx.log_manager.append_log_record(begin_record.clone());
             next_lsn += 1;
             assert_eq!(lsn, 0);
             lsn
@@ -350,16 +443,16 @@ mod tests {
         thread::sleep(Duration::from_millis(1));
 
         // Create and append commit record
-        let commit_record = LogRecord::new_transaction_record(1, begin_lsn, LogRecordType::Commit);
-        let commit_lsn = ctx.log_manager.append_log_record(&commit_record);
+        let commit_record = Arc::new(LogRecord::new_transaction_record(1, begin_lsn, LogRecordType::Commit));
+        let commit_lsn = ctx.log_manager.append_log_record(commit_record);
         next_lsn += 1;
         assert_eq!(commit_lsn, 1);
 
         thread::sleep(Duration::from_millis(1));
 
         // Create and append abort record
-        let abort_record = LogRecord::new_transaction_record(2, INVALID_LSN, LogRecordType::Abort);
-        let abort_lsn = ctx.log_manager.append_log_record(&abort_record);
+        let abort_record = Arc::new(LogRecord::new_transaction_record(2, INVALID_LSN, LogRecordType::Abort));
+        let abort_lsn = ctx.log_manager.append_log_record(abort_record);
         next_lsn += 1;
         assert_eq!(abort_lsn, 2);
 
@@ -377,11 +470,11 @@ mod tests {
         let mut ctx = TestContext::new("large_records_test");
 
         // Create a large log record
-        let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
+        let log_record = Arc::new(LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin));
 
         // Append multiple large records
         for _ in 0..5 {
-            ctx.log_manager.append_log_record(&log_record);
+            ctx.log_manager.append_log_record(log_record.clone());
         }
 
         // assert!(ctx.log_manager.get_log_buffer().len() > 1000);
@@ -398,12 +491,12 @@ mod tests {
         for i in 0..thread_count {
             let ctx_clone = Arc::clone(&ctx);
             let handle = thread::spawn(move || {
-                let log_record = LogRecord::new_transaction_record(
+                let log_record = Arc::new(LogRecord::new_transaction_record(
                     i as TxnId,
                     INVALID_LSN,
                     LogRecordType::Begin,
-                );
-                ctx_clone.write().log_manager.append_log_record(&log_record)
+                ));
+                ctx_clone.write().log_manager.append_log_record(log_record)
             });
             handles.push(handle);
         }
@@ -429,9 +522,10 @@ mod tests {
 
         // Append some records
         for i in 0..3 {
-            let log_record =
-                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin);
-            ctx.log_manager.append_log_record(&log_record);
+            let log_record = Arc::new(
+                LogRecord::new_transaction_record(i as TxnId, INVALID_LSN, LogRecordType::Begin)
+            );
+            ctx.log_manager.append_log_record(log_record);
         }
 
         // Test multiple shutdown calls (should handle gracefully)
@@ -444,12 +538,12 @@ mod tests {
         let mut ctx = TestContext::new("log_level_test");
 
         // Create log record once and reuse
-        let log_record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
+        let log_record = Arc::new(LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin));
 
         // Test trace-level logging with minimal lock holding
         {
             trace!("Testing trace-level logging");
-            ctx.log_manager.append_log_record(&log_record);
+            ctx.log_manager.append_log_record(log_record.clone());
         }
 
         // Test debug-level logging in separate scope
@@ -470,12 +564,12 @@ mod tests {
             // Fill buffer in chunks to avoid holding lock too long
             for chunk in 0..10 {
                 for i in 0..100 {
-                    let record = LogRecord::new_transaction_record(
+                    let record = Arc::new(LogRecord::new_transaction_record(
                         (chunk * 100 + i) as TxnId,
                         INVALID_LSN,
                         LogRecordType::Begin,
-                    );
-                    ctx.log_manager.append_log_record(&record);
+                    ));
+                    ctx.log_manager.append_log_record(record);
                 }
                 // Give other threads a chance to run
                 thread::sleep(Duration::from_millis(1));
