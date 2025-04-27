@@ -18,33 +18,33 @@ impl WALManager {
     }
 
     pub fn write_commit_record(&self, txn: &Transaction) -> u64 {
-        let commit_record = LogRecord::new_transaction_record(
+        let commit_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
             txn.get_prev_lsn(),
             LogRecordType::Commit,
-        );
+        ));
         let mut log_manager = self.log_manager.write();
-        log_manager.append_log_record(&commit_record)
+        log_manager.append_log_record(commit_record)
     }
 
     pub fn write_abort_record(&self, txn: &Transaction) -> u64 {
-        let abort_record = LogRecord::new_transaction_record(
+        let abort_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
             txn.get_prev_lsn(),
             LogRecordType::Abort,
-        );
+        ));
         let mut log_manager = self.log_manager.write();
-        log_manager.append_log_record(&abort_record)
+        log_manager.append_log_record(abort_record)
     }
 
     pub fn write_begin_record(&self, txn: &Transaction) -> u64 {
-        let begin_record = LogRecord::new_transaction_record(
+        let begin_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
             INVALID_LSN,
             LogRecordType::Begin,
-        );
+        ));
         let mut log_manager = self.log_manager.write();
-        log_manager.append_log_record(&begin_record)
+        log_manager.append_log_record(begin_record)
     }
 
     pub fn write_update_record(
@@ -54,15 +54,15 @@ impl WALManager {
         old_tuple: Tuple,
         new_tuple: Tuple,
     ) -> u64 {
-        let update_record = LogRecord::new_update_record(
+        let update_record = Arc::new(LogRecord::new_update_record(
             txn.get_transaction_id(),
             txn.get_prev_lsn(),
             LogRecordType::Update,
             rid,
-            old_tuple,
-            new_tuple,
-        );
+            Arc::new(old_tuple),
+            Arc::new(new_tuple),
+        ));
         let mut log_manager = self.log_manager.write();
-        log_manager.append_log_record(&update_record)
+        log_manager.append_log_record(update_record)
     }
 }
