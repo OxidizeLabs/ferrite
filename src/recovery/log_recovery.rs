@@ -24,63 +24,9 @@ struct TxnTable {
     table: HashMap<TxnId, Lsn>,
 }
 
-impl TxnTable {
-    fn new() -> Self {
-        Self {
-            table: HashMap::new(),
-        }
-    }
-
-    fn add_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
-        self.table.insert(txn_id, lsn);
-    }
-
-    fn update_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
-        if self.table.contains_key(&txn_id) {
-            self.table.insert(txn_id, lsn);
-        }
-    }
-
-    fn remove_txn(&mut self, txn_id: TxnId) {
-        self.table.remove(&txn_id);
-    }
-
-    fn contains_txn(&self, txn_id: TxnId) -> bool {
-        self.table.contains_key(&txn_id)
-    }
-
-    fn get_prev_lsn(&self, txn_id: TxnId) -> Option<Lsn> {
-        self.table.get(&txn_id).copied()
-    }
-
-    fn get_active_txns(&self) -> Vec<TxnId> {
-        self.table.keys().copied().collect()
-    }
-}
-
 /// Keeps track of dirty pages during recovery for efficient checkpointing
 struct DirtyPageTable {
     table: HashMap<PageId, Lsn>,
-}
-
-impl DirtyPageTable {
-    fn new() -> Self {
-        Self {
-            table: HashMap::new(),
-        }
-    }
-
-    fn add_page(&mut self, page_id: PageId, lsn: Lsn) {
-        self.table.entry(page_id).or_insert(lsn);
-    }
-
-    fn get_rec_lsn(&self, page_id: PageId) -> Option<Lsn> {
-        self.table.get(&page_id).copied()
-    }
-
-    fn get_dirty_pages(&self) -> Vec<(PageId, Lsn)> {
-        self.table.iter().map(|(&pid, &lsn)| (pid, lsn)).collect()
-    }
 }
 
 impl LogRecoveryManager {
@@ -198,7 +144,7 @@ impl LogRecoveryManager {
                             dirty_page_table.add_page(*page_id, lsn);
                         }
                     }
-                    _ => {} // Ignore invalid records
+                    LogRecordType::Invalid => {}
                 }
 
                 // Update offset for next read
@@ -498,6 +444,60 @@ impl LogRecoveryManager {
             // In a real implementation, we would restore the deleted tuple
         }
         Ok(())
+    }
+}
+
+impl TxnTable {
+    fn new() -> Self {
+        Self {
+            table: HashMap::new(),
+        }
+    }
+
+    fn add_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
+        self.table.insert(txn_id, lsn);
+    }
+
+    fn update_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
+        if self.table.contains_key(&txn_id) {
+            self.table.insert(txn_id, lsn);
+        }
+    }
+
+    fn remove_txn(&mut self, txn_id: TxnId) {
+        self.table.remove(&txn_id);
+    }
+
+    fn contains_txn(&self, txn_id: TxnId) -> bool {
+        self.table.contains_key(&txn_id)
+    }
+
+    fn get_prev_lsn(&self, txn_id: TxnId) -> Option<Lsn> {
+        self.table.get(&txn_id).copied()
+    }
+
+    fn get_active_txns(&self) -> Vec<TxnId> {
+        self.table.keys().copied().collect()
+    }
+}
+
+impl DirtyPageTable {
+    fn new() -> Self {
+        Self {
+            table: HashMap::new(),
+        }
+    }
+
+    fn add_page(&mut self, page_id: PageId, lsn: Lsn) {
+        self.table.entry(page_id).or_insert(lsn);
+    }
+
+    fn get_rec_lsn(&self, page_id: PageId) -> Option<Lsn> {
+        self.table.get(&page_id).copied()
+    }
+
+    fn get_dirty_pages(&self) -> Vec<(PageId, Lsn)> {
+        self.table.iter().map(|(&pid, &lsn)| (pid, lsn)).collect()
     }
 }
 
