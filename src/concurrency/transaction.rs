@@ -1,12 +1,11 @@
-use crate::common::config::{
-    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID,
-};
+use crate::common::config::{Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID};
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use crate::storage::table::tuple::TupleMeta;
 use log;
+use log::debug;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -34,7 +33,7 @@ pub enum IsolationLevel {
 }
 
 /// Represents a link to a previous version of this tuple.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct UndoLink {
     /// Previous version can be found in which txn.
     pub prev_txn: TxnId,
@@ -43,14 +42,14 @@ pub struct UndoLink {
 }
 
 /// Represents an undo log entry.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct UndoLog {
     /// Whether this log is a deletion marker.
     pub is_deleted: bool,
     /// The fields modified by this undo log.
     pub modified_fields: Vec<bool>,
     /// The modified fields.
-    pub tuple: Tuple,
+    pub tuple: Arc<Tuple>,
     /// Timestamp of this undo log.
     pub ts: TimeStampOidT,
     /// Undo log previous version.
@@ -69,13 +68,40 @@ pub struct Transaction {
     state: RwLock<TransactionState>,
     read_ts: RwLock<Timestamp>,
     commit_ts: RwLock<Timestamp>,
-    undo_logs: Mutex<Vec<UndoLog>>,
+    undo_logs: Mutex<Vec<Arc<UndoLog>>>,
     write_set: Mutex<HashMap<TableOidT, HashSet<RID>>>,
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
     prev_lsn: RwLock<Lsn>,
 }
 
+impl UndoLog {
+    /// Creates a new UndoLog entry
+    pub fn new(
+        is_deleted: bool,
+        modified_fields: Vec<bool>,
+        tuple: Arc<Tuple>,
+        ts: TimeStampOidT,
+        prev_version: UndoLink,
+    ) -> Self {
+        Self {
+            is_deleted,
+            modified_fields,
+            tuple,
+            ts,
+            prev_version,
+        }
+    }
+}
+
 impl UndoLink {
+    
+    pub fn new(txn_id: TxnId, log_idx: usize) -> Self {
+        Self {
+            prev_txn: txn_id,
+            prev_log_idx: log_idx
+        }
+    }
+    
     /// Checks if the undo link points to something.
     pub fn is_valid(&self) -> bool {
         self.prev_txn != INVALID_TXN_ID
@@ -131,12 +157,12 @@ impl Transaction {
     /// Returns the human-readable transaction ID, stripping the highest bit.
     /// This should only be used for debugging.
     pub fn txn_id_human_readable(&self) -> TxnId {
-        self.txn_id ^ crate::common::config::TXN_START_ID
+        self.txn_id ^ TXN_START_ID
     }
 
     /// Returns the temporary timestamp of this transaction.
     pub fn temp_ts(&self) -> TimeStampOidT {
-        self.txn_id.try_into().unwrap()
+        self.txn_id
     }
 
     /// Returns the isolation level of this transaction.
@@ -176,7 +202,7 @@ impl Transaction {
     /// # Parameters
     /// - `log_idx`: The index of the undo log to modify.
     /// - `new_log`: The new undo log entry.
-    pub fn modify_undo_log(&self, log_idx: usize, new_log: UndoLog) {
+    pub fn modify_undo_log(&self, log_idx: usize, new_log: Arc<UndoLog>) {
         let mut logs = self.undo_logs.lock().unwrap();
         logs[log_idx] = new_log;
     }
@@ -188,13 +214,13 @@ impl Transaction {
     ///
     /// # Returns
     /// The link to the appended undo log entry.
-    pub fn append_undo_log(&self, log: UndoLog) -> UndoLink {
+    pub fn append_undo_log(&self, log: Arc<UndoLog>) -> UndoLink {
         let mut logs = self.undo_logs.lock().unwrap();
         let idx = logs.len();
         logs.push(log);
 
         // Add debug logging
-        log::debug!(
+        debug!(
             "Appended undo log at index {} for txn {}. New length: {}",
             idx,
             self.txn_id,
@@ -214,15 +240,19 @@ impl Transaction {
     ///
     /// # Returns
     /// The undo log entry at the specified index.
-    pub fn get_undo_log(&self, log_id: usize) -> UndoLog {
-        // Add debug logging
-        log::debug!(
-            "Getting undo log at index {} for txn {}. Current undo logs: {}",
-            log_id,
-            self.txn_id,
-            self.undo_logs.lock().unwrap().len()
-        );
-        self.undo_logs.lock().unwrap()[log_id].clone()
+    pub fn get_undo_log(&self, log_id: usize) -> Arc<UndoLog> {
+        debug!(
+        "Getting undo log at index {} for txn {}. Current undo logs: {}",
+        log_id,
+        self.txn_id,
+        self.undo_logs.lock().unwrap().len()
+    );
+
+        // Lock the mutex and clone the Arc before returning
+        let undo_logs = self.undo_logs.lock().unwrap();
+        undo_logs.get(log_id)
+            .expect(&format!("Undo log at index {} not found", log_id))
+            .clone()
     }
 
     /// Returns the number of undo log entries.
@@ -271,11 +301,7 @@ impl Transaction {
             .or_insert_with(Vec::new)
             .push(predicate);
     }
-
-    /// Returns the scan predicates.
-    pub fn scan_predicates(&self) -> HashMap<u32, Vec<Arc<Expression>>> {
-        self.scan_predicates.lock().unwrap().clone()
-    }
+    
 
     /// Sets the transaction state to tainted.
     pub fn set_tainted(&self) {
@@ -327,7 +353,7 @@ impl Transaction {
 
     /// Enhanced tuple visibility check that considers watermark
     pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
-        log::debug!(
+        debug!(
             "Transaction.is_tuple_visible(): txn_id={}, isolation={:?}, read_ts={}, meta={{creator={}, commit_ts={}, deleted={}}}",
             self.txn_id, self.isolation_level, *self.read_ts.read(), 
             meta.get_creator_txn_id(), meta.get_commit_timestamp(), meta.is_deleted()
@@ -348,40 +374,17 @@ impl Transaction {
                 let visible = meta.is_committed() &&
                     meta.get_commit_timestamp() <= *self.read_ts.read() &&
                     !meta.is_deleted();
-                log::debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
+                debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
             }
         }
     }
 }
 
-impl Default for Transaction {
-    fn default() -> Self {
-        Transaction::new(0, IsolationLevel::ReadUncommitted)
-    }
-}
 
 impl Default for IsolationLevel {
     fn default() -> Self {
         IsolationLevel::ReadCommitted
-    }
-}
-
-// Manually implement Clone for Transaction
-impl Clone for Transaction {
-    fn clone(&self) -> Self {
-        Self {
-            txn_id: self.txn_id,
-            isolation_level: self.isolation_level,
-            thread_id: self.thread_id,
-            state: RwLock::new(*self.state.read()),
-            read_ts: RwLock::new(*self.read_ts.read()),
-            commit_ts: RwLock::new(*self.commit_ts.read()),
-            undo_logs: Mutex::new(self.undo_logs.lock().unwrap().clone()),
-            write_set: Mutex::new(self.write_set.lock().unwrap().clone()),
-            scan_predicates: Mutex::new(self.scan_predicates.lock().unwrap().clone()),
-            prev_lsn: RwLock::new(*self.prev_lsn.read()),
-        }
     }
 }
 
@@ -483,45 +486,72 @@ mod tests {
     #[test]
     fn test_transaction_undo_logs() {
         let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
-        let tuple = create_test_tuple();
+        
+        // Create multiple undo logs with modifications
+        let tuple1 = create_test_tuple();
+        let undo_log1 = UndoLog::new(
+            false,
+            vec![true, false],
+            Arc::new(tuple1),
+            100,
+            UndoLink::new(INVALID_TXN_ID, 0)
+        );
 
-        // Create test undo log
-        let undo_log = UndoLog {
-            is_deleted: false,
-            modified_fields: vec![true, false],
-            tuple: tuple.clone(),
-            ts: 100,
-            prev_version: UndoLink {
-                prev_txn: INVALID_TXN_ID,
-                prev_log_idx: 0,
-            },
-        };
-
-        // Test append undo log
-        let link = txn.append_undo_log(undo_log.clone());
-        assert_eq!(link, UndoLink {
-            prev_txn: txn.get_transaction_id(),  // Should be txn's ID (1), not INVALID_TXN_ID
-            prev_log_idx: 0,
-        });
-
-        // Test get undo log
-        let retrieved_log = txn.get_undo_log(0);
-        assert_eq!(retrieved_log.is_deleted, undo_log.is_deleted);
-        assert_eq!(retrieved_log.modified_fields, undo_log.modified_fields);
-        assert_eq!(retrieved_log.ts, undo_log.ts);
-        assert_eq!(retrieved_log.prev_version, undo_log.prev_version);
-
-        // Test modify undo log
-        let mut modified_log = undo_log.clone();
-        modified_log.is_deleted = true;
-        txn.modify_undo_log(0, modified_log);
-        let retrieved_modified = txn.get_undo_log(0);
-        assert!(retrieved_modified.is_deleted);
-
-        // Test undo log count and clear
+        // Append first undo log
+        let link1 = txn.append_undo_log(Arc::new(undo_log1));
+        assert_eq!(link1.prev_txn, txn.get_transaction_id());
+        assert_eq!(link1.prev_log_idx, 0);
         assert_eq!(txn.get_undo_log_num(), 1);
+
+        // Create a second undo log that points to the first
+        let mut tuple2 = create_test_tuple();
+        tuple2.get_values_mut()[0] = Value::new(2); // Change the ID value
+
+        let undo_log2 = UndoLog::new(
+            false,
+            vec![true, false],
+            Arc::new(tuple2),
+            200,
+            link1.clone() // Clone the link to avoid moving it
+        );
+
+        // Append second undo log
+        let link2 = txn.append_undo_log(Arc::new(undo_log2));
+        assert_eq!(link2.prev_txn, txn.get_transaction_id());
+        assert_eq!(link2.prev_log_idx, 1);
+        assert_eq!(txn.get_undo_log_num(), 2);
+
+        // Verify undo log chain
+        let retrieved_log2 = txn.get_undo_log(link2.prev_log_idx);
+        assert_eq!(retrieved_log2.ts, 200);
+        assert_eq!(retrieved_log2.prev_version.prev_txn, link1.prev_txn);
+        assert_eq!(retrieved_log2.prev_version.prev_log_idx, link1.prev_log_idx);
+
+        // Get first log through chain
+        let retrieved_log1 = txn.get_undo_log(retrieved_log2.prev_version.prev_log_idx);
+        assert_eq!(retrieved_log1.ts, 100);
+        assert_eq!(retrieved_log1.prev_version.prev_txn, INVALID_TXN_ID);
+
+        // Modify an existing log
+        let tuple3 = create_test_tuple();
+        let modified_log1 = UndoLog::new(
+            true, // changed to true (deleted)
+            vec![true, false],
+            Arc::new(tuple3),
+            150, // changed timestamp
+            UndoLink::new(INVALID_TXN_ID, 0)
+        );
+
+        txn.modify_undo_log(link1.prev_log_idx, Arc::new(modified_log1));
+
+        // Verify modification
+        let updated_log1 = txn.get_undo_log(link1.prev_log_idx);
+        assert!(updated_log1.is_deleted);
+        assert_eq!(updated_log1.ts, 150);
+
+        // Test clear
         let cleared_count = txn.clear_undo_log();
-        assert_eq!(cleared_count, 1);
+        assert_eq!(cleared_count, 2);
         assert_eq!(txn.get_undo_log_num(), 0);
     }
 
@@ -586,7 +616,7 @@ mod tests {
         txn.append_scan_predicate(2, predicate1.clone());
 
         // Test get scan predicates
-        let scan_predicates = txn.scan_predicates();
+        let scan_predicates = txn.get_scan_predicates();
         assert_eq!(scan_predicates.len(), 2); // Two tables
         assert_eq!(scan_predicates.get(&1).unwrap().len(), 2); // Two predicates for table 1
         assert_eq!(scan_predicates.get(&2).unwrap().len(), 1); // One predicate for table 2
@@ -663,34 +693,61 @@ mod tests {
 
     #[test]
     fn test_concurrent_undo_log_operations() {
+        // Create a shared transaction
         let txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
-        let tuple = create_test_tuple();
         let thread_count = 5;
         let mut handles = vec![];
-
+        
+        // Create an initial tuple and undo log
+        let tuple = create_test_tuple();
+        let initial_log = UndoLog::new(
+            false, vec![true, false],
+            Arc::new(tuple),
+            100,
+            UndoLink::new(INVALID_TXN_ID, 0)
+        );
+        
+        // Add the initial log to the transaction
+        let initial_link = txn.append_undo_log(Arc::new(initial_log));
+        assert_eq!(txn.get_undo_log_num(), 1);
+        
+        // Each thread will read the current log and create a modified version that only changes the timestamp
         for i in 0..thread_count {
             let txn_clone = Arc::clone(&txn);
-            let tuple_clone = tuple.clone();
+            
             let handle = thread::spawn(move || {
-                let undo_log = UndoLog {
-                    is_deleted: false,
-                    modified_fields: vec![true, false],
-                    tuple: tuple_clone,
-                    ts: i as TimeStampOidT,
-                    prev_version: UndoLink {
-                        prev_txn: INVALID_TXN_ID,
-                        prev_log_idx: 0,
-                    },
-                };
-                txn_clone.append_undo_log(undo_log);
+                // Get the current log
+                let current_log = txn_clone.get_undo_log(initial_link.prev_log_idx);
+                
+                // Create a new modified log with only the timestamp changed
+                let new_tuple = create_test_tuple();
+                
+                let new_modified_log = UndoLog::new(
+                    current_log.is_deleted,
+                    current_log.modified_fields.clone(),
+                    Arc::new(new_tuple),
+                    200 + i as TimeStampOidT, // Unique timestamp per thread
+                    current_log.prev_version.clone()
+                );
+                
+                // Modify the log entry in the transaction
+                txn_clone.modify_undo_log(initial_link.prev_log_idx, Arc::new(new_modified_log));
             });
             handles.push(handle);
         }
 
+        // Wait for all threads to complete
         for handle in handles {
             handle.join().unwrap();
         }
 
-        assert_eq!(txn.get_undo_log_num(), thread_count);
+        // Verify that we still have only one log entry
+        assert_eq!(txn.get_undo_log_num(), 1);
+        
+        // Check the final timestamp is one of the thread modifications
+        let final_log = txn.get_undo_log(initial_link.prev_log_idx);
+        assert!(final_log.ts >= 200 && final_log.ts < 200 + thread_count as TimeStampOidT,
+                "Final timestamp {} should be between {} and {}", 
+                final_log.ts, 200, 200 + thread_count as TimeStampOidT - 1);
     }
 }
