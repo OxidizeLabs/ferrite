@@ -118,7 +118,7 @@ impl TupleMeta {
 }
 
 /// Represents a tuple in the database.
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Eq)]
+#[derive(Debug, PartialEq, PartialOrd, Serialize, Deserialize, Eq)]
 pub struct Tuple {
     values: Vec<Value>,
     rid: RID,
