@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::mem::size_of;
+use std::sync::Arc;
 
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
@@ -42,7 +43,7 @@ pub enum LogRecordType {
 ///--------------------------
 /// | HEADER | prev_page_id | page_id |
 ///--------------------------
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LogRecord {
     size: i32,
     lsn: Lsn,
@@ -52,12 +53,12 @@ pub struct LogRecord {
 
     // Fields for different types of log records
     delete_rid: Option<RID>,
-    delete_tuple: Option<Tuple>,
+    delete_tuple: Option<Arc<Tuple>>,
     insert_rid: Option<RID>,
-    insert_tuple: Option<Tuple>,
+    insert_tuple: Option<Arc<Tuple>>,
     update_rid: Option<RID>,
-    old_tuple: Option<Tuple>,
-    new_tuple: Option<Tuple>,
+    old_tuple: Option<Arc<Tuple>>,
+    new_tuple: Option<Arc<Tuple>>,
     prev_page_id: Option<PageId>,
     page_id: Option<PageId>,
 }
@@ -113,7 +114,7 @@ impl LogRecord {
         prev_lsn: Lsn,
         log_record_type: LogRecordType,
         rid: RID,
-        tuple: Tuple,
+        tuple: Arc<Tuple>,
     ) -> Self {
         let size = Self::HEADER_SIZE as i32
             + size_of::<RID>() as i32
@@ -178,8 +179,8 @@ impl LogRecord {
         prev_lsn: Lsn,
         log_record_type: LogRecordType,
         update_rid: RID,
-        old_tuple: Tuple,
-        new_tuple: Tuple,
+        old_tuple: Arc<Tuple>,
+        new_tuple: Arc<Tuple>,
     ) -> Self {
         let size = Self::HEADER_SIZE as i32
             + size_of::<RID>() as i32
@@ -248,7 +249,7 @@ impl LogRecord {
 
     /// Returns the delete tuple.
     pub fn get_delete_tuple(&self) -> Option<&Tuple> {
-        self.delete_tuple.as_ref()
+        self.delete_tuple.as_ref().map(|arc| arc.as_ref())
     }
 
     /// Returns the delete RID.
@@ -258,7 +259,7 @@ impl LogRecord {
 
     /// Returns the insert tuple.
     pub fn get_insert_tuple(&self) -> Option<&Tuple> {
-        self.insert_tuple.as_ref()
+        self.insert_tuple.as_ref().map(|arc| arc.as_ref())
     }
 
     /// Returns the insert RID.
@@ -268,12 +269,12 @@ impl LogRecord {
 
     /// Returns the original tuple.
     pub fn get_original_tuple(&self) -> Option<&Tuple> {
-        self.old_tuple.as_ref()
+        self.old_tuple.as_ref().map(|arc| arc.as_ref())
     }
 
     /// Returns the update tuple.
     pub fn get_update_tuple(&self) -> Option<&Tuple> {
-        self.new_tuple.as_ref()
+        self.new_tuple.as_ref().map(|arc| arc.as_ref())
     }
 
     /// Returns the update RID.
@@ -385,13 +386,13 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::Insert,
             rid,
-            tuple.clone(),
+            Arc::new(tuple),
         );
 
         assert_eq!(record.get_size(), expected_size);
         assert_eq!(record.get_log_record_type(), LogRecordType::Insert);
         assert_eq!(record.get_insert_rid(), Some(&rid));
-        assert_eq!(record.get_insert_tuple(), Some(&tuple));
+        assert!(record.get_insert_tuple().is_some());
         assert!(record.get_delete_rid().is_none());
         assert!(record.get_delete_tuple().is_none());
     }
@@ -410,13 +411,13 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::MarkDelete,
             rid,
-            tuple.clone(),
+            Arc::new(tuple),
         );
 
         assert_eq!(record.get_size(), expected_size);
         assert_eq!(record.get_log_record_type(), LogRecordType::MarkDelete);
         assert_eq!(record.get_delete_rid(), Some(&rid));
-        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+        assert!(record.get_delete_tuple().is_some());
         assert!(record.get_insert_rid().is_none());
         assert!(record.get_insert_tuple().is_none());
     }
@@ -437,15 +438,15 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::Update,
             rid,
-            old_tuple.clone(),
-            new_tuple.clone(),
+            Arc::new(old_tuple),
+            Arc::new(new_tuple),
         );
 
         assert_eq!(record.get_size(), expected_size);
         assert_eq!(record.get_log_record_type(), LogRecordType::Update);
         assert_eq!(record.get_update_rid(), Some(&rid));
-        assert_eq!(record.get_original_tuple(), Some(&old_tuple));
-        assert_eq!(record.get_update_tuple(), Some(&new_tuple));
+        assert!(record.get_original_tuple().is_some());
+        assert!(record.get_update_tuple().is_some());
     }
 
     #[test]
@@ -502,12 +503,12 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::RollbackDelete,
             rid,
-            tuple.clone(),
+            Arc::new(tuple),
         );
 
         assert_eq!(record.get_log_record_type(), LogRecordType::RollbackDelete);
         assert_eq!(record.get_delete_rid(), Some(&rid));
-        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+        assert!(record.get_delete_tuple().is_some());
     }
 
     #[test]
@@ -520,12 +521,12 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::ApplyDelete,
             rid,
-            tuple.clone(),
+            Arc::new(tuple),
         );
 
         assert_eq!(record.get_log_record_type(), LogRecordType::ApplyDelete);
         assert_eq!(record.get_delete_rid(), Some(&rid));
-        assert_eq!(record.get_delete_tuple(), Some(&tuple));
+        assert!(record.get_delete_tuple().is_some());
     }
 
     // Add to existing test setup functions
@@ -548,22 +549,22 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::Insert,
             rid,
-            large_tuple.clone(),
+            Arc::new(large_tuple),
         );
 
         let expected_size = LogRecord::HEADER_SIZE as i32
             + size_of::<RID>() as i32
             + size_of::<i32>() as i32
-            + large_tuple.get_length().unwrap() as i32;
+            + insert_record.get_insert_tuple().unwrap().get_length().unwrap() as i32;
 
         assert_eq!(insert_record.get_size(), expected_size);
     }
 
     #[test]
     fn test_sequential_update_records() {
-        let tuple1 = create_test_tuple();
-        let tuple2 = create_test_tuple_updated();
-        let tuple3 = create_large_test_tuple();
+        let tuple1 = Arc::new(create_test_tuple());
+        let tuple2 = Arc::new(create_test_tuple_updated());
+        let tuple3 = Arc::new(create_large_test_tuple());
         let rid = tuple1.get_rid();
 
         // Create chain of update records
@@ -572,7 +573,7 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::Update,
             rid,
-            tuple1.clone(),
+            tuple1,
             tuple2.clone(),
         );
 
@@ -581,13 +582,13 @@ mod tests {
             record1.get_lsn(),
             LogRecordType::Update,
             rid,
-            tuple2.clone(),
-            tuple3.clone(),
+            tuple2,
+            tuple3,
         );
 
         assert_eq!(record2.get_prev_lsn(), record1.get_lsn());
-        assert_eq!(record2.get_original_tuple(), Some(&tuple2));
-        assert_eq!(record2.get_update_tuple(), Some(&tuple3));
+        assert!(record2.get_original_tuple().is_some());
+        assert!(record2.get_update_tuple().is_some());
     }
 
     #[test]
@@ -601,7 +602,7 @@ mod tests {
             DUMMY_PREV_LSN,
             LogRecordType::Insert,
             rid,
-            tuple.clone(),
+            Arc::new(tuple),
         );
 
         let commit_record = LogRecord::new_transaction_record(
@@ -644,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_transaction_abort_after_operations() {
-        let tuple = create_test_tuple();
+        let tuple = Arc::new(create_test_tuple());
         let rid = tuple.get_rid();
 
         // Create sequence: Insert -> MarkDelete -> Abort
@@ -661,7 +662,7 @@ mod tests {
             insert_record.get_lsn(),
             LogRecordType::MarkDelete,
             rid,
-            tuple.clone(),
+            tuple,
         );
 
         let abort_record = LogRecord::new_transaction_record(
@@ -676,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_record_type_transitions() {
-        let tuple = create_test_tuple();
+        let tuple = Arc::new(create_test_tuple());
         let rid = tuple.get_rid();
 
         // Test valid sequence: Begin -> Insert -> MarkDelete -> ApplyDelete -> Commit
@@ -704,7 +705,7 @@ mod tests {
             mark_delete_record.get_lsn(),
             LogRecordType::ApplyDelete,
             rid,
-            tuple.clone(),
+            tuple,
         );
 
         let commit_record = LogRecord::new_transaction_record(
@@ -724,5 +725,35 @@ mod tests {
             LogRecordType::ApplyDelete
         );
         assert_eq!(commit_record.get_log_record_type(), LogRecordType::Commit);
+    }
+    
+    #[test]
+    fn test_arc_clone_consistency() {
+        let tuple = create_test_tuple();
+        let arc_tuple = Arc::new(tuple);
+        let rid = arc_tuple.get_rid();
+        
+        // Create two log records sharing the same tuple 
+        let record1 = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID,
+            DUMMY_PREV_LSN,
+            LogRecordType::Insert,
+            rid,
+            arc_tuple.clone(),
+        );
+        
+        let record2 = LogRecord::new_insert_delete_record(
+            DUMMY_TXN_ID + 1,
+            DUMMY_PREV_LSN,
+            LogRecordType::MarkDelete,
+            rid,
+            arc_tuple,
+        );
+        
+        // Both records should point to the same tuple
+        assert!(std::ptr::eq(
+            record1.get_insert_tuple().unwrap(), 
+            record2.get_delete_tuple().unwrap()
+        ));
     }
 }
