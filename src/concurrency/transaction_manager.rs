@@ -23,6 +23,30 @@ pub struct PageVersionInfo {
     prev_link: RwLock<HashMap<RID, UndoLink>>,
 }
 
+impl PageVersionInfo {
+    pub fn new() -> Self {
+        Self {
+            prev_link: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn get_link(&self, rid: &RID) -> Option<UndoLink> {
+        self.prev_link.read().get(rid).cloned()
+    }
+
+    pub fn set_link(&self, rid: RID, link: UndoLink) {
+        self.prev_link.write().insert(rid, link);
+    }
+
+    pub fn remove_link(&self, rid: &RID) -> Option<UndoLink> {
+        self.prev_link.write().remove(rid)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.prev_link.read().is_empty()
+    }
+}
+
 /// Represents the internal state of the transaction manager
 #[derive(Debug)]
 struct TransactionManagerState {
@@ -157,9 +181,16 @@ impl TransactionManager {
         let write_set = txn.get_write_set();
         for (_, rid) in write_set {
             if let Some(undo_link) = self.get_undo_link(rid) {
-                let mut undo_log = self.get_undo_log(undo_link.clone());
-                undo_log.ts = commit_ts;
-                txn.modify_undo_log(undo_link.prev_log_idx, undo_log);
+                let undo_log = self.get_undo_log(undo_link.clone());
+                // Create a new UndoLog with updated timestamp
+                let mut new_undo_log = UndoLog {
+                    is_deleted: undo_log.is_deleted,
+                    modified_fields: undo_log.modified_fields.clone(),
+                    tuple: undo_log.tuple.clone(),
+                    ts: commit_ts,
+                    prev_version: undo_log.prev_version.clone(),
+                };
+                txn.modify_undo_log(undo_link.prev_log_idx, Arc::new(new_undo_log));
             }
         }
 
@@ -229,9 +260,8 @@ impl TransactionManager {
                     meta.set_deleted(undo_log.is_deleted);
                     meta.set_undo_log_idx(undo_link.prev_log_idx);
 
-                    // Restore the tuple to its previous state
-                    let mut tuple = undo_log.tuple.clone();
-                    if let Err(e) = table_heap.rollback_tuple(&meta, &mut tuple, rid) {
+                    // Use a reference to the Arc<Tuple> without cloning
+                    if let Err(e) = table_heap.rollback_tuple(&meta, &*undo_log.tuple, rid) {
                         log::error!("Failed to rollback tuple: {}", e);
                     }
                 } else {
@@ -305,14 +335,12 @@ impl TransactionManager {
     ) -> bool {
         let mut version_info = self.state.version_info.write();
         let page_info = version_info.entry(rid.get_page_id()).or_insert_with(|| {
-            Arc::new(PageVersionInfo {
-                prev_link: RwLock::new(HashMap::new()),
-            })
+            Arc::new(PageVersionInfo::new())
         });
 
         // If check function is provided, verify the update is valid
         if let Some(check_fn) = check {
-            let current_link = page_info.prev_link.read().get(&rid).cloned();
+            let current_link = page_info.get_link(&rid);
             if !check_fn(current_link) {
                 return false;
             }
@@ -321,10 +349,10 @@ impl TransactionManager {
         // Update the link
         match prev_link {
             Some(link) => {
-                page_info.prev_link.write().insert(rid, link);
+                page_info.set_link(rid, link);
             }
             None => {
-                page_info.prev_link.write().remove(&rid);
+                page_info.remove_link(&rid);
             }
         }
 
@@ -342,7 +370,7 @@ impl TransactionManager {
         let version_info = self.state.version_info.read();
         version_info
             .get(&rid.get_page_id())
-            .and_then(|page_info| page_info.prev_link.read().get(&rid).cloned())
+            .and_then(|page_info| page_info.get_link(&rid))
     }
 
     pub fn update_tuple(
@@ -376,7 +404,7 @@ impl TransactionManager {
         table_heap: &TableHeap,
         rid: RID,
         lock_manager: Arc<LockManager>,
-    ) -> (TupleMeta, Tuple, Option<UndoLink>) {
+    ) -> (TupleMeta, Arc<Tuple>, Option<UndoLink>) {
         // Create transaction context
         let txn_ctx = Arc::new(TransactionContext::new(
             Arc::new(Transaction::new(
@@ -403,7 +431,7 @@ impl TransactionManager {
     ///
     /// # Returns
     /// The undo log, if it exists.
-    pub fn get_undo_log_optional(&self, link: UndoLink) -> Option<UndoLog> {
+    pub fn get_undo_log_optional(&self, link: UndoLink) -> Option<Arc<UndoLog>> {
         // Add debug logging
         log::debug!(
             "Looking up transaction {} for undo log index {}",
@@ -415,7 +443,7 @@ impl TransactionManager {
             .txn_map
             .read()
             .get(&link.prev_txn)
-            .map(|txn| txn.get_undo_log(link.prev_log_idx))
+            .and_then(|txn| Some(txn.get_undo_log(link.prev_log_idx)))
     }
 
     /// Accesses the transaction undo log buffer and gets the undo log.
@@ -425,7 +453,7 @@ impl TransactionManager {
     ///
     /// # Returns
     /// The undo log.
-    pub fn get_undo_log(&self, link: UndoLink) -> UndoLog {
+    pub fn get_undo_log(&self, link: UndoLink) -> Arc<UndoLog> {
         // Add debug logging
         log::debug!(
             "Getting undo log for link: txn={}, idx={}",
@@ -803,7 +831,7 @@ mod tests {
             .unwrap();
 
         // Try to update with txn2 before txn1 commits - should fail
-        let mut modified_tuple = tuple.clone();
+        let mut modified_tuple = tuple;
         modified_tuple.get_values_mut()[1] = Value::new(200);
 
         let update_result = txn_table_heap.update_tuple(
