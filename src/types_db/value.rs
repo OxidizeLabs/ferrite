@@ -13,10 +13,20 @@ pub enum Val {
     Integer(i32),
     BigInt(i64),
     Decimal(f64),
+    Float(f32),
     Timestamp(u64),
+    Date(i32),
+    Time(i32),
+    Interval(i64),
     VarLen(String),
     ConstLen(String),
+    Binary(Vec<u8>),
+    JSON(String),
+    UUID(String),
     Vector(Vec<Value>),
+    Array(Vec<Value>),
+    Enum(i32, String),
+    Point(f64, f64),
     Null,
     Struct,
 }
@@ -46,9 +56,20 @@ impl Value {
             Val::Integer(_) => TypeId::Integer,
             Val::BigInt(_) => TypeId::BigInt,
             Val::Decimal(_) => TypeId::Decimal,
+            Val::Float(_) => TypeId::Float,
             Val::Timestamp(_) => TypeId::Timestamp,
-            Val::VarLen(_) | Val::ConstLen(_) => TypeId::VarChar,
+            Val::Date(_) => TypeId::Date,
+            Val::Time(_) => TypeId::Time,
+            Val::Interval(_) => TypeId::Interval,
+            Val::VarLen(_) => TypeId::VarChar,
+            Val::ConstLen(_) => TypeId::Char,
+            Val::Binary(_) => TypeId::Binary,
+            Val::JSON(_) => TypeId::JSON,
+            Val::UUID(_) => TypeId::UUID,
             Val::Vector(_) => TypeId::Vector,
+            Val::Array(_) => TypeId::Array,
+            Val::Enum(_, _) => TypeId::Enum,
+            Val::Point(_, _) => TypeId::Point,
             Val::Null => TypeId::Invalid,
             Val::Struct => TypeId::Struct,
         };
@@ -88,9 +109,20 @@ impl Value {
             Val::Integer(_) => 4,
             Val::BigInt(_) => 8,
             Val::Decimal(_) => 8,
+            Val::Float(_) => 4,
             Val::Timestamp(_) => 8,
-            Val::VarLen(s) | Val::ConstLen(s) => s.len() as u32,
+            Val::Date(_) => 4,
+            Val::Time(_) => 4,
+            Val::Interval(_) => 8,
+            Val::VarLen(s) => s.len() as u32,
+            Val::ConstLen(s) => s.len() as u32,
+            Val::Binary(b) => b.len() as u32,
+            Val::JSON(j) => j.len() as u32,
+            Val::UUID(_) => 16,
             Val::Vector(v) => 4 + v.len() as u32 * 4,
+            Val::Array(a) => 4 + a.len() as u32 * 4,
+            Val::Enum(_, s) => 4 + s.len() as u32,
+            Val::Point(_, _) => 16,
             Val::Null => 1,
             Val::Struct => 8, // Pointer size for struct
         }
@@ -105,12 +137,27 @@ impl Value {
             Val::Integer(i) => bytes.extend_from_slice(&i.to_le_bytes()),
             Val::BigInt(i) => bytes.extend_from_slice(&i.to_le_bytes()),
             Val::Decimal(f) => bytes.extend_from_slice(&f.to_le_bytes()),
+            Val::Float(f) => bytes.extend_from_slice(&f.to_le_bytes()),
             Val::Timestamp(t) => bytes.extend_from_slice(&t.to_le_bytes()),
+            Val::Date(d) => bytes.extend_from_slice(&d.to_le_bytes()),
+            Val::Time(t) => bytes.extend_from_slice(&t.to_le_bytes()),
+            Val::Interval(i) => bytes.extend_from_slice(&i.to_le_bytes()),
             Val::VarLen(s) | Val::ConstLen(s) => bytes.extend_from_slice(s.as_bytes()),
-            Val::Vector(v) => {
+            Val::Binary(b) => bytes.extend_from_slice(b),
+            Val::JSON(j) => bytes.extend_from_slice(j.as_bytes()),
+            Val::UUID(u) => bytes.extend_from_slice(u.as_bytes()),
+            Val::Vector(v) | Val::Array(v) => {
                 for value in v {
                     bytes.extend(value.as_bytes());
                 }
+            }
+            Val::Enum(i, s) => {
+                bytes.extend_from_slice(&i.to_le_bytes());
+                bytes.extend_from_slice(s.as_bytes());
+            }
+            Val::Point(x, y) => {
+                bytes.extend_from_slice(&x.to_le_bytes());
+                bytes.extend_from_slice(&y.to_le_bytes());
             }
             Val::Null => bytes.extend_from_slice(&[0u8]),
             Val::Struct => bytes.extend_from_slice(&[0u8]), // Placeholder for struct
@@ -126,7 +173,7 @@ impl Value {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self.value_,
-            Val::Decimal(_) | Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_)
+            Val::Decimal(_) | Val::Float(_) | Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_)
         )
     }
 
@@ -205,6 +252,7 @@ impl Value {
             Val::SmallInt(i) => *i == 0,
             Val::TinyInt(i) => *i == 0,
             Val::Decimal(f) => *f == 0.0,
+            Val::Float(f) => *f == 0.0,
             _ => false,
         }
     }
@@ -834,12 +882,22 @@ impl From<TypeId> for Val {
             TypeId::Integer => Val::Integer(0),
             TypeId::BigInt => Val::BigInt(0),
             TypeId::Decimal => Val::Decimal(0.0),
+            TypeId::Float => Val::Float(0.0),
             TypeId::Timestamp => Val::Timestamp(0),
+            TypeId::Date => Val::Date(0),
+            TypeId::Time => Val::Time(0),
+            TypeId::Interval => Val::Interval(0),
             TypeId::VarChar => Val::VarLen(String::new()),
             TypeId::Char => Val::ConstLen(String::new()),
+            TypeId::Binary => Val::Binary(Vec::new()),
+            TypeId::JSON => Val::JSON(String::new()),
+            TypeId::UUID => Val::UUID(String::new()),
             TypeId::Vector => Val::Vector(Vec::new()),
+            TypeId::Array => Val::Array(Vec::new()),
+            TypeId::Enum => Val::Enum(0, String::new()),
+            TypeId::Point => Val::Point(0.0, 0.0),
             TypeId::Invalid => Val::Null,
-            TypeId::Struct => Val::Struct, // Create an empty struct value
+            TypeId::Struct => Val::Struct,
         }
     }
 }
@@ -923,52 +981,60 @@ impl<T: Into<Val>> From<T> for Value {
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.value_ {
-            Val::Struct => {
-                if let Some(struct_data) = &self.struct_data {
-                    let mut result = String::from("{");
-
-                    if !struct_data.is_empty() {
-                        let field_names = self.get_struct_field_names();
-                        let values = self.get_struct_values();
-
-                        for (i, (name, value)) in field_names.iter().zip(values.iter()).enumerate()
-                        {
-                            if i > 0 {
-                                result.push_str(", ");
-                            }
-                            result.push_str(&format!("{}: {}", name, value));
-                        }
-                    }
-
-                    result.push('}');
-                    write!(f, "{}", result)
-                } else {
-                    write!(f, "INVALID_STRUCT")
-                }
-            }
-            Val::Vector(v) => {
-                // Format vector values using explicit ToString trait
-                let values: Vec<String> =
-                    v.iter().map(|value| ToString::to_string(value)).collect();
-                write!(f, "[{}]", values.join(", "))
-            }
-            Val::Integer(i) => write!(f, "{}", i),
-            Val::SmallInt(s) => write!(f, "{}", s),
-            Val::TinyInt(t) => write!(f, "{}", t),
-            Val::BigInt(b) => write!(f, "{}", b),
-            Val::Decimal(d) => write!(f, "{}", d),
             Val::Boolean(b) => write!(f, "{}", b),
+            Val::TinyInt(i) => write!(f, "{}", i),
+            Val::SmallInt(i) => write!(f, "{}", i),
+            Val::Integer(i) => write!(f, "{}", i),
+            Val::BigInt(i) => write!(f, "{}", i),
+            Val::Decimal(d) => write!(f, "{}", d),
+            Val::Float(fl) => write!(f, "{}", fl),
+            Val::Timestamp(t) => write!(f, "{}", t),
+            Val::Date(d) => write!(f, "DATE({})", d),
+            Val::Time(t) => write!(f, "TIME({})", t),
+            Val::Interval(i) => write!(f, "INTERVAL({})", i),
             Val::VarLen(s) => write!(f, "{}", s),
             Val::ConstLen(s) => write!(f, "{}", s),
-            Val::Timestamp(ts) => {
-                let secs = ts;
-                let seconds = secs % 60;
-                let minutes = (secs / 60) % 60;
-                let hours = (secs / 3600) % 24;
-                let days = secs / 86400;
-                write!(f, "{} days {}:{}:{} UTC", days, hours, minutes, seconds)
+            Val::Binary(b) => write!(f, "BINARY[{} bytes]", b.len()),
+            Val::JSON(j) => write!(f, "{}", j),
+            Val::UUID(u) => write!(f, "{}", u),
+            Val::Vector(v) => {
+                write!(f, "[")?;
+                for (i, val) in v.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+                write!(f, "]")
             }
+            Val::Array(a) => {
+                write!(f, "ARRAY[")?;
+                for (i, val) in a.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+                write!(f, "]")
+            }
+            Val::Enum(id, name) => write!(f, "ENUM({}: {})", id, name),
+            Val::Point(x, y) => write!(f, "POINT({}, {})", x, y),
             Val::Null => write!(f, "NULL"),
+            Val::Struct => {
+                if let Some(values) = &self.struct_data {
+                    write!(f, "{{")?;
+                    // This assumes field names are stored elsewhere
+                    for (i, val) in values.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", val)?;
+                    }
+                    write!(f, "}}")
+                } else {
+                    write!(f, "{{EMPTY STRUCT}}")
+                }
+            }
         }
     }
 }
@@ -1743,5 +1809,24 @@ mod cast_tests {
 
         let str_val = Value::new("test");
         assert!(str_val.cast_to(TypeId::Integer).is_err());
+    }
+}
+
+impl From<f32> for Val {
+    fn from(f: f32) -> Self {
+        Val::Float(f)
+    }
+}
+
+// Add after the existing From<u64> for Val implementation
+impl From<&[u8]> for Val {
+    fn from(b: &[u8]) -> Self {
+        Val::Binary(b.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for Val {
+    fn from(b: Vec<u8>) -> Self {
+        Val::Binary(b)
     }
 }
