@@ -245,7 +245,7 @@ impl IndexScanExecutor {
         }
     }
 
-    fn analyze_bounds(&self, index_info: &IndexInfo) -> (Option<Tuple>, Option<Tuple>) {
+    fn analyze_bounds(&self, index_info: &IndexInfo) -> (Option<Arc<Tuple>>, Option<Arc<Tuple>>) {
         let predicate_keys = self.plan.get_predicate_keys();
         let mut all_ranges = Vec::new();
 
@@ -297,11 +297,11 @@ impl IndexScanExecutor {
 
         let start_tuple = final_start
             .clone()
-            .map(|v| Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0)));
+            .map(|v| Arc::new(Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0))));
 
         let end_tuple = final_end
             .clone()
-            .map(|v| Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0)));
+            .map(|v| Arc::new(Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0))));
 
         debug!(
             "Scan bounds: start={:?} (incl={}), end={:?} (incl={})",
@@ -328,7 +328,7 @@ impl AbstractExecutor for IndexScanExecutor {
             // Analyze predicates and create bounds...
             let (start_key, end_key) = self.analyze_bounds(&index_info);
 
-            // Create iterator
+            // Create iterator with Arc<Tuple> arguments
             self.iterator = Some(IndexIterator::new(btree.clone(), start_key, end_key));
             self.initialized = true;
         }
@@ -932,15 +932,20 @@ mod index_scan_executor_tests {
 
             // Delete tuples with IDs 3 and 7
             let mut iterator = table_heap.make_iterator(Some(transaction_context.clone()));
-            while let Some((mut meta, mut tuple)) = iterator.next() {
+            while let Some((meta, mut tuple)) = iterator.next() {
                 // Store both id and rid before any mutable borrows
                 let id = tuple.get_value(0).as_integer().unwrap();
                 let rid = tuple.get_rid();
 
                 if id == 3 || id == 7 {
-                    meta.set_deleted(true);
+                    // Create a new TupleMeta with deleted flag set to true
+                    let new_meta = Arc::new(TupleMeta::new_with_delete(
+                        meta.get_creator_txn_id(),
+                        true
+                    ));
+                    
                     let _ = table_heap.update_tuple(
-                        &meta,
+                        &new_meta,
                         &mut tuple,
                         rid, // Use the stored rid
                         transaction_context.clone(),

@@ -990,6 +990,7 @@ mod test_utils {
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::storage::index::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
@@ -1026,6 +1027,10 @@ mod test_utils {
 
     pub fn create_test_tree(order: usize, index_info: Arc<IndexInfo>) -> Arc<RwLock<BPlusTree>> {
         Arc::new(RwLock::new(BPlusTree::new(order, index_info)))
+    }
+
+    pub fn create_text_txn() -> Transaction {
+        Transaction::new(0, IsolationLevel::ReadCommitted)
     }
 
     pub fn get_integer_from_value(value: &Value) -> i32 {
@@ -1117,9 +1122,10 @@ mod basic_behavior_tests {
         let mut tree_write_guard = tree.write();
         let tuple1 = create_tuple(1, "value1", &schema);
         let tuple2 = create_tuple(2, "value2", &schema);
+        let txn = create_text_txn();
 
-        assert!(tree_write_guard.insert_entry(&tuple1, RID::new(0, 1), &Default::default()));
-        assert!(tree_write_guard.insert_entry(&tuple2, RID::new(0, 2), &Default::default()));
+        assert!(tree_write_guard.insert_entry(&tuple1, RID::new(0, 1), &txn));
+        assert!(tree_write_guard.insert_entry(&tuple2, RID::new(0, 2), &txn));
 
         let root = tree_write_guard.root.read();
         assert!(!root.keys.is_empty());
@@ -1132,25 +1138,26 @@ mod basic_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert a value
         let tuple = create_tuple(1, "value1", &schema);
         let rid = RID::new(0, 1);
-        assert!(tree_write_guard.insert_entry(&tuple, rid, &Default::default()));
+        assert!(tree_write_guard.insert_entry(&tuple, rid, &txn));
 
         // Verify the value exists
         let result = tree_write_guard
-            .scan_key(&tuple, &Default::default())
+            .scan_key(&tuple, &txn)
             .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].1, rid);
 
         // Delete the value
-        assert!(tree_write_guard.delete_entry(&tuple, rid, &Default::default()));
+        assert!(tree_write_guard.delete_entry(&tuple, rid, &txn));
 
         // Verify the value is gone
         let result2 = tree_write_guard
-            .scan_key(&tuple, &Default::default())
+            .scan_key(&tuple, &txn)
             .unwrap();
         assert!(result2.is_empty());
     }
@@ -1167,6 +1174,7 @@ mod basic_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         debug!("Inserting test data");
         // Insert test data ensuring full tuples
@@ -1175,7 +1183,7 @@ mod basic_behavior_tests {
             assert!(tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
-                &Default::default()
+                &txn
             ));
             debug!("Inserted value {}", i);
         }
@@ -1246,9 +1254,10 @@ mod basic_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         let tuple = create_tuple(3, "value3", &schema);
-        tree_write_guard.insert_entry(&tuple, RID::new(0, 3), &Default::default());
+        tree_write_guard.insert_entry(&tuple, RID::new(0, 3), &txn);
 
         let result = tree_write_guard.scan_range(&tuple, &tuple, true).unwrap();
         assert_eq!(result.len(), 1, "Expected single value for point query");
@@ -1267,12 +1276,13 @@ mod basic_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert enough values to cause splits
         for i in (0..10).rev() {
             // Insert in reverse order
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default());
+            tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn);
         }
 
         // Scan entire range to verify leaf node links
@@ -1312,13 +1322,14 @@ mod advanced_tests {
         let schema = create_test_schema();
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
+        let txn = create_text_txn();
 
         {
             let mut tree_guard = tree.write();
             for i in 0..10 {
                 let tuple = create_tuple(i, &format!("val{}", i), &schema);
                 assert!(
-                    tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                    tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn),
                     "Insertion of ascending key {} failed",
                     i
                 );
@@ -1331,7 +1342,7 @@ mod advanced_tests {
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("val{}", i), &schema);
             let result = tree_guard
-                .scan_key(&tuple, &Transaction::default())
+                .scan_key(&tuple, &txn)
                 .unwrap();
             assert_eq!(result.len(), 1);
         }
@@ -1342,13 +1353,14 @@ mod advanced_tests {
         let schema = create_test_schema();
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
+        let txn = create_text_txn();
 
         {
             let mut tree_guard = tree.write();
             for i in (0..10).rev() {
                 let tuple = create_tuple(i, &format!("val{}", i), &schema);
                 assert!(
-                    tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                    tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn),
                     "Insertion of descending key {} failed",
                     i
                 );
@@ -1360,7 +1372,7 @@ mod advanced_tests {
         let tree_guard = tree.read();
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("val{}", i), &schema);
-            let result = tree_guard.scan_key(&tuple, &Default::default()).unwrap();
+            let result = tree_guard.scan_key(&tuple, &txn).unwrap();
             assert_eq!(result.len(), 1);
         }
     }
@@ -1370,6 +1382,7 @@ mod advanced_tests {
         let schema = create_test_schema();
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
+        let txn = create_text_txn();
 
         let mut rng = rng();
         let mut numbers: Vec<i32> = (0..10).collect();
@@ -1380,7 +1393,7 @@ mod advanced_tests {
             for &num in &numbers {
                 let tuple = create_tuple(num, &format!("random{}", num), &schema);
                 assert!(
-                    tree_guard.insert_entry(&tuple, RID::new(0, num as u32), &Default::default()),
+                    tree_guard.insert_entry(&tuple, RID::new(0, num as u32), &txn),
                     "Insertion of random key {} failed",
                     num
                 );
@@ -1392,7 +1405,7 @@ mod advanced_tests {
         let tree_guard = tree.read();
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("random{}", i), &schema);
-            let result = tree_guard.scan_key(&tuple, &Default::default()).unwrap();
+            let result = tree_guard.scan_key(&tuple, &txn).unwrap();
             assert_eq!(result.len(), 1);
         }
     }
@@ -1405,17 +1418,18 @@ mod advanced_tests {
         let tree = create_test_tree(4, Arc::from(index_info));
         let tuple = create_tuple(42, "forty-two", &schema);
         let rid = RID::new(0, 42);
+        let txn = create_text_txn();
 
         {
             let mut tree_guard = tree.write();
-            assert!(tree_guard.insert_entry(&tuple, rid, &Default::default()));
-            assert!(!tree_guard.insert_entry(&tuple, rid, &Default::default())); // Duplicate should fail
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, 43), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, rid, &txn));
+            assert!(!tree_guard.insert_entry(&tuple, rid, &txn)); // Duplicate should fail
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, 43), &txn));
             // Different RID
         }
 
         let tree_guard = tree.read();
-        let result = tree_guard.scan_key(&tuple, &Default::default()).unwrap();
+        let result = tree_guard.scan_key(&tuple, &txn).unwrap();
         assert_eq!(result.len(), 2, "Expected exactly two entries for key=42");
     }
 
@@ -1424,6 +1438,7 @@ mod advanced_tests {
         let schema = create_test_schema();
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info));
+        let txn = create_text_txn();
 
         {
             let mut tree_guard = tree.write();
@@ -1431,13 +1446,13 @@ mod advanced_tests {
             assert!(tree_guard.insert_entry(
                 &existing_tuple,
                 RID::new(0, 100),
-                &Default::default()
+                &txn
             ));
         }
 
         let missing_tuple = create_tuple(999, "missing", &schema);
         let tree_guard = tree.write();
-        assert!(!tree_guard.delete_entry(&missing_tuple, RID::new(0, 999), &Default::default()));
+        assert!(!tree_guard.delete_entry(&missing_tuple, RID::new(0, 999), &txn));
     }
 }
 
@@ -1456,6 +1471,7 @@ mod split_behavior_tests {
         // Using order 3 to force splits frequently
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert 2 keys (should not split yet as order is 3)
         let tuple1 = create_tuple(1, "value1", &schema);
@@ -1464,15 +1480,15 @@ mod split_behavior_tests {
         println!("Initial tree state:");
         println!("{}", tree_write_guard.visualize());
 
-        assert!(tree_write_guard.insert_entry(&tuple1, RID::new(0, 1), &Default::default()));
-        assert!(tree_write_guard.insert_entry(&tuple2, RID::new(0, 2), &Default::default()));
+        assert!(tree_write_guard.insert_entry(&tuple1, RID::new(0, 1), &txn));
+        assert!(tree_write_guard.insert_entry(&tuple2, RID::new(0, 2), &txn));
 
         println!("\nAfter inserting 2 keys (before split):");
         println!("{}", tree_write_guard.visualize());
 
         // This insert should cause a split
         let tuple3 = create_tuple(3, "value3", &schema);
-        assert!(tree_write_guard.insert_entry(&tuple3, RID::new(0, 3), &Default::default()));
+        assert!(tree_write_guard.insert_entry(&tuple3, RID::new(0, 3), &txn));
 
         println!("\nAfter inserting 3rd key (after split):");
         println!("{}", tree_write_guard.visualize());
@@ -1513,6 +1529,7 @@ mod split_behavior_tests {
         // Using order 3 to force splits frequently
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         println!("Initial tree state:");
         println!("{}", tree_write_guard.visualize());
@@ -1523,7 +1540,7 @@ mod split_behavior_tests {
             assert!(tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
-                &Default::default()
+                &txn
             ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
@@ -1593,6 +1610,7 @@ mod split_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         println!("Initial tree state:");
         println!("{}", tree_write_guard.visualize());
@@ -1603,7 +1621,7 @@ mod split_behavior_tests {
             assert!(tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
-                &Default::default()
+                &txn
             ));
             println!("\nAfter inserting duplicate 1 (#{}):", i);
             println!("{}", tree_write_guard.visualize());
@@ -1612,7 +1630,7 @@ mod split_behavior_tests {
         // Collect all values
         let search_tuple = create_tuple(1, "value1_1", &schema);
         let result = tree_write_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
 
         assert_eq!(result.len(), 5, "Should find all 5 duplicate entries");
@@ -1626,6 +1644,7 @@ mod split_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         println!("Initial tree state:");
         println!("{}", tree_write_guard.visualize());
@@ -1638,7 +1657,7 @@ mod split_behavior_tests {
             assert!(tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
-                &Default::default()
+                &txn
             ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
@@ -1674,6 +1693,7 @@ mod split_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_write_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert enough values to cause multiple splits
         for i in (1..=6).rev() {
@@ -1682,7 +1702,7 @@ mod split_behavior_tests {
             assert!(tree_write_guard.insert_entry(
                 &tuple,
                 RID::new(0, i as u32),
-                &Default::default()
+                &txn
             ));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
@@ -1720,12 +1740,13 @@ mod split_behavior_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert values that will cause internal node splits
         for i in 1..=5 {
             let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
             assert!(
-                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn),
                 "Failed to insert tuple {}",
                 i
             );
@@ -1764,7 +1785,7 @@ mod split_behavior_tests {
         for i in 1..=5 {
             let tuple = create_tuple(i, &format!("value1_{}", i), &schema);
             assert!(
-                tree_guard.delete_entry(&tuple, RID::new(0, i as u32), &Default::default()),
+                tree_guard.delete_entry(&tuple, RID::new(0, i as u32), &txn),
                 "Failed to delete tuple {}",
                 i
             );
@@ -1791,10 +1812,11 @@ mod scan_key_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let tree_guard = tree.write();
+        let txn = create_text_txn();
 
         let search_tuple = create_tuple(1, "value1", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert!(result.is_empty(), "Empty tree should return no results");
     }
@@ -1807,17 +1829,18 @@ mod scan_key_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert some data
         for i in 1..=5 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
         }
 
         // Search for non-existent key
         let search_tuple = create_tuple(10, "value10", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert!(
             result.is_empty(),
@@ -1832,13 +1855,14 @@ mod scan_key_tests {
         let schema = create_test_schema();
         let index_info = create_test_metadata();
         let tree = create_test_tree(4, Arc::from(index_info)); // Larger order to keep in single leaf
+        let txn = create_text_txn();
 
         let mut tree_guard = tree.write();
 
         // Insert duplicates
         for i in 1..=3 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
         }
 
         println!("Tree state:\n{}", tree_guard.visualize());
@@ -1846,7 +1870,7 @@ mod scan_key_tests {
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert_eq!(
             result.len(),
@@ -1870,11 +1894,12 @@ mod scan_key_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert enough duplicates to cause splits
         for i in 1..=5 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             println!("\nAfter inserting duplicate 1 (#{}):", i);
             println!("{}", tree_guard.visualize());
         }
@@ -1882,7 +1907,7 @@ mod scan_key_tests {
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert_eq!(
             result.len(),
@@ -1906,24 +1931,25 @@ mod scan_key_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
+        let txn = create_text_txn();
 
         // Insert mix of values and duplicates
         // Insert key 1 three times
         for i in 1..=3 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
         }
 
         // Insert some other values
         let tuple2 = create_tuple(2, "value2", &schema);
         let tuple3 = create_tuple(3, "value3", &schema);
-        assert!(tree_guard.insert_entry(&tuple2, RID::new(0, 4), &Default::default()));
-        assert!(tree_guard.insert_entry(&tuple3, RID::new(0, 5), &Default::default()));
+        assert!(tree_guard.insert_entry(&tuple2, RID::new(0, 4), &txn));
+        assert!(tree_guard.insert_entry(&tuple3, RID::new(0, 5), &txn));
 
         // Insert more duplicates of key 1
         for i in 6..=7 {
             let tuple = create_tuple(1, &format!("value1_{}", i - 2), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
         }
 
         println!("Final tree state:\n{}", tree_guard.visualize());
@@ -1931,7 +1957,7 @@ mod scan_key_tests {
         // Search for key 1
         let search_tuple = create_tuple(1, "value1_1", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert_eq!(result.len(), 5, "Should find all 5 duplicates of key 1");
 
@@ -1946,6 +1972,7 @@ mod scan_key_tests {
         let index_info = create_test_metadata();
         let tree = create_test_tree(3, Arc::from(index_info));
         let mut tree_guard = tree.write();
+        let txn = create_text_txn();
 
         // Store tuples for later deletion
         let mut inserted_tuples = Vec::new();
@@ -1953,7 +1980,7 @@ mod scan_key_tests {
         // Insert duplicates
         for i in 1..=5 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i), &Default::default()));
+            assert!(tree_guard.insert_entry(&tuple, RID::new(0, i), &txn));
             inserted_tuples.push((tuple, RID::new(0, i)));
         }
 
@@ -1964,7 +1991,7 @@ mod scan_key_tests {
             tree_guard.delete_entry(
                 &inserted_tuples[1].0,
                 inserted_tuples[1].1,
-                &Default::default()
+                &txn
             ),
             "Failed to delete second tuple"
         );
@@ -1972,7 +1999,7 @@ mod scan_key_tests {
             tree_guard.delete_entry(
                 &inserted_tuples[3].0,
                 inserted_tuples[3].1,
-                &Default::default()
+                &txn
             ),
             "Failed to delete fourth tuple"
         );
@@ -1982,7 +2009,7 @@ mod scan_key_tests {
         // Search for remaining duplicates
         let search_tuple = create_tuple(1, "value", &schema);
         let result = tree_guard
-            .scan_key(&search_tuple, &Default::default())
+            .scan_key(&search_tuple, &txn)
             .unwrap();
         assert_eq!(result.len(), 3, "Should find remaining 3 duplicates");
 

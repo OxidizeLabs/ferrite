@@ -121,8 +121,8 @@ impl IndexInfo {
     pub fn create_iterator(
         &self,
         tree: Arc<RwLock<BPlusTree>>,
-        start_key: Option<Tuple>,
-        end_key: Option<Tuple>,
+        start_key: Option<Arc<Tuple>>,
+        end_key: Option<Arc<Tuple>>,
     ) -> IndexIterator {
         IndexIterator::new(tree, start_key, end_key)
     }
