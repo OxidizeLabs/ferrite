@@ -1165,8 +1165,6 @@ mod basic_behavior_tests {
     #[test]
     fn test_range_scan() {
         // Force debug logging for this test
-        std::env::set_var("RUST_LOG", "debug");
-        std::env::set_var("RUST_TEST", "1");
         initialize_logger();
 
         debug!("Starting range scan test");
