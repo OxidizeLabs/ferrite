@@ -1,4 +1,5 @@
 use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -24,7 +25,16 @@ impl Column {
             TypeId::Vector => length * size_of::<f64>(),
             TypeId::Invalid => 0,
             TypeId::Struct => length,
-            _ => todo!(), // Struct size is determined by its fields' total size
+            TypeId::Float => 4,
+            TypeId::Date => 4,
+            TypeId::Time => 4,
+            TypeId::Interval => 8,
+            TypeId::Binary => length,
+            TypeId::JSON => length,
+            TypeId::UUID => 16,
+            TypeId::Array => size_of::<Vec<Value>>(),
+            TypeId::Enum => 4,
+            TypeId::Point => 16,
         }
     }
 
