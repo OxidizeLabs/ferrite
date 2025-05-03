@@ -32,6 +32,16 @@ impl TupleMeta {
         }
     }
 
+    /// Creates a new `TupleMeta` instance with specified deleted status.
+    pub fn new_with_delete(txn_id: TxnId, deleted: bool) -> Self {
+        Self {
+            creator_txn_id: txn_id,
+            commit_timestamp: Timestamp::MAX, // Start with MAX to indicate uncommitted
+            deleted,
+            undo_log_idx: 0,
+        }
+    }
+
     /// Returns the transaction ID that created/modified the tuple.
     pub fn get_creator_txn_id(&self) -> TxnId {
         self.creator_txn_id

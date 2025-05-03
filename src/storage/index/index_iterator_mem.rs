@@ -77,11 +77,19 @@ impl IndexIterator {
             // Range scan case
             (Some(start), Some(end)) => {
                 let scan_start = if let Some(last_key) = &self.last_key {
-                    let mut new_start = start.clone();
                     let key_attrs = tree_guard.get_metadata().get_key_attrs().clone();
-                    let mut keys = new_start.keys_from_tuple(key_attrs);
-                    keys[0] = last_key.clone();
-                    new_start.set_values(keys);
+                    let schema = start.get_schema();
+                    let mut values = start.get_values();
+                    
+                    // Only modify the first key (the one we're iterating on)
+                    for &idx in &key_attrs {
+                        if idx == 0 {  // Assuming we're always iterating on the first column
+                            values[idx] = last_key.clone();
+                        }
+                    }
+                    
+                    // Create a new tuple with the modified values
+                    let new_start = Arc::new(Tuple::new(&values, schema, RID::new(0, 0)));
                     debug!("Continuing range scan from key: {:?}", new_start);
                     new_start
                 } else {
@@ -220,6 +228,7 @@ mod test_utils {
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::storage::index::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
@@ -258,6 +267,10 @@ mod test_utils {
         let metadata = create_test_metadata("test_table".to_string(), "test_index".to_string());
         Arc::new(RwLock::new(BPlusTree::new(order, Arc::from(metadata))))
     }
+    
+    pub fn create_text_txn() -> Transaction {
+        Transaction::new(0, IsolationLevel::ReadCommitted)
+    }
 }
 
 #[cfg(test)]
@@ -272,13 +285,14 @@ mod tests {
         initialize_logger();
         let schema = create_test_schema();
         let tree = create_test_tree(4);
-
+        let txn = create_text_txn();
+        
         // Insert test data in a separate scope
         {
             let mut tree_guard = tree.write();
             for i in 1..=5 {
                 let tuple = create_tuple(i, &format!("value{}", i), &schema);
-                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default());
+                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn);
             }
         } // write lock is released here
 
@@ -296,13 +310,14 @@ mod tests {
     fn test_iterator_batching() {
         let schema = create_test_schema();
         let tree = create_test_tree(4);
+        let txn = create_text_txn();
 
         // Insert data in a separate scope
         {
             let mut tree_guard = tree.write();
             for i in 1..=200 {
                 let tuple = create_tuple(i, &format!("value{}", i), &schema);
-                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &Default::default());
+                tree_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn);
             }
         } // write lock is released here
 

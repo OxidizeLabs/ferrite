@@ -12,42 +12,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
-      <change beforePath="$PROJECT_DIR$/src/catalog/catalog.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/catalog/catalog.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/concurrency/transaction_manager.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/concurrency/transaction_manager.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/execution_engine.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/execution_engine.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/abstract_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/abstract_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/aggregation_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/aggregation_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/create_index_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/create_index_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/create_table_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/create_table_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/delete_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/delete_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/filter_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/filter_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/hash_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/hash_join_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/insert_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/insert_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/limit_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/limit_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/mock_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/mock_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/mock_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/mock_scan_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/nested_index_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/nested_index_join_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/nested_loop_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/nested_loop_join_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/projection_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/projection_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/seq_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/seq_scan_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/sort_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/sort_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/table_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/table_scan_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/topn_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/topn_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/topn_per_group_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/topn_per_group_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/update_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/update_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/values_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/values_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/window_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/window_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/plans/insert_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/plans/insert_plan.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/index/index.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/table/table_iterator.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_iterator.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/table/transactional_table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/transactional_table_heap.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/table/tuple.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/tuple.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/concurrency/concurrent_transactions.rs" beforeDir="false" afterPath="$PROJECT_DIR$/tests/concurrency/concurrent_transactions.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -277,7 +246,7 @@
       <recent name="$PROJECT_DIR$/src/storage/page" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Test log_manager">
+  <component name="RunManager" selected="Cargo.Test index_iterator_mem">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -701,14 +670,27 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test filter_executor" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::executors::filter_executor" />
+    <configuration name="Test index_iterator_mem" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::index::index_iterator_mem" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
-      </envs>
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test index_scan_executor" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib sql::execution::executors::index_scan_executor" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -726,27 +708,6 @@
       <option name="command" value="test --package tkdb --lib recovery::log_manager" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test log_recovery" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib recovery::log_recovery" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="trace" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
-      </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -846,19 +807,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
-      <item itemvalue="Cargo.Test filter_executor" />
+      <item itemvalue="Cargo.Test index_iterator_mem" />
+      <item itemvalue="Cargo.Test index_scan_executor" />
       <item itemvalue="Cargo.Test log_manager" />
-      <item itemvalue="Cargo.Test log_recovery" />
       <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter" />
       <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Test index_iterator_mem" />
+        <item itemvalue="Cargo.Test index_scan_executor" />
         <item itemvalue="Cargo.Test log_manager" />
         <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
         <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter" />
-        <item itemvalue="Cargo.Test log_recovery" />
-        <item itemvalue="Cargo.Test filter_executor" />
       </list>
     </recent_temporary>
   </component>
@@ -920,7 +881,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="842000" />
+      <workItem from="1746260136063" duration="2246000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
