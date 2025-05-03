@@ -1,14 +1,24 @@
+use crate::types_db::array_type;
 use crate::types_db::bigint_type;
+use crate::types_db::binary_type;
 use crate::types_db::boolean_type;
 use crate::types_db::const_len_type;
+use crate::types_db::date_type;
 use crate::types_db::decimal_type;
+use crate::types_db::enum_type;
+use crate::types_db::float_type;
 use crate::types_db::integer_type;
+use crate::types_db::interval_type;
 use crate::types_db::invalid_type;
+use crate::types_db::json_type;
+use crate::types_db::point_type;
 use crate::types_db::smallint_type;
 use crate::types_db::struct_type;
+use crate::types_db::time_type;
 use crate::types_db::timestamp_type;
 use crate::types_db::tinyint_type;
 use crate::types_db::type_id::TypeId;
+use crate::types_db::uuid_type;
 use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type;
@@ -33,16 +43,21 @@ pub trait Type {
             | TypeId::SmallInt
             | TypeId::Integer
             | TypeId::BigInt
-            | TypeId::Decimal => matches!(
+            | TypeId::Decimal
+            | TypeId::Float => matches!(
                 type_id,
                 TypeId::TinyInt
                     | TypeId::SmallInt
                     | TypeId::Integer
                     | TypeId::BigInt
                     | TypeId::Decimal
+                    | TypeId::Float
                     | TypeId::VarChar
             ),
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
+            TypeId::Date => type_id == TypeId::VarChar || type_id == TypeId::Date || type_id == TypeId::Timestamp,
+            TypeId::Time => type_id == TypeId::VarChar || type_id == TypeId::Time,
+            TypeId::Interval => type_id == TypeId::VarChar || type_id == TypeId::Interval,
             TypeId::VarChar => matches!(
                 type_id,
                 TypeId::Boolean
@@ -51,9 +66,15 @@ pub trait Type {
                     | TypeId::Integer
                     | TypeId::BigInt
                     | TypeId::Decimal
+                    | TypeId::Float
                     | TypeId::Timestamp
+                    | TypeId::Date
+                    | TypeId::Time
+                    | TypeId::Interval
                     | TypeId::VarChar
                     | TypeId::Char
+                    | TypeId::UUID
+                    | TypeId::JSON
             ),
             TypeId::Char => matches!(
                 type_id,
@@ -63,11 +84,21 @@ pub trait Type {
                     | TypeId::Integer
                     | TypeId::BigInt
                     | TypeId::Decimal
+                    | TypeId::Float
                     | TypeId::Timestamp
+                    | TypeId::Date
+                    | TypeId::Time
+                    | TypeId::Interval
                     | TypeId::VarChar
             ),
-            TypeId::Vector => matches!(type_id, TypeId::Vector),
-            TypeId::Struct => matches!(type_id, TypeId::Struct),
+            TypeId::Binary => type_id == TypeId::Binary,
+            TypeId::JSON => type_id == TypeId::JSON || type_id == TypeId::VarChar,
+            TypeId::UUID => type_id == TypeId::UUID || type_id == TypeId::VarChar,
+            TypeId::Vector => type_id == TypeId::Vector,
+            TypeId::Array => type_id == TypeId::Array,
+            TypeId::Enum => type_id == TypeId::Enum || type_id == TypeId::Integer || type_id == TypeId::VarChar,
+            TypeId::Point => type_id == TypeId::Point,
+            TypeId::Struct => type_id == TypeId::Struct,
         }
     }
     fn get_min_value(type_id: TypeId) -> Value
@@ -81,10 +112,22 @@ pub trait Type {
             TypeId::Integer => Value::from(i32::MIN),
             TypeId::BigInt => Value::from(i64::MIN),
             TypeId::Decimal => Value::from(f64::MIN),
+            TypeId::Float => Value::from(f32::MIN),
             TypeId::Timestamp => Value::from(0_u64),
+            TypeId::Date => Value::from(i32::MIN), // Minimum date value (days from epoch)
+            TypeId::Time => Value::from(0), // Minimum time value (seconds from midnight)
+            TypeId::Interval => Value::from(i64::MIN), // Minimum interval (seconds)
             TypeId::VarChar => Value::from(""),
-            TypeId::Invalid => Value::from(Null),
-            _ => panic!("Invalid type for min value"),
+            TypeId::Char => Value::from(""),
+            TypeId::Binary => Value::from(Vec::<u8>::new()),
+            TypeId::JSON => Value::from("{}"),
+            TypeId::UUID => Value::from("00000000-0000-0000-0000-000000000000"),
+            TypeId::Vector => Value::from(Vec::<Value>::new()),
+            TypeId::Array => Value::from(Vec::<Value>::new()),
+            TypeId::Enum => Value::from(Val::Enum(0, String::new())),
+            TypeId::Point => Value::from(Val::Point(f64::MIN, f64::MIN)),
+            TypeId::Invalid => Value::from(Val::Null),
+            TypeId::Struct => Value::from(Val::Null),
         }
     }
     fn get_max_value(type_id: TypeId) -> Value
@@ -98,10 +141,22 @@ pub trait Type {
             TypeId::Integer => Value::from(i32::MAX),
             TypeId::BigInt => Value::from(i64::MAX),
             TypeId::Decimal => Value::from(f64::MAX),
+            TypeId::Float => Value::from(f32::MAX),
             TypeId::Timestamp => Value::from(u64::MAX),
+            TypeId::Date => Value::from(i32::MAX), // Maximum date value (days from epoch)
+            TypeId::Time => Value::from(86399), // Maximum time value (23:59:59 in seconds)
+            TypeId::Interval => Value::from(i64::MAX), // Maximum interval (seconds)
             TypeId::VarChar => Value::from(""),
-            TypeId::Invalid => Value::from(Null),
-            _ => panic!("Invalid type for max value"),
+            TypeId::Char => Value::from(""),
+            TypeId::Binary => Value::from(Vec::<u8>::new()),
+            TypeId::JSON => Value::from("{}"),
+            TypeId::UUID => Value::from("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            TypeId::Vector => Value::from(Vec::<Value>::new()),
+            TypeId::Array => Value::from(Vec::<Value>::new()),
+            TypeId::Enum => Value::from(Val::Enum(i32::MAX, String::new())),
+            TypeId::Point => Value::from(Val::Point(f64::MAX, f64::MAX)),
+            TypeId::Invalid => Value::from(Val::Null),
+            TypeId::Struct => Value::from(Val::Null),
         }
     }
     fn compare_equals(&self, other: &Value) -> CmpBool;
@@ -190,9 +245,19 @@ pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
         TypeId::Integer => &integer_type::INTEGER_TYPE_INSTANCE,
         TypeId::BigInt => &bigint_type::BIGINT_TYPE_INSTANCE,
         TypeId::Decimal => &decimal_type::DECIMAL_TYPE_INSTANCE,
+        TypeId::Float => &float_type::FLOAT_TYPE_INSTANCE,
         TypeId::VarChar => &varlen_type::VARCHAR_TYPE_INSTANCE,
         TypeId::Timestamp => &timestamp_type::TIMESTAMP_TYPE_INSTANCE,
+        TypeId::Date => &date_type::DATE_TYPE_INSTANCE,
+        TypeId::Time => &time_type::TIME_TYPE_INSTANCE,
+        TypeId::Interval => &interval_type::INTERVAL_TYPE_INSTANCE,
         TypeId::Vector => &vector_type::VECTOR_TYPE_INSTANCE,
+        TypeId::Binary => &binary_type::BINARY_TYPE_INSTANCE,
+        TypeId::JSON => &json_type::JSON_TYPE_INSTANCE,
+        TypeId::UUID => &uuid_type::UUID_TYPE_INSTANCE,
+        TypeId::Array => &array_type::ARRAY_TYPE_INSTANCE,
+        TypeId::Enum => &enum_type::ENUM_TYPE_INSTANCE,
+        TypeId::Point => &point_type::POINT_TYPE_INSTANCE,
         TypeId::Invalid => &invalid_type::INVALID_TYPE_INSTANCE,
         TypeId::Char => &const_len_type::CHAR_TYPE_INSTANCE,
         TypeId::Struct => &struct_type::STRUCT_TYPE_INSTANCE,

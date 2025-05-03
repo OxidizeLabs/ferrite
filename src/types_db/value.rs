@@ -308,6 +308,14 @@ impl Value {
                     Value::new(Val::Null)
                 }
             }
+            Float => {
+                if data.len() >= 4 {
+                    let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
+                    Value::new(f32::from_le_bytes(arr))
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             Timestamp => {
                 if data.len() >= 8 {
                     let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
@@ -316,11 +324,61 @@ impl Value {
                     Value::new(Val::Null)
                 }
             }
+            Date => {
+                if data.len() >= 4 {
+                    let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
+                    Value::new_with_type(Val::Date(i32::from_le_bytes(arr)), TypeId::Date)
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
+            Time => {
+                if data.len() >= 4 {
+                    let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
+                    Value::new_with_type(Val::Time(i32::from_le_bytes(arr)), TypeId::Time)
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
+            Interval => {
+                if data.len() >= 8 {
+                    let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
+                    Value::new_with_type(Val::Interval(i64::from_le_bytes(arr)), TypeId::Interval)
+                } else {
+                    Value::new(Val::Null)
+                }
+            }
             VarChar | Char => match std::str::from_utf8(data) {
-                Ok(s) => Value::new(s),
+                Ok(s) => {
+                    if column_type == VarChar {
+                        Value::new(s)
+                    } else {
+                        Value::new_with_type(Val::ConstLen(s.to_string()), TypeId::Char)
+                    }
+                }
                 Err(_) => Value::new(Val::Null),
             },
-            // For other types (including Vector), for now return a Null value.
+            Binary => Value::new_with_type(Val::Binary(data.to_vec()), TypeId::Binary),
+            JSON => match std::str::from_utf8(data) {
+                Ok(s) => Value::new_with_type(Val::JSON(s.to_string()), TypeId::JSON),
+                Err(_) => Value::new(Val::Null),
+            },
+            UUID => match std::str::from_utf8(data) {
+                Ok(s) => Value::new_with_type(Val::UUID(s.to_string()), TypeId::UUID),
+                Err(_) => Value::new(Val::Null),
+            },
+            Point => {
+                if data.len() >= 16 {
+                    let x_arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
+                    let y_arr: [u8; 8] = data[8..16].try_into().expect("slice with incorrect length");
+                    let x = f64::from_le_bytes(x_arr);
+                    let y = f64::from_le_bytes(y_arr);
+                    Value::new_with_type(Val::Point(x, y), TypeId::Point)
+                } else {
+                    Value::new(Val::Null)
+                }
+            },
+            // For other types, return a Null value for now
             _ => Value::new(Val::Null),
         }
     }
@@ -525,9 +583,21 @@ impl Type for Value {
             (Val::Integer(l), Val::Integer(r)) => (l < r).into(),
             (Val::BigInt(l), Val::BigInt(r)) => (l < r).into(),
             (Val::Decimal(l), Val::Decimal(r)) => (l < r).into(),
+            (Val::Float(l), Val::Float(r)) => (l < r).into(),
             (Val::Timestamp(l), Val::Timestamp(r)) => (l < r).into(),
+            (Val::Date(l), Val::Date(r)) => (l < r).into(),
+            (Val::Time(l), Val::Time(r)) => (l < r).into(),
+            (Val::Interval(l), Val::Interval(r)) => (l < r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l < r).into(),
             (Val::ConstLen(l), Val::ConstLen(r)) => (l < r).into(),
+            (Val::UUID(l), Val::UUID(r)) => (l < r).into(),
+            // Comparisons between compatible numeric types
+            (Val::TinyInt(l), Val::Integer(r)) => ((*l as i32) < *r).into(),
+            (Val::Integer(l), Val::TinyInt(r)) => (*l < (*r as i32)).into(),
+            (Val::Integer(l), Val::BigInt(r)) => ((*l as i64) < *r).into(),
+            (Val::BigInt(l), Val::Integer(r)) => (*l < (*r as i64)).into(),
+            (Val::Float(l), Val::Decimal(r)) => ((*l as f64) < *r).into(),
+            (Val::Decimal(l), Val::Float(r)) => (*l < (*r as f64)).into(),
             _ => CmpBool::CmpFalse,
         }
     }
@@ -552,9 +622,21 @@ impl Type for Value {
             (Val::Integer(l), Val::Integer(r)) => (l > r).into(),
             (Val::BigInt(l), Val::BigInt(r)) => (l > r).into(),
             (Val::Decimal(l), Val::Decimal(r)) => (l > r).into(),
+            (Val::Float(l), Val::Float(r)) => (l > r).into(),
             (Val::Timestamp(l), Val::Timestamp(r)) => (l > r).into(),
+            (Val::Date(l), Val::Date(r)) => (l > r).into(),
+            (Val::Time(l), Val::Time(r)) => (l > r).into(),
+            (Val::Interval(l), Val::Interval(r)) => (l > r).into(),
             (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
             (Val::ConstLen(l), Val::ConstLen(r)) => (l > r).into(),
+            (Val::UUID(l), Val::UUID(r)) => (l > r).into(),
+            // Comparisons between compatible numeric types
+            (Val::TinyInt(l), Val::Integer(r)) => ((*l as i32) > *r).into(),
+            (Val::Integer(l), Val::TinyInt(r)) => (*l > (*r as i32)).into(),
+            (Val::Integer(l), Val::BigInt(r)) => ((*l as i64) > *r).into(),
+            (Val::BigInt(l), Val::Integer(r)) => (*l > (*r as i64)).into(),
+            (Val::Float(l), Val::Decimal(r)) => ((*l as f64) > *r).into(),
+            (Val::Decimal(l), Val::Float(r)) => (*l > (*r as f64)).into(),
             _ => CmpBool::CmpFalse,
         }
     }
@@ -772,12 +854,21 @@ impl Type for Value {
             Val::SmallInt(i) => Ok(*i as i32),
             Val::BigInt(i) => Ok(*i as i32),
             Val::Decimal(f) => Ok(*f as i32),
+            Val::Float(f) => Ok(*f as i32),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i32),
+            Val::Date(d) => Ok(*d),
+            Val::Time(t) => Ok(*t),
+            Val::Interval(i) => Ok(*i as i32),
             Val::VarLen(s) | Val::ConstLen(s) => s
                 .parse()
                 .map_err(|e| format!("Cannot convert string to integer: {}", e)),
-            Val::Vector(v) => Ok(v.len() as i32),
+            Val::Binary(_) => Err("Cannot convert binary data to integer".to_string()),
+            Val::JSON(_) => Err("Cannot convert JSON to integer".to_string()),
+            Val::UUID(_) => Err("Cannot convert UUID to integer".to_string()),
+            Val::Vector(v) | Val::Array(v) => Ok(v.len() as i32),
+            Val::Enum(id, _) => Ok(*id),
+            Val::Point(_, _) => Err("Cannot convert point to integer".to_string()),
             Val::Null => Err("Cannot convert NULL to integer".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
         }
@@ -790,12 +881,21 @@ impl Type for Value {
             Val::SmallInt(i) => Ok(*i as i64),
             Val::TinyInt(i) => Ok(*i as i64),
             Val::Decimal(f) => Ok(*f as i64),
+            Val::Float(f) => Ok(*f as i64),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i64),
+            Val::Date(d) => Ok(*d as i64),
+            Val::Time(t) => Ok(*t as i64),
+            Val::Interval(i) => Ok(*i),
             Val::VarLen(s) | Val::ConstLen(s) => s
                 .parse()
                 .map_err(|e| format!("Cannot convert string to bigint: {}", e)),
-            Val::Vector(v) => Ok(v.len() as i64),
+            Val::Binary(_) => Err("Cannot convert binary data to bigint".to_string()),
+            Val::JSON(_) => Err("Cannot convert JSON to bigint".to_string()),
+            Val::UUID(_) => Err("Cannot convert UUID to bigint".to_string()),
+            Val::Vector(v) | Val::Array(v) => Ok(v.len() as i64),
+            Val::Enum(id, _) => Ok(*id as i64),
+            Val::Point(_, _) => Err("Cannot convert point to bigint".to_string()),
             Val::Null => Err("Cannot convert NULL to bigint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
         }
@@ -808,12 +908,21 @@ impl Type for Value {
             Val::Integer(i) => Ok(*i as i16),
             Val::BigInt(i) => Ok(*i as i16),
             Val::Decimal(f) => Ok(*f as i16),
+            Val::Float(f) => Ok(*f as i16),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i16),
+            Val::Date(d) => Ok(*d as i16),
+            Val::Time(t) => Ok(*t as i16),
+            Val::Interval(i) => Ok(*i as i16),
             Val::VarLen(s) | Val::ConstLen(s) => s
                 .parse()
                 .map_err(|e| format!("Cannot convert string to smallint: {}", e)),
-            Val::Vector(v) => Ok(v.len() as i16),
+            Val::Binary(_) => Err("Cannot convert binary data to smallint".to_string()),
+            Val::JSON(_) => Err("Cannot convert JSON to smallint".to_string()),
+            Val::UUID(_) => Err("Cannot convert UUID to smallint".to_string()),
+            Val::Vector(v) | Val::Array(v) => Ok(v.len() as i16),
+            Val::Enum(id, _) => Ok(*id as i16),
+            Val::Point(_, _) => Err("Cannot convert point to smallint".to_string()),
             Val::Null => Err("Cannot convert NULL to smallint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
         }
@@ -826,12 +935,21 @@ impl Type for Value {
             Val::Integer(i) => Ok(*i as i8),
             Val::BigInt(i) => Ok(*i as i8),
             Val::Decimal(f) => Ok(*f as i8),
+            Val::Float(f) => Ok(*f as i8),
             Val::Boolean(b) => Ok(if *b { 1 } else { 0 }),
             Val::Timestamp(t) => Ok(*t as i8),
+            Val::Date(d) => Ok(*d as i8),
+            Val::Time(t) => Ok(*t as i8),
+            Val::Interval(i) => Ok(*i as i8),
             Val::VarLen(s) | Val::ConstLen(s) => s
                 .parse()
                 .map_err(|e| format!("Cannot convert string to tinyint: {}", e)),
-            Val::Vector(v) => Ok(v.len() as i8),
+            Val::Binary(_) => Err("Cannot convert binary data to tinyint".to_string()),
+            Val::JSON(_) => Err("Cannot convert JSON to tinyint".to_string()),
+            Val::UUID(_) => Err("Cannot convert UUID to tinyint".to_string()),
+            Val::Vector(v) | Val::Array(v) => Ok(v.len() as i8),
+            Val::Enum(id, _) => Ok(*id as i8),
+            Val::Point(_, _) => Err("Cannot convert point to tinyint".to_string()),
             Val::Null => Err("Cannot convert NULL to tinyint".to_string()),
             Val::Struct => Ok(1), // Struct is considered as 1
         }
@@ -840,16 +958,25 @@ impl Type for Value {
     fn as_decimal(&self) -> Result<f64, String> {
         match &self.value_ {
             Val::Decimal(d) => Ok(*d),
+            Val::Float(f) => Ok(*f as f64),
             Val::Integer(i) => Ok(*i as f64),
             Val::BigInt(i) => Ok(*i as f64),
             Val::SmallInt(i) => Ok(*i as f64),
             Val::TinyInt(i) => Ok(*i as f64),
             Val::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Val::Timestamp(t) => Ok(*t as f64),
+            Val::Date(d) => Ok(*d as f64),
+            Val::Time(t) => Ok(*t as f64),
+            Val::Interval(i) => Ok(*i as f64),
             Val::VarLen(s) | Val::ConstLen(s) => s
                 .parse()
                 .map_err(|e| format!("Cannot convert string to decimal: {}", e)),
-            Val::Vector(v) => Ok(v.len() as f64),
+            Val::Binary(_) => Err("Cannot convert binary data to decimal".to_string()),
+            Val::JSON(_) => Err("Cannot convert JSON to decimal".to_string()),
+            Val::UUID(_) => Err("Cannot convert UUID to decimal".to_string()),
+            Val::Vector(v) | Val::Array(v) => Ok(v.len() as f64),
+            Val::Enum(id, _) => Ok(*id as f64),
+            Val::Point(x, y) => Err(format!("Cannot convert point ({}, {}) to decimal", x, y)),
             Val::Null => Err("Cannot convert NULL to decimal".to_string()),
             Val::Struct => Ok(1.0), // Struct is considered as 1.0
         }
@@ -863,9 +990,18 @@ impl Type for Value {
             Val::SmallInt(i) => Ok(*i != 0),
             Val::TinyInt(i) => Ok(*i != 0),
             Val::Decimal(f) => Ok(*f != 0.0),
+            Val::Float(f) => Ok(*f != 0.0),
             Val::Timestamp(t) => Ok(*t != 0),
+            Val::Date(d) => Ok(*d != 0),
+            Val::Time(t) => Ok(*t != 0),
+            Val::Interval(i) => Ok(*i != 0),
             Val::VarLen(s) | Val::ConstLen(s) => Ok(!s.is_empty()),
-            Val::Vector(v) => Ok(!v.is_empty()),
+            Val::Binary(b) => Ok(!b.is_empty()),
+            Val::JSON(j) => Ok(!j.is_empty()),
+            Val::UUID(u) => Ok(!u.is_empty()),
+            Val::Vector(v) | Val::Array(v) => Ok(!v.is_empty()),
+            Val::Enum(_, _) => Ok(true), // Enums are always considered true
+            Val::Point(_, _) => Ok(true), // Points are always considered true
             Val::Null => Ok(false),
             Val::Struct => Ok(true), // Struct is considered true as it's a non-null value
         }
@@ -1064,13 +1200,28 @@ impl Hash for Value {
             Val::Integer(i) => i.hash(state),
             Val::BigInt(i) => i.hash(state),
             Val::Decimal(f) => f.to_bits().hash(state),
+            Val::Float(f) => f.to_bits().hash(state),
             Val::Timestamp(t) => t.hash(state),
+            Val::Date(d) => d.hash(state),
+            Val::Time(t) => t.hash(state),
+            Val::Interval(i) => i.hash(state),
             Val::VarLen(s) | Val::ConstLen(s) => s.hash(state),
-            Val::Vector(v) => {
+            Val::Binary(b) => b.hash(state),
+            Val::JSON(j) => j.hash(state),
+            Val::UUID(u) => u.hash(state),
+            Val::Vector(v) | Val::Array(v) => {
                 for value in v {
                     value.hash(state);
                 }
-            }
+            },
+            Val::Enum(id, s) => {
+                id.hash(state);
+                s.hash(state);
+            },
+            Val::Point(x, y) => {
+                x.to_bits().hash(state);
+                y.to_bits().hash(state);
+            },
             Val::Null => (), // Null doesn't need additional hashing
         }
     }
