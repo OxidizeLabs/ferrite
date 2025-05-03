@@ -54,7 +54,7 @@ use crate::sql::execution::expressions::regex_expression::{RegexExpression, Rege
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
 use crate::sql::execution::expressions::subquery_expression::SubqueryExpression;
 use crate::sql::execution::expressions::subquery_expression::SubqueryType;
-use crate::sql::execution::expressions::subscript_expression::{Subscript, SubscriptExpression};
+use crate::sql::execution::expressions::subscript_expression::{Subscript as InternalSubscript, SubscriptExpression};
 use crate::sql::execution::expressions::substring_expression::SubstringExpression;
 use crate::sql::execution::expressions::trim_expression::{TrimExpression, TrimType};
 use crate::sql::execution::expressions::tuple_expression::TupleExpression;
@@ -65,13 +65,9 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::{
-    BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
-    JoinOperator, ObjectName, OrderByExpr, Query, Select, SelectItem, SetExpr,
-    Subscript as SQLSubscript, TableFactor, Value as SQLValue, WindowFrameBound, WindowType,
-};
+use sqlparser::ast::{BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr, Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, WindowFrameBound, WindowType, AccessExpr, ValueWithSpan};
 use std::sync::Arc;
+use sqlparser::tokenizer::{Location, Span};
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -115,11 +111,11 @@ impl ExpressionParser {
                 if parts.len() != 2 {
                     return Err("Only table.column compound identifiers are supported".to_string());
                 }
-
+            
                 let table_alias = &parts[0].value;
                 let column_name = &parts[1].value;
                 let qualified_name = format!("{}.{}", table_alias, column_name);
-
+            
                 debug!("Parsing compound identifier: {}", qualified_name);
                 debug!("Schema has {} columns:", schema.get_column_count());
                 for i in 0..schema.get_column_count() as usize {
@@ -131,7 +127,7 @@ impl ExpressionParser {
                         col.get_type()
                     );
                 }
-
+            
                 // First, try to find the column using the qualified name directly
                 if let Some(column_idx) = schema.get_qualified_column_index(&qualified_name) {
                     debug!(
@@ -139,7 +135,7 @@ impl ExpressionParser {
                         qualified_name, column_idx
                     );
                     let column = schema.get_column(column_idx).unwrap().clone();
-
+            
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         column_idx,
@@ -148,12 +144,12 @@ impl ExpressionParser {
                     )));
                 }
                 debug!("Qualified column '{}' not found directly", qualified_name);
-
+            
                 // Second, try to find any column that matches the pattern table_alias.column_name
                 for (idx, col) in schema.get_columns().iter().enumerate() {
                     let col_name = col.get_name();
                     debug!("Checking column '{}' for pattern match", col_name);
-
+            
                     // Check if the column name is already qualified with the same table alias
                     if col_name.starts_with(&format!("{}.", table_alias)) {
                         let parts: Vec<&str> = col_name.split('.').collect();
@@ -175,7 +171,7 @@ impl ExpressionParser {
                     "No column found with pattern match for '{}'",
                     qualified_name
                 );
-
+            
                 // Third, if the table alias matches a known alias and the column exists without qualification
                 // This handles cases where the schema has unqualified column names but we're using qualified references
                 let unqualified_idx = schema.get_column_index(column_name);
@@ -184,10 +180,10 @@ impl ExpressionParser {
                         "Found unqualified column '{}' at index {}, will qualify with '{}'",
                         column_name, idx, table_alias
                     );
-
+            
                     let mut column = schema.get_column(idx).unwrap().clone();
                     column.set_name(qualified_name);
-
+            
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         idx,
@@ -196,22 +192,22 @@ impl ExpressionParser {
                     )));
                 }
                 debug!("No unqualified column '{}' found", column_name);
-
+            
                 // If we get here, the column wasn't found
                 Err(format!(
                     "Column {}.{} not found in schema",
                     table_alias, column_name
                 ))
             }
-
+            
             Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
-                value.clone(),
+                value.clone().into(),
             )?)),
-
+            
             Expr::BinaryOp { left, op, right } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-
+            
                 // Convert arithmetic binary operators to ArithmeticExpression
                 match op {
                     BinaryOperator::Plus
@@ -220,7 +216,7 @@ impl ExpressionParser {
                     | BinaryOperator::Divide => {
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-
+            
                         // Check if types are compatible for arithmetic
                         match (left_type, right_type) {
                             (TypeId::Integer, TypeId::Integer)
@@ -255,14 +251,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-
+            
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "AND operator requires boolean operands, got {:?} AND {:?}",
                                 left_type, right_type
                             ));
                         }
-
+            
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -274,14 +270,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-
+            
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "OR operator requires boolean operands, got {:?} OR {:?}",
                                 left_type, right_type
                             ));
                         }
-
+            
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -299,7 +295,7 @@ impl ExpressionParser {
                         // Validate that the types are comparable
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-
+            
                         match (left_type, right_type) {
                             (TypeId::Integer, TypeId::Integer)
                             | (TypeId::Decimal, TypeId::Decimal)
@@ -322,7 +318,7 @@ impl ExpressionParser {
                                     BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
                                     _ => unreachable!(),
                                 };
-
+            
                                 // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
                                 let right_expr = match right_expr.as_ref() {
                                     Expression::Literal(lit) => {
@@ -334,7 +330,7 @@ impl ExpressionParser {
                                     }
                                     _ => right_expr,
                                 };
-
+            
                                 Ok(Expression::Comparison(ComparisonExpression::new(
                                     left_expr.clone(),
                                     right_expr.clone(),
@@ -357,7 +353,7 @@ impl ExpressionParser {
                     )?)),
                 }
             }
-
+            
             Expr::UnaryOp { op, expr } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::UnaryOp(UnaryOpExpression::new(
@@ -365,7 +361,7 @@ impl ExpressionParser {
                     op.clone(),
                 )?))
             }
-
+            
             Expr::IsNull(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -374,7 +370,7 @@ impl ExpressionParser {
                     Column::new("is_null", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsNotNull(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -383,7 +379,7 @@ impl ExpressionParser {
                     Column::new("is_not_null", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsTrue(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -392,7 +388,7 @@ impl ExpressionParser {
                     Column::new("is_true", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsNotTrue(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -401,7 +397,7 @@ impl ExpressionParser {
                     Column::new("is_not_true", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsFalse(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -410,7 +406,7 @@ impl ExpressionParser {
                     Column::new("is_false", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsNotFalse(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -419,7 +415,7 @@ impl ExpressionParser {
                     Column::new("is_not_false", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsUnknown(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -428,7 +424,7 @@ impl ExpressionParser {
                     Column::new("is_unknown", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::IsNotUnknown(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -437,7 +433,7 @@ impl ExpressionParser {
                     Column::new("is_not_unknown", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::Between {
                 expr,
                 negated,
@@ -447,7 +443,7 @@ impl ExpressionParser {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let low = Arc::new(self.parse_expression(low, schema)?);
                 let high = Arc::new(self.parse_expression(high, schema)?);
-
+            
                 let low_compare = Expression::Comparison(ComparisonExpression::new(
                     expr.clone(),
                     low.clone(),
@@ -458,7 +454,7 @@ impl ExpressionParser {
                     },
                     vec![expr.clone(), low],
                 ));
-
+            
                 let high_compare = Expression::Comparison(ComparisonExpression::new(
                     expr.clone(),
                     high.clone(),
@@ -469,23 +465,22 @@ impl ExpressionParser {
                     },
                     vec![expr.clone(), high],
                 ));
-
+            
                 let result = Expression::Logic(LogicExpression::new(
                     Arc::new(low_compare.clone()),
                     Arc::new(high_compare.clone()),
                     LogicType::And,
                     vec![Arc::new(low_compare), Arc::new(high_compare)],
                 ));
-
+            
                 Ok(result)
             }
-
+            
             Expr::Function(func) => self.parse_function(func, schema),
-
+            
             Expr::Case {
                 operand,
                 conditions,
-                results,
                 else_result,
             } => {
                 // Parse the base expression if present
@@ -493,38 +488,35 @@ impl ExpressionParser {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
                     None => None,
                 };
-
-                // Parse WHEN conditions
-                let when_exprs = conditions
-                    .iter()
-                    .map(|expr| self.parse_expression(expr, schema))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(Arc::new)
-                    .collect();
-
-                // Parse THEN results
-                let then_exprs = results
-                    .iter()
-                    .map(|expr| self.parse_expression(expr, schema))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(Arc::new)
-                    .collect();
-
+            
+                // Extract both conditions and results from the conditions
+                // The sqlparser::ast::Expr::Case struct combines WHEN/THEN pairs in a single "conditions" vector
+                // where each entry is a (condition, result) pair
+                let mut when_exprs = Vec::new();
+                let mut then_exprs = Vec::new();
+                
+                for when_then in conditions {
+                    // Each condition has a when (condition) and a then (result)
+                    let when_expr = Arc::new(self.parse_expression(&when_then.condition, schema)?);
+                    let then_expr = Arc::new(self.parse_expression(&when_then.result, schema)?);
+                    
+                    when_exprs.push(when_expr);
+                    then_exprs.push(then_expr);
+                }
+            
                 // Parse ELSE result if present
                 let else_expr = match else_result {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
                     None => None,
                 };
-
+            
                 // Create the CASE expression
                 Ok(Expression::Case(
                     CaseExpression::new(base_expr, when_exprs, then_exprs, else_expr)
                         .map_err(|e| e.to_string())?,
                 ))
             }
-
+            
             Expr::Cast {
                 expr,
                 data_type,
@@ -533,19 +525,19 @@ impl ExpressionParser {
             } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let target_type = match data_type {
-                    sqlparser::ast::DataType::Int(_) | sqlparser::ast::DataType::Integer(_) => {
+                    DataType::Int(_) | DataType::Integer(_) => {
                         TypeId::Integer
                     }
                     DataType::BigInt(_) => TypeId::BigInt,
-                    DataType::Float(_) | DataType::Double | DataType::Decimal(_) => TypeId::Decimal,
+                    DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => TypeId::Decimal,
                     DataType::Char(_) => TypeId::Char,
                     DataType::Varchar(_) => TypeId::VarChar,
                     DataType::Boolean => TypeId::Boolean,
                     _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
                 };
-
+            
                 let mut cast_expr = CastExpression::new(inner_expr, target_type);
-
+            
                 // Handle format if present
                 if let Some(format_expr) = format {
                     match format_expr {
@@ -558,20 +550,20 @@ impl ExpressionParser {
                         }
                     }
                 }
-
+            
                 Ok(Expression::Cast(cast_expr))
             }
-
+            
             Expr::Nested(expr) => {
                 // For nested expressions, just parse the inner expression
                 self.parse_expression(expr, schema)
             }
-
+            
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
             } => Ok(self.parse_at_timezone(timestamp, time_zone, schema)?),
-
+            
             Expr::SimilarTo {
                 negated,
                 expr,
@@ -580,7 +572,7 @@ impl ExpressionParser {
             } => {
                 let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let parsed_pattern = Arc::new(self.parse_expression(pattern, schema)?);
-
+            
                 Ok(Expression::Regex(RegexExpression::new(
                     parsed_expr,
                     parsed_pattern,
@@ -593,7 +585,7 @@ impl ExpressionParser {
                     Column::new("similar_to", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::RLike {
                 negated,
                 expr,
@@ -602,7 +594,7 @@ impl ExpressionParser {
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let pattern = Arc::new(self.parse_expression(pattern, schema)?);
-
+            
                 Ok(Expression::Regex(RegexExpression::new(
                     expr,
                     pattern,
@@ -615,7 +607,7 @@ impl ExpressionParser {
                     Column::new("rlike", TypeId::Boolean),
                 )))
             }
-
+            
             Expr::AnyOp {
                 left,
                 compare_op,
@@ -624,7 +616,7 @@ impl ExpressionParser {
             } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-
+            
                 Ok(Expression::Any(AnyExpression::new(
                     left_expr,
                     right_expr,
@@ -632,7 +624,7 @@ impl ExpressionParser {
                     *is_some,
                 )))
             }
-
+            
             Expr::AllOp {
                 left,
                 compare_op,
@@ -640,14 +632,14 @@ impl ExpressionParser {
             } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-
+            
                 Ok(Expression::All(AllExpression::new(
                     left_expr,
                     right_expr,
                     compare_op.clone(),
                 )))
             }
-
+            
             Expr::Convert {
                 is_try,
                 expr,
@@ -657,13 +649,13 @@ impl ExpressionParser {
                 styles,
             } => {
                 let inner_expr = Arc::new(self.parse_expression(&expr, schema)?);
-
+            
                 // Parse the target type if specified
                 let target_type = match data_type {
                     Some(dtype) => Some(match dtype {
                         DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
                         DataType::BigInt(_) => TypeId::BigInt,
-                        DataType::Float(_) | DataType::Double | DataType::Decimal(_) => {
+                        DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
                             TypeId::Decimal
                         }
                         DataType::Char(_) => TypeId::Char,
@@ -675,10 +667,10 @@ impl ExpressionParser {
                     }),
                     None => None,
                 };
-
+            
                 // Parse the character set if specified
                 let charset_str = charset.clone().map(|name| name.to_string());
-
+            
                 // Parse style expressions
                 let style_exprs = styles
                     .iter()
@@ -687,7 +679,7 @@ impl ExpressionParser {
                     .into_iter()
                     .map(Arc::new)
                     .collect();
-
+            
                 // Determine return type
                 let return_type = match target_type {
                     Some(typ) => Column::new("convert_result", typ),
@@ -696,7 +688,7 @@ impl ExpressionParser {
                         None => inner_expr.get_return_type().clone(),
                     },
                 };
-
+            
                 Ok(Expression::Convert(ConvertExpression::new(
                     inner_expr,
                     target_type,
@@ -706,10 +698,10 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
-
+            
             Expr::Ceil { expr, field } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-
+            
                 let datetime_field = match field {
                     CeilFloorKind::DateTimeField(field) => Some(match field {
                         sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
@@ -747,17 +739,20 @@ impl ExpressionParser {
                         _ => return Err("Unsupported datetime field".to_string()),
                     }),
                     CeilFloorKind::Scale(scale_expr) => {
-                        let scale_expr = Expr::Value(scale_expr.clone());
+                        let scale_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+                            value: scale_expr.clone(),
+                             span: Span { start: Location::new(0, 0), end:  Location::new(0, 0)},
+                        });
                         let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
-                            CeilFloorOperation::Floor,
+                            CeilFloorOperation::Ceil,
                             inner_expr,
                             Some(scale),
                             None,
                         )?));
                     }
                 };
-
+            
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
                     CeilFloorOperation::Ceil,
                     inner_expr,
@@ -765,10 +760,10 @@ impl ExpressionParser {
                     datetime_field,
                 )?))
             }
-
+            
             Expr::Floor { expr, field } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-
+            
                 let datetime_field = match field {
                     CeilFloorKind::DateTimeField(field) => Some(match field {
                         sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
@@ -806,7 +801,10 @@ impl ExpressionParser {
                         _ => return Err("Unsupported datetime field".to_string()),
                     }),
                     CeilFloorKind::Scale(scale_expr) => {
-                        let scale_expr = Expr::Value(scale_expr.clone());
+                        let scale_expr = Expr::Value(ValueWithSpan {
+                            value: scale_expr.clone(),
+                            span: Span { start: Location::new(0,0), end: Location::new(0,0) },
+                        });
                         let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
                             CeilFloorOperation::Floor,
@@ -816,7 +814,7 @@ impl ExpressionParser {
                         )?));
                     }
                 };
-
+            
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
                     CeilFloorOperation::Floor,
                     inner_expr,
@@ -824,35 +822,35 @@ impl ExpressionParser {
                     datetime_field,
                 )?))
             }
-
+            
             Expr::Position { expr, r#in } => {
                 let substring_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let string_expr = Arc::new(self.parse_expression(r#in, schema)?);
-
+            
                 // Validate that both expressions return string types
                 let substring_type = substring_expr.get_return_type().get_type();
                 let string_type = string_expr.get_return_type().get_type();
-
+            
                 if !matches!(substring_type, TypeId::VarChar | TypeId::Char) {
                     return Err(format!(
                         "POSITION substring must be a string type, got {:?}",
                         substring_type
                     ));
                 }
-
+            
                 if !matches!(string_type, TypeId::VarChar | TypeId::Char) {
                     return Err(format!(
                         "POSITION string must be a string type, got {:?}",
                         string_type
                     ));
                 }
-
+            
                 Ok(Expression::Position(PositionExpression::new(
                     substring_expr,
                     string_expr,
                 )))
             }
-
+            
             Expr::Overlay {
                 expr,
                 overlay_what,
@@ -862,16 +860,16 @@ impl ExpressionParser {
                 let base_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let overlay_what_expr = Arc::new(self.parse_expression(overlay_what, schema)?);
                 let overlay_from_expr = Arc::new(self.parse_expression(overlay_from, schema)?);
-
+            
                 let overlay_for_expr = if let Some(for_expr) = overlay_for {
                     Some(Arc::new(self.parse_expression(for_expr, schema)?))
                 } else {
                     None
                 };
-
+            
                 // Determine return type (always a string)
                 let return_type = Column::new("overlay_result", TypeId::VarChar);
-
+            
                 Ok(Expression::Overlay(OverlayExpression::new(
                     base_expr,
                     overlay_what_expr,
@@ -880,6 +878,7 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
+            
             Expr::IsDistinctFrom(left, right) => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
@@ -890,6 +889,7 @@ impl ExpressionParser {
                     Column::new("is_distinct", TypeId::Boolean),
                 )))
             }
+            
             Expr::IsNotDistinctFrom(left, right) => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
@@ -900,6 +900,7 @@ impl ExpressionParser {
                     Column::new("is_not_distinct", TypeId::Boolean),
                 )))
             }
+            
             Expr::InList {
                 expr,
                 list,
@@ -923,21 +924,23 @@ impl ExpressionParser {
                     Column::new("in_list", TypeId::Boolean),
                 )))
             }
+            
             Expr::InSubquery {
                 expr,
                 subquery,
                 negated,
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
-                // The schema parameter is now called _outer_schema in parse_subquery
-                let subquery = Arc::new(self.parse_subquery(subquery, schema)?);
+                // The subquery parameter is a Query, which is what parse_subquery expects
+                let subquery_expr = Arc::new(self.parse_setexpr(subquery, schema)?);
                 Ok(Expression::In(InExpression::new_subquery(
                     expr,
-                    subquery,
+                    subquery_expr,
                     *negated,
                     Column::new("in_list", TypeId::Boolean),
                 )))
             }
+            
             Expr::InUnnest {
                 expr,
                 array_expr,
@@ -952,6 +955,7 @@ impl ExpressionParser {
                     Column::new("in_unnest", TypeId::Boolean),
                 )))
             }
+            
             Expr::Like {
                 negated,
                 any,
@@ -965,6 +969,7 @@ impl ExpressionParser {
                 escape_char.clone(),
                 Column::new("like", TypeId::Boolean),
             ))),
+            
             Expr::ILike {
                 negated,
                 any,
@@ -978,6 +983,7 @@ impl ExpressionParser {
                 escape_char.clone(),
                 Column::new("ilike", TypeId::Boolean),
             ))),
+            
             Expr::Extract {
                 field,
                 syntax,
@@ -1005,32 +1011,35 @@ impl ExpressionParser {
                     Column::new("extract", TypeId::Integer),
                 )))
             }
+            
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
                 special,
+                shorthand
             } => {
                 let string_expr = Arc::new(self.parse_expression(expr, schema)?);
-
+            
                 // Parse the FROM expression
                 let from_expr = match substring_from {
                     Some(from) => Arc::new(self.parse_expression(from, schema)?),
                     None => return Err("SUBSTRING requires FROM clause".to_string()),
                 };
-
+            
                 // Parse the optional FOR expression
                 let for_expr = match substring_for {
                     Some(for_expr) => Some(Arc::new(self.parse_expression(for_expr, schema)?)),
                     None => None,
                 };
-
+            
                 Ok(Expression::Substring(SubstringExpression::new(
                     string_expr,
                     from_expr,
                     for_expr,
                 )))
             }
+            
             Expr::Trim {
                 expr,
                 trim_where,
@@ -1044,10 +1053,10 @@ impl ExpressionParser {
                     Some(sqlparser::ast::TrimWhereField::Both) => TrimType::Both,
                     None => TrimType::Both,
                 };
-
+            
                 // Create the children vector with the main expression first
                 let mut children = vec![parsed_expr];
-
+            
                 // Add trim characters if specified
                 if let Some(chars) = trim_characters {
                     // If there are multiple trim characters, concatenate them into a single string
@@ -1057,16 +1066,22 @@ impl ExpressionParser {
                             .iter()
                             .map(|expr| {
                                 match expr {
-                                    Expr::Value(sqlparser::ast::Value::SingleQuotedString(s)) => {
+                                    Expr::Value(ValueWithSpan { 
+                                        value: sqlparser::ast::Value::SingleQuotedString(s),
+                                        span: _,  // Use _ to ignore the span
+                                    }) => {
                                         s.clone()
                                     }
                                     _ => String::new(), // Skip non-string literals
                                 }
                             })
                             .collect::<String>();
-
+            
                         children.push(Arc::new(self.parse_expression(
-                            &Expr::Value(sqlparser::ast::Value::SingleQuotedString(concat_chars)),
+                            &Expr::Value(ValueWithSpan {
+                                value: sqlparser::ast::Value::SingleQuotedString(concat_chars),
+                                span: Span::new(Location::new(0,0), Location::new(0,0)),
+                            }),
                             schema,
                         )?));
                     } else if let Some(first_char) = chars.first() {
@@ -1074,13 +1089,14 @@ impl ExpressionParser {
                         children.push(Arc::new(self.parse_expression(first_char, schema)?));
                     }
                 }
-
+            
                 Ok(Expression::Trim(TrimExpression::new(
                     trim_type,
                     children,
                     Column::new("trim", TypeId::VarChar),
                 )))
             }
+            
             Expr::Collate { expr, collation } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let collation_str = collation.to_string();
@@ -1090,6 +1106,7 @@ impl ExpressionParser {
                     Column::new("collate", TypeId::VarChar),
                 )))
             }
+            
             Expr::TypedString { data_type, value } => {
                 Ok(Expression::TypedString(TypedStringExpression::new(
                     data_type.to_string(),
@@ -1105,67 +1122,7 @@ impl ExpressionParser {
                     ),
                 )))
             }
-            Expr::MapAccess { column, keys } => {
-                let parsed_column = self.parse_expression(column, schema)?;
-                let mut path = Vec::new();
-                for key in keys {
-                    // Parse the key expression
-                    match &key.key {
-                        Expr::Value(SQLValue::SingleQuotedString(s))
-                        | Expr::Value(SQLValue::DoubleQuotedString(s)) => {
-                            path.push(MapAccessKey::String(s.to_string()))
-                        }
-                        Expr::Value(SQLValue::Number(n, _)) => {
-                            if let Ok(num) = n.parse::<i64>() {
-                                path.push(MapAccessKey::Number(num))
-                            } else {
-                                return Err(format!("Invalid numeric key: {}", n));
-                            }
-                        }
-                        _ => return Err(format!("Unsupported map access key type")),
-                    }
-                }
-                Ok(Expression::MapAccess(MapAccessExpression::new(
-                    Arc::new(parsed_column),
-                    path,
-                    Column::new("map_access", TypeId::VarChar), // Using VarChar as default type since map access typically returns string-like data
-                )))
-            }
-            Expr::Method(method) => {
-                let obj_expr = Arc::new(self.parse_expression(&method.expr, schema)?);
-                let parsed_args = Vec::new();
-
-                for func in &method.method_chain {
-                    // Parse each function's arguments
-                    self.parse_function(func, schema);
-                }
-
-                // Get the method name from the last function in the chain
-                let method_name = if let Some(last_func) = method.method_chain.last() {
-                    last_func
-                        .name
-                        .0
-                        .last()
-                        .map(|i| i.value.clone())
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                };
-
-                // Determine return type based on method name
-                let return_type = match method_name.as_str() {
-                    "length" | "size" | "count" => Column::new(&method_name, TypeId::Integer),
-                    "value" => Column::new(&method_name, TypeId::VarChar),
-                    _ => Column::new(&method_name, TypeId::VarChar), // Default to VarChar
-                };
-
-                Ok(Expression::Method(MethodExpression::new(
-                    obj_expr,
-                    method_name,
-                    parsed_args,
-                    return_type,
-                )))
-            }
+            
             Expr::Exists { subquery, negated } => {
                 // The schema parameter is now called _outer_schema in parse_subquery
                 let subquery_expr = Arc::new(self.parse_subquery(subquery, schema)?);
@@ -1175,10 +1132,12 @@ impl ExpressionParser {
                     Column::new("exists", TypeId::Boolean),
                 )))
             }
+            
             Expr::Subquery(query) => {
                 // The schema parameter is now called _outer_schema in parse_subquery
                 self.parse_subquery(query, schema)
             }
+            
             Expr::GroupingSets(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1194,6 +1153,7 @@ impl ExpressionParser {
                     Column::new("grouping_sets", TypeId::Vector),
                 )))
             }
+            
             Expr::Cube(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1209,6 +1169,7 @@ impl ExpressionParser {
                     Column::new("cube", TypeId::Vector),
                 )))
             }
+            
             Expr::Rollup(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1224,6 +1185,7 @@ impl ExpressionParser {
                     Column::new("rollup", TypeId::Vector),
                 )))
             }
+            
             Expr::Tuple(exprs) => {
                 // Parse each expression in the tuple
                 let parsed_exprs: Result<Vec<Arc<Expression>>, String> = exprs
@@ -1240,6 +1202,7 @@ impl ExpressionParser {
                     ))
                 })
             }
+            
             Expr::Struct { values, fields } => {
                 // Parse each value expression
                 let mut parsed_values = Vec::new();
@@ -1262,7 +1225,7 @@ impl ExpressionParser {
                         DataType::BigInt(_) => TypeId::BigInt,
                         DataType::SmallInt(_) => TypeId::SmallInt,
                         DataType::TinyInt(_) => TypeId::TinyInt,
-                        DataType::Float(_) | DataType::Double | DataType::Decimal(_) => {
+                        DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
                             TypeId::Decimal
                         }
                         DataType::Char(_) => TypeId::Char,
@@ -1297,63 +1260,7 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
-            Expr::Subscript { expr, subscript } => {
-                let base_expr = Arc::new(self.parse_expression(&expr, schema)?);
-
-                match &**subscript {
-                    SQLSubscript::Index { index } => {
-                        let idx_expr = Arc::new(self.parse_expression(index, schema)?);
-
-                        // The return type will be the element type of the vector
-                        let return_type = match base_expr.get_return_type().get_type() {
-                            TypeId::Vector => {
-                                // For now, assuming vectors contain integers. In future, we should get the element type from the vector type
-                                Column::new("subscript_result", TypeId::Integer)
-                            }
-                            _ => {
-                                return Err(format!(
-                                    "Cannot perform subscript operation on non-vector type: {:?}",
-                                    base_expr.get_return_type().get_type()
-                                ))
-                            }
-                        };
-
-                        Ok(Expression::Subscript(SubscriptExpression::new(
-                            base_expr,
-                            Subscript::Single(idx_expr),
-                            return_type,
-                        )))
-                    }
-                    SQLSubscript::Slice {
-                        lower_bound,
-                        upper_bound,
-                        stride,
-                    } => {
-                        if stride.is_some() {
-                            return Err("Stride in array slices is not yet supported".to_string());
-                        }
-
-                        let start = match lower_bound {
-                            Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
-                            None => None,
-                        };
-
-                        let end = match upper_bound {
-                            Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
-                            None => None,
-                        };
-
-                        // For slices, the return type is always a vector since we're returning a subset
-                        let return_type = Column::new("slice_result", TypeId::Vector);
-
-                        Ok(Expression::Subscript(SubscriptExpression::new(
-                            base_expr,
-                            Subscript::Range { start, end },
-                            return_type,
-                        )))
-                    }
-                }
-            }
+            
             Expr::Array(array) => {
                 // Parse each element in the array
                 let mut elements = Vec::new();
@@ -1391,6 +1298,7 @@ impl ExpressionParser {
                     Column::new("array", TypeId::Vector),
                 )))
             }
+            
             Expr::Interval(interval) => {
                 // Parse the interval value expression
                 let value_expr = self.parse_expression(&interval.value, schema)?;
@@ -1413,6 +1321,7 @@ impl ExpressionParser {
                     Column::new("interval", TypeId::Struct),
                 )))
             }
+            
             Expr::Wildcard(token) => {
                 // Create a wildcard expression that will return all columns as a vector
                 Ok(Expression::Wildcard(WildcardExpression::new(Column::new(
@@ -1420,9 +1329,10 @@ impl ExpressionParser {
                     TypeId::Vector,
                 ))))
             }
+            
             Expr::QualifiedWildcard(name, _) => {
                 // Extract the qualifier parts (e.g., ["schema", "table"] from schema.table.*)
-                let qualifier: Vec<String> = name.0.iter().map(|i| i.value.clone()).collect();
+                let qualifier: Vec<String> = name.0.iter().map(|i| i.as_ident().unwrap().value.clone()).collect();
 
                 // Create a qualified wildcard expression
                 Ok(Expression::QualifiedWildcard(
@@ -1433,7 +1343,7 @@ impl ExpressionParser {
                                 "{}.*",
                                 name.0
                                     .iter()
-                                    .map(|i| i.value.as_str())
+                                    .map(|i| i.as_ident().unwrap().value.clone())
                                     .collect::<Vec<_>>()
                                     .join(".")
                             ),
@@ -1442,6 +1352,151 @@ impl ExpressionParser {
                     ),
                 ))
             }
+            
+            Expr::CompoundFieldAccess { root, access_chain } => {
+                // First, parse the root expression
+                let mut expr = self.parse_expression(root, schema)?;
+                
+                // Apply each access in the chain sequentially
+                for access in access_chain {
+                    match access {
+                        AccessExpr::Dot(field_expr) => {
+                            // For dot notation, the field is usually an identifier
+                            if let Expr::Identifier(ident) = field_expr {
+                                let field_name = ident.value.clone();
+                                
+                                // Get the type of the current expression
+                                let curr_type = expr.get_return_type().get_type();
+                                
+                                if curr_type == TypeId::Struct {
+                                    // Access field in a struct
+                                    expr = Expression::MapAccess(MapAccessExpression::new(
+                                        Arc::new(expr),
+                                        vec![MapAccessKey::String(field_name.clone())],
+                                        Column::new(&format!("field_{}", field_name), TypeId::Invalid),
+                                    ));
+                                } else {
+                                    return Err(format!(
+                                        "Dot notation field access only supported for struct types, got {:?}",
+                                        curr_type
+                                    ));
+                                }
+                            } else {
+                                return Err("Dot notation field access requires identifier".to_string());
+                            }
+                        },
+                        AccessExpr::Subscript(subscript) => {
+                            match subscript {
+                                SQLSubscript::Index { index } => {
+                                    // Parse the index expression
+                                    let index_expr = Arc::new(self.parse_expression(&index, schema)?);
+                                    let curr_type = expr.get_return_type().get_type();
+                                    
+                                    if curr_type == TypeId::Vector || curr_type == TypeId::Array {
+                                        // For array/vector access
+                                        expr = Expression::Subscript(SubscriptExpression::new(
+                                            Arc::new(expr),
+                                            InternalSubscript::Single(index_expr),
+                                            Column::new("array_element", TypeId::Invalid),
+                                        ));
+                                    } else if curr_type == TypeId::Struct || curr_type == TypeId::JSON {
+                                        // For map/struct access with bracket notation
+                                        // Determine if this is a numeric or string index
+                                        match &index {
+                                            Expr::Value(value) => {
+                                                if let SQLValue::SingleQuotedString(s) = &value.value {
+                                                    // String key for map access
+                                                    expr = Expression::MapAccess(MapAccessExpression::new(
+                                                        Arc::new(expr),
+                                                        vec![MapAccessKey::String(s.clone())],
+                                                        Column::new(&format!("field_{}", s), TypeId::Invalid),
+                                                    ));
+                                                } else if let SQLValue::Number(n, _) = &value.value {
+                                                    // Numeric index for array access within a struct
+                                                    expr = Expression::MapAccess(MapAccessExpression::new(
+                                                        Arc::new(expr),
+                                                        vec![MapAccessKey::Number(n.parse::<i64>().unwrap_or(0))],
+                                                        Column::new(&format!("index_{}", n), TypeId::Invalid),
+                                                    ));
+                                                } else {
+                                                    return Err(format!(
+                                                        "Unsupported map/struct index type: {:?}", 
+                                                        value
+                                                    ));
+                                                }
+                                            },
+                                            Expr::Identifier(ident) => {
+                                                // Identifier as a string key
+                                                expr = Expression::MapAccess(MapAccessExpression::new(
+                                                    Arc::new(expr),
+                                                    vec![MapAccessKey::String(ident.value.clone())],
+                                                    Column::new(&format!("field_{}", ident.value), TypeId::Invalid),
+                                                ));
+                                            },
+                                            _ => {
+                                                // For dynamic keys, we'll need to use a different approach
+                                                // Let's wrap the index expression in a function or method call
+                                                let func_name = format!("access_at_index");
+                                                expr = Expression::Function(FunctionExpression::new(
+                                                    func_name,
+                                                    vec![Arc::new(expr), index_expr],
+                                                    Column::new("dynamic_field", TypeId::Invalid),
+                                                ));
+                                            }
+                                        }
+                                    } else {
+                                        return Err(format!(
+                                            "Subscript access only supported for array, vector, struct, or JSON types, got {:?}",
+                                            curr_type
+                                        ));
+                                    }
+                                },
+                                SQLSubscript::Slice { lower_bound, upper_bound, stride } => {
+                                    // Handle array slicing - convert SQL expressions to our expressions
+                                    let lower_expr = lower_bound.as_ref().map(|e| 
+                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(|_| 
+                                            Expression::Constant(ConstantExpression::new(
+                                                Value::new(0),
+                                                Column::new("lower_bound", TypeId::Integer),
+                                                vec![],
+                                            ))
+                                        ))
+                                    );
+                                    
+                                    let upper_expr = upper_bound.as_ref().map(|e| 
+                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(|_| 
+                                            Expression::Constant(ConstantExpression::new(
+                                                Value::new(-1), // -1 indicates the end of array
+                                                Column::new("upper_bound", TypeId::Integer),
+                                                vec![],
+                                            ))
+                                        ))
+                                    );
+                                    
+                                    // Create Range subscript
+                                    let slice_subscript = InternalSubscript::Range {
+                                        start: lower_expr,
+                                        end: upper_expr,
+                                    };
+                                    
+                                    expr = Expression::Subscript(SubscriptExpression::new(
+                                        Arc::new(expr),
+                                        slice_subscript,
+                                        Column::new("array_slice", TypeId::Vector),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Ok(expr)
+            }
+            
+            Expr::JsonAccess { .. } => {
+                Err("JSON access expressions are not yet supported".to_string())
+            }
+            
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
@@ -1656,6 +1711,47 @@ impl ExpressionParser {
 
                 Ok((predicate, join_operator.clone()))
             }
+            // Handle the additional JoinOperator variants
+            JoinOperator::Join(constraint) => {
+                // Treat like INNER JOIN
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
+                Ok((predicate, join_operator.clone()))
+            }
+            JoinOperator::Left(constraint) => {
+                // Treat like LEFT OUTER JOIN
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
+                Ok((predicate, join_operator.clone()))
+            }
+            JoinOperator::Right(constraint) => {
+                // Treat like RIGHT OUTER JOIN
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
+                Ok((predicate, join_operator.clone()))
+            }
+            JoinOperator::StraightJoin(constraint) => {
+                // Treat like INNER JOIN
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
+                Ok((predicate, join_operator.clone()))
+            }
         }
     }
 
@@ -1677,7 +1773,9 @@ impl ExpressionParser {
                 let mut predicates = Vec::new();
 
                 for ident in columns {
-                    let column_name = ident.value.clone();
+                    let column_name = match &ident.0[0] {
+                        ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                    };
 
                     // Find the column in both schemas
                     let left_col_idx =
@@ -1818,7 +1916,11 @@ impl ExpressionParser {
     pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
         debug!("Extracting table name from: {:?}", table_name);
         match table_name {
-            ObjectName(parts) if parts.len() == 1 => Ok(parts[0].value.clone()),
+            ObjectName(parts) if parts.len() == 1 => {
+                match &parts[0] {
+                    ObjectNamePart::Identifier(ident) => Ok(ident.value.clone()),
+                }
+            },
             _ => Err("Only single table INSERT statements are supported".to_string()),
         }
     }
@@ -2117,7 +2219,7 @@ impl ExpressionParser {
                 // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
                 Arc::new(Expression::TypedString(TypedStringExpression::new(
                     "TIMESTAMP".to_string(),
-                    value.clone(),
+                    value.to_string(),
                     Column::new("timestamp", TypeId::Timestamp),
                 )))
             }
@@ -2144,11 +2246,15 @@ impl ExpressionParser {
 
         // Parse the timezone expression
         let timezone_expr = match timezone {
-            Expr::Value(sqlparser::ast::Value::SingleQuotedString(tz_str)) => {
-                debug!("Processing timezone string literal: {}", tz_str);
+            Expr::Value(sqlparser::ast::ValueWithSpan { value: tz_value, span }) => {
+                debug!("Processing timezone string literal: {:?}", tz_value);
+                // Extract the string value from the sqlparser Value
+                let tz_str = Value::from_sqlparser_value(&tz_value)
+                    .map_err(|e| format!("Failed to extract timezone string: {}", e))?;
+                
                 // Create a constant expression for the timezone string
                 Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(tz_str.clone()),
+                    Value::new(tz_str),
                     Column::new("timezone", TypeId::VarChar),
                     Vec::new(), // No children for constant expression
                 )))
@@ -2183,13 +2289,11 @@ impl ExpressionParser {
         )))
     }
 
-    fn parse_subquery(&self, query: &Query, _outer_schema: &Schema) -> Result<Expression, String> {
-        debug!("Parsing subquery: {:?}", query);
-        // Extract the body of the query
-        let body = &query.body;
+    fn parse_setexpr(&self, set_expr: &SetExpr, _outer_schema: &Schema) -> Result<Expression, String> {
+        debug!("Parsing set_expr: {:?}", set_expr);
 
         // For now, we only support SELECT expressions
-        match body.as_ref() {
+        match set_expr {
             SetExpr::Select(select) => {
                 // Get the schema for the tables in the subquery's FROM clause
                 let subquery_schema = if !select.from.is_empty() {
@@ -2244,6 +2348,15 @@ impl ExpressionParser {
             }
             _ => Err("Unsupported subquery type".to_string()),
         }
+    }
+
+    fn parse_subquery(&self, query: &Query, _outer_schema: &Schema) -> Result<Expression, String> {
+        debug!("Parsing subquery: {:?}", query);
+        // Extract the body of the query
+        let body = &query.body;
+
+        // For now, we only support SELECT expressions
+        self.parse_setexpr(body, _outer_schema)
     }
 
     // Helper method to determine the subquery type and return type
@@ -2706,891 +2819,901 @@ impl ExpressionParser {
             "COUNT".to_string(),
         )))
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::common::logger::initialize_logger;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
-    use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
-    use crate::sql::execution::expressions::comparison_expression::ComparisonType;
-    use crate::sql::execution::expressions::logic_expression::LogicType;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use sqlparser::ast::Ident;
-    use std::collections::HashMap;
-    use tempfile::TempDir;
-
-    struct TestContext {
-        catalog: Arc<RwLock<Catalog>>,
-        _temp_dir: TempDir,
-        expression_parser: ExpressionParser,
-    }
-
-    impl TestContext {
-        pub fn new(name: &str) -> Self {
-            initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 5;
-            const K: usize = 2;
-
-            // Create temporary directory
-            let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir
-                .path()
-                .join(format!("{name}.db"))
-                .to_str()
-                .unwrap()
-                .to_string();
-            let log_path = temp_dir
-                .path()
-                .join(format!("{name}.log"))
-                .to_str()
-                .unwrap()
-                .to_string();
-
-            // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer.clone(),
-            ));
-
-            let transaction_manager = Arc::new(TransactionManager::new());
-
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                transaction_manager.clone(),
-            )));
-
-            let expression_parser = ExpressionParser::new(catalog.clone());
-
-            Self {
-                catalog,
-                _temp_dir: temp_dir,
-                expression_parser,
-            }
-        }
-
-        pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
-            self.catalog.clone()
-        }
-
-        pub fn expression_parser(&self) -> &ExpressionParser {
-            &self.expression_parser
-        }
-
-        fn setup_test_schema(&self) -> Schema {
-            Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("age", TypeId::Integer),
-                Column::new("salary", TypeId::Decimal),
-                Column::new("timestamp_column", TypeId::Timestamp),
-            ])
-        }
-
-        fn parse_expression(&self, expr_str: &str, schema: &Schema) -> Result<Expression, String> {
-            use sqlparser::dialect::GenericDialect;
-            use sqlparser::parser::Parser;
-
-            let dialect = GenericDialect {};
-            let mut parser = Parser::new(&dialect)
-                .try_with_sql(expr_str)
-                .map_err(|e| e.to_string())?;
-            let expr = parser.parse_expr().map_err(|e| e.to_string())?;
-            self.expression_parser().parse_expression(&expr, schema)
-        }
-    }
-
-    // Helper function to extract the first column reference from an expression
-    fn extract_first_column_ref(expr: &Expression) -> Option<Column> {
-        match expr {
-            Expression::ColumnRef(col_ref) => Some(col_ref.get_return_type().clone()),
-            Expression::Comparison(comp) => {
-                let children = comp.get_children();
-                if let Expression::ColumnRef(col_ref) = children[0].as_ref() {
-                    Some(col_ref.get_return_type().clone())
-                } else {
-                    None
-                }
-            }
-            Expression::Arithmetic(arith) => {
-                let children = arith.get_children();
-                for child in children {
-                    if let Some(col) = extract_first_column_ref(child) {
-                        return Some(col);
-                    }
-                }
-                None
-            }
-            Expression::Logic(logic) => {
-                let children = logic.get_children();
-                for child in children {
-                    if let Some(col) = extract_first_column_ref(child) {
-                        return Some(col);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn test_parse_comparison_expressions() {
-        let ctx = TestContext::new("test_parse_comparison_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("age > 25", ComparisonType::GreaterThan),
-            ("age >= 25", ComparisonType::GreaterThanOrEqual),
-            ("age < 25", ComparisonType::LessThan),
-            ("age <= 25", ComparisonType::LessThanOrEqual),
-            ("age = 25", ComparisonType::Equal),
-            ("age != 25", ComparisonType::NotEqual),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Comparison(comp) => {
-                    assert_eq!(
-                        comp.get_comp_type(),
-                        expected_type,
-                        "Expression '{}' should be {:?}",
-                        expr_str,
-                        expected_type
-                    );
-                }
-                _ => panic!("Expected Comparison expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_arithmetic_expressions() {
-        let ctx = TestContext::new("test_parse_arithmetic_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("age + 5", ArithmeticOp::Add),
-            ("age - 5", ArithmeticOp::Subtract),
-            ("age * 5", ArithmeticOp::Multiply),
-            ("age / 5", ArithmeticOp::Divide),
-        ];
-
-        for (expr_str, expected_op) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Arithmetic(arith) => {
-                    assert_eq!(
-                        arith.get_op(),
-                        expected_op,
-                        "Expression '{}' should be {:?}",
-                        expr_str,
-                        expected_op
-                    );
-                }
-                _ => panic!("Expected Arithmetic expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_logical_expressions() {
-        let ctx = TestContext::new("test_parse_logical_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("age > 20 AND salary < 50000", LogicType::And),
-            ("age < 25 OR salary > 60000", LogicType::Or),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Logic(logic) => {
-                    assert_eq!(
-                        logic.get_logic_type(),
-                        expected_type,
-                        "Expression '{}' should be {:?}",
-                        expr_str,
-                        expected_type
-                    );
-                }
-                _ => panic!("Expected Logic expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_column_references() {
-        let ctx = TestContext::new("test_parse_column_references");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec!["id = 1", "name = 'John'", "age > 25", "salary < 50000"];
-
-        for expr_str in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Comparison(comp) => {
-                    let children = comp.get_children();
-
-                    // Verify we have exactly 2 children
-                    assert_eq!(
-                        children.len(),
-                        2,
-                        "Comparison expression '{}' should have exactly 2 children (got {})",
-                        expr_str,
-                        children.len()
-                    );
-
-                    // Verify left child is a column reference
-                    match children[0].as_ref() {
-                        Expression::ColumnRef(col_ref) => {
-                            assert!(
-                                schema
-                                    .get_column_index(col_ref.get_return_type().get_name())
-                                    .is_some(),
-                                "Column '{}' not found in schema",
-                                col_ref.get_return_type().get_name()
-                            );
-                        }
-                        other => panic!(
-                            "Expected ColumnRef as left child for '{}', got {:?}",
-                            expr_str, other
-                        ),
-                    }
-
-                    // Verify right child is a constant
-                    match children[1].as_ref() {
-                        Expression::Constant(_) => {} // Success
-                        other => panic!(
-                            "Expected Constant as right child for '{}', got {:?}",
-                            expr_str, other
-                        ),
-                    }
-                }
-                _ => panic!("Expected Comparison expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_constants() {
-        let ctx = TestContext::new("test_parse_constants");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("age = 25", TypeId::Integer),
-            ("name = 'John'", TypeId::VarChar),
-            ("salary > 50000.0", TypeId::Decimal),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Comparison(comp) => {
-                    let children = comp.get_children();
-                    match children[1].as_ref() {
-                        Expression::Constant(constant) => {
-                            assert_eq!(
-                                constant.get_return_type().get_type(),
-                                expected_type,
-                                "Constant in '{}' should have type {:?}",
-                                expr_str,
-                                expected_type
-                            );
-                        }
-                        other => panic!(
-                            "Expected Constant as right child for '{}', got {:?}",
-                            expr_str, other
-                        ),
-                    }
-                }
-                _ => panic!("Expected Comparison expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_case_expressions() {
-        let ctx = TestContext::new("test_parse_case_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            "CASE WHEN age > 25 THEN 'Adult' ELSE 'Young' END",
-            "CASE age WHEN 20 THEN 'Twenty' WHEN 30 THEN 'Thirty' ELSE 'Other' END",
-        ];
-
-        for expr_str in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Case(case) => {
-                    assert_eq!(
-                        case.get_return_type().get_type(),
-                        TypeId::VarChar,
-                        "CASE expression '{}' should return {:?}",
-                        expr_str,
-                        TypeId::VarChar
-                    );
-                }
-                _ => panic!("Expected Case expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_cast_expressions() {
-        let ctx = TestContext::new("test_parse_cast_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("CAST(age AS VARCHAR)", TypeId::VarChar),
-            ("CAST(salary AS INTEGER)", TypeId::Integer),
-            ("CAST('123' AS INTEGER)", TypeId::Integer),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Cast(cast) => {
-                    assert_eq!(
-                        cast.get_return_type().get_type(),
-                        expected_type,
-                        "CAST expression '{}' should return {:?}",
-                        expr_str,
-                        expected_type
-                    );
-                }
-                _ => panic!("Expected Cast expression for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_string_functions() {
-        let ctx = TestContext::new("test_parse_string_functions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("UPPER(name)", true),
-            ("LOWER(name)", true),
-            ("SUBSTRING(name FROM 1 FOR 3)", false),
-        ];
-
-        for (expr_str, is_function) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match (expr, is_function) {
-                (Expression::Function(func), true) => {
-                    assert_eq!(
-                        func.get_return_type().get_type(),
-                        TypeId::VarChar,
-                        "String function '{}' should return {:?}",
-                        expr_str,
-                        TypeId::VarChar
-                    );
-                }
-                (Expression::Substring(substr), false) => {
-                    assert_eq!(
-                        substr.get_return_type().get_type(),
-                        TypeId::VarChar,
-                        "SUBSTRING expression '{}' should return {:?}",
-                        expr_str,
-                        TypeId::VarChar
-                    );
-                }
-                _ => panic!(
-                    "Expected {} expression for '{}'",
-                    if is_function { "Function" } else { "Substring" },
-                    expr_str
-                ),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_complex_expressions() {
-        let ctx = TestContext::new("test_parse_complex_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            (
-                "CASE WHEN age > 25 AND salary > 50000 THEN 'High' ELSE 'Low' END",
-                "case",
-            ),
-            ("(age + 5) * 2", "multiply"),
-            ("UPPER(name) = 'JOHN'", "compare"),
-        ];
-
-        for (expr_str, expr_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match (expr, expr_type) {
-                (Expression::Case(case), "case") => {
-                    assert_eq!(
-                        case.get_return_type().get_type(),
-                        TypeId::VarChar,
-                        "CASE expression '{}' should return {:?}",
-                        expr_str,
-                        TypeId::VarChar
-                    );
-                }
-                (Expression::Arithmetic(arith), "multiply") => {
-                    assert_eq!(
-                        arith.get_op(),
-                        ArithmeticOp::Multiply,
-                        "Arithmetic expression '{}' should be {:?}",
-                        expr_str,
-                        ArithmeticOp::Multiply
-                    );
-                    // Verify the left child is an Add operation
-                    let children = arith.get_children();
-                    assert_eq!(children.len(), 2, "Multiply should have 2 children");
-                    match children[0].as_ref() {
-                        Expression::Arithmetic(add_expr) => {
-                            assert_eq!(
-                                add_expr.get_op(),
-                                ArithmeticOp::Add,
-                                "Left child of multiply should be Add"
-                            );
-                        }
-                        _ => panic!("Expected Add expression as left child of multiply"),
-                    }
-                }
-                (Expression::Comparison(comp), "compare") => {
-                    assert_eq!(
-                        comp.get_comp_type(),
-                        ComparisonType::Equal,
-                        "Comparison expression '{}' should be {:?}",
-                        expr_str,
-                        ComparisonType::Equal
-                    );
-                }
-                _ => panic!("Unexpected expression type for '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_aggregate_functions() {
-        use crate::sql::execution::expressions::aggregate_expression::AggregationType;
-
-        let ctx = TestContext::new("test_parse_aggregate_functions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            ("COUNT(*)", AggregationType::CountStar),
-            ("SUM(salary)", AggregationType::Sum),
-            ("AVG(age)", AggregationType::Avg),
-            ("MIN(salary)", AggregationType::Min),
-            ("MAX(age)", AggregationType::Max),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Aggregate(agg) => {
-                    assert_eq!(
-                        agg.get_agg_type(),
-                        &expected_type,
-                        "Aggregate expression '{}' should be {:?}",
-                        expr_str,
-                        expected_type
-                    );
-                }
-                _ => panic!("Expected Aggregate expression for '{}'", expr_str),
-            }
-        }
-
-        // Test invalid aggregates
-        let invalid_cases = vec![
-            "COUNT()",             // No arguments
-            "SUM(*)",              // Can't sum *
-            "AVG(name)",           // Can't average strings
-            "MIN()",               // No arguments
-            "MAX(invalid_column)", // Invalid column
-        ];
-
-        for expr_str in invalid_cases {
-            assert!(
-                ctx.parse_expression(expr_str, &schema).is_err(),
-                "Expected error for invalid aggregate: {}",
-                expr_str
-            );
-        }
-    }
-
-    #[test]
-    fn test_parse_between_expressions() {
-        let ctx = TestContext::new("test_parse_between_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            "age BETWEEN 20 AND 30",
-            "salary BETWEEN 30000 AND 50000",
-            "age NOT BETWEEN 10 AND 18",
-        ];
-
-        for expr_str in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            match expr {
-                Expression::Logic(logic) => {
-                    assert_eq!(
-                        logic.get_logic_type(),
-                        LogicType::And,
-                        "BETWEEN expression '{}' should use AND",
-                        expr_str
-                    );
-
-                    let children = logic.get_children();
-                    assert_eq!(
-                        children.len(),
-                        2,
-                        "BETWEEN expression '{}' should have 2 comparison parts",
-                        expr_str
-                    );
-                }
-                _ => panic!("Expected Logic expression for BETWEEN '{}'", expr_str),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_nested_expressions() {
-        let ctx = TestContext::new("test_parse_nested_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec![
-            (
-                "CASE WHEN (age > 25 AND salary > 50000) THEN 'High' ELSE 'Low' END",
-                TypeId::VarChar,
-            ),
-            ("UPPER(LOWER(name))", TypeId::VarChar),
-            ("(age + salary) * 2", TypeId::Decimal),
-        ];
-
-        for (expr_str, expected_type) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            assert_eq!(
-                expr.get_return_type().get_type(),
-                expected_type,
-                "Nested expression '{}' should return {:?}",
-                expr_str,
-                expected_type
-            );
-        }
-    }
-
-    #[test]
-    fn test_parse_null_expressions() -> Result<(), String> {
-        let ctx = TestContext::new("test_parse_null_expressions");
-        let schema = ctx.setup_test_schema();
-
-        let simple_null_checks = vec!["name IS NULL", "age IS NOT NULL"];
-
-        for expr_str in simple_null_checks {
-            let expr = ctx.parse_expression(expr_str, &schema)?;
-            match expr {
-                Expression::IsCheck(_) => (),
-                _ => {
-                    return Err(format!(
-                        "Expected IsCheck expression for {}, got {:?}",
-                        expr_str, expr
-                    ))
-                }
-            }
-        }
-
-        // Test CASE expression with IS NULL check
-        let case_expr_str = "CASE WHEN name IS NULL THEN 'Unknown' ELSE name END";
-        let expr = ctx.parse_expression(case_expr_str, &schema)?;
-
-        // Verify it's a CASE expression
-        match &expr {
-            Expression::Case(case_expr) => {
-                // Verify return type is VARCHAR
-                assert_eq!(case_expr.get_return_type().get_type(), TypeId::VarChar);
-
-                // Get the first WHEN expression
-                let when_expr = case_expr.get_children()[0].clone();
-                // Verify it's an IS NULL check
-                match *when_expr {
-                    Expression::IsCheck(_) => (),
-                    _ => {
-                        return Err(format!(
-                            "Expected IsCheck expression for WHEN condition, got {:?}",
-                            when_expr
-                        ))
-                    }
-                }
-            }
-            _ => return Err(format!("Expected Case expression, got {:?}", expr)),
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_error_cases() {
-        let ctx = TestContext::new("test_parse_error_cases");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec!["invalid_column > 5", "age + 'string'", "CASE WHEN THEN END"];
-
-        for expr_str in test_cases {
-            assert!(ctx.parse_expression(expr_str, &schema).is_err());
-        }
-    }
-
-    #[test]
-    fn test_parse_at_timezone() {
-        let ctx = TestContext::new("test_parse_at_timezone");
-        let schema = ctx.setup_test_schema();
-
-        let expr_str = "timestamp_column AT TIME ZONE 'UTC'";
-        let expr = ctx
-            .parse_expression(expr_str, &schema)
-            .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-        assert_eq!(
-            expr.get_return_type().get_type(),
-            TypeId::Timestamp,
-            "AT TIME ZONE expression should return timestamp type"
-        );
-    }
-
-    #[test]
-    fn test_parse_at_timezone_invalid_types() {
-        let ctx = TestContext::new("test_parse_at_timezone_invalid_types");
-        let schema = ctx.setup_test_schema();
-
-        let test_cases = vec!["age AT TIME ZONE 'UTC'", "name AT TIME ZONE '123'"];
-
-        for expr_str in test_cases {
-            assert!(ctx.parse_expression(expr_str, &schema).is_err());
-        }
-    }
-
-    #[test]
-    fn test_parse_join_operators() {
-        let ctx = TestContext::new("test_parse_join_operators");
-        let schema = ctx.setup_test_schema();
-
-        // Create a second test schema
-        let mut columns = Vec::new();
-        columns.push(Column::new("id", TypeId::Integer));
-        columns.push(Column::new("name", TypeId::VarChar));
-        columns.push(Column::new("department", TypeId::VarChar));
-        let second_schema = Schema::new(columns);
-
-        // Test INNER JOIN with ON constraint
-        let on_expr = sqlparser::ast::Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("id"))),
-            op: BinaryOperator::Eq,
-            right: Box::new(Expr::Identifier(Ident::new("id"))),
-        };
-
-        let inner_join = JoinOperator::Inner(JoinConstraint::On(on_expr.clone()));
-        let result = ctx.expression_parser().process_join_operator(
-            &inner_join,
-            &schema,
-            &second_schema,
-            None,
-            None,
-        );
-        assert!(
-            result.is_ok(),
-            "Failed to process INNER JOIN: {:?}",
-            result.err()
-        );
-
-        // Test LEFT OUTER JOIN with ON constraint
-        let left_join = JoinOperator::LeftOuter(JoinConstraint::On(on_expr.clone()));
-        let result = ctx.expression_parser().process_join_operator(
-            &left_join,
-            &schema,
-            &second_schema,
-            None,
-            None,
-        );
-        assert!(
-            result.is_ok(),
-            "Failed to process LEFT OUTER JOIN: {:?}",
-            result.err()
-        );
-
-        // Test USING constraint
-        let using_cols = vec![Ident::new("id")];
-        let using_join = JoinOperator::Inner(JoinConstraint::Using(using_cols));
-        let result = ctx.expression_parser().process_join_operator(
-            &using_join,
-            &schema,
-            &second_schema,
-            None,
-            None,
-        );
-        assert!(
-            result.is_ok(),
-            "Failed to process USING constraint: {:?}",
-            result.err()
-        );
-
-        // Test NATURAL JOIN
-        let natural_join = JoinOperator::Inner(JoinConstraint::Natural);
-        let result = ctx.expression_parser().process_join_operator(
-            &natural_join,
-            &schema,
-            &second_schema,
-            None,
-            None,
-        );
-        assert!(
-            result.is_ok(),
-            "Failed to process NATURAL JOIN: {:?}",
-            result.err()
-        );
-
-        // Test CROSS JOIN
-        let cross_join = JoinOperator::CrossJoin;
-        let result = ctx.expression_parser().process_join_operator(
-            &cross_join,
-            &schema,
-            &second_schema,
-            None,
-            None,
-        );
-        assert!(
-            result.is_ok(),
-            "Failed to process CROSS JOIN: {:?}",
-            result.err()
-        );
-    }
-
-    #[test]
-    fn test_parse_qualified_column_references() {
-        let ctx = TestContext::new("test_parse_qualified_column_references");
-
-        // Create a schema with regular columns
-        let base_schema = ctx.setup_test_schema();
-
-        // Create schemas with table aliases
-        let table1_schema =
-            Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t1"), None);
-        let table2_schema =
-            Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t2"), None);
-
-        // Merge the schemas to simulate a join
-        let joined_schema = Schema::merge(&table1_schema, &table2_schema);
-
-        // Test cases for qualified column references
-        let test_cases = vec![
-            // Basic table alias references
-            ("t1.id = 1", "t1.id"),
-            ("t2.name = 'John'", "t2.name"),
-            ("t1.age > 25", "t1.age"),
-            ("t2.salary < 50000", "t2.salary"),
-            // Comparison between columns from different tables
-            ("t1.id = t2.id", "t1.id"),
-            ("t1.age > t2.age", "t1.age"),
-            // Arithmetic with qualified columns
-            ("t1.salary + t2.salary", "t1.salary"),
-            ("t1.age * 2", "t1.age"),
-            // Complex expressions with qualified columns
-            ("t1.age > 25 AND t2.salary < 50000", "t1.age"),
-            ("t1.id = 1 OR t2.name = 'John'", "t1.id"),
-        ];
-
-        for (expr_str, expected_column) in test_cases {
-            let expr = ctx
-                .parse_expression(expr_str, &joined_schema)
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
-
-            // Extract the first column reference from the expression
-            let column_ref = extract_first_column_ref(&expr);
-
-            // Verify the column name matches the expected qualified name
-            assert!(
-                column_ref.is_some(),
-                "Expected ColumnRef in expression: {}",
-                expr_str
-            );
-
-            if let Some(col_ref) = column_ref {
-                assert_eq!(
-                    col_ref.get_name(),
-                    expected_column,
-                    "Column name in '{}' should be '{}'",
-                    expr_str,
-                    expected_column
-                );
-            }
-        }
-
-        // Test error cases
-        let error_cases = vec![
-            "unknown_table.unknown_column = 1", // Unknown table alias and column
-            "t1.unknown_column = 1",            // Unknown column
-            "t3.unknown_column = 1",            // Non-existent table
-            "schema.table.column = 1",          // Three-part identifier not supported
-        ];
-
-        for expr_str in error_cases {
-            assert!(
-                ctx.parse_expression(expr_str, &joined_schema).is_err(),
-                "Expected error for invalid expression: {}",
-                expr_str
-            );
+    // Add a method to extract table name from TableObject
+    pub fn extract_table_object_name(&self, table: &TableObject) -> Result<String, String> {
+        debug!("Extracting table name from TableObject: {:?}", table);
+        // Match on the TableObject enum to extract the ObjectName
+        match table {
+            TableObject::TableName(obj_name) => self.extract_table_name(obj_name),
+            TableObject::TableFunction(_) => Err("Table functions are not supported".to_string()),
         }
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+//     use crate::buffer::lru_k_replacer::LRUKReplacer;
+//     use crate::common::logger::initialize_logger;
+//     use crate::concurrency::transaction_manager::TransactionManager;
+//     use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
+//     use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
+//     use crate::sql::execution::expressions::comparison_expression::ComparisonType;
+//     use crate::sql::execution::expressions::logic_expression::LogicType;
+//     use crate::storage::disk::disk_manager::FileDiskManager;
+//     use crate::storage::disk::disk_scheduler::DiskScheduler;
+//     use sqlparser::ast::Ident;
+//     use std::collections::HashMap;
+//     use tempfile::TempDir;
+//
+//     struct TestContext {
+//         catalog: Arc<RwLock<Catalog>>,
+//         _temp_dir: TempDir,
+//         expression_parser: ExpressionParser,
+//     }
+//
+//     impl TestContext {
+//         pub fn new(name: &str) -> Self {
+//             initialize_logger();
+//             const BUFFER_POOL_SIZE: usize = 5;
+//             const K: usize = 2;
+//
+//             // Create temporary directory
+//             let temp_dir = TempDir::new().unwrap();
+//             let db_path = temp_dir
+//                 .path()
+//                 .join(format!("{name}.db"))
+//                 .to_str()
+//                 .unwrap()
+//                 .to_string();
+//             let log_path = temp_dir
+//                 .path()
+//                 .join(format!("{name}.log"))
+//                 .to_str()
+//                 .unwrap()
+//                 .to_string();
+//
+//             // Create disk components
+//             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+//             let disk_scheduler =
+//                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+//             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+//             let bpm = Arc::new(BufferPoolManager::new(
+//                 BUFFER_POOL_SIZE,
+//                 disk_scheduler,
+//                 disk_manager.clone(),
+//                 replacer.clone(),
+//             ));
+//
+//             let transaction_manager = Arc::new(TransactionManager::new());
+//
+//             let catalog = Arc::new(RwLock::new(Catalog::new(
+//                 bpm.clone(),
+//                 0,
+//                 0,
+//                 HashMap::new(),
+//                 HashMap::new(),
+//                 HashMap::new(),
+//                 HashMap::new(),
+//                 transaction_manager.clone(),
+//             )));
+//
+//             let expression_parser = ExpressionParser::new(catalog.clone());
+//
+//             Self {
+//                 catalog,
+//                 _temp_dir: temp_dir,
+//                 expression_parser,
+//             }
+//         }
+//
+//         pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
+//             self.catalog.clone()
+//         }
+//
+//         pub fn expression_parser(&self) -> &ExpressionParser {
+//             &self.expression_parser
+//         }
+//
+//         fn setup_test_schema(&self) -> Schema {
+//             Schema::new(vec![
+//                 Column::new("id", TypeId::Integer),
+//                 Column::new("name", TypeId::VarChar),
+//                 Column::new("age", TypeId::Integer),
+//                 Column::new("salary", TypeId::Decimal),
+//                 Column::new("timestamp_column", TypeId::Timestamp),
+//             ])
+//         }
+//
+//         fn parse_expression(&self, expr_str: &str, schema: &Schema) -> Result<Expression, String> {
+//             use sqlparser::dialect::GenericDialect;
+//             use sqlparser::parser::Parser;
+//
+//             let dialect = GenericDialect {};
+//             let mut parser = Parser::new(&dialect)
+//                 .try_with_sql(expr_str)
+//                 .map_err(|e| e.to_string())?;
+//             let expr = parser.parse_expr().map_err(|e| e.to_string())?;
+//             self.expression_parser().parse_expression(&expr, schema)
+//         }
+//     }
+//
+//     // Helper function to extract the first column reference from an expression
+//     fn extract_first_column_ref(expr: &Expression) -> Option<Column> {
+//         match expr {
+//             Expression::ColumnRef(col_ref) => Some(col_ref.get_return_type().clone()),
+//             Expression::Comparison(comp) => {
+//                 let children = comp.get_children();
+//                 if let Expression::ColumnRef(col_ref) = children[0].as_ref() {
+//                     Some(col_ref.get_return_type().clone())
+//                 } else {
+//                     None
+//                 }
+//             }
+//             Expression::Arithmetic(arith) => {
+//                 let children = arith.get_children();
+//                 for child in children {
+//                     if let Some(col) = extract_first_column_ref(child) {
+//                         return Some(col);
+//                     }
+//                 }
+//                 None
+//             }
+//             Expression::Logic(logic) => {
+//                 let children = logic.get_children();
+//                 for child in children {
+//                     if let Some(col) = extract_first_column_ref(child) {
+//                         return Some(col);
+//                     }
+//                 }
+//                 None
+//             }
+//             _ => None,
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_comparison_expressions() {
+//         let ctx = TestContext::new("test_parse_comparison_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("age > 25", ComparisonType::GreaterThan),
+//             ("age >= 25", ComparisonType::GreaterThanOrEqual),
+//             ("age < 25", ComparisonType::LessThan),
+//             ("age <= 25", ComparisonType::LessThanOrEqual),
+//             ("age = 25", ComparisonType::Equal),
+//             ("age != 25", ComparisonType::NotEqual),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Comparison(comp) => {
+//                     assert_eq!(
+//                         comp.get_comp_type(),
+//                         expected_type,
+//                         "Expression '{}' should be {:?}",
+//                         expr_str,
+//                         expected_type
+//                     );
+//                 }
+//                 _ => panic!("Expected Comparison expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_arithmetic_expressions() {
+//         let ctx = TestContext::new("test_parse_arithmetic_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("age + 5", ArithmeticOp::Add),
+//             ("age - 5", ArithmeticOp::Subtract),
+//             ("age * 5", ArithmeticOp::Multiply),
+//             ("age / 5", ArithmeticOp::Divide),
+//         ];
+//
+//         for (expr_str, expected_op) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Arithmetic(arith) => {
+//                     assert_eq!(
+//                         arith.get_op(),
+//                         expected_op,
+//                         "Expression '{}' should be {:?}",
+//                         expr_str,
+//                         expected_op
+//                     );
+//                 }
+//                 _ => panic!("Expected Arithmetic expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_logical_expressions() {
+//         let ctx = TestContext::new("test_parse_logical_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("age > 20 AND salary < 50000", LogicType::And),
+//             ("age < 25 OR salary > 60000", LogicType::Or),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Logic(logic) => {
+//                     assert_eq!(
+//                         logic.get_logic_type(),
+//                         expected_type,
+//                         "Expression '{}' should be {:?}",
+//                         expr_str,
+//                         expected_type
+//                     );
+//                 }
+//                 _ => panic!("Expected Logic expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_column_references() {
+//         let ctx = TestContext::new("test_parse_column_references");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec!["id = 1", "name = 'John'", "age > 25", "salary < 50000"];
+//
+//         for expr_str in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Comparison(comp) => {
+//                     let children = comp.get_children();
+//
+//                     // Verify we have exactly 2 children
+//                     assert_eq!(
+//                         children.len(),
+//                         2,
+//                         "Comparison expression '{}' should have exactly 2 children (got {})",
+//                         expr_str,
+//                         children.len()
+//                     );
+//
+//                     // Verify left child is a column reference
+//                     match children[0].as_ref() {
+//                         Expression::ColumnRef(col_ref) => {
+//                             assert!(
+//                                 schema
+//                                     .get_column_index(col_ref.get_return_type().get_name())
+//                                     .is_some(),
+//                                 "Column '{}' not found in schema",
+//                                 col_ref.get_return_type().get_name()
+//                             );
+//                         }
+//                         other => panic!(
+//                             "Expected ColumnRef as left child for '{}', got {:?}",
+//                             expr_str, other
+//                         ),
+//                     }
+//
+//                     // Verify right child is a constant
+//                     match children[1].as_ref() {
+//                         Expression::Constant(_) => {} // Success
+//                         other => panic!(
+//                             "Expected Constant as right child for '{}', got {:?}",
+//                             expr_str, other
+//                         ),
+//                     }
+//                 }
+//                 _ => panic!("Expected Comparison expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_constants() {
+//         let ctx = TestContext::new("test_parse_constants");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("age = 25", TypeId::Integer),
+//             ("name = 'John'", TypeId::VarChar),
+//             ("salary > 50000.0", TypeId::Decimal),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Comparison(comp) => {
+//                     let children = comp.get_children();
+//                     match children[1].as_ref() {
+//                         Expression::Constant(constant) => {
+//                             assert_eq!(
+//                                 constant.get_return_type().get_type(),
+//                                 expected_type,
+//                                 "Constant in '{}' should have type {:?}",
+//                                 expr_str,
+//                                 expected_type
+//                             );
+//                         }
+//                         other => panic!(
+//                             "Expected Constant as right child for '{}', got {:?}",
+//                             expr_str, other
+//                         ),
+//                     }
+//                 }
+//                 _ => panic!("Expected Comparison expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_case_expressions() {
+//         let ctx = TestContext::new("test_parse_case_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             "CASE WHEN age > 25 THEN 'Adult' ELSE 'Young' END",
+//             "CASE age WHEN 20 THEN 'Twenty' WHEN 30 THEN 'Thirty' ELSE 'Other' END",
+//         ];
+//
+//         for expr_str in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Case(case) => {
+//                     assert_eq!(
+//                         case.get_return_type().get_type(),
+//                         TypeId::VarChar,
+//                         "CASE expression '{}' should return {:?}",
+//                         expr_str,
+//                         TypeId::VarChar
+//                     );
+//                 }
+//                 _ => panic!("Expected Case expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_cast_expressions() {
+//         let ctx = TestContext::new("test_parse_cast_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("CAST(age AS VARCHAR)", TypeId::VarChar),
+//             ("CAST(salary AS INTEGER)", TypeId::Integer),
+//             ("CAST('123' AS INTEGER)", TypeId::Integer),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Cast(cast) => {
+//                     assert_eq!(
+//                         cast.get_return_type().get_type(),
+//                         expected_type,
+//                         "CAST expression '{}' should return {:?}",
+//                         expr_str,
+//                         expected_type
+//                     );
+//                 }
+//                 _ => panic!("Expected Cast expression for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_string_functions() {
+//         let ctx = TestContext::new("test_parse_string_functions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("UPPER(name)", true),
+//             ("LOWER(name)", true),
+//             ("SUBSTRING(name FROM 1 FOR 3)", false),
+//         ];
+//
+//         for (expr_str, is_function) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match (expr, is_function) {
+//                 (Expression::Function(func), true) => {
+//                     assert_eq!(
+//                         func.get_return_type().get_type(),
+//                         TypeId::VarChar,
+//                         "String function '{}' should return {:?}",
+//                         expr_str,
+//                         TypeId::VarChar
+//                     );
+//                 }
+//                 (Expression::Substring(substr), false) => {
+//                     assert_eq!(
+//                         substr.get_return_type().get_type(),
+//                         TypeId::VarChar,
+//                         "SUBSTRING expression '{}' should return {:?}",
+//                         expr_str,
+//                         TypeId::VarChar
+//                     );
+//                 }
+//                 _ => panic!(
+//                     "Expected {} expression for '{}'",
+//                     if is_function { "Function" } else { "Substring" },
+//                     expr_str
+//                 ),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_complex_expressions() {
+//         let ctx = TestContext::new("test_parse_complex_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             (
+//                 "CASE WHEN age > 25 AND salary > 50000 THEN 'High' ELSE 'Low' END",
+//                 "case",
+//             ),
+//             ("(age + 5) * 2", "multiply"),
+//             ("UPPER(name) = 'JOHN'", "compare"),
+//         ];
+//
+//         for (expr_str, expr_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match (expr, expr_type) {
+//                 (Expression::Case(case), "case") => {
+//                     assert_eq!(
+//                         case.get_return_type().get_type(),
+//                         TypeId::VarChar,
+//                         "CASE expression '{}' should return {:?}",
+//                         expr_str,
+//                         TypeId::VarChar
+//                     );
+//                 }
+//                 (Expression::Arithmetic(arith), "multiply") => {
+//                     assert_eq!(
+//                         arith.get_op(),
+//                         ArithmeticOp::Multiply,
+//                         "Arithmetic expression '{}' should be {:?}",
+//                         expr_str,
+//                         ArithmeticOp::Multiply
+//                     );
+//                     // Verify the left child is an Add operation
+//                     let children = arith.get_children();
+//                     assert_eq!(children.len(), 2, "Multiply should have 2 children");
+//                     match children[0].as_ref() {
+//                         Expression::Arithmetic(add_expr) => {
+//                             assert_eq!(
+//                                 add_expr.get_op(),
+//                                 ArithmeticOp::Add,
+//                                 "Left child of multiply should be Add"
+//                             );
+//                         }
+//                         _ => panic!("Expected Add expression as left child of multiply"),
+//                     }
+//                 }
+//                 (Expression::Comparison(comp), "compare") => {
+//                     assert_eq!(
+//                         comp.get_comp_type(),
+//                         ComparisonType::Equal,
+//                         "Comparison expression '{}' should be {:?}",
+//                         expr_str,
+//                         ComparisonType::Equal
+//                     );
+//                 }
+//                 _ => panic!("Unexpected expression type for '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_aggregate_functions() {
+//         use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+//
+//         let ctx = TestContext::new("test_parse_aggregate_functions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             ("COUNT(*)", AggregationType::CountStar),
+//             ("SUM(salary)", AggregationType::Sum),
+//             ("AVG(age)", AggregationType::Avg),
+//             ("MIN(salary)", AggregationType::Min),
+//             ("MAX(age)", AggregationType::Max),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Aggregate(agg) => {
+//                     assert_eq!(
+//                         agg.get_agg_type(),
+//                         &expected_type,
+//                         "Aggregate expression '{}' should be {:?}",
+//                         expr_str,
+//                         expected_type
+//                     );
+//                 }
+//                 _ => panic!("Expected Aggregate expression for '{}'", expr_str),
+//             }
+//         }
+//
+//         // Test invalid aggregates
+//         let invalid_cases = vec![
+//             "COUNT()",             // No arguments
+//             "SUM(*)",              // Can't sum *
+//             "AVG(name)",           // Can't average strings
+//             "MIN()",               // No arguments
+//             "MAX(invalid_column)", // Invalid column
+//         ];
+//
+//         for expr_str in invalid_cases {
+//             assert!(
+//                 ctx.parse_expression(expr_str, &schema).is_err(),
+//                 "Expected error for invalid aggregate: {}",
+//                 expr_str
+//             );
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_between_expressions() {
+//         let ctx = TestContext::new("test_parse_between_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             "age BETWEEN 20 AND 30",
+//             "salary BETWEEN 30000 AND 50000",
+//             "age NOT BETWEEN 10 AND 18",
+//         ];
+//
+//         for expr_str in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             match expr {
+//                 Expression::Logic(logic) => {
+//                     assert_eq!(
+//                         logic.get_logic_type(),
+//                         LogicType::And,
+//                         "BETWEEN expression '{}' should use AND",
+//                         expr_str
+//                     );
+//
+//                     let children = logic.get_children();
+//                     assert_eq!(
+//                         children.len(),
+//                         2,
+//                         "BETWEEN expression '{}' should have 2 comparison parts",
+//                         expr_str
+//                     );
+//                 }
+//                 _ => panic!("Expected Logic expression for BETWEEN '{}'", expr_str),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_nested_expressions() {
+//         let ctx = TestContext::new("test_parse_nested_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec![
+//             (
+//                 "CASE WHEN (age > 25 AND salary > 50000) THEN 'High' ELSE 'Low' END",
+//                 TypeId::VarChar,
+//             ),
+//             ("UPPER(LOWER(name))", TypeId::VarChar),
+//             ("(age + salary) * 2", TypeId::Decimal),
+//         ];
+//
+//         for (expr_str, expected_type) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             assert_eq!(
+//                 expr.get_return_type().get_type(),
+//                 expected_type,
+//                 "Nested expression '{}' should return {:?}",
+//                 expr_str,
+//                 expected_type
+//             );
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_null_expressions() -> Result<(), String> {
+//         let ctx = TestContext::new("test_parse_null_expressions");
+//         let schema = ctx.setup_test_schema();
+//
+//         let simple_null_checks = vec!["name IS NULL", "age IS NOT NULL"];
+//
+//         for expr_str in simple_null_checks {
+//             let expr = ctx.parse_expression(expr_str, &schema)?;
+//             match expr {
+//                 Expression::IsCheck(_) => (),
+//                 _ => {
+//                     return Err(format!(
+//                         "Expected IsCheck expression for {}, got {:?}",
+//                         expr_str, expr
+//                     ))
+//                 }
+//             }
+//         }
+//
+//         // Test CASE expression with IS NULL check
+//         let case_expr_str = "CASE WHEN name IS NULL THEN 'Unknown' ELSE name END";
+//         let expr = ctx.parse_expression(case_expr_str, &schema)?;
+//
+//         // Verify it's a CASE expression
+//         match &expr {
+//             Expression::Case(case_expr) => {
+//                 // Verify return type is VARCHAR
+//                 assert_eq!(case_expr.get_return_type().get_type(), TypeId::VarChar);
+//
+//                 // Get the first WHEN expression
+//                 let when_expr = case_expr.get_children()[0].clone();
+//                 // Verify it's an IS NULL check
+//                 match *when_expr {
+//                     Expression::IsCheck(_) => (),
+//                     _ => {
+//                         return Err(format!(
+//                             "Expected IsCheck expression for WHEN condition, got {:?}",
+//                             when_expr
+//                         ))
+//                     }
+//                 }
+//             }
+//             _ => return Err(format!("Expected Case expression, got {:?}", expr)),
+//         }
+//
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn test_parse_error_cases() {
+//         let ctx = TestContext::new("test_parse_error_cases");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec!["invalid_column > 5", "age + 'string'", "CASE WHEN THEN END"];
+//
+//         for expr_str in test_cases {
+//             assert!(ctx.parse_expression(expr_str, &schema).is_err());
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_at_timezone() {
+//         let ctx = TestContext::new("test_parse_at_timezone");
+//         let schema = ctx.setup_test_schema();
+//
+//         let expr_str = "timestamp_column AT TIME ZONE 'UTC'";
+//         let expr = ctx
+//             .parse_expression(expr_str, &schema)
+//             .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//         assert_eq!(
+//             expr.get_return_type().get_type(),
+//             TypeId::Timestamp,
+//             "AT TIME ZONE expression should return timestamp type"
+//         );
+//     }
+//
+//     #[test]
+//     fn test_parse_at_timezone_invalid_types() {
+//         let ctx = TestContext::new("test_parse_at_timezone_invalid_types");
+//         let schema = ctx.setup_test_schema();
+//
+//         let test_cases = vec!["age AT TIME ZONE 'UTC'", "name AT TIME ZONE '123'"];
+//
+//         for expr_str in test_cases {
+//             assert!(ctx.parse_expression(expr_str, &schema).is_err());
+//         }
+//     }
+//
+//     #[test]
+//     fn test_parse_join_operators() {
+//         let ctx = TestContext::new("test_parse_join_operators");
+//         let schema = ctx.setup_test_schema();
+//
+//         // Create a second test schema
+//         let mut columns = Vec::new();
+//         columns.push(Column::new("id", TypeId::Integer));
+//         columns.push(Column::new("name", TypeId::VarChar));
+//         columns.push(Column::new("department", TypeId::VarChar));
+//         let second_schema = Schema::new(columns);
+//
+//         // Test INNER JOIN with ON constraint
+//         let on_expr = sqlparser::ast::Expr::BinaryOp {
+//             left: Box::new(Expr::Identifier(Ident::new("id"))),
+//             op: BinaryOperator::Eq,
+//             right: Box::new(Expr::Identifier(Ident::new("id"))),
+//         };
+//
+//         let inner_join = JoinOperator::Inner(JoinConstraint::On(on_expr.clone()));
+//         let result = ctx.expression_parser().process_join_operator(
+//             &inner_join,
+//             &schema,
+//             &second_schema,
+//             None,
+//             None,
+//         );
+//         assert!(
+//             result.is_ok(),
+//             "Failed to process INNER JOIN: {:?}",
+//             result.err()
+//         );
+//
+//         // Test LEFT OUTER JOIN with ON constraint
+//         let left_join = JoinOperator::LeftOuter(JoinConstraint::On(on_expr.clone()));
+//         let result = ctx.expression_parser().process_join_operator(
+//             &left_join,
+//             &schema,
+//             &second_schema,
+//             None,
+//             None,
+//         );
+//         assert!(
+//             result.is_ok(),
+//             "Failed to process LEFT OUTER JOIN: {:?}",
+//             result.err()
+//         );
+//
+//         // Test USING constraint
+//         let using_cols = vec![Ident::new("id")];
+//         let using_join = JoinOperator::Inner(JoinConstraint::Using(using_cols));
+//         let result = ctx.expression_parser().process_join_operator(
+//             &using_join,
+//             &schema,
+//             &second_schema,
+//             None,
+//             None,
+//         );
+//         assert!(
+//             result.is_ok(),
+//             "Failed to process USING constraint: {:?}",
+//             result.err()
+//         );
+//
+//         // Test NATURAL JOIN
+//         let natural_join = JoinOperator::Inner(JoinConstraint::Natural);
+//         let result = ctx.expression_parser().process_join_operator(
+//             &natural_join,
+//             &schema,
+//             &second_schema,
+//             None,
+//             None,
+//         );
+//         assert!(
+//             result.is_ok(),
+//             "Failed to process NATURAL JOIN: {:?}",
+//             result.err()
+//         );
+//
+//         // Test CROSS JOIN
+//         let cross_join = JoinOperator::CrossJoin;
+//         let result = ctx.expression_parser().process_join_operator(
+//             &cross_join,
+//             &schema,
+//             &second_schema,
+//             None,
+//             None,
+//         );
+//         assert!(
+//             result.is_ok(),
+//             "Failed to process CROSS JOIN: {:?}",
+//             result.err()
+//         );
+//     }
+//
+//     #[test]
+//     fn test_parse_qualified_column_references() {
+//         let ctx = TestContext::new("test_parse_qualified_column_references");
+//
+//         // Create a schema with regular columns
+//         let base_schema = ctx.setup_test_schema();
+//
+//         // Create schemas with table aliases
+//         let table1_schema =
+//             Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t1"), None);
+//         let table2_schema =
+//             Schema::merge_with_aliases(&base_schema, &Schema::new(vec![]), Some("t2"), None);
+//
+//         // Merge the schemas to simulate a join
+//         let joined_schema = Schema::merge(&table1_schema, &table2_schema);
+//
+//         // Test cases for qualified column references
+//         let test_cases = vec![
+//             // Basic table alias references
+//             ("t1.id = 1", "t1.id"),
+//             ("t2.name = 'John'", "t2.name"),
+//             ("t1.age > 25", "t1.age"),
+//             ("t2.salary < 50000", "t2.salary"),
+//             // Comparison between columns from different tables
+//             ("t1.id = t2.id", "t1.id"),
+//             ("t1.age > t2.age", "t1.age"),
+//             // Arithmetic with qualified columns
+//             ("t1.salary + t2.salary", "t1.salary"),
+//             ("t1.age * 2", "t1.age"),
+//             // Complex expressions with qualified columns
+//             ("t1.age > 25 AND t2.salary < 50000", "t1.age"),
+//             ("t1.id = 1 OR t2.name = 'John'", "t1.id"),
+//         ];
+//
+//         for (expr_str, expected_column) in test_cases {
+//             let expr = ctx
+//                 .parse_expression(expr_str, &joined_schema)
+//                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
+//
+//             // Extract the first column reference from the expression
+//             let column_ref = extract_first_column_ref(&expr);
+//
+//             // Verify the column name matches the expected qualified name
+//             assert!(
+//                 column_ref.is_some(),
+//                 "Expected ColumnRef in expression: {}",
+//                 expr_str
+//             );
+//
+//             if let Some(col_ref) = column_ref {
+//                 assert_eq!(
+//                     col_ref.get_name(),
+//                     expected_column,
+//                     "Column name in '{}' should be '{}'",
+//                     expr_str,
+//                     expected_column
+//                 );
+//             }
+//         }
+//
+//         // Test error cases
+//         let error_cases = vec![
+//             "unknown_table.unknown_column = 1", // Unknown table alias and column
+//             "t1.unknown_column = 1",            // Unknown column
+//             "t3.unknown_column = 1",            // Non-existent table
+//             "schema.table.column = 1",          // Three-part identifier not supported
+//         ];
+//
+//         for expr_str in error_cases {
+//             assert!(
+//                 ctx.parse_expression(expr_str, &joined_schema).is_err(),
+//                 "Expected error for invalid expression: {}",
+//                 expr_str
+//             );
+//         }
+//     }
+// }

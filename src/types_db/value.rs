@@ -575,6 +575,28 @@ impl Value {
     fn copy(&self, val: &Value) -> Value {
         val.clone_optimized()
     }
+
+    /// Helper function to convert a sqlparser::ast::Value to a string
+    pub fn from_sqlparser_value(value: &sqlparser::ast::Value) -> Result<String, String> {
+        match value {
+            sqlparser::ast::Value::SingleQuotedString(s) => Ok(s.clone()),
+            sqlparser::ast::Value::DoubleQuotedString(s) => Ok(s.clone()),
+            sqlparser::ast::Value::DollarQuotedString(s) => Ok(s.value.clone()),
+            sqlparser::ast::Value::TripleSingleQuotedString(s) => Ok(s.clone()),
+            sqlparser::ast::Value::TripleDoubleQuotedString(s) => Ok(s.clone()),
+            sqlparser::ast::Value::EscapedStringLiteral(s) => Ok(s.clone()),
+            sqlparser::ast::Value::UnicodeStringLiteral(s) => Ok(s.clone()),
+            sqlparser::ast::Value::NationalStringLiteral(s) => Ok(s.clone()),
+            #[cfg(not(feature = "bigdecimal"))]
+            sqlparser::ast::Value::Number(s, _) => Ok(s.clone()),
+            #[cfg(feature = "bigdecimal")]
+            sqlparser::ast::Value::Number(s, _) => Ok(s.to_string()),
+            sqlparser::ast::Value::Boolean(b) => Ok(b.to_string()),
+            sqlparser::ast::Value::Null => Ok("NULL".to_string()),
+            sqlparser::ast::Value::Placeholder(s) => Ok(s.clone()),
+            _ => Err(format!("Cannot convert {:?} to string", value)),
+        }
+    }
 }
 
 impl Type for Value {
@@ -585,42 +607,96 @@ impl Type for Value {
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ == other.value_).into(),
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpFalse
+                } else {
+                    (self.value_ == other.value_).into()
+                }
+            }
         }
     }
 
     fn compare_not_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ != other.value_).into(),
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpTrue
+                } else {
+                    (self.value_ != other.value_).into()
+                }
+            }
         }
     }
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ < other.value_).into(),
+            // Vector and Array types don't support ordering comparisons
+            (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
+            (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpFalse
+                } else {
+                    (self.value_ < other.value_).into()
+                }
+            }
         }
     }
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ <= other.value_).into(),
+            // Vector and Array types don't support ordering comparisons
+            (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
+            (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpFalse
+                } else {
+                    (self.value_ <= other.value_).into()
+                }
+            }
         }
     }
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ > other.value_).into(),
+            // Vector and Array types don't support ordering comparisons
+            (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
+            (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpFalse
+                } else {
+                    (self.value_ > other.value_).into()
+                }
+            }
         }
     }
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => (self.value_ >= other.value_).into(),
+            // Vector and Array types don't support ordering comparisons
+            (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
+            (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
+            _ => {
+                // Check if types match before comparing values
+                if self.type_id_ != other.type_id_ {
+                    CmpBool::CmpFalse
+                } else {
+                    (self.value_ >= other.value_).into()
+                }
+            }
         }
     }
 

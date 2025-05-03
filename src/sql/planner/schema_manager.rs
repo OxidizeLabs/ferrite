@@ -148,13 +148,13 @@ impl SchemaManager {
 
     pub fn infer_expression_type(&self, expr: &Expr) -> Result<TypeId, String> {
         match expr {
-            Expr::Value(value) => match value {
+            Expr::Value(value_with_span) => match &value_with_span.value {
                 sqlparser::ast::Value::Number(_, _) => Ok(TypeId::Integer),
                 sqlparser::ast::Value::SingleQuotedString(_)
                 | sqlparser::ast::Value::DoubleQuotedString(_) => Ok(TypeId::VarChar),
                 sqlparser::ast::Value::Boolean(_) => Ok(TypeId::Boolean),
                 sqlparser::ast::Value::Null => Ok(TypeId::Invalid),
-                _ => Err(format!("Unsupported value type: {:?}", value)),
+                _ => Err(format!("Unsupported value type: {:?}", value_with_span.value)),
             },
             _ => Ok(TypeId::Invalid), // Default type for complex expressions
         }
@@ -258,6 +258,7 @@ mod tests {
     };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use sqlparser::ast::{ColumnDef, DataType, Ident, Value};
+    use sqlparser::tokenizer::{Location, Span};
 
     #[test]
     fn test_convert_sql_types() {
@@ -306,30 +307,94 @@ mod tests {
         let manager = SchemaManager::new();
 
         // Test number
-        let num_expr = Expr::Value(Value::Number("42".to_string(), false));
+        let num_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Number("42".to_string(), false),// Empty span
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
         assert_eq!(
             manager.infer_expression_type(&num_expr).unwrap(),
             TypeId::Integer
         );
 
         // Test string
-        let str_expr = Expr::Value(Value::SingleQuotedString("test".to_string()));
+        let str_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::SingleQuotedString("test".to_string()),
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
         assert_eq!(
             manager.infer_expression_type(&str_expr).unwrap(),
             TypeId::VarChar
         );
 
         // Test boolean
-        let bool_expr = Expr::Value(Value::Boolean(true));
+        let bool_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Boolean(true),
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
         assert_eq!(
             manager.infer_expression_type(&bool_expr).unwrap(),
             TypeId::Boolean
         );
 
         // Test null
-        let null_expr = Expr::Value(Value::Null);
+        let null_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Null,
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
         assert_eq!(
             manager.infer_expression_type(&null_expr).unwrap(),
+            TypeId::Invalid
+        );
+    }
+
+    #[test]
+    fn test_infer_expression_type_edge_cases() {
+        let manager = SchemaManager::new();
+
+        // Test empty string
+        let empty_str = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::SingleQuotedString("".to_string()),
+            span: Span::new(Location::new(0, 0), Location::new(0, 0)), // Empty span
+        });
+        assert_eq!(
+            manager.infer_expression_type(&empty_str).unwrap(),
+            TypeId::VarChar
+        );
+
+        // Test zero
+        let zero = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Number("0".to_string(), false),
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
+        assert_eq!(
+            manager.infer_expression_type(&zero).unwrap(),
+            TypeId::Integer
+        );
+
+        // Test negative number
+        let negative = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Number("-42".to_string(), false),
+            span: Span::new(Location::new(0,0), Location::new(0,0))
+        });
+        assert_eq!(
+            manager.infer_expression_type(&negative).unwrap(),
+            TypeId::Integer
+        );
+
+        // Test complex expression (should return Invalid)
+        let complex = Expr::BinaryOp {
+            left: Box::new(Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("1".to_string(), false),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            })),
+            op: sqlparser::ast::BinaryOperator::Plus,
+            right: Box::new(Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("2".to_string(), false),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            })),
+        };
+        assert_eq!(
+            manager.infer_expression_type(&complex).unwrap(),
             TypeId::Invalid
         );
     }
@@ -342,13 +407,11 @@ mod tests {
             ColumnDef {
                 name: Ident::new("id"),
                 data_type: DataType::Integer(None),
-                collation: None,
                 options: vec![],
             },
             ColumnDef {
                 name: Ident::new("name"),
                 data_type: DataType::Varchar(None),
-                collation: None,
                 options: vec![],
             },
         ];
@@ -397,8 +460,14 @@ mod tests {
         let manager = SchemaManager::new();
 
         let values = vec![vec![
-            Expr::Value(Value::Number("1".to_string(), false)),
-            Expr::Value(Value::SingleQuotedString("test".to_string())),
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("1".to_string(), false),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            }),
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::SingleQuotedString("test_string".to_string()),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            }),
         ]];
 
         let schema = manager.create_values_schema(&values).unwrap();
@@ -475,12 +544,24 @@ mod tests {
 
         let values = vec![
             vec![
-                Expr::Value(Value::Number("1".to_string(), false)),
-                Expr::Value(Value::SingleQuotedString("test1".to_string())),
+                Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("1".to_string(), false),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            }),
+                Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::SingleQuotedString("test1".to_string()),
+                    span: Span::new(Location::new(0,0), Location::new(0,0))
+                }),
             ],
             vec![
-                Expr::Value(Value::Number("2".to_string(), false)),
-                Expr::Value(Value::SingleQuotedString("test2".to_string())),
+                Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::Number("2".to_string(), false),
+                    span: Span::new(Location::new(0,0), Location::new(0,0))
+                }),
+                Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::SingleQuotedString("test2".to_string()),
+                    span: Span::new(Location::new(0,0), Location::new(0,0))
+                }),
             ],
         ];
 
@@ -499,13 +580,11 @@ mod tests {
             ColumnDef {
                 name: Ident::new("name"),
                 data_type: DataType::Varchar(None), // Using None for now
-                collation: None,
                 options: vec![],
             },
             ColumnDef {
                 name: Ident::new("description"),
                 data_type: DataType::String(None),
-                collation: None,
                 options: vec![],
             },
         ];
@@ -522,7 +601,6 @@ mod tests {
         let column_defs_with_length = vec![ColumnDef {
             name: Ident::new("fixed_text"),
             data_type: DataType::Char(None), // Using CHAR type
-            collation: None,
             options: vec![],
         }];
 
@@ -614,43 +692,6 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_expression_type_edge_cases() {
-        let manager = SchemaManager::new();
-
-        // Test empty string
-        let empty_str = Expr::Value(Value::SingleQuotedString("".to_string()));
-        assert_eq!(
-            manager.infer_expression_type(&empty_str).unwrap(),
-            TypeId::VarChar
-        );
-
-        // Test zero
-        let zero = Expr::Value(Value::Number("0".to_string(), false));
-        assert_eq!(
-            manager.infer_expression_type(&zero).unwrap(),
-            TypeId::Integer
-        );
-
-        // Test negative number
-        let negative = Expr::Value(Value::Number("-42".to_string(), false));
-        assert_eq!(
-            manager.infer_expression_type(&negative).unwrap(),
-            TypeId::Integer
-        );
-
-        // Test complex expression (should return Invalid)
-        let complex = Expr::BinaryOp {
-            left: Box::new(Expr::Value(Value::Number("1".to_string(), false))),
-            op: sqlparser::ast::BinaryOperator::Plus,
-            right: Box::new(Expr::Value(Value::Number("2".to_string(), false))),
-        };
-        assert_eq!(
-            manager.infer_expression_type(&complex).unwrap(),
-            TypeId::Invalid
-        );
-    }
-
-    #[test]
     fn test_create_aggregation_output_schema_no_group_by() {
         let manager = SchemaManager::new();
 
@@ -725,11 +766,24 @@ mod tests {
         let manager = SchemaManager::new();
 
         let values = vec![vec![
-            Expr::Value(Value::Number("1".to_string(), false)),
-            Expr::Value(Value::SingleQuotedString("text".to_string())),
-            Expr::Value(Value::Boolean(true)),
-            Expr::Value(Value::Null),
-        ]];
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("1".to_string(), false),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            }),
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::SingleQuotedString("test1".to_string()),
+                span: Span::new(Location::new(0,0), Location::new(0,0))
+            }),
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::Boolean(true),
+                    span: Span::new(Location::new(0,0), Location::new(0,0))
+                }),
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::Null,
+                    span: Span::new(Location::new(0,0), Location::new(0,0))
+                }),
+            ]
+        ];
 
         let schema = manager.create_values_schema(&values).unwrap();
 

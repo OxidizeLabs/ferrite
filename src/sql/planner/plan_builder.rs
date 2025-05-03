@@ -38,6 +38,7 @@ impl LogicalPlanBuilder {
                 self.build_values_plan(&values.rows, &schema)?
             }
             SetExpr::Update(update) => self.build_update_plan(update)?,
+            SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
             SetExpr::SetOperation {
                 op,
                 left,
@@ -65,69 +66,83 @@ impl LogicalPlanBuilder {
         // Handle ORDER BY if present
         if let Some(order_by) = &query.order_by {
             let schema = current_plan.get_schema();
-            let sort_exprs = order_by
-                .exprs
-                .iter()
-                .map(|order| {
-                    let expr = self
-                        .expression_parser
-                        .parse_expression(&order.expr, &schema)?;
-                    // TODO: Handle order.asc and order.nulls_first if needed
-                    Ok(Arc::new(expr))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
+            
+            // Build sort expressions manually
+            let mut sort_exprs = Vec::new();
+            
+            // Access expressions based on the OrderByKind
+            match &order_by.kind {
+                sqlparser::ast::OrderByKind::Expressions(order_by_exprs) => {
+                    for order_item in order_by_exprs {
+                        let expr = self
+                            .expression_parser
+                            .parse_expression(&order_item.expr, &schema)?;
+                        sort_exprs.push(Arc::new(expr));
+                    }
+                }
+                sqlparser::ast::OrderByKind::All(_) => {
+                    // Handle ALL case if needed
+                    return Err("ORDER BY ALL is not supported yet".to_string());
+                }
+            }
 
             current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
         }
-
-        // Handle OFFSET if present
-        if let Some(offset) = &query.offset {
-            let schema = current_plan.get_schema();
-            match &offset.value {
-                Expr::Value(SqlValue::Number(n, _)) => {
-                    if let Ok(offset_val) = n.parse::<usize>() {
-                        // Create a limit node with offset
-                        // For now, we'll use a very large number as the limit
-                        current_plan = LogicalPlan::limit(usize::MAX, schema, current_plan);
-                        // TODO: Implement proper OFFSET support in the limit plan
-                    } else {
-                        return Err("Invalid OFFSET value".to_string());
-                    }
-                }
-                _ => return Err("OFFSET must be a number".to_string()),
-            }
-        }
-
+        
         // Handle LIMIT if present
-        if let Some(limit_expr) = &query.limit {
+        if let Some(limit_clause) = &query.limit_clause {
             let schema = current_plan.get_schema();
-            match limit_expr {
-                Expr::Value(SqlValue::Number(n, _)) => {
+            
+            // Extract the limit expression based on the LimitClause variant
+            let limit_expr = match limit_clause {
+                sqlparser::ast::LimitClause::LimitOffset { limit, .. } => {
+                    if let Some(expr) = limit {
+                        expr
+                    } else {
+                        return Err("LIMIT clause has no limit value".to_string());
+                    }
+                },
+                sqlparser::ast::LimitClause::OffsetCommaLimit { limit, .. } => limit,
+            };
+            
+            // Process the limit expression
+            if let sqlparser::ast::Expr::Value(value_with_span) = limit_expr {
+                if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
                     if let Ok(limit_val) = n.parse::<usize>() {
                         current_plan = LogicalPlan::limit(limit_val, schema, current_plan);
                     } else {
                         return Err("Invalid LIMIT value".to_string());
                     }
+                } else {
+                    return Err("LIMIT must be a number".to_string());
                 }
-                _ => return Err("LIMIT must be a number".to_string()),
+            } else {
+                return Err("LIMIT must be a number".to_string());
             }
         }
 
         // Handle FETCH if present (similar to LIMIT)
         if let Some(fetch) = &query.fetch {
             let schema = current_plan.get_schema();
-            match &fetch.quantity {
-                Some(Expr::Value(SqlValue::Number(n, _))) => {
-                    if let Ok(fetch_val) = n.parse::<usize>() {
-                        current_plan = LogicalPlan::limit(fetch_val, schema, current_plan);
+            // In sqlparser 0.56.0, fetch.quantity is an Option<Expr>
+            if let Some(quantity_expr) = &fetch.quantity {
+                if let sqlparser::ast::Expr::Value(value_with_span) = quantity_expr {
+                    if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
+                        if let Ok(fetch_val) = n.parse::<usize>() {
+                            current_plan = LogicalPlan::limit(fetch_val, schema, current_plan);
+                        } else {
+                            return Err("Invalid FETCH value".to_string());
+                        }
                     } else {
-                        return Err("Invalid FETCH value".to_string());
+                        return Err("FETCH quantity must be a number".to_string());
                     }
+                } else {
+                    return Err("FETCH quantity must be a number".to_string());
                 }
-                _ => return Err("FETCH quantity must be a number".to_string()),
+            } else {
+                return Err("FETCH quantity is required".to_string());
             }
         }
-
         Ok(current_plan)
     }
 
@@ -310,24 +325,6 @@ impl LogicalPlanBuilder {
             }
         }
 
-        // Apply TOP if it exists (MSSQL-specific LIMIT)
-        if let Some(top) = &select.top {
-            if let Some(quantity) = &top.quantity {
-                let limit_val = match quantity {
-                    TopQuantity::Constant(n) => *n as usize,
-                    TopQuantity::Expr(expr) => match expr {
-                        Expr::Value(SqlValue::Number(n, _)) => n
-                            .parse::<usize>()
-                            .map_err(|_| "Invalid TOP value".to_string())?,
-                        _ => return Err("TOP quantity must be a number".to_string()),
-                    },
-                };
-
-                let schema = current_plan.get_schema().clone();
-                current_plan = LogicalPlan::limit(limit_val, schema, current_plan);
-            }
-        }
-
         Ok(current_plan)
     }
 
@@ -458,9 +455,11 @@ impl LogicalPlanBuilder {
     }
 
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
-        let table_name = self
-            .expression_parser
-            .extract_table_name(&insert.table_name)?;
+        // Extract the table name from the table field
+        let table_name = match &insert.table {
+            TableObject::TableName(obj_name) => self.expression_parser.extract_table_name(obj_name)?,
+            TableObject::TableFunction(_) => return Err("Table functions are not supported in INSERT statements".to_string()),
+        };
 
         // Get table info from catalog
         let binding = self.expression_parser.catalog();
@@ -766,7 +765,7 @@ impl LogicalPlanBuilder {
             .expect("Index Name not available")
             .to_string();
         let table_name = match &create_index.table_name {
-            ObjectName(parts) if parts.len() == 1 => parts[0].value.clone(),
+            ObjectName(parts) if parts.len() == 1 => parts[0].to_string(),
             _ => return Err("Only single table indices are supported".to_string()),
         };
 

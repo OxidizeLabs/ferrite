@@ -27,10 +27,10 @@ mod tests {
     use super::*;
     use log::{debug, info};
     use std::env;
+    use std::process::Command;
 
     #[test]
     fn test_logging_levels() {
-        env::set_var("RUST_TEST", "1");
         initialize_logger();
         debug!("Debug message in test");
         info!("Info message in test");
