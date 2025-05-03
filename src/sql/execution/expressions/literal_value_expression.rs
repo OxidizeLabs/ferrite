@@ -145,6 +145,7 @@ impl Display for LiteralValueExpression {
             Val::Vector(v) => write!(f, "{:?}", v),
             Val::Null => write!(f, "NULL"),
             Val::Struct => write!(f, "STRUCT"),
+            _ => todo!(),
         }
     }
 }

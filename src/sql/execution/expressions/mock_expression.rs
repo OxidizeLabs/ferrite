@@ -37,7 +37,8 @@ impl MockExpression {
                 let field_names = vec!["field1", "field2"];
                 let values = vec![Value::new(42), Value::new("test")];
                 Value::new_struct(field_names, values)
-            }
+            },
+            _ => todo!()
         });
 
         Self {

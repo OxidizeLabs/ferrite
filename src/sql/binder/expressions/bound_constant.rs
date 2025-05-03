@@ -62,6 +62,7 @@ impl Display for BoundConstant {
             Val::Vector(v) => write!(f, "{:?}", v),
             Val::Null => write!(f, "Null"),
             Val::Struct => write!(f, "STRUCT"),
+            _ => todo!(),
         }
     }
 }
