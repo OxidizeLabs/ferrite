@@ -190,89 +190,7 @@ impl Value {
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
     }
-
-    fn add(&self, other: &Value) -> Result<Value, String> {
-        if self.is_null() || other.is_null() {
-            return Ok(Value::new(Val::Null));
-        }
-
-        match (&self.value_, &other.value_) {
-            (Val::Integer(a), Val::Integer(b)) => {
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
-            }
-            (Val::BigInt(a), Val::BigInt(b)) => {
-                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            }
-            (Val::Integer(a), Val::BigInt(b)) => Ok(Value::new_with_type(
-                Val::BigInt(*a as i64 + b),
-                TypeId::BigInt,
-            )),
-            (Val::BigInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
-                Val::BigInt(a + *b as i64),
-                TypeId::BigInt,
-            )),
-            (Val::Decimal(a), Val::Decimal(b)) => {
-                Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
-            }
-            (Val::SmallInt(a), Val::SmallInt(b)) => {
-                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            }
-            (Val::TinyInt(a), Val::TinyInt(b)) => {
-                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            }
-            // Promote smaller types to larger ones
-            (Val::TinyInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
-                Val::Integer(*a as i32 + b),
-                TypeId::Integer,
-            )),
-            (Val::Integer(a), Val::TinyInt(b)) => Ok(Value::new_with_type(
-                Val::Integer(a + *b as i32),
-                TypeId::Integer,
-            )),
-            (Val::SmallInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
-                Val::Integer(*a as i32 + b),
-                TypeId::Integer,
-            )),
-            (Val::Integer(a), Val::SmallInt(b)) => Ok(Value::new_with_type(
-                Val::Integer(a + *b as i32),
-                TypeId::Integer,
-            )),
-
-            (Val::Boolean(_), _) => Err("Cannot add Boolean values".to_string()),
-            (Val::Float(a), Val::Float(b)) => Ok(Value::new_with_type(Val::Float(a + b), TypeId::Float)),
-            (Val::Timestamp(_), _) => Err("Cannot add Timestamp values".to_string()),
-            (Val::Date(_), _) => Err("Cannot add Date values".to_string()),
-            (Val::Time(_), _) => Err("Cannot add Time values".to_string()),
-            (Val::Interval(a), Val::Interval(b)) => Ok(Value::new_with_type(Val::Interval(a + b), TypeId::Interval)),
-            (Val::VarLen(a), Val::VarLen(b)) => Ok(Value::new_with_type(Val::VarLen(a.clone() + b), TypeId::VarChar)),
-            (Val::ConstLen(a), Val::ConstLen(b)) => Ok(Value::new_with_type(Val::ConstLen(a.clone() + b), TypeId::Char)),
-            (Val::Binary(_), _) => Err("Cannot add Binary values".to_string()),
-            (Val::JSON(_), _) => Err("Cannot add JSON values".to_string()),
-            (Val::UUID(_), _) => Err("Cannot add UUID values".to_string()),
-            (Val::Vector(_), _) => Err("Cannot add Vector values".to_string()),
-            (Val::Array(_), _) => Err("Cannot add Array values".to_string()),
-            (Val::Enum(_, _), _) => Err("Cannot add Enum values".to_string()),
-            (Val::Point(_, _), _) => Err("Cannot add Point values".to_string()),
-            (Val::Null, _) => Ok(Value::new(Val::Null)),
-            (Val::Struct, _) => Err("Cannot add Struct values".to_string()),
-            (_, Val::Boolean(_)) => Err("Cannot add to Boolean values".to_string()),
-            (_, Val::Timestamp(_)) => Err("Cannot add to Timestamp values".to_string()),
-            (_, Val::Date(_)) => Err("Cannot add to Date values".to_string()),
-            (_, Val::Time(_)) => Err("Cannot add to Time values".to_string()),
-            (_, Val::Binary(_)) => Err("Cannot add to Binary values".to_string()),
-            (_, Val::JSON(_)) => Err("Cannot add to JSON values".to_string()),
-            (_, Val::UUID(_)) => Err("Cannot add to UUID values".to_string()),
-            (_, Val::Vector(_)) => Err("Cannot add to Vector values".to_string()),
-            (_, Val::Array(_)) => Err("Cannot add to Array values".to_string()),
-            (_, Val::Enum(_, _)) => Err("Cannot add to Enum values".to_string()),
-            (_, Val::Point(_, _)) => Err("Cannot add to Point values".to_string()),
-            (_, Val::Null) => Ok(Value::new(Val::Null)),
-            (_, Val::Struct) => Err("Cannot add to Struct values".to_string()),
-            // Catch-all for any other type combinations
-            (a, b) => Err(format!("Cannot add {:?} and {:?}", a, b)),
-        }
-    }
-
+    
     fn is_zero(&self, val: &Value) -> bool {
         match val.get_val() {
             Val::Integer(i) => *i == 0,
@@ -666,56 +584,87 @@ impl Type for Value {
     }
 
     fn add(&self, other: &Value) -> Result<Value, String> {
-        match (self.get_type_id(), other.get_type_id()) {
-            (TypeId::Integer, TypeId::Integer) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
+        if self.is_null() || other.is_null() {
+            return Ok(Value::new(Val::Null));
+        }
+
+        match (&self.value_, &other.value_) {
+            (Val::Integer(a), Val::Integer(b)) => {
                 Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
             }
-            (TypeId::BigInt, TypeId::BigInt) => {
-                let a = self.as_bigint()?;
-                let b = other.as_bigint()?;
+            (Val::BigInt(a), Val::BigInt(b)) => {
                 Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
             }
-            (TypeId::SmallInt, TypeId::SmallInt) => {
-                let a = self.as_smallint()?;
-                let b = other.as_smallint()?;
-                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
-            }
-            (TypeId::TinyInt, TypeId::TinyInt) => {
-                let a = self.as_tinyint()?;
-                let b = other.as_tinyint()?;
-                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
-            }
-            (TypeId::Decimal, TypeId::Decimal) => {
-                let a = self.as_decimal()?;
-                let b = other.as_decimal()?;
+            (Val::Integer(a), Val::BigInt(b)) => Ok(Value::new_with_type(
+                Val::BigInt(*a as i64 + b),
+                TypeId::BigInt,
+            )),
+            (Val::BigInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::BigInt(a + *b as i64),
+                TypeId::BigInt,
+            )),
+            (Val::Decimal(a), Val::Decimal(b)) => {
                 Ok(Value::new_with_type(Val::Decimal(a + b), TypeId::Decimal))
             }
-            // Handle type promotions
-            (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            (Val::SmallInt(a), Val::SmallInt(b)) => {
+                Ok(Value::new_with_type(Val::SmallInt(a + b), TypeId::SmallInt))
             }
-            (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
-                let a = self.as_integer()?;
-                let b = other.as_integer()?;
-                Ok(Value::new_with_type(Val::Integer(a + b), TypeId::Integer))
+            (Val::TinyInt(a), Val::TinyInt(b)) => {
+                Ok(Value::new_with_type(Val::TinyInt(a + b), TypeId::TinyInt))
             }
-            (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
-                let a = self.as_bigint()?;
-                let b = other.as_bigint()?;
-                Ok(Value::new_with_type(Val::BigInt(a + b), TypeId::BigInt))
-            }
-            _ => Err(format!(
-                "Cannot add values of types {:?} and {:?}",
-                self.get_type_id(),
-                other.get_type_id()
+            // Promote smaller types to larger ones
+            (Val::TinyInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::Integer(*a as i32 + b),
+                TypeId::Integer,
             )),
+            (Val::Integer(a), Val::TinyInt(b)) => Ok(Value::new_with_type(
+                Val::Integer(a + *b as i32),
+                TypeId::Integer,
+            )),
+            (Val::SmallInt(a), Val::Integer(b)) => Ok(Value::new_with_type(
+                Val::Integer(*a as i32 + b),
+                TypeId::Integer,
+            )),
+            (Val::Integer(a), Val::SmallInt(b)) => Ok(Value::new_with_type(
+                Val::Integer(a + *b as i32),
+                TypeId::Integer,
+            )),
+
+            (Val::Boolean(_), _) => Err("Cannot add Boolean values".to_string()),
+            (Val::Float(a), Val::Float(b)) => Ok(Value::new_with_type(Val::Float(a + b), TypeId::Float)),
+            (Val::Timestamp(_), _) => Err("Cannot add Timestamp values".to_string()),
+            (Val::Date(_), _) => Err("Cannot add Date values".to_string()),
+            (Val::Time(_), _) => Err("Cannot add Time values".to_string()),
+            (Val::Interval(a), Val::Interval(b)) => Ok(Value::new_with_type(Val::Interval(a + b), TypeId::Interval)),
+            (Val::VarLen(a), Val::VarLen(b)) => Ok(Value::new_with_type(Val::VarLen(a.clone() + b), TypeId::VarChar)),
+            (Val::ConstLen(a), Val::ConstLen(b)) => Ok(Value::new_with_type(Val::ConstLen(a.clone() + b), TypeId::Char)),
+            (Val::Binary(_), _) => Err("Cannot add Binary values".to_string()),
+            (Val::JSON(_), _) => Err("Cannot add JSON values".to_string()),
+            (Val::UUID(_), _) => Err("Cannot add UUID values".to_string()),
+            (Val::Vector(_), _) => Err("Cannot add Vector values".to_string()),
+            (Val::Array(_), _) => Err("Cannot add Array values".to_string()),
+            (Val::Enum(_, _), _) => Err("Cannot add Enum values".to_string()),
+            (Val::Point(_, _), _) => Err("Cannot add Point values".to_string()),
+            (Val::Null, _) => Ok(Value::new(Val::Null)),
+            (Val::Struct, _) => Err("Cannot add Struct values".to_string()),
+            (_, Val::Boolean(_)) => Err("Cannot add to Boolean values".to_string()),
+            (_, Val::Timestamp(_)) => Err("Cannot add to Timestamp values".to_string()),
+            (_, Val::Date(_)) => Err("Cannot add to Date values".to_string()),
+            (_, Val::Time(_)) => Err("Cannot add to Time values".to_string()),
+            (_, Val::Binary(_)) => Err("Cannot add to Binary values".to_string()),
+            (_, Val::JSON(_)) => Err("Cannot add to JSON values".to_string()),
+            (_, Val::UUID(_)) => Err("Cannot add to UUID values".to_string()),
+            (_, Val::Vector(_)) => Err("Cannot add to Vector values".to_string()),
+            (_, Val::Array(_)) => Err("Cannot add to Array values".to_string()),
+            (_, Val::Enum(_, _)) => Err("Cannot add to Enum values".to_string()),
+            (_, Val::Point(_, _)) => Err("Cannot add to Point values".to_string()),
+            (_, Val::Null) => Ok(Value::new(Val::Null)),
+            (_, Val::Struct) => Err("Cannot add to Struct values".to_string()),
+            // Catch-all for any other type combinations
+            (a, b) => Err(format!("Cannot add {:?} and {:?}", a, b)),
         }
     }
-
+    
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match (self.get_type_id(), other.get_type_id()) {
             (TypeId::Integer, TypeId::Integer) => {
@@ -743,7 +692,40 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a - b), TypeId::Decimal))
             }
-            _ => Err(format!(
+            (TypeId::Boolean, _) => Err(format!("Cannot subtract from Boolean type")),
+            (TypeId::Float, TypeId::Float) => {
+                let a = self.get_val();
+                let b = other.get_val();
+                if let (Val::Float(a_val), Val::Float(b_val)) = (a, b) {
+                    Ok(Value::new_with_type(Val::Float(a_val - b_val), TypeId::Float))
+                } else {
+                    Err(format!("Invalid Float values for subtraction"))
+                }
+            }
+            (TypeId::Timestamp, _) => Err(format!("Cannot subtract from Timestamp type")),
+            (TypeId::Date, _) => Err(format!("Cannot subtract from Date type")),
+            (TypeId::Time, _) => Err(format!("Cannot subtract from Time type")),
+            (TypeId::Interval, TypeId::Interval) => {
+                let a = self.get_val();
+                let b = other.get_val();
+                if let (Val::Interval(a_val), Val::Interval(b_val)) = (a, b) {
+                    Ok(Value::new_with_type(Val::Interval(a_val - b_val), TypeId::Interval))
+                } else {
+                    Err(format!("Invalid Interval values for subtraction"))
+                }
+            }
+            (TypeId::VarChar, _) => Err(format!("Cannot subtract from VarChar type")),
+            (TypeId::Char, _) => Err(format!("Cannot subtract from Char type")),
+            (TypeId::Binary, _) => Err(format!("Cannot subtract from Binary type")),
+            (TypeId::JSON, _) => Err(format!("Cannot subtract from JSON type")),
+            (TypeId::UUID, _) => Err(format!("Cannot subtract from UUID type")),
+            (TypeId::Vector, _) => Err(format!("Cannot subtract from Vector type")),
+            (TypeId::Array, _) => Err(format!("Cannot subtract from Array type")),
+            (TypeId::Enum, _) => Err(format!("Cannot subtract from Enum type")),
+            (TypeId::Point, _) => Err(format!("Cannot subtract from Point type")),
+            (TypeId::Invalid, _) => Err(format!("Cannot subtract from Invalid type")),
+            (TypeId::Struct, _) => Err(format!("Cannot subtract from Struct type")),
+            (_, _) => Err(format!(
                 "Cannot subtract values of types {:?} and {:?}",
                 self.get_type_id(),
                 other.get_type_id()
@@ -778,7 +760,32 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a * b), TypeId::Decimal))
             }
-            _ => Err(format!(
+            (TypeId::Boolean, _) => Err(format!("Cannot multiply Boolean type")),
+            (TypeId::Float, TypeId::Float) => {
+                let a = self.get_val();
+                let b = other.get_val();
+                if let (Val::Float(a_val), Val::Float(b_val)) = (a, b) {
+                    Ok(Value::new_with_type(Val::Float(a_val * b_val), TypeId::Float))
+                } else {
+                    Err(format!("Invalid Float values for multiplication"))
+                }
+            }
+            (TypeId::Timestamp, _) => Err(format!("Cannot multiply Timestamp type")),
+            (TypeId::Date, _) => Err(format!("Cannot multiply Date type")),
+            (TypeId::Time, _) => Err(format!("Cannot multiply Time type")),
+            (TypeId::Interval, _) => Err(format!("Cannot multiply Interval type")),
+            (TypeId::VarChar, _) => Err(format!("Cannot multiply VarChar type")),
+            (TypeId::Char, _) => Err(format!("Cannot multiply Char type")),
+            (TypeId::Binary, _) => Err(format!("Cannot multiply Binary type")),
+            (TypeId::JSON, _) => Err(format!("Cannot multiply JSON type")),
+            (TypeId::UUID, _) => Err(format!("Cannot multiply UUID type")),
+            (TypeId::Vector, _) => Err(format!("Cannot multiply Vector type")),
+            (TypeId::Array, _) => Err(format!("Cannot multiply Array type")),
+            (TypeId::Enum, _) => Err(format!("Cannot multiply Enum type")),
+            (TypeId::Point, _) => Err(format!("Cannot multiply Point type")),
+            (TypeId::Invalid, _) => Err(format!("Cannot multiply Invalid type")),
+            (TypeId::Struct, _) => Err(format!("Cannot multiply Struct type")),
+            (_, _) => Err(format!(
                 "Cannot multiply values of types {:?} and {:?}",
                 self.get_type_id(),
                 other.get_type_id()
@@ -816,7 +823,35 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a / b), TypeId::Decimal))
             }
-            _ => Err(format!(
+            (TypeId::Boolean, _) => Err(format!("Cannot divide Boolean type")),
+            (TypeId::Float, TypeId::Float) => {
+                let a = self.get_val();
+                let b = other.get_val();
+                if let (Val::Float(a_val), Val::Float(b_val)) = (a, b) {
+                    if *b_val == 0.0 {
+                        return Err("Division by zero".to_string());
+                    }
+                    Ok(Value::new_with_type(Val::Float(a_val / b_val), TypeId::Float))
+                } else {
+                    Err(format!("Invalid Float values for division"))
+                }
+            }
+            (TypeId::Timestamp, _) => Err(format!("Cannot divide Timestamp type")),
+            (TypeId::Date, _) => Err(format!("Cannot divide Date type")),
+            (TypeId::Time, _) => Err(format!("Cannot divide Time type")),
+            (TypeId::Interval, _) => Err(format!("Cannot divide Interval type")),
+            (TypeId::VarChar, _) => Err(format!("Cannot divide VarChar type")),
+            (TypeId::Char, _) => Err(format!("Cannot divide Char type")),
+            (TypeId::Binary, _) => Err(format!("Cannot divide Binary type")),
+            (TypeId::JSON, _) => Err(format!("Cannot divide JSON type")),
+            (TypeId::UUID, _) => Err(format!("Cannot divide UUID type")),
+            (TypeId::Vector, _) => Err(format!("Cannot divide Vector type")),
+            (TypeId::Array, _) => Err(format!("Cannot divide Array type")),
+            (TypeId::Enum, _) => Err(format!("Cannot divide Enum type")),
+            (TypeId::Point, _) => Err(format!("Cannot divide Point type")),
+            (TypeId::Invalid, _) => Err(format!("Cannot divide Invalid type")),
+            (TypeId::Struct, _) => Err(format!("Cannot divide Struct type")),
+            (_, _) => Err(format!(
                 "Cannot divide values of types {:?} and {:?}",
                 self.get_type_id(),
                 other.get_type_id()
