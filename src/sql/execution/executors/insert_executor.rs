@@ -119,7 +119,7 @@ impl AbstractExecutor for InsertExecutor {
         }
 
         if let Some(child) = &mut self.child_executor {
-            if let Some((mut tuple, _)) = child.next() {
+            if let Some((tuple, _)) = child.next() {
                 debug!(
                     "Inserting tuple into table '{}'",
                     self.plan.get_table_name()

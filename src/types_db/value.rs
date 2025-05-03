@@ -237,11 +237,39 @@ impl Value {
                 Val::Integer(a + *b as i32),
                 TypeId::Integer,
             )),
-            _ => Err(format!(
-                "Cannot add values of types {:?} and {:?}",
-                self.get_type_id(),
-                other.get_type_id()
-            )),
+
+            (Val::Boolean(_), _) => Err("Cannot add Boolean values".to_string()),
+            (Val::Float(a), Val::Float(b)) => Ok(Value::new_with_type(Val::Float(a + b), TypeId::Float)),
+            (Val::Timestamp(_), _) => Err("Cannot add Timestamp values".to_string()),
+            (Val::Date(_), _) => Err("Cannot add Date values".to_string()),
+            (Val::Time(_), _) => Err("Cannot add Time values".to_string()),
+            (Val::Interval(a), Val::Interval(b)) => Ok(Value::new_with_type(Val::Interval(a + b), TypeId::Interval)),
+            (Val::VarLen(a), Val::VarLen(b)) => Ok(Value::new_with_type(Val::VarLen(a.clone() + b), TypeId::VarChar)),
+            (Val::ConstLen(a), Val::ConstLen(b)) => Ok(Value::new_with_type(Val::ConstLen(a.clone() + b), TypeId::Char)),
+            (Val::Binary(_), _) => Err("Cannot add Binary values".to_string()),
+            (Val::JSON(_), _) => Err("Cannot add JSON values".to_string()),
+            (Val::UUID(_), _) => Err("Cannot add UUID values".to_string()),
+            (Val::Vector(_), _) => Err("Cannot add Vector values".to_string()),
+            (Val::Array(_), _) => Err("Cannot add Array values".to_string()),
+            (Val::Enum(_, _), _) => Err("Cannot add Enum values".to_string()),
+            (Val::Point(_, _), _) => Err("Cannot add Point values".to_string()),
+            (Val::Null, _) => Ok(Value::new(Val::Null)),
+            (Val::Struct, _) => Err("Cannot add Struct values".to_string()),
+            (_, Val::Boolean(_)) => Err("Cannot add to Boolean values".to_string()),
+            (_, Val::Timestamp(_)) => Err("Cannot add to Timestamp values".to_string()),
+            (_, Val::Date(_)) => Err("Cannot add to Date values".to_string()),
+            (_, Val::Time(_)) => Err("Cannot add to Time values".to_string()),
+            (_, Val::Binary(_)) => Err("Cannot add to Binary values".to_string()),
+            (_, Val::JSON(_)) => Err("Cannot add to JSON values".to_string()),
+            (_, Val::UUID(_)) => Err("Cannot add to UUID values".to_string()),
+            (_, Val::Vector(_)) => Err("Cannot add to Vector values".to_string()),
+            (_, Val::Array(_)) => Err("Cannot add to Array values".to_string()),
+            (_, Val::Enum(_, _)) => Err("Cannot add to Enum values".to_string()),
+            (_, Val::Point(_, _)) => Err("Cannot add to Point values".to_string()),
+            (_, Val::Null) => Ok(Value::new(Val::Null)),
+            (_, Val::Struct) => Err("Cannot add to Struct values".to_string()),
+            // Catch-all for any other type combinations
+            (a, b) => Err(format!("Cannot add {:?} and {:?}", a, b)),
         }
     }
 
@@ -253,7 +281,22 @@ impl Value {
             Val::TinyInt(i) => *i == 0,
             Val::Decimal(f) => *f == 0.0,
             Val::Float(f) => *f == 0.0,
-            _ => false,
+            Val::Boolean(_) => false,
+            Val::Timestamp(_) => false,
+            Val::Date(_) => false,
+            Val::Time(_) => false,
+            Val::Interval(_) => false,
+            Val::VarLen(s) => s.is_empty(),
+            Val::ConstLen(s) => s.is_empty(),
+            Val::Binary(b) => b.is_empty(),
+            Val::JSON(_) => false,
+            Val::UUID(_) => false,
+            Val::Vector(v) => v.is_empty(),
+            Val::Array(a) => a.is_empty(),
+            Val::Enum(_, _) => false,
+            Val::Point(_, _) => false,
+            Val::Null => false,
+            Val::Struct => false,
         }
     }
 
@@ -378,8 +421,11 @@ impl Value {
                     Value::new(Val::Null)
                 }
             },
-            // For other types, return a Null value for now
-            _ => Value::new(Val::Null),
+            Vector => Value::new_with_type(Val::Vector(Vec::new()), Vector),
+            Array => Value::new_with_type(Val::Array(Vec::new()), Array),
+            Enum => Value::new_with_type(Val::Enum(0, String::new()), Enum),
+            Invalid => Value::new(Val::Null),
+            Struct => Value::new_with_type(Val::Struct, Struct),
         }
     }
 
@@ -457,11 +503,28 @@ impl Value {
                 Ok(Value::new_with_type(val.clone(), target_type))
             }
 
-            // Invalid conversions
-            _ => Err(format!(
-                "Cannot cast from {:?} to {:?}",
-                self.type_id_, target_type
-            )),
+            (Val::Boolean(_), _) => Err(format!("Cannot cast Boolean to {:?}", target_type)),
+            (Val::Float(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
+            (Val::Float(_), _) => Err(format!("Cannot cast Float to {:?}", target_type)),
+            (Val::Timestamp(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
+            (Val::Timestamp(_), _) => Err(format!("Cannot cast Timestamp to {:?}", target_type)),
+            (Val::Date(d), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(d.to_string()), target_type)),
+            (Val::Date(_), _) => Err(format!("Cannot cast Date to {:?}", target_type)),
+            (Val::Time(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
+            (Val::Time(_), _) => Err(format!("Cannot cast Time to {:?}", target_type)),
+            (Val::Interval(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::Interval(_), _) => Err(format!("Cannot cast Interval to {:?}", target_type)),
+            (Val::Binary(_), _) => Err(format!("Cannot cast Binary to {:?}", target_type)),
+            (Val::JSON(_), _) => Err(format!("Cannot cast JSON to {:?}", target_type)),
+            (Val::UUID(_), _) => Err(format!("Cannot cast UUID to {:?}", target_type)),
+            (Val::Vector(_), _) => Err(format!("Cannot cast Vector to {:?}", target_type)),
+            (Val::Array(_), _) => Err(format!("Cannot cast Array to {:?}", target_type)),
+            (Val::Enum(_, _), _) => Err(format!("Cannot cast Enum to {:?}", target_type)),
+            (Val::Point(_, _), _) => Err(format!("Cannot cast Point to {:?}", target_type)),
+            (Val::Null, _) => Ok(Value::new_with_type(Val::Null, target_type)),
+            (Val::Struct, _) => Err(format!("Cannot cast Struct to {:?}", target_type)),
+            // Catch-all for any other type combinations
+            (val, typ) => Err(format!("Cannot cast {:?} to {:?}", val, typ)),
         }
     }
 
@@ -577,78 +640,28 @@ impl Type for Value {
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            (Val::Boolean(l), Val::Boolean(r)) => (l < r).into(),
-            (Val::TinyInt(l), Val::TinyInt(r)) => (l < r).into(),
-            (Val::SmallInt(l), Val::SmallInt(r)) => (l < r).into(),
-            (Val::Integer(l), Val::Integer(r)) => (l < r).into(),
-            (Val::BigInt(l), Val::BigInt(r)) => (l < r).into(),
-            (Val::Decimal(l), Val::Decimal(r)) => (l < r).into(),
-            (Val::Float(l), Val::Float(r)) => (l < r).into(),
-            (Val::Timestamp(l), Val::Timestamp(r)) => (l < r).into(),
-            (Val::Date(l), Val::Date(r)) => (l < r).into(),
-            (Val::Time(l), Val::Time(r)) => (l < r).into(),
-            (Val::Interval(l), Val::Interval(r)) => (l < r).into(),
-            (Val::VarLen(l), Val::VarLen(r)) => (l < r).into(),
-            (Val::ConstLen(l), Val::ConstLen(r)) => (l < r).into(),
-            (Val::UUID(l), Val::UUID(r)) => (l < r).into(),
-            // Comparisons between compatible numeric types
-            (Val::TinyInt(l), Val::Integer(r)) => ((*l as i32) < *r).into(),
-            (Val::Integer(l), Val::TinyInt(r)) => (*l < (*r as i32)).into(),
-            (Val::Integer(l), Val::BigInt(r)) => ((*l as i64) < *r).into(),
-            (Val::BigInt(l), Val::Integer(r)) => (*l < (*r as i64)).into(),
-            (Val::Float(l), Val::Decimal(r)) => ((*l as f64) < *r).into(),
-            (Val::Decimal(l), Val::Float(r)) => (*l < (*r as f64)).into(),
-            _ => CmpBool::CmpFalse,
+            _ => (self.value_ < other.value_).into(),
         }
     }
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => match self.compare_greater_than(other) {
-                CmpBool::CmpTrue => CmpBool::CmpFalse,
-                CmpBool::CmpFalse => CmpBool::CmpTrue,
-                CmpBool::CmpNull => CmpBool::CmpNull,
-            },
+            _ => (self.value_ <= other.value_).into(),
         }
     }
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            (Val::Boolean(l), Val::Boolean(r)) => (l > r).into(),
-            (Val::TinyInt(l), Val::TinyInt(r)) => (l > r).into(),
-            (Val::SmallInt(l), Val::SmallInt(r)) => (l > r).into(),
-            (Val::Integer(l), Val::Integer(r)) => (l > r).into(),
-            (Val::BigInt(l), Val::BigInt(r)) => (l > r).into(),
-            (Val::Decimal(l), Val::Decimal(r)) => (l > r).into(),
-            (Val::Float(l), Val::Float(r)) => (l > r).into(),
-            (Val::Timestamp(l), Val::Timestamp(r)) => (l > r).into(),
-            (Val::Date(l), Val::Date(r)) => (l > r).into(),
-            (Val::Time(l), Val::Time(r)) => (l > r).into(),
-            (Val::Interval(l), Val::Interval(r)) => (l > r).into(),
-            (Val::VarLen(l), Val::VarLen(r)) => (l > r).into(),
-            (Val::ConstLen(l), Val::ConstLen(r)) => (l > r).into(),
-            (Val::UUID(l), Val::UUID(r)) => (l > r).into(),
-            // Comparisons between compatible numeric types
-            (Val::TinyInt(l), Val::Integer(r)) => ((*l as i32) > *r).into(),
-            (Val::Integer(l), Val::TinyInt(r)) => (*l > (*r as i32)).into(),
-            (Val::Integer(l), Val::BigInt(r)) => ((*l as i64) > *r).into(),
-            (Val::BigInt(l), Val::Integer(r)) => (*l > (*r as i64)).into(),
-            (Val::Float(l), Val::Decimal(r)) => ((*l as f64) > *r).into(),
-            (Val::Decimal(l), Val::Float(r)) => (*l > (*r as f64)).into(),
-            _ => CmpBool::CmpFalse,
+            _ => (self.value_ > other.value_).into(),
         }
     }
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
-            _ => match self.compare_less_than(other) {
-                CmpBool::CmpTrue => CmpBool::CmpFalse,
-                CmpBool::CmpFalse => CmpBool::CmpTrue,
-                CmpBool::CmpNull => CmpBool::CmpNull,
-            },
+            _ => (self.value_ >= other.value_).into(),
         }
     }
 
@@ -1105,6 +1118,25 @@ impl From<CmpBool> for Val {
             CmpBool::CmpFalse => Val::Boolean(false),
             CmpBool::CmpNull => Val::Null,
         }
+    }
+}
+
+impl From<f32> for Val {
+    fn from(f: f32) -> Self {
+        Val::Float(f)
+    }
+}
+
+// Add after the existing From<u64> for Val implementation
+impl From<&[u8]> for Val {
+    fn from(b: &[u8]) -> Self {
+        Val::Binary(b.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for Val {
+    fn from(b: Vec<u8>) -> Self {
+        Val::Binary(b)
     }
 }
 
@@ -1960,24 +1992,5 @@ mod cast_tests {
 
         let str_val = Value::new("test");
         assert!(str_val.cast_to(TypeId::Integer).is_err());
-    }
-}
-
-impl From<f32> for Val {
-    fn from(f: f32) -> Self {
-        Val::Float(f)
-    }
-}
-
-// Add after the existing From<u64> for Val implementation
-impl From<&[u8]> for Val {
-    fn from(b: &[u8]) -> Self {
-        Val::Binary(b.to_vec())
-    }
-}
-
-impl From<Vec<u8>> for Val {
-    fn from(b: Vec<u8>) -> Self {
-        Val::Binary(b)
     }
 }
