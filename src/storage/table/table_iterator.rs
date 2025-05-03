@@ -244,7 +244,7 @@ impl TableScanIterator {
 }
 
 impl Iterator for TableScanIterator {
-    type Item = (TupleMeta, Tuple);
+    type Item = (Arc<TupleMeta>, Arc<Tuple>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_end {
@@ -263,7 +263,7 @@ impl Iterator for TableScanIterator {
 }
 
 impl Iterator for TableIterator {
-    type Item = (TupleMeta, Tuple);
+    type Item = (Arc<TupleMeta>, Arc<Tuple>);
 
     fn next(&mut self) -> Option<Self::Item> {
         while !self.is_end() {
@@ -407,15 +407,15 @@ mod tests {
             txn_ctx: Option<Arc<TransactionContext>>,
         ) -> RID {
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(
+            let meta = Arc::new(TupleMeta::new(
                 txn_ctx
                     .as_ref()
                     .map_or(0, |ctx| ctx.get_transaction().get_transaction_id()),
-            );
+            ));
 
             table
                 .insert_tuple(
-                    &meta,
+                    meta,
                     &mut tuple,
                     txn_ctx.unwrap_or_else(|| self.transaction_context.clone()),
                 )
@@ -461,7 +461,7 @@ mod tests {
 
         assert!(!iterator.is_end());
         let result = iterator.next().expect("Should return tuple");
-        assert_eq!(result.1.get_value(0), &Value::new(1));
+        assert_eq!(result.1.get_value(0), Value::new(1));
         assert!(iterator.next().is_none());
     }
 

@@ -18,8 +18,8 @@ pub struct HashJoinExecutor {
     left_child: Box<dyn AbstractExecutor>,
     right_child: Box<dyn AbstractExecutor>,
     hash_table: Option<DiskExtendableHashTable>,
-    right_tuples: Vec<(RID, Tuple)>,
-    current_left_tuple: Option<(Tuple, RID)>,
+    right_tuples: Vec<(RID, Arc<Tuple>)>,
+    current_left_tuple: Option<(Arc<Tuple>, RID)>,
     initialized: bool,
 }
 
@@ -104,7 +104,7 @@ impl AbstractExecutor for HashJoinExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             return None;
         }
@@ -139,7 +139,7 @@ impl AbstractExecutor for HashJoinExecutor {
                     if let Some((_, right_tuple)) =
                         self.right_tuples.iter().find(|(rid, _)| *rid == right_rid)
                     {
-                        let combined_tuple = left_tuple.combine(right_tuple);
+                        let combined_tuple = Arc::new(left_tuple.combine(right_tuple));
                         self.current_left_tuple = None;
                         return Some((combined_tuple, left_rid));
                     }
@@ -252,13 +252,13 @@ mod tests {
 
     // Mock executor that returns predefined tuples
     struct MockExecutor {
-        tuples: Vec<(Tuple, RID)>,
+        tuples: Vec<(Arc<Tuple>, RID)>,
         index: usize,
         schema: Schema,
     }
 
     impl MockExecutor {
-        fn new(tuples: Vec<(Tuple, RID)>, schema: Schema) -> Self {
+        fn new(tuples: Vec<(Arc<Tuple>, RID)>, schema: Schema) -> Self {
             Self {
                 tuples,
                 index: 0,
@@ -272,7 +272,7 @@ mod tests {
             self.index = 0;
         }
 
-        fn next(&mut self) -> Option<(Tuple, RID)> {
+        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
             if self.index < self.tuples.len() {
                 let result = self.tuples[self.index].clone();
                 self.index += 1;
@@ -315,27 +315,27 @@ mod tests {
         // Create test data for left child
         let left_tuples = vec![
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(1), Value::new("Alice")],
                     left_schema.clone(),
                     RID::new(1, 0),
-                ),
+                )),
                 RID::new(1, 0),
             ),
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(2), Value::new("Bob")],
                     left_schema.clone(),
                     RID::new(1, 1),
-                ),
+                )),
                 RID::new(1, 1),
             ),
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(3), Value::new("Charlie")],
                     left_schema.clone(),
                     RID::new(1, 2),
-                ),
+                )),
                 RID::new(1, 2),
             ),
         ];
@@ -343,27 +343,27 @@ mod tests {
         // Create test data for right child
         let right_tuples = vec![
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(1), Value::new(25)],
                     right_schema.clone(),
                     RID::new(2, 0),
-                ),
+                )),
                 RID::new(2, 0),
             ),
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(2), Value::new(30)],
                     right_schema.clone(),
                     RID::new(2, 1),
-                ),
+                )),
                 RID::new(2, 1),
             ),
             (
-                Tuple::new(
+                Arc::new(Tuple::new(
                     &[Value::new(4), Value::new(35)],
                     right_schema.clone(),
                     RID::new(2, 2),
-                ),
+                )),
                 RID::new(2, 2),
             ),
         ];
@@ -423,15 +423,15 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         // Verify first match
-        assert_eq!(results[0].get_value(0), &Value::new(1)); // left id
-        assert_eq!(results[0].get_value(1), &Value::new("Alice")); // name
-        assert_eq!(results[0].get_value(2), &Value::new(1)); // right id
-        assert_eq!(results[0].get_value(3), &Value::new(25)); // age
+        assert_eq!(results[0].get_value(0), Value::new(1)); // left id
+        assert_eq!(results[0].get_value(1), Value::new("Alice")); // name
+        assert_eq!(results[0].get_value(2), Value::new(1)); // right id
+        assert_eq!(results[0].get_value(3), Value::new(25)); // age
 
         // Verify second match
-        assert_eq!(results[1].get_value(0), &Value::new(2)); // left id
-        assert_eq!(results[1].get_value(1), &Value::new("Bob")); // name
-        assert_eq!(results[1].get_value(2), &Value::new(2)); // right id
-        assert_eq!(results[1].get_value(3), &Value::new(30)); // age
+        assert_eq!(results[1].get_value(0), Value::new(2)); // left id
+        assert_eq!(results[1].get_value(1), Value::new("Bob")); // name
+        assert_eq!(results[1].get_value(2), Value::new(2)); // right id
+        assert_eq!(results[1].get_value(3), Value::new(30)); // age
     }
 }

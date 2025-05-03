@@ -128,7 +128,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// An `Option` containing the RID of the inserted tuple, or `None` if the tuple is too large
-    pub fn insert_tuple(&self, meta: &TupleMeta, tuple: &mut Tuple) -> Result<RID, String> {
+    pub fn insert_tuple(&self, meta: Arc<TupleMeta>, tuple: &Tuple) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
         // Get the last page
@@ -138,8 +138,8 @@ impl TableHeap {
         // Try to insert into current page
         {
             let mut page = page_guard.write();
-            if page.has_space_for(&mut *tuple) {
-                let rid = page.insert_tuple(meta, tuple).unwrap();
+            if page.has_space_for(tuple) {
+                let rid = page.insert_tuple(&meta, tuple).unwrap();
                 page.set_dirty(true);
                 return Ok(rid);
             }
@@ -147,13 +147,13 @@ impl TableHeap {
 
         // If we get here, we need a new page
         // Note: page_guard is dropped here before creating new page
-        self.create_new_page_and_insert(meta, tuple)
+        self.create_new_page_and_insert(&meta, tuple)
     }
 
     pub fn update_tuple(
         &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        meta: Arc<TupleMeta>,
+        tuple: &Tuple,
         rid: RID,
         txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<RID, String> {
@@ -190,23 +190,24 @@ impl TableHeap {
             let txn_manager = txn_ctx.get_transaction_manager();
 
             // Always create undo log for any modification
-            let undo_log = UndoLog {
-                is_deleted: false,
-                modified_fields: vec![true; tuple.get_column_count()],
-                tuple: current_tuple.clone(), // Keep the old version
-                ts: current_meta.get_commit_timestamp(),
-                prev_version: UndoLink {
-                    prev_txn: current_meta.get_creator_txn_id(),
-                    prev_log_idx: current_meta.get_undo_log_idx(),
-                },
-            };
-
+            let undo_log = UndoLog::new(
+                false,
+                vec![true; tuple.get_column_count()],
+                Arc::from(current_tuple), // Keep the old version
+                current_meta.get_commit_timestamp(),
+                UndoLink::new(
+                    current_meta.get_creator_txn_id(),
+                    current_meta.get_undo_log_idx()
+                )
+            );
+      
             // Append the undo log to the transaction and get its index
-            let undo_link = txn.append_undo_log(undo_log);
+            let undo_link = txn.append_undo_log(Arc::from(undo_log));
 
             // Create new meta with updated undo log index
-            let mut new_meta = meta.clone();
+            let mut new_meta = (*meta).clone();
             new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
+            let new_meta_arc = Arc::new(new_meta);
 
             // Update the version chain
             txn_manager.update_undo_link(rid, Some(undo_link), None);
@@ -215,7 +216,7 @@ impl TableHeap {
             let page_guard = self.get_page(rid.get_page_id())?;
             let mut page = page_guard.write();
             return page
-                .update_tuple(&new_meta, tuple, rid)
+                .update_tuple(&new_meta_arc, tuple, rid)
                 .map(|_| rid)
                 .map_err(|e| format!("Failed to update tuple: {}", e));
         }
@@ -223,7 +224,7 @@ impl TableHeap {
         // For non-transactional updates, just get write lock and update
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
-        page.update_tuple(meta, tuple, rid)
+        page.update_tuple(&meta, tuple, rid)
             .map(|_| rid)
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
@@ -234,7 +235,7 @@ impl TableHeap {
     ///
     /// - `meta`: New tuple meta.
     /// - `rid`: The RID of the inserted tuple.
-    pub fn update_tuple_meta(&self, meta: &TupleMeta, rid: RID) -> Result<(), String> {
+    pub fn update_tuple_meta(&self, meta: Arc<TupleMeta>, rid: RID) -> Result<(), String> {
         let _write_guard = self.latch.write();
 
         // Get the page with write access
@@ -257,7 +258,7 @@ impl TableHeap {
         }
 
         // Now perform the update
-        page.update_tuple_meta(meta, &rid)
+        page.update_tuple_meta(&meta, &rid)
             .map_err(|e| format!("Failed to update tuple meta: {}", e))
     }
 
@@ -275,7 +276,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// A pair containing the meta and tuple.
-    pub fn get_tuple(&self, rid: RID) -> Result<(TupleMeta, Tuple), String> {
+    pub fn get_tuple(&self, rid: RID) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
 
@@ -288,7 +289,7 @@ impl TableHeap {
 
         // Allow access to both committed tuples and uncommitted tuples
         // The transaction visibility should be handled at a higher level
-        Ok((meta, tuple))
+        Ok((Arc::new(meta), Arc::new(tuple)))
     }
 
     /// Gets a tuple with transaction visibility checks
@@ -296,7 +297,7 @@ impl TableHeap {
         &self,
         rid: RID,
         txn_ctx: Arc<TransactionContext>,
-    ) -> Result<(TupleMeta, Tuple), String> {
+    ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let txn = txn_ctx.get_transaction();
 
         // First get the latest version
@@ -311,19 +312,19 @@ impl TableHeap {
 
         // Always allow transaction to see its own changes
         if meta.get_creator_txn_id() == txn.get_transaction_id() {
-            return Ok((meta, tuple));
+            return Ok((Arc::new(meta), Arc::new(tuple)));
         }
 
         match txn.get_isolation_level() {
             IsolationLevel::ReadUncommitted => {
                 // For READ_UNCOMMITTED, return the latest version
-                Ok((meta, tuple))
+                Ok((Arc::new(meta), Arc::new(tuple)))
             }
 
             IsolationLevel::ReadCommitted => {
                 // For READ_COMMITTED, only return committed versions
                 if meta.is_committed() {
-                    Ok((meta, tuple))
+                    Ok((Arc::new(meta), Arc::new(tuple)))
                 } else {
                     Err("Tuple not visible".to_string())
                 }
@@ -332,7 +333,7 @@ impl TableHeap {
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 // For REPEATABLE_READ and SERIALIZABLE, check timestamp visibility
                 if txn.is_tuple_visible(&meta) {
-                    return Ok((meta, tuple));
+                    return Ok((Arc::new(meta), Arc::new(tuple)));
                 }
 
                 // If latest version isn't visible, check version chain
@@ -347,7 +348,7 @@ impl TableHeap {
                     prev_meta.set_deleted(undo_log.is_deleted);
 
                     if txn.is_tuple_visible(&prev_meta) {
-                        return Ok((prev_meta, undo_log.tuple.clone()));
+                        return Ok((Arc::new(prev_meta), undo_log.tuple.clone()));
                     }
 
                     // Get the next link from the undo log's prev_version
@@ -373,7 +374,7 @@ impl TableHeap {
     /// # Returns
     ///
     /// The tuple meta.
-    pub fn get_tuple_meta(&self, rid: RID) -> Result<TupleMeta, String> {
+    pub fn get_tuple_meta(&self, rid: RID) -> Result<Arc<TupleMeta>, String> {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
 
@@ -387,7 +388,7 @@ impl TableHeap {
 
         // Allow access to both committed and uncommitted tuple metadata
         // Transaction visibility should be handled at a higher level
-        Ok(meta)
+        Ok(Arc::new(meta))
     }
 
     /// Returns an eager iterator of this table. The iterator will stop at the last tuple
@@ -552,7 +553,7 @@ impl TableHeap {
         rid: RID,
         txn: &Transaction,
         txn_manager: &TransactionManager,
-    ) -> Result<(TupleMeta, Tuple), String> {
+    ) -> Result<(TupleMeta, Arc<Tuple>), String> {
         // Get the current version
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
@@ -564,7 +565,7 @@ impl TableHeap {
                     || meta.get_creator_txn_id() == txn.get_transaction_id()
                 {
                     // Tuple was created by this transaction or has no creator
-                    Ok((meta, tuple))
+                    Ok((meta, Arc::new(tuple)))
                 } else {
                     // Check commit timestamp visibility
                     let creator_commit_ts = txn_manager
@@ -573,7 +574,7 @@ impl TableHeap {
                         .unwrap_or(0);
 
                     if creator_commit_ts <= txn.read_ts() {
-                        Ok((meta, tuple))
+                        Ok((meta, Arc::new(tuple)))
                     } else {
                         Err("No visible version found for transaction".to_string())
                     }
@@ -586,7 +587,7 @@ impl TableHeap {
     fn create_new_page_and_insert(
         &self,
         meta: &TupleMeta,
-        tuple: &mut Tuple,
+        tuple: &Tuple,
     ) -> Result<RID, String> {
         // First check if tuple is too large for any page
         let temp_page = TablePage::new(0); // Temporary page just for size check
@@ -685,8 +686,8 @@ impl TableHeap {
     // Basic storage operations without transaction logic
     pub fn insert_tuple_internal(
         &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        meta: Arc<TupleMeta>,
+        tuple: &Tuple,
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
@@ -697,36 +698,38 @@ impl TableHeap {
         // Try to insert into current page
         {
             let mut page = page_guard.write();
-            if page.has_space_for(&mut *tuple) {
-                let rid = page.insert_tuple(meta, tuple).unwrap();
+            if page.has_space_for(tuple) {
+                let rid = page.insert_tuple(&meta, tuple).unwrap();
                 page.set_dirty(true);
                 return Ok(rid);
             }
         }
 
         // If we get here, we need a new page
-        self.create_new_page_and_insert(meta, tuple)
+        self.create_new_page_and_insert(&meta, tuple)
     }
 
     pub fn update_tuple_internal(
         &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        meta: Arc<TupleMeta>,
+        tuple: &Tuple,
         rid: RID,
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
+        
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
 
-        page.update_tuple(meta, tuple, rid)
+        page.update_tuple(&meta, tuple, rid)
             .map(|_| rid)
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
 
-    pub fn get_tuple_internal(&self, rid: RID) -> Result<(TupleMeta, Tuple), String> {
+    pub fn get_tuple_internal(&self, rid: RID) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
-        page.get_tuple(&rid)
+        let (meta, tuple) = page.get_tuple(&rid)?;
+        Ok((Arc::new(meta), Arc::new(tuple)))
     }
 }
 
@@ -1035,8 +1038,9 @@ mod tests {
 
         // Test insert
         let (meta, mut tuple) = create_test_tuple(&schema);
+        let meta_clone = meta.clone(); // Clone before insert
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(Arc::new(meta_clone), &mut tuple)
             .expect("Insert failed");
 
         // Verify page creation
@@ -1077,7 +1081,7 @@ mod tests {
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0);
 
-            match table_heap.insert_tuple(&meta, &mut tuple) {
+            match table_heap.insert_tuple(Arc::new(meta), &mut tuple) {
                 Ok(rid) => {
                     debug!("Inserted tuple {} with RID {:?}", i, rid);
                     page_ids.insert(rid.get_page_id());
@@ -1148,7 +1152,7 @@ mod tests {
         let meta = TupleMeta::new(0);
 
         // Attempt to insert should fail gracefully
-        let result = table_heap.insert_tuple(&meta, &mut tuple);
+        let result = table_heap.insert_tuple(Arc::new(meta), &mut tuple);
         assert!(
             result.is_err(),
             "Should fail to insert tuple larger than page size"
@@ -1168,7 +1172,7 @@ mod tests {
         // Insert initial tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(Arc::new(meta), &mut tuple)
             .expect("Insert failed");
 
         // Create updated tuple
@@ -1181,15 +1185,15 @@ mod tests {
 
         // Update the tuple
         let updated_rid = table_heap
-            .update_tuple(&meta, &mut updated_tuple, rid, None)
+            .update_tuple(Arc::new(meta), &mut updated_tuple, rid, None)
             .expect("Update failed");
 
         // Verify the update
         let (_, retrieved_tuple) = table_heap
             .get_tuple(updated_rid)
             .expect("Failed to get updated tuple");
-        assert_eq!(retrieved_tuple.get_value(1), &Value::new("Bob"));
-        assert_eq!(retrieved_tuple.get_value(2), &Value::new(30));
+        assert_eq!(retrieved_tuple.get_value(1), Value::new("Bob"));
+        assert_eq!(retrieved_tuple.get_value(2), Value::new(30));
     }
 
     #[test]
@@ -1201,13 +1205,13 @@ mod tests {
         // Insert initial tuple
         let (mut meta, mut tuple) = create_test_tuple(&schema);
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(Arc::new(meta), &mut tuple)
             .expect("Insert failed");
 
         // Update tuple meta
         meta.set_commit_timestamp(100);
         table_heap
-            .update_tuple_meta(&meta, rid)
+            .update_tuple_meta(Arc::new(meta), rid)
             .expect("Meta update failed");
 
         // Verify the meta update
@@ -1234,7 +1238,7 @@ mod tests {
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = TupleMeta::new(0);
             let rid = table_heap
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(Arc::new(meta), &mut tuple)
                 .expect("Insert failed");
             rids.push(rid);
         }
@@ -1267,7 +1271,7 @@ mod tests {
         // Insert initial tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
         let rid = table_heap
-            .insert_tuple(&meta, &mut tuple)
+            .insert_tuple(Arc::new(meta), &mut tuple)
             .expect("Insert failed");
 
         // Spawn multiple threads to read the tuple concurrently
@@ -1300,11 +1304,11 @@ mod tests {
         // Try to update non-existent tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
         assert!(table_heap
-            .update_tuple(&meta, &mut tuple, invalid_rid, None)
+            .update_tuple(Arc::new(meta), &mut tuple, invalid_rid, None)
             .is_err());
 
         // Try to update tuple meta for non-existent tuple
-        assert!(table_heap.update_tuple_meta(&meta, invalid_rid).is_err());
+        assert!(table_heap.update_tuple_meta(Arc::new(meta), invalid_rid).is_err());
     }
 
     #[test]
@@ -1320,7 +1324,7 @@ mod tests {
         let meta = TupleMeta::new(0);
 
         // This should succeed
-        assert!(table_heap.insert_tuple(&meta, &mut tuple).is_ok());
+        assert!(table_heap.insert_tuple(Arc::new(meta), &mut tuple).is_ok());
 
         // Now try with a slightly larger tuple that should fail
         let too_large_string = "x".repeat(4000);
@@ -1328,6 +1332,6 @@ mod tests {
         let mut large_tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
 
         // This should fail
-        assert!(table_heap.insert_tuple(&meta, &mut large_tuple).is_err());
+        assert!(table_heap.insert_tuple(Arc::new(meta), &mut large_tuple).is_err());
     }
 }

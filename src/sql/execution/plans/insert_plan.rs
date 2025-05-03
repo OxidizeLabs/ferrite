@@ -11,7 +11,7 @@ pub struct InsertNode {
     output_schema: Arc<Schema>,
     table_oid: TableOidT,
     table_name: String,
-    tuples: Vec<Tuple>,
+    tuples: Vec<Arc<Tuple>>,
     children: Vec<PlanNode>,
 }
 
@@ -20,7 +20,7 @@ impl InsertNode {
         output_schema: Schema,
         table_oid: TableOidT,
         table_name: String,
-        tuples: Vec<Tuple>,
+        tuples: Vec<Arc<Tuple>>,
         children: Vec<PlanNode>,
     ) -> Self {
         Self {
@@ -40,8 +40,12 @@ impl InsertNode {
         &self.table_name
     }
 
-    pub fn get_input_tuples(&self) -> &Vec<Tuple> {
+    pub fn get_input_tuples(&self) -> &Vec<Arc<Tuple>> {
         &self.tuples
+    }
+
+    pub fn get_input_tuples_mut(&mut self) -> &mut Vec<Arc<Tuple>> {
+        &mut self.tuples
     }
 }
 
@@ -97,8 +101,8 @@ mod tests {
             ])
         }
 
-        pub fn create_test_tuple(id: i32, name: &str, active: bool, schema: Schema) -> Tuple {
-            Tuple::new(
+        pub fn create_test_tuple(id: i32, name: &str, active: bool, schema: Schema) -> Arc<Tuple> {
+            Arc::new(Tuple::new(
                 &*vec![
                     Value::new(id),
                     Value::new(name.to_string()),
@@ -106,7 +110,7 @@ mod tests {
                 ],
                 schema,
                 Default::default(),
-            )
+            ))
         }
 
         pub fn create_values_plan(schema: Schema) -> PlanNode {
@@ -332,12 +336,12 @@ mod tests {
             assert_eq!(stored_tuple, &tuple);
 
             // Verify individual values
-            assert_eq!(stored_tuple.get_value(0), &Value::new(42));
+            assert_eq!(stored_tuple.get_value(0), Value::new(42));
             assert_eq!(
                 stored_tuple.get_value(1),
-                &Value::new("test_name".to_string())
+                Value::new("test_name".to_string())
             );
-            assert_eq!(stored_tuple.get_value(2), &Value::new(true));
+            assert_eq!(stored_tuple.get_value(2), Value::new(true));
         }
     }
 }

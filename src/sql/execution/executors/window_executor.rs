@@ -19,7 +19,7 @@ use std::sync::Arc;
 #[derive(Eq)]
 struct TupleWithKeys {
     sort_keys: Vec<Value>,
-    tuple: Tuple,
+    tuple: Arc<Tuple>,
     rid: RID,
 }
 
@@ -65,7 +65,7 @@ pub struct WindowExecutor {
     plan: Arc<WindowNode>,
     child_executor: Box<dyn AbstractExecutor>,
     // Store all tuples and their partitions
-    partitions: HashMap<Vec<Value>, Vec<(Tuple, RID)>>,
+    partitions: HashMap<Vec<Value>, Vec<(Arc<Tuple>, RID)>>,
     // Track which partition and index we're currently returning from
     current_partition_keys: Vec<Vec<Value>>,
     partition_index: usize,
@@ -125,7 +125,7 @@ impl AbstractExecutor for WindowExecutor {
             self.child_executor.init();
 
             // Collect all tuples and their sort keys
-            let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Tuple, RID)> = Vec::new();
+            let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Arc<Tuple>, RID)> = Vec::new();
             while let Some((tuple, rid)) = self.child_executor.next() {
                 let partition_keys = self.evaluate_partition_keys(&tuple);
                 let sort_keys = self.evaluate_sort_keys(&tuple);
@@ -133,7 +133,7 @@ impl AbstractExecutor for WindowExecutor {
             }
 
             // Group tuples by partition
-            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Tuple, RID)>> =
+            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Arc<Tuple>, RID)>> =
                 HashMap::new();
             for (partition_keys, sort_keys, tuple, rid) in all_tuples {
                 partitions_map
@@ -185,7 +185,7 @@ impl AbstractExecutor for WindowExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -206,7 +206,7 @@ impl AbstractExecutor for WindowExecutor {
             // Create new tuple with row number
             let mut values = tuple.get_values().to_vec();
             values.push(Value::new((self.tuple_index + 1) as i32));
-            let new_tuple = Tuple::new(&values, self.plan.get_output_schema().clone(), *rid);
+            let new_tuple = Arc::new(Tuple::new(&values, self.plan.get_output_schema().clone(), *rid));
 
             // Advance indices
             self.tuple_index += 1;
@@ -536,10 +536,11 @@ mod tests {
         let mut it_rows = Vec::new();
 
         for tuple in results {
-            let dept = tuple.get_value(0).get_val();
+            let dept = tuple.get_value(0);
+            let dept_val = dept.get_val();
             let row_num = tuple.get_value(2).as_integer().unwrap();
 
-            match dept {
+            match dept_val {
                 Val::VarLen(s) | Val::ConstLen(s) => match s.as_str() {
                     "HR" => hr_rows.push(row_num),
                     "IT" => it_rows.push(row_num),

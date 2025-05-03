@@ -44,7 +44,7 @@ impl AbstractExecutor for MockExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -55,8 +55,10 @@ impl AbstractExecutor for MockExecutor {
 
         let (values, rid) = &self.tuples[self.current_tuple_idx];
         self.current_tuple_idx += 1;
+        
+        let tuple = Arc::new(Tuple::new(values, self.schema.clone(), *rid));
 
-        Some((Tuple::new(values, self.schema.clone(), *rid), *rid))
+        Some((tuple, *rid))
     }
 
     fn get_output_schema(&self) -> &Schema {

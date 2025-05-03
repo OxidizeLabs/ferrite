@@ -46,7 +46,7 @@ impl AbstractExecutor for LimitExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         // Check if we've reached the limit
         if self.current_index >= self.plan.get_limit() {
             return None;
@@ -238,12 +238,12 @@ mod tests {
         let (tuple1, rid1) = result1.unwrap();
         assert_eq!(
             tuple1.get_value(0),
-            &Value::new(1),
+            Value::new(1),
             "First tuple id should be 1"
         );
         assert_eq!(
             tuple1.get_value(1),
-            &Value::new("a".to_string()),
+            Value::new("a".to_string()),
             "First tuple name should be 'a'"
         );
         assert_eq!(rid1, RID::new(0, 0), "First tuple RID should match");
@@ -253,12 +253,12 @@ mod tests {
         let (tuple2, rid2) = result2.unwrap();
         assert_eq!(
             tuple2.get_value(0),
-            &Value::new(2),
+            Value::new(2),
             "Second tuple id should be 2"
         );
         assert_eq!(
             tuple2.get_value(1),
-            &Value::new("b".to_string()),
+            Value::new("b".to_string()),
             "Second tuple name should be 'b'"
         );
         assert_eq!(rid2, RID::new(0, 1), "Second tuple RID should match");

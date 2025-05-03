@@ -45,7 +45,7 @@ impl AbstractExecutor for CreateTableExecutor {
         self.executed = false;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if self.executed {
             debug!("CreateTableExecutor already executed, returning None");
             return None;

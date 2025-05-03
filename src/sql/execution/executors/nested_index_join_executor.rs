@@ -24,7 +24,7 @@ pub struct NestedIndexJoinExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<NestedIndexJoinNode>,
     initialized: bool,
-    current_left_tuple: Option<(Tuple, RID)>, // Current tuple from outer (left) relation
+    current_left_tuple: Option<(Arc<Tuple>, RID)>, // Current tuple from outer (left) relation
     right_exhausted: bool, // Whether we've exhausted the inner (right) relation for current left tuple
     current_index_executor: Option<IndexScanExecutor>, // Track current index scan executor
 }
@@ -76,18 +76,18 @@ impl NestedIndexJoinExecutor {
         }
     }
 
-    fn construct_output_tuple(&self, left_tuple: &Tuple, right_tuple: &Tuple) -> Tuple {
+    fn construct_output_tuple(&self, left_tuple: &Tuple, right_tuple: &Tuple) -> Arc<Tuple> {
         let mut joined_values = left_tuple.get_values().clone();
         joined_values.extend(right_tuple.get_values().clone());
 
-        Tuple::new(
+        Arc::new(Tuple::new(
             &joined_values,
             self.get_output_schema().clone(),
             RID::new(0, 0), // Use a placeholder RID for joined tuples
-        )
+        ))
     }
 
-    fn get_next_inner_tuple(&mut self) -> Option<(Tuple, RID)> {
+    fn get_next_inner_tuple(&mut self) -> Option<(Arc<Tuple>, RID)> {
         // If we have a current index executor, try to get next tuple from it
         if let Some(executor) = &mut self.current_index_executor {
             if let Some(tuple) = executor.next() {
@@ -193,7 +193,7 @@ impl AbstractExecutor for DummyExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         None
     }
 
@@ -237,7 +237,7 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("NestedIndexJoinExecutor not initialized");
             return None;
@@ -450,7 +450,7 @@ mod tests {
 
         // Insert data into left table
         let left_data = vec![(1, "A"), (2, "B"), (3, "C")];
-        let left_tuple_meta = TupleMeta::new(0);
+        let left_tuple_meta = Arc::new(TupleMeta::new(0));
         for (id, value) in left_data {
             let mut tuple = Tuple::new(
                 &vec![Value::new(id), Value::new(value.to_string())],
@@ -458,7 +458,7 @@ mod tests {
                 RID::new(0, 0),
             );
             let rid = left_table
-                .insert_tuple(&left_tuple_meta, &mut tuple)
+                .insert_tuple(left_tuple_meta.clone(), &mut tuple)
                 .expect("Failed to insert into left table");
             debug!(
                 "Inserted into left table: id={}, value={} at RID={:?}",
@@ -474,7 +474,7 @@ mod tests {
 
         // Insert data into right table
         let right_data = vec![(1, "X"), (2, "Y"), (4, "Z")];
-        let right_tuple_meta = TupleMeta::new(0);
+        let right_tuple_meta = Arc::new(TupleMeta::new(0));
         for (id, data) in right_data {
             let mut tuple = Tuple::new(
                 &vec![Value::new(id), Value::new(data.to_string())],
@@ -482,7 +482,7 @@ mod tests {
                 RID::new(0, 0),
             );
             let rid = right_table
-                .insert_tuple(&right_tuple_meta, &mut tuple)
+                .insert_tuple(right_tuple_meta.clone(), &mut tuple)
                 .expect("Failed to insert into right table");
             debug!(
                 "Inserted into right table: id={}, data={} at RID={:?}",

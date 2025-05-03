@@ -49,7 +49,7 @@ impl AbstractExecutor for TableScanExecutor {
         debug!("TableScanExecutor initialized successfully");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         // Initialize if not already done
         if !self.initialized {
             self.init();
@@ -215,7 +215,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(Arc::from(meta), &mut tuple)
                 .expect("Failed to insert tuple");
         }
 

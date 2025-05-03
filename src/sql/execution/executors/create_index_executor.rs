@@ -46,7 +46,7 @@ impl AbstractExecutor for CreateIndexExecutor {
         self.executed = false;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if self.executed {
             debug!("CreateIndexExecutor already executed, returning None");
             return None;

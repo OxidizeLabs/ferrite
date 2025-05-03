@@ -199,90 +199,10 @@ impl TablePage {
         }
     }
 
-    /// Low-level tuple insertion into the page
-    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &mut Tuple) -> Option<RID> {
-        debug!(
-            "Starting tuple insertion. Current num_tuples: {}, tuple_info.len(): {}",
-            self.header.num_tuples,
-            self.tuple_info.len()
-        );
-
-        // Get the next available offset for the tuple
-        let tuple_offset = match self.get_next_tuple_offset(tuple) {
-            Some(offset) => {
-                debug!("Found available offset: {}", offset);
-                offset
-            }
-            None => {
-                debug!("No available offset found for tuple");
-                return None;
-            }
-        };
-
-        // Create RID for the new tuple
-        let rid = RID::new(self.header.page_id, self.header.num_tuples as u32);
-        debug!("Created new RID: {:?}", rid);
-        tuple.set_rid(rid);
-
-        // Serialize tuple data
-        let tuple_data = match bincode::serialize(tuple) {
-            Ok(data) => {
-                debug!("Serialized tuple data length: {}", data.len());
-                data
-            }
-            Err(e) => {
-                error!("Failed to serialize tuple: {}", e);
-                return None;
-            }
-        };
-
-        // Store tuple metadata and data
-        debug!(
-            "Storing tuple info - offset: {}, size: {}, meta txn_id: {}",
-            tuple_offset,
-            tuple_data.len(),
-            meta.get_creator_txn_id()
-        );
-        self.tuple_info
-            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
-
-        // Write tuple data to page
-        let start = tuple_offset as usize;
-        let end = start + tuple_data.len();
-        debug!("Writing tuple data to page range [{}..{}]", start, end);
-
-        if end <= self.data.len() {
-            self.data[start..end].copy_from_slice(&tuple_data);
-            // Update header before returning
-            self.header.num_tuples += 1;
-            self.is_dirty = true;
-
-            // Serialize the page to ensure changes are persisted
-            let serialized = self.serialize();
-            self.data.copy_from_slice(&serialized);
-
-            debug!(
-                "Successfully inserted tuple. New num_tuples: {}, tuple_info.len(): {}",
-                self.header.num_tuples,
-                self.tuple_info.len()
-            );
-            Some(rid)
-        } else {
-            // Rollback tuple_info change if write fails
-            error!(
-                "Write failed - end position {} exceeds data length {}",
-                end,
-                self.data.len()
-            );
-            self.tuple_info.pop();
-            None
-        }
-    }
-
     pub fn update_tuple(
         &mut self,
         meta: &TupleMeta,
-        tuple: &mut Tuple,
+        tuple: &Tuple,
         rid: RID,
     ) -> Result<(), PageError> {
         let tuple_id = rid.get_slot_num() as usize;
@@ -741,10 +661,102 @@ impl TablePage {
 
     // Add a method to check if tuple is too large for any page
     pub fn is_tuple_too_large(&self, tuple: &Tuple) -> bool {
-        let tuple_info_size = std::mem::size_of::<(u16, u16, TupleMeta)>();
+        let tuple_info_size = size_of::<(u16, u16, TupleMeta)>();
         let tuple_size = tuple.get_length().unwrap_or(0); // Handle potential error
         let total_size = tuple_size + tuple_info_size;
         total_size > (DB_PAGE_SIZE as usize - self.get_header_size() as usize)
+    }
+
+    /// Gets the next RID that would be assigned to a tuple inserted into this page
+    pub fn get_next_rid(&self) -> RID {
+        RID::new(self.header.page_id, self.header.num_tuples as u32)
+    }
+
+    /// Inserts a tuple with an immutable reference
+    /// The tuple should already have the correct RID (use get_next_rid to get it)
+    pub fn insert_tuple(&mut self, meta: &TupleMeta, tuple: &Tuple) -> Option<RID> {
+        debug!(
+            "Starting immutable tuple insertion. Current num_tuples: {}, tuple_info.len(): {}",
+            self.header.num_tuples,
+            self.tuple_info.len()
+        );
+
+        // Get the next available offset for the tuple
+        let tuple_offset = match self.get_next_tuple_offset(tuple) {
+            Some(offset) => {
+                debug!("Found available offset: {}", offset);
+                offset
+            }
+            None => {
+                debug!("No available offset found for tuple");
+                return None;
+            }
+        };
+
+        // Verify the RID in the tuple matches what we expect
+        let expected_rid = self.get_next_rid();
+        let tuple_rid = tuple.get_rid();
+        if tuple_rid != expected_rid {
+            debug!(
+                "Tuple RID {:?} does not match expected RID {:?}",
+                tuple_rid, expected_rid
+            );
+            return None;
+        }
+
+        // Serialize tuple data
+        let tuple_data = match bincode::serialize(tuple) {
+            Ok(data) => {
+                debug!("Serialized tuple data length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                error!("Failed to serialize tuple: {}", e);
+                return None;
+            }
+        };
+
+        // Store tuple metadata and data
+        debug!(
+            "Storing tuple info - offset: {}, size: {}, meta txn_id: {}",
+            tuple_offset,
+            tuple_data.len(),
+            meta.get_creator_txn_id()
+        );
+        self.tuple_info
+            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+
+        // Write tuple data to page
+        let start = tuple_offset as usize;
+        let end = start + tuple_data.len();
+        debug!("Writing tuple data to page range [{}..{}]", start, end);
+
+        if end <= self.data.len() {
+            self.data[start..end].copy_from_slice(&tuple_data);
+            // Update header before returning
+            self.header.num_tuples += 1;
+            self.is_dirty = true;
+
+            // Serialize the page to ensure changes are persisted
+            let serialized = self.serialize();
+            self.data.copy_from_slice(&serialized);
+
+            debug!(
+                "Successfully inserted tuple. New num_tuples: {}, tuple_info.len(): {}",
+                self.header.num_tuples,
+                self.tuple_info.len()
+            );
+            Some(expected_rid)
+        } else {
+            // Rollback tuple_info change if write fails
+            error!(
+                "Write failed - end position {} exceeds data length {}",
+                end,
+                self.data.len()
+            );
+            self.tuple_info.pop();
+            None
+        }
     }
 }
 
@@ -1135,6 +1147,57 @@ mod tuple_operation_tests {
         );
         assert_eq!(retrieved_tuple.get_value(0), new_tuple.get_value(0));
     }
+
+    #[test]
+    fn test_immutable_tuple_insertion() {
+        let mut page = TablePage::new(1);
+        
+        // Get the next RID before creating the tuple
+        let next_rid = page.get_next_rid();
+        
+        // Create tuple with the correct RID
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(1), Value::from("Test".to_string())];
+        let tuple = Tuple::new(&values, schema, next_rid);
+        let meta = TupleMeta::new(123);
+
+        // Insert using the immutable method
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
+        assert_eq!(page.header.num_tuples, 1);
+        assert_eq!(rid, next_rid);
+        
+        // Retrieve and verify
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        assert_eq!(
+            retrieved_meta.get_commit_timestamp(),
+            meta.get_commit_timestamp()
+        );
+        assert_eq!(retrieved_tuple.get_value(0), tuple.get_value(0));
+        assert_eq!(retrieved_tuple.get_value(1), tuple.get_value(1));
+    }
+
+    #[test]
+    fn test_incorrect_rid_rejection() {
+        let mut page = TablePage::new(1);
+        
+        // Create tuple with an incorrect RID
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(1), Value::from("Test".to_string())];
+        let incorrect_rid = RID::new(1, 999); // Wrong slot number
+        let tuple = Tuple::new(&values, schema, incorrect_rid);
+        let meta = TupleMeta::new(123);
+
+        // Insert should fail due to RID mismatch
+        let result = page.insert_tuple(&meta, &tuple);
+        assert!(result.is_none());
+        assert_eq!(page.header.num_tuples, 0);
+    }
 }
 
 #[cfg(test)]
@@ -1343,7 +1406,7 @@ mod serialization_tests {
             // Verify initial insertion
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid).unwrap();
             assert_eq!(initial_meta.get_commit_timestamp(), 123);
-            assert_eq!(initial_tuple.get_value(0), &Value::new(42));
+            assert_eq!(initial_tuple.get_value(0), Value::new(42));
         }
 
         let mut handles = vec![];
@@ -1458,8 +1521,8 @@ mod page_type_tests {
 
         // Verify tuple can still be read after deserialization
         let (_, retrieved_tuple) = deserialized.get_tuple(&rid).unwrap();
-        assert_eq!(retrieved_tuple.get_value(0), &Value::new(1));
-        assert_eq!(retrieved_tuple.get_value(1), &Value::new("test"));
+        assert_eq!(retrieved_tuple.get_value(0), Value::new(1));
+        assert_eq!(retrieved_tuple.get_value(1), Value::new("test"));
     }
 
     #[test]

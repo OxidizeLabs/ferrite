@@ -19,7 +19,7 @@ use std::sync::Arc;
 #[derive(Eq)]
 struct TupleWithKeys {
     sort_keys: Vec<Value>,
-    tuple: Tuple,
+    tuple: Arc<Tuple>,
     rid: RID,
 }
 
@@ -160,7 +160,7 @@ impl AbstractExecutor for TopNExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }

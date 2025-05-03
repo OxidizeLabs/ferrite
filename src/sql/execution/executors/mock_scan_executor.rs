@@ -15,7 +15,7 @@ use std::sync::Arc;
 pub struct MockScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<MockScanNode>,
-    mock_tuples: Vec<(Tuple, RID)>,
+    mock_tuples: Vec<(Arc<Tuple>, RID)>,
     current_index: usize,
     initialized: bool,
 }
@@ -37,7 +37,7 @@ impl MockScanExecutor {
     }
 
     // Helper method to generate mock data based on schema
-    fn generate_mock_data(&self) -> Vec<(Tuple, RID)> {
+    fn generate_mock_data(&self) -> Vec<(Arc<Tuple>, RID)> {
         let schema = self.plan.get_output_schema();
         let mut mock_data = Vec::new();
 
@@ -57,7 +57,7 @@ impl MockScanExecutor {
             }
 
             let rid = RID::new(i as PageId, 0);
-            let tuple = Tuple::new(&values, schema.clone(), rid);
+            let tuple = Arc::new(Tuple::new(&values, schema.clone(), rid));
             mock_data.push((tuple, rid));
         }
 
@@ -83,7 +83,7 @@ impl AbstractExecutor for MockScanExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("MockScanExecutor not initialized, initializing now");
             self.init();

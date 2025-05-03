@@ -148,7 +148,7 @@ impl AbstractExecutor for ProjectionExecutor {
         debug!("ProjectionExecutor initialization complete");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("ProjectionExecutor not initialized, initializing now");
             self.init();
@@ -161,7 +161,7 @@ impl AbstractExecutor for ProjectionExecutor {
             // Project tuple values according to expressions
             if let Some(projected_tuple) = self.project_tuple(&tuple) {
                 debug!("Successfully projected tuple");
-                return Some((projected_tuple, rid));
+                return Some((Arc::from(projected_tuple), rid));
             }
             debug!("Failed to project tuple, trying next one");
         }

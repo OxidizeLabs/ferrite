@@ -99,7 +99,7 @@ impl AbstractExecutor for SeqScanExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             trace!("SeqScanExecutor not initialized, initializing now");
             self.init();
@@ -274,7 +274,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(Arc::from(meta), &mut tuple)
                 .expect("Failed to insert tuple");
         }
 
@@ -399,7 +399,7 @@ mod tests {
         for (id, name, age) in test_data.iter() {
             let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(&meta, &mut tuple)
+                .insert_tuple(Arc::from(meta), &mut tuple)
                 .expect("Failed to insert tuple");
         }
 

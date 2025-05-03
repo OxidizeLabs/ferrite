@@ -113,7 +113,7 @@ impl AbstractExecutor for InsertExecutor {
         debug!("InsertExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -130,12 +130,12 @@ impl AbstractExecutor for InsertExecutor {
                     context.get_transaction_context().clone()
                 };
 
-                let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
+                let tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
 
                 // Use TransactionalTableHeap's insert_tuple method
                 match self
                     .txn_table_heap
-                    .insert_tuple(&tuple_meta, &mut tuple, txn_ctx)
+                    .insert_tuple(tuple_meta, &tuple, txn_ctx)
                 {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
@@ -341,8 +341,8 @@ mod tests {
         let (tuple, _) = result.unwrap();
 
         // Verify inserted values
-        assert_eq!(*tuple.get_value(0), Value::from(1));
-        assert_eq!(*tuple.get_value(1), Value::from("test"));
+        assert_eq!(tuple.get_value(0), Value::from(1));
+        assert_eq!(tuple.get_value(1), Value::from("test"));
 
         // Verify no more tuples
         assert!(executor.next().is_none());
@@ -409,11 +409,11 @@ mod tests {
 
         // First row
         let (tuple1, _) = executor.next().expect("Expected first tuple");
-        assert_eq!(*tuple1.get_value(0), Value::from(1));
+        assert_eq!(tuple1.get_value(0), Value::from(1));
 
         // Second row
         let (tuple2, _) = executor.next().expect("Expected second tuple");
-        assert_eq!(*tuple2.get_value(0), Value::from(2));
+        assert_eq!(tuple2.get_value(0), Value::from(2));
 
         // No more rows
         assert!(executor.next().is_none());

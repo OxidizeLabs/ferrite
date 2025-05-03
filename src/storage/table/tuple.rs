@@ -9,9 +9,11 @@ use bincode;
 use log;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use parking_lot::{RwLock, RwLockWriteGuard};
 
 /// Metadata associated with a tuple.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Copy)]
+#[derive(Clone, Debug, PartialEq, Copy, Serialize, Deserialize)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
     commit_timestamp: Timestamp,
@@ -118,11 +120,57 @@ impl TupleMeta {
 }
 
 /// Represents a tuple in the database.
-#[derive(Debug, PartialEq, PartialOrd, Serialize, Deserialize, Eq)]
+#[derive(Debug)]
 pub struct Tuple {
-    values: Vec<Value>,
+    values: Arc<RwLock<Vec<Value>>>,
     rid: RID,
 }
+
+// Custom Serialize implementation for Tuple
+impl Serialize for Tuple {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize as a tuple of (values, rid)
+        let values = self.values.read().clone();
+        (values, self.rid).serialize(serializer)
+    }
+}
+
+// Custom Deserialize implementation for Tuple
+impl<'de> Deserialize<'de> for Tuple {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize from a tuple of (values, rid)
+        let (values, rid): (Vec<Value>, RID) = Deserialize::deserialize(deserializer)?;
+        Ok(Self {
+            values: Arc::new(RwLock::new(values)),
+            rid,
+        })
+    }
+}
+
+impl PartialEq for Tuple {
+    fn eq(&self, other: &Self) -> bool {
+        // First compare RIDs for efficiency (avoid lock acquisition if RIDs differ)
+        if self.rid != other.rid {
+            return false;
+        }
+        
+        // Compare the contents of values by acquiring read locks
+        let self_values = self.values.read();
+        let other_values = other.values.read();
+        
+        // Compare the contents of the vectors
+        *self_values == *other_values
+    }
+}
+
+// Implement Eq as well since tuples can be equal if they have the same RID and values
+impl Eq for Tuple {}
 
 impl Tuple {
     /// Creates a new `Tuple` instance.
@@ -138,7 +186,7 @@ impl Tuple {
         );
 
         Self {
-            values: values.to_vec(),
+            values: Arc::new(RwLock::new(values.to_vec())),
             rid,
         }
     }
@@ -149,7 +197,8 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        let serialized = bincode::serialize(&(self.values.clone(), self.rid))
+        // Use the Serialize trait implementation directly
+        let serialized = bincode::serialize(self)
             .map_err(|e| TupleError::SerializationError(e.to_string()))?;
 
         if storage.len() < serialized.len() {
@@ -166,9 +215,9 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        let (values, rid): (Vec<Value>, RID) = bincode::deserialize(storage)
-            .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
-        Ok(Self { values, rid })
+        // Use the Deserialize trait implementation directly
+        bincode::deserialize(storage)
+            .map_err(|e| TupleError::DeserializationError(e.to_string()))
     }
 
     /// Returns the RID of the tuple.
@@ -187,7 +236,8 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
-        bincode::serialized_size(&(self.values.clone(), self.rid))
+        let values = self.values.read().clone();
+        bincode::serialized_size(&(values, self.rid))
             .map(|size| size as usize)
             .map_err(|e| TupleError::SerializationError(e.to_string()))
     }
@@ -197,20 +247,20 @@ impl Tuple {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub fn get_value(&self, column_index: usize) -> &Value {
-        &self.values[column_index]
+    pub fn get_value(&self, column_index: usize) -> Value {
+        self.values.read()[column_index].clone()
     }
 
     pub fn set_values(&mut self, values: Vec<Value>) {
-        self.values = values;
+        *self.values.write() = values;
     }
 
-    pub fn get_values(&self) -> &Vec<Value> {
-        &self.values
+    pub fn get_values(&self) -> Vec<Value> {
+        self.values.read().clone()
     }
 
-    pub fn get_values_mut(&mut self) -> &mut Vec<Value> {
-        &mut self.values
+    pub fn get_values_mut(&mut self) -> RwLockWriteGuard<Vec<Value>> {
+        self.values.write()
     }
 
     /// Returns a reference to the schema of this tuple.
@@ -218,7 +268,7 @@ impl Tuple {
     /// This method constructs a schema based on the types of values in the tuple.
     pub fn get_schema(&self) -> Schema {
         let columns: Vec<Column> = self
-            .values
+            .get_values()
             .iter()
             .enumerate()
             .map(|(i, value)| {
@@ -243,7 +293,7 @@ impl Tuple {
 
     /// Returns a string representation of the tuple.
     pub fn to_string(&self, schema: Schema) -> String {
-        self.values
+        self.get_values()
             .iter()
             .enumerate()
             .map(|(i, value)| {
@@ -259,7 +309,7 @@ impl Tuple {
 
     /// Returns a detailed string representation of the tuple.
     pub fn to_string_detailed(&self, schema: Schema) -> String {
-        self.values
+        self.get_values()
             .iter()
             .enumerate()
             .map(|(i, value)| {
@@ -275,18 +325,18 @@ impl Tuple {
 
     /// Combines this tuple with another tuple by appending the other tuple's values
     pub fn combine(&self, other: &Tuple) -> Self {
-        let mut combined_values = self.values.clone();
-        combined_values.extend(other.values.clone());
+        let mut combined_values = self.get_values();
+        combined_values.extend(other.get_values());
 
         Self {
-            values: combined_values,
+            values: Arc::new(RwLock::new(combined_values)),
             rid: self.rid, // Keep the left tuple's RID
         }
     }
 
     /// Gets the number of columns in this tuple
     pub fn get_column_count(&self) -> usize {
-        self.values.len()
+        self.get_values().len()
     }
 }
 
@@ -327,10 +377,10 @@ mod tests {
     fn test_tuple_creation_and_access() {
         let (tuple, _) = create_sample_tuple();
 
-        assert_eq!(tuple.get_value(0), &Value::new(1));
-        assert_eq!(tuple.get_value(1), &Value::new("Alice"));
-        assert_eq!(tuple.get_value(2), &Value::new(30));
-        assert_eq!(tuple.get_value(3), &Value::new(true));
+        assert_eq!(tuple.get_value(0), Value::new(1));
+        assert_eq!(tuple.get_value(1), Value::new("Alice"));
+        assert_eq!(tuple.get_value(2), Value::new(30));
+        assert_eq!(tuple.get_value(3), Value::new(true));
         assert_eq!(tuple.get_rid(), RID::new(0, 0));
     }
 
@@ -404,6 +454,26 @@ mod tests {
     }
 
     #[test]
+    fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
+        let (tuple, _) = create_sample_tuple();
+        
+        // Directly use bincode with the Serialize trait
+        let serialized = bincode::serialize(&tuple)?;
+        
+        // Directly use bincode with the Deserialize trait
+        let deserialized: Tuple = bincode::deserialize(&serialized)?;
+        
+        // Verify the deserialized tuple matches the original
+        assert_eq!(deserialized.get_rid(), tuple.get_rid());
+        assert_eq!(deserialized.get_value(0), tuple.get_value(0));
+        assert_eq!(deserialized.get_value(1), tuple.get_value(1));
+        assert_eq!(deserialized.get_value(2), tuple.get_value(2));
+        assert_eq!(deserialized.get_value(3), tuple.get_value(3));
+        
+        Ok(())
+    }
+
+    #[test]
     fn test_tuple_meta() {
         let mut meta = TupleMeta::new(1);
         assert_eq!(meta.get_creator_txn_id(), 1);
@@ -461,10 +531,10 @@ mod tests {
         let rid = RID::new(0, 0);
         let tuple = Tuple::new(&*values, schema, rid);
 
-        assert_eq!(tuple.get_value(0), &Value::new(42));
-        assert_eq!(tuple.get_value(1), &Value::new(3.14));
-        assert_eq!(tuple.get_value(2), &Value::new("Hello"));
-        assert_eq!(tuple.get_value(3), &Value::new(true));
+        assert_eq!(tuple.get_value(0), Value::new(42));
+        assert_eq!(tuple.get_value(1), Value::new(3.14));
+        assert_eq!(tuple.get_value(2), Value::new("Hello"));
+        assert_eq!(tuple.get_value(3), Value::new(true));
     }
 
     #[test]

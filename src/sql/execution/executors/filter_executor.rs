@@ -20,7 +20,7 @@ pub struct FilterExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<FilterNode>,
     initialized: bool,
-    group_tuples: Vec<Tuple>,
+    group_tuples: Vec<Arc<Tuple>>,
     current_group_idx: usize,
 }
 
@@ -309,7 +309,7 @@ impl AbstractExecutor for FilterExecutor {
         debug!("FilterExecutor initialized successfully");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("FilterExecutor not initialized, initializing now");
             self.init();
@@ -334,13 +334,13 @@ impl AbstractExecutor for FilterExecutor {
             },
             FilterType::Having => {
                 while self.current_group_idx < self.group_tuples.len() {
-                    let tuple = self.group_tuples[self.current_group_idx].clone();
+                    let tuple = self.group_tuples.get(self.current_group_idx).unwrap();
                     let rid = tuple.get_rid();
                     self.current_group_idx += 1;
 
-                    if self.apply_filter(&tuple) {
+                    if self.apply_filter(tuple) {
                         debug!("Found matching tuple for HAVING clause");
-                        return Some((tuple, rid));
+                        return Some((tuple.clone(), rid));
                     }
                 }
                 debug!("No more tuples matching HAVING clause");
@@ -478,7 +478,7 @@ mod tests {
             self.initialized = true;
         }
 
-        fn next(&mut self) -> Option<(Tuple, RID)> {
+        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
             None
         }
 
@@ -683,9 +683,9 @@ mod tests {
                 Value::new(salary),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(transaction_context.get_transaction_id());
+            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
-                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                .insert_tuple(meta, &mut tuple, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
     }
@@ -1357,9 +1357,9 @@ mod tests {
                 Value::new(salary),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(transaction_context.get_transaction_id());
+            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
-                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                .insert_tuple(meta, &mut tuple, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
 
