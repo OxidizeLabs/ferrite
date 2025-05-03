@@ -193,13 +193,13 @@ pub trait Type {
         true
     }
     fn copy(&self, val: &Value) -> Value {
-        val.clone()
+        val.clone_optimized()
     }
     fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
         if !self.is_coercible_from(type_id) {
             return Value::new(Val::Null);
         }
-        val.clone()
+        val.cast_to(self.get_type_id()).unwrap_or_else(|_| val.clone_optimized())
     }
     fn get_data(&self, _val: &Value) -> &[u8] {
         &[]
