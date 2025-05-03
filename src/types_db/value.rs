@@ -534,6 +534,47 @@ impl Value {
         }
         Vec::new()
     }
+
+    /// An optimized clone that avoids deep copying when possible
+    pub fn clone_optimized(&self) -> Value {
+        // For simple scalar types, we don't need to clone deep structures
+        match &self.value_ {
+            // Primitive types can be copied inexpensively
+            Val::Boolean(b) => Value::new(*b),
+            Val::TinyInt(i) => Value::new(*i),
+            Val::SmallInt(i) => Value::new(*i),
+            Val::Integer(i) => Value::new(*i),
+            Val::BigInt(i) => Value::new(*i),
+            Val::Decimal(d) => Value::new(*d),
+            Val::Float(f) => Value::new(*f),
+            Val::Timestamp(t) => Value::new(*t),
+            Val::Date(d) => Value::new_with_type(Val::Date(*d), TypeId::Date),
+            Val::Time(t) => Value::new_with_type(Val::Time(*t), TypeId::Time),
+            Val::Interval(i) => Value::new_with_type(Val::Interval(*i), TypeId::Interval),
+            Val::Point(x, y) => Value::new_with_type(Val::Point(*x, *y), TypeId::Point),
+            Val::Null => Value::new(Val::Null),
+            
+            // For these types, we need to clone but can potentially optimize later
+            // with reference counting or other techniques
+            Val::VarLen(s) => Value::new_with_type(Val::VarLen(s.clone()), TypeId::VarChar),
+            Val::ConstLen(s) => Value::new_with_type(Val::ConstLen(s.clone()), TypeId::Char),
+            Val::Binary(b) => Value::new_with_type(Val::Binary(b.clone()), TypeId::Binary),
+            Val::JSON(j) => Value::new_with_type(Val::JSON(j.clone()), TypeId::JSON),
+            Val::UUID(u) => Value::new_with_type(Val::UUID(u.clone()), TypeId::UUID),
+            Val::Vector(v) => Value::new_with_type(Val::Vector(v.clone()), TypeId::Vector),
+            Val::Array(a) => Value::new_with_type(Val::Array(a.clone()), TypeId::Array),
+            Val::Enum(id, s) => Value::new_with_type(Val::Enum(*id, s.clone()), TypeId::Enum),
+            Val::Struct => {
+                let mut result = Value::new_with_type(Val::Struct, TypeId::Struct);
+                result.struct_data = self.struct_data.clone();
+                result
+            },
+        }
+    }
+
+    fn copy(&self, val: &Value) -> Value {
+        val.clone_optimized()
+    }
 }
 
 impl Type for Value {
@@ -877,16 +918,16 @@ impl Type for Value {
 
     fn min(&self, other: &Value) -> Value {
         match self.compare_less_than(other) {
-            CmpBool::CmpTrue => self.clone(),
-            CmpBool::CmpFalse => other.clone(),
+            CmpBool::CmpTrue => self.clone_optimized(),
+            CmpBool::CmpFalse => other.clone_optimized(),
             CmpBool::CmpNull => Value::new(Val::Null),
         }
     }
 
     fn max(&self, other: &Value) -> Value {
         match self.compare_greater_than(other) {
-            CmpBool::CmpTrue => self.clone(),
-            CmpBool::CmpFalse => other.clone(),
+            CmpBool::CmpTrue => self.clone_optimized(),
+            CmpBool::CmpFalse => other.clone_optimized(),
             CmpBool::CmpNull => Value::new(Val::Null),
         }
     }
