@@ -23,7 +23,8 @@ impl Column {
             TypeId::VarChar | TypeId::Char => length,
             TypeId::Vector => length * size_of::<f64>(),
             TypeId::Invalid => 0,
-            TypeId::Struct => length, // Struct size is determined by its fields' total size
+            TypeId::Struct => length,
+            _ => todo!(), // Struct size is determined by its fields' total size
         }
     }
 

@@ -43,6 +43,7 @@ sqlparser = "0.53"
 clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
 regex = "1.11"
+hex = "0.4.3"
 
 # Metrics
 #metrics = "0.21"

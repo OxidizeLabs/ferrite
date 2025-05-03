@@ -11,7 +11,17 @@
     </cargoProject>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system." />
+    <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/catalog/column.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/catalog/column.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/binder/expressions/bound_constant.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/binder/expressions/bound_constant.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/literal_value_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/literal_value_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/array_type.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/array_type.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test.log" beforeDir="false" afterPath="$PROJECT_DIR$/test.log" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -47,6 +57,9 @@
 }</component>
   <component name="MacroExpansionManager">
     <option name="directoryName" value="gQCZbqix" />
+  </component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="CurrentFile" />
   </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 1
@@ -234,6 +247,7 @@
     "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
     "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
     "org.rust.first.attach.projects": "true",
+    "run.code.analysis.last.selected.profile": "pProject Default",
     "settings.editor.selected.configurable": "language.rust.cargo.check",
     "vue.rearranger.settings.migration": "true"
   }
@@ -874,7 +888,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="2562000" />
+      <workItem from="1746260136063" duration="4738000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />

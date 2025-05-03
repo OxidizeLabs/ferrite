@@ -130,7 +130,7 @@ impl Type for ArrayType {
         match val.get_val() {
             Val::Array(a) => {
                 let elements: Vec<String> = a.iter()
-                    .map(|v| v.to_string())
+                    .map(|v| ToString::to_string(&v))
                     .collect();
                 format!("[{}]", elements.join(", "))
             }
