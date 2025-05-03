@@ -141,7 +141,7 @@ impl AbstractExecutor for UpdateExecutor {
         debug!("UpdateExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -149,7 +149,7 @@ impl AbstractExecutor for UpdateExecutor {
         // Get the next tuple to update from child executor
         let child = self.child_executor.as_mut()?;
 
-        while let Some((mut tuple, rid)) = child.next() {
+        while let Some((tuple, rid)) = child.next() {
             // Skip if we've already updated this tuple
             if self.updated_rids.contains(&rid) {
                 continue;
@@ -178,7 +178,7 @@ impl AbstractExecutor for UpdateExecutor {
                     .evaluate(&tuple, output_schema)
                     .expect("Failed to evaluate expression");
 
-                let values = tuple.get_values_mut();
+                let mut values = tuple.get_values();
                 values[col_idx] = new_value;
             }
 
@@ -188,7 +188,7 @@ impl AbstractExecutor for UpdateExecutor {
             // Update the tuple using TransactionalTableHeap
             match self
                 .table_heap
-                .update_tuple(&tuple_meta, &mut tuple, rid, txn_ctx)
+                .update_tuple(&tuple_meta, &tuple, rid, txn_ctx)
             {
                 Ok(new_rid) => {
                     debug!("Successfully updated tuple: {:?}", new_rid);
@@ -400,9 +400,9 @@ mod tests {
                 Value::new(age),
             ];
             let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
-            let meta = TupleMeta::new(transaction_context.get_transaction_id());
+            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             table_heap
-                .insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                .insert_tuple(meta, &mut tuple, transaction_context.clone())
                 .unwrap();
         }
     }

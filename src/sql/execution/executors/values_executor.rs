@@ -36,7 +36,7 @@ impl AbstractExecutor for ValuesExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -56,7 +56,7 @@ impl AbstractExecutor for ValuesExecutor {
         match row_clone.evaluate(schema) {
             Ok(values) => {
                 // Create tuple with evaluated values
-                let tuple = Tuple::new(values, schema.clone(), RID::default());
+                let tuple = Arc::new(Tuple::new(values, schema.clone(), RID::default()));
 
                 // Advance to next row
                 self.current_row += 1;
@@ -294,9 +294,9 @@ mod tests {
 
             assert!(result.is_some());
             let (tuple, rid) = result.unwrap();
-            assert_eq!(tuple.get_value(0), &Value::new(0));
-            assert_eq!(tuple.get_value(1), &Value::new("name_0".to_string()));
-            assert_eq!(tuple.get_value(2), &Value::new(true));
+            assert_eq!(tuple.get_value(0), Value::new(0));
+            assert_eq!(tuple.get_value(1), Value::new("name_0".to_string()));
+            assert_eq!(tuple.get_value(2), Value::new(true));
             assert_eq!(rid, RID::default());
         }
 
@@ -318,7 +318,7 @@ mod tests {
                 let result = executor.next();
                 assert!(result.is_some());
                 let (tuple, _) = result.unwrap();
-                assert_eq!(tuple.get_value(0), &Value::new(i));
+                assert_eq!(tuple.get_value(0), Value::new(i));
             }
 
             test_ctx.transaction_manager().commit(

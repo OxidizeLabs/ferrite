@@ -12,6 +12,7 @@ use tkdb::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use tkdb::sql::execution::execution_context::ExecutionContext;
 use tkdb::sql::execution::execution_engine::ExecutionEngine;
 use tkdb::recovery::log_manager::LogManager;
+use tkdb::recovery::wal_manager::WALManager;
 use tkdb::storage::disk::disk_manager::FileDiskManager;
 use tkdb::storage::disk::disk_scheduler::DiskScheduler;
 
@@ -60,11 +61,14 @@ impl ConcurrentTestContext {
         let transaction_factory = Arc::new(TransactionManagerFactory::new(
             buffer_pool_manager.clone(),
         ));
+        
+        let wal_manager = Arc::new(WALManager::new(log_manager));
 
         let execution_engine = Arc::new(RwLock::new(ExecutionEngine::new(
             catalog.clone(),
             buffer_pool_manager.clone(),
             transaction_factory.clone(),
+            wal_manager
         )));
 
         Self {

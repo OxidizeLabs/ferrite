@@ -211,7 +211,7 @@ pub trait Index: Send + Sync {
 
     /// Creates an iterator for scanning a specific key
     fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
-        self.create_iterator(Some(key.clone()), Some(key.clone()))
+        unimplemented!()
     }
 
     fn get_metadata(&self) -> Arc<IndexInfo>;

@@ -14,7 +14,7 @@ pub struct SortExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<SortNode>,
     child_executor: Option<Box<dyn AbstractExecutor>>,
-    sorted_tuples: Vec<(Tuple, RID)>,
+    sorted_tuples: Vec<(Arc<Tuple>, RID)>,
     current_index: usize,
     initialized: bool,
 }
@@ -120,7 +120,7 @@ impl AbstractExecutor for SortExecutor {
         debug!("SortExecutor initialization complete");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("SortExecutor not initialized, initializing now");
             self.init();

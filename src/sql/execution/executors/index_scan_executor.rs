@@ -334,7 +334,7 @@ impl AbstractExecutor for IndexScanExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             debug!("IndexScanExecutor not initialized, initializing now");
             self.init();
@@ -612,11 +612,11 @@ mod index_scan_executor_tests {
                     schema.clone(),
                     RID::new(0, i),
                 );
-                let tuple_meta = TupleMeta::new(transaction_context.get_transaction_id());
+                let tuple_meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
 
                 // Insert using transactional table heap
                 let rid = txn_table_heap
-                    .insert_tuple(&tuple_meta, &mut tuple, transaction_context.clone())
+                    .insert_tuple(tuple_meta, &mut tuple, transaction_context.clone())
                     .unwrap();
 
                 // Insert into index
@@ -669,7 +669,7 @@ mod index_scan_executor_tests {
             self.initialized = true;
         }
 
-        fn next(&mut self) -> Option<(Tuple, RID)> {
+        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
             None
         }
 
@@ -924,9 +924,9 @@ mod index_scan_executor_tests {
             // Insert test data
             for i in 1..=10 {
                 let mut tuple = create_test_tuple(&schema, i);
-                let meta = TupleMeta::new(0);
+                let meta = Arc::new(TupleMeta::new(0));
                 table_heap
-                    .insert_tuple(&meta, &mut tuple, transaction_context.clone())
+                    .insert_tuple(meta, &mut tuple, transaction_context.clone())
                     .unwrap();
             }
 

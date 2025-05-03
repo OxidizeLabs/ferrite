@@ -244,7 +244,7 @@ impl AbstractExecutor for AggregationExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -258,7 +258,7 @@ impl AbstractExecutor for AggregationExecutor {
             debug!("Creating tuple with values: {:?}", values);
             debug!("Output schema: {:?}", self.output_schema);
 
-            let tuple = Tuple::new(&values, self.output_schema.clone(), RID::new(0, 0));
+            let tuple = Arc::new(Tuple::new(&values, self.output_schema.clone(), RID::new(0, 0)));
             Some((tuple, RID::new(0, 0)))
         } else {
             None
@@ -428,7 +428,7 @@ mod tests {
         let result = executor.next();
         assert!(result.is_some());
         let (tuple, _) = result.unwrap();
-        assert_eq!(*tuple.get_value(0), Value::new(BigInt(3)));
+        assert_eq!(tuple.get_value(0), Value::new(BigInt(3)));
 
         // No more results
         assert!(executor.next().is_none());
@@ -504,7 +504,7 @@ mod tests {
 
         // Sort results by group_id for consistent checking
         results.sort_by(
-            |a, b| match a.get_value(0).compare_less_than(b.get_value(0)) {
+            |a, b| match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
@@ -514,12 +514,12 @@ mod tests {
         assert_eq!(results.len(), 2, "Should have exactly 2 groups");
 
         // Check first group (group_id = 1)
-        assert_eq!(*results[0].get_value(0), Value::new(Integer(1))); // Group ID as Integer
-        assert_eq!(*results[0].get_value(1), Value::new(Integer(30))); // Sum as Integer
+        assert_eq!(results[0].get_value(0), Value::new(Integer(1))); // Group ID as Integer
+        assert_eq!(results[0].get_value(1), Value::new(Integer(30))); // Sum as Integer
 
         // Check second group (group_id = 2)
-        assert_eq!(*results[1].get_value(0), Value::new(Integer(2))); // Group ID as Integer
-        assert_eq!(*results[1].get_value(1), Value::new(Integer(70))); // Sum as Integer
+        assert_eq!(results[1].get_value(0), Value::new(Integer(2))); // Group ID as Integer
+        assert_eq!(results[1].get_value(1), Value::new(Integer(70))); // Sum as Integer
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         }
 
         results.sort_by(
-            |a, b| match a.get_value(0).compare_less_than(b.get_value(0)) {
+            |a, b| match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
@@ -608,14 +608,14 @@ mod tests {
         assert_eq!(results.len(), 2, "Should have 2 groups");
 
         // Check first group
-        assert_eq!(*results[0].get_value(0), Value::new(1));
-        assert_eq!(*results[0].get_value(1), Value::new(10)); // Min stays Integer
-        assert_eq!(*results[0].get_value(2), Value::new(30)); // Max stays Integer
+        assert_eq!(results[0].get_value(0), Value::new(1));
+        assert_eq!(results[0].get_value(1), Value::new(10)); // Min stays Integer
+        assert_eq!(results[0].get_value(2), Value::new(30)); // Max stays Integer
 
         // Check second group
-        assert_eq!(*results[1].get_value(0), Value::new(2));
-        assert_eq!(*results[1].get_value(1), Value::new(20)); // Min
-        assert_eq!(*results[1].get_value(2), Value::new(50)); // Max
+        assert_eq!(results[1].get_value(0), Value::new(2));
+        assert_eq!(results[1].get_value(1), Value::new(20)); // Min
+        assert_eq!(results[1].get_value(2), Value::new(50)); // Max
     }
 
     #[test]
@@ -681,8 +681,8 @@ mod tests {
         assert!(result.is_some());
 
         let (tuple, _) = result.unwrap();
-        assert_eq!(*tuple.get_value(0), Value::new(Integer(10))); // Min
-        assert_eq!(*tuple.get_value(1), Value::new(Integer(50))); // Max
+        assert_eq!(tuple.get_value(0), Value::new(Integer(10))); // Min
+        assert_eq!(tuple.get_value(1), Value::new(Integer(50))); // Max
 
         // No more results
         assert!(executor.next().is_none());
@@ -827,7 +827,7 @@ mod tests {
 
         let (tuple, _) = result.unwrap();
         assert_eq!(
-            *tuple.get_value(0),
+            tuple.get_value(0),
             Value::new(BigInt(0)),
             "Count should be 0 for empty input"
         );
@@ -902,8 +902,8 @@ mod tests {
         }
 
         assert_eq!(results.len(), 1, "Should have exactly one group");
-        assert_eq!(*results[0].get_value(0), Value::new(Integer(1)));
-        assert_eq!(*results[0].get_value(1), Value::new(Integer(60))); // 10 + 20 + 30
+        assert_eq!(results[0].get_value(0), Value::new(Integer(1)));
+        assert_eq!(results[0].get_value(1), Value::new(Integer(60))); // 10 + 20 + 30
     }
 
     #[test]

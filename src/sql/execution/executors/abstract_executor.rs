@@ -21,7 +21,7 @@ pub trait AbstractExecutor {
     /// # Returns
     ///
     /// Returns `Some((Tuple, RID))` if a tuple was produced, `None` if there are no more tuples.
-    fn next(&mut self) -> Option<(Tuple, RID)>;
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)>;
 
     /// Get the schema of the tuples that this executor produces.
     fn get_output_schema(&self) -> &Schema;

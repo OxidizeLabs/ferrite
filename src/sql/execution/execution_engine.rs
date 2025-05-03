@@ -261,7 +261,7 @@ impl ExecutionEngine {
 
     fn execute_insert(
         &self,
-        plan: &InsertNode,
+        plan: &mut InsertNode,
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<(), DBError> {
         debug!("Executing insert plan");
@@ -275,20 +275,20 @@ impl ExecutionEngine {
         let meta = TupleMeta::new(txn_ctx.get_transaction_id());
 
         // Get the first tuple from input tuples
-        let input_tuples = plan.get_input_tuples();
+        let input_tuples = plan.get_input_tuples_mut();
         if input_tuples.is_empty() {
             return Err(DBError::Execution("No tuples to insert".to_string()));
         }
-
-        let mut tuple = input_tuples[0].clone(); // Clone the first tuple
 
         // Get mutable table heap and insert tuple with transaction context
         let table_heap = table_info.get_table_heap_mut();
         let _table_heap_guard = table_heap.latch.write();
 
-        table_heap
-            .insert_tuple(&meta, &mut tuple)
-            .expect("Insert failed");
+        input_tuples
+            .iter_mut()
+            .map(| tuple | table_heap
+                .insert_tuple(Arc::from(meta), tuple)
+                .expect("Insert failed"));
 
         debug!("Insert executed successfully");
         Ok(())
@@ -481,12 +481,12 @@ mod tests {
             let table = catalog.get_table(table_name).unwrap();
             let table_heap = table.get_table_heap();
 
-            let meta = TupleMeta::new(0);
+            let meta = Arc::new(TupleMeta::new(0));
             for values in tuples {
                 let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
 
                 table_heap
-                    .insert_tuple(&meta, &mut tuple)
+                    .insert_tuple(meta.clone(), &mut tuple)
                     .map_err(|e| e.to_string())?;
             }
             Ok(())

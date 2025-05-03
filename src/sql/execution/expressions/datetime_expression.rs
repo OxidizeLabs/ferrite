@@ -763,7 +763,7 @@ impl ExpressionOps for DateTimeExpression {
 
                 // Create a dummy tuple with the evaluated arguments
                 let mut dummy_tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
-                let values = dummy_tuple.get_values_mut();
+                let mut values = dummy_tuple.get_values();
                 values.push(left);
                 values.push(right);
 
@@ -1021,12 +1021,12 @@ mod tests {
         ])
     }
 
-    fn create_test_tuple() -> Tuple {
-        let mut tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
-        let values = tuple.get_values_mut();
+    fn create_test_tuple() -> Arc<Tuple> {
+        let tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
+        let mut values = tuple.get_values();
         values.push(Value::new("2024-01-01T12:30:45Z"));
         values.push(Value::new(42));
-        tuple
+        Arc::from(tuple)
     }
 
     #[test]

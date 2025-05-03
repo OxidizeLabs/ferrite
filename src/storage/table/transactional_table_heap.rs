@@ -37,8 +37,8 @@ impl TransactionalTableHeap {
 
     pub fn rollback_tuple(
         &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        meta: Arc<TupleMeta>,
+        tuple: &Tuple,
         rid: RID,
     ) -> Result<(), String> {
         self.table_heap
@@ -48,8 +48,8 @@ impl TransactionalTableHeap {
 
     pub fn insert_tuple(
         &self,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        meta: Arc<TupleMeta>,
+        tuple: &Tuple,
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<RID, String> {
         let txn = txn_ctx.get_transaction();
@@ -78,7 +78,7 @@ impl TransactionalTableHeap {
         &self,
         rid: RID,
         txn_ctx: Arc<TransactionContext>,
-    ) -> Result<(TupleMeta, Tuple), String> {
+    ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let txn = txn_ctx.get_transaction();
         let txn_manager = txn_ctx.get_transaction_manager();
 
@@ -102,7 +102,7 @@ impl TransactionalTableHeap {
     pub fn update_tuple(
         &self,
         meta: &TupleMeta,
-        tuple: &mut Tuple,
+        tuple: &Tuple,
         rid: RID,
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<RID, String> {
@@ -144,7 +144,7 @@ impl TransactionalTableHeap {
         };
 
         // Append undo log and get link
-        let undo_link = txn.append_undo_log(undo_log);
+        let undo_link = txn.append_undo_log(Arc::from(undo_log));
         log::debug!(
             "Appended undo log. New link: prev_txn={}, prev_log_idx={}, txn_id={}, log_num={}",
             undo_link.prev_txn,
@@ -181,7 +181,7 @@ impl TransactionalTableHeap {
         // Perform update
         let result = self
             .table_heap
-            .update_tuple_internal(&new_meta, tuple, rid)?;
+            .update_tuple_internal(Arc::from(new_meta), tuple, rid)?;
         txn.append_write_set(self.table_oid, rid);
 
         Ok(result)
@@ -193,9 +193,9 @@ impl TransactionalTableHeap {
         rid: RID,
         txn: Arc<Transaction>,
         txn_manager: Arc<TransactionManager>,
-        meta: TupleMeta,
-        tuple: Tuple,
-    ) -> Result<(TupleMeta, Tuple), String> {
+        meta: Arc<TupleMeta>,
+        tuple: Arc<Tuple>,
+    ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         log::debug!(
             "Starting version chain traversal for RID {:?} - Latest version: creator_txn={}, commit_ts={}, txn_id={}",
             rid, meta.get_creator_txn_id(), meta.get_commit_timestamp(), txn.get_transaction_id()
@@ -226,6 +226,7 @@ impl TransactionalTableHeap {
             );
 
             let undo_log = txn_manager.get_undo_log(undo_link.clone());
+            let undo_log_clone = undo_log.clone();
             log::debug!(
                 "Retrieved undo log: ts={}, is_deleted={}, prev_version: txn={}, idx={}",
                 undo_log.ts,
@@ -249,7 +250,7 @@ impl TransactionalTableHeap {
             );
 
             // Update current version
-            current_meta = prev_meta;
+            current_meta = Arc::from(prev_meta);
             current_tuple = undo_log.tuple.clone();
 
             if txn.is_tuple_visible(&current_meta) {
@@ -263,7 +264,7 @@ impl TransactionalTableHeap {
 
             // Move to next version in chain using the undo log's prev_version
             current_link = if undo_log.prev_version.is_valid() {
-                Some(undo_log.prev_version)
+                Some(undo_log_clone.prev_version.clone())
             } else {
                 None
             };
@@ -338,7 +339,7 @@ impl TransactionalTableHeap {
         };
 
         // Append undo log and get link
-        let undo_link = txn.append_undo_log(undo_log);
+        let undo_link = txn.append_undo_log(Arc::from(undo_log));
         log::debug!(
             "Appended undo log. New link: prev_txn={}, prev_log_idx={}",
             undo_link.prev_txn,
@@ -363,7 +364,7 @@ impl TransactionalTableHeap {
 
         // Update the tuple with deleted metadata
         self.table_heap
-            .update_tuple(&new_meta, &mut current_tuple.clone(), rid, None)?;
+            .update_tuple_internal(Arc::from(new_meta), &current_tuple, rid)?;
         txn.append_write_set(self.table_oid, rid);
 
         Ok(())
@@ -472,7 +473,7 @@ mod tests {
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Commit first transaction
@@ -483,7 +484,7 @@ mod tests {
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
 
         // Update tuple with txn2
-        let mut new_tuple = tuple.clone();
+        let mut new_tuple = tuple;
         new_tuple.get_values_mut()[1] = Value::new(200);
 
         ctx.txn_heap
@@ -521,7 +522,7 @@ mod tests {
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(&meta, &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Verify visibility based on isolation level

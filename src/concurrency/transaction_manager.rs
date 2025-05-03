@@ -261,7 +261,7 @@ impl TransactionManager {
                     meta.set_undo_log_idx(undo_link.prev_log_idx);
 
                     // Use a reference to the Arc<Tuple> without cloning
-                    if let Err(e) = table_heap.rollback_tuple(&meta, &*undo_log.tuple, rid) {
+                    if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid) {
                         log::error!("Failed to rollback tuple: {}", e);
                     }
                 } else {
@@ -404,7 +404,7 @@ impl TransactionManager {
         table_heap: &TableHeap,
         rid: RID,
         lock_manager: Arc<LockManager>,
-    ) -> (TupleMeta, Arc<Tuple>, Option<UndoLink>) {
+    ) -> (Arc<TupleMeta>, Arc<Tuple>, Option<UndoLink>) {
         // Create transaction context
         let txn_ctx = Arc::new(TransactionContext::new(
             Arc::new(Transaction::new(
@@ -703,7 +703,7 @@ mod tests {
 
         // Insert tuple
         let rid = table_heap
-            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple)
+            .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
             .unwrap();
 
         // Append to write set
@@ -763,7 +763,7 @@ mod tests {
 
         // Insert tuple
         let rid = table_heap
-            .insert_tuple(&TupleMeta::new(txn_id), &mut tuple)
+            .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
             .unwrap();
 
         txn.append_write_set(table_oid, rid);
@@ -824,7 +824,7 @@ mod tests {
         let mut tuple = TestContext::create_test_tuple();
         let rid = txn_table_heap
             .insert_tuple(
-                &TupleMeta::new(txn1.get_transaction_id()),
+                Arc::from(TupleMeta::new(txn1.get_transaction_id())),
                 &mut tuple,
                 txn_ctx1.clone(),
             )

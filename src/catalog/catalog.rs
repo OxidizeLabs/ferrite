@@ -838,11 +838,11 @@ mod tests {
             RID::new(0, 0),
         );
 
-        let tuple_meta = TupleMeta::new(txn.get_transaction_id());
+        let tuple_meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
 
         // Insert the tuple using transactional table heap
         let rid = txn_table_heap
-            .insert_tuple(&tuple_meta, &mut tuple, txn_ctx.clone())
+            .insert_tuple(tuple_meta, &mut tuple, txn_ctx.clone())
             .expect("Failed to insert tuple");
         tuple.set_rid(rid);
 

@@ -115,7 +115,7 @@ impl AbstractExecutor for DeleteExecutor {
         debug!("DeleteExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Tuple, RID)> {
+    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
         if !self.initialized {
             self.init();
         }
@@ -131,8 +131,9 @@ impl AbstractExecutor for DeleteExecutor {
                 };
 
                 // Get the ID we want to delete
-                let id_to_delete = tuple_to_delete.get_value(0).get_val();
-                debug!("Looking for tuple with ID: {:?}", id_to_delete);
+                let id_to_delete = tuple_to_delete.get_value(0);
+                let id_val = id_to_delete.get_val();
+                debug!("Looking for tuple with ID: {:?}", id_val);
 
                 // Scan the table to find the matching tuple
                 let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
@@ -142,7 +143,7 @@ impl AbstractExecutor for DeleteExecutor {
                     let current_id = tuple.get_value(0).get_val().clone();
                     let rid = tuple.get_rid();
 
-                    if current_id == *id_to_delete {
+                    if current_id == *id_val {
                         debug!("Found matching tuple with ID: {:?}", current_id);
 
                         // Delete the tuple
@@ -357,10 +358,10 @@ mod tests {
                 Default::default(),
             );
 
-            let tuple_meta = TupleMeta::new(ctx.transaction_context.get_transaction_id());
+            let tuple_meta = Arc::new(TupleMeta::new(ctx.transaction_context.get_transaction_id()));
 
             table_heap
-                .insert_tuple(&tuple_meta, &mut tuple, ctx.transaction_context.clone())
+                .insert_tuple(tuple_meta, &mut tuple, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
 
@@ -427,8 +428,9 @@ mod tests {
         while let Some((tuple, _)) = delete_executor.next() {
             delete_count += 1;
             // Verify the deleted tuple has id > 3
-            let id = tuple.get_value(0).get_val();
-            assert!(id > &Val::from(3), "Should only delete tuples with id > 3");
+            let id = tuple.get_value(0);
+            let id_val = id.get_val();
+            assert!(id_val > &Val::from(3), "Should only delete tuples with id > 3");
         }
 
         assert_eq!(delete_count, 2, "Should have deleted 2 tuples");

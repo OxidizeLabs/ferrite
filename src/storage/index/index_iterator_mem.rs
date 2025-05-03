@@ -12,8 +12,8 @@ pub struct IndexIterator {
     tree: Arc<RwLock<BPlusTree>>,
     current_batch: Vec<(Value, RID)>,
     position: usize,
-    start_key: Option<Tuple>,
-    end_key: Option<Tuple>,
+    start_key: Option<Arc<Tuple>>,
+    end_key: Option<Arc<Tuple>>,
     exhausted: bool,
     last_key: Option<Value>, // Track the last key we've processed
 }
@@ -22,8 +22,8 @@ impl IndexIterator {
     /// Create a new index iterator with batched scanning.
     pub fn new(
         tree: Arc<RwLock<BPlusTree>>,
-        start_key: Option<Tuple>,
-        end_key: Option<Tuple>,
+        start_key: Option<Arc<Tuple>>,
+        end_key: Option<Arc<Tuple>>,
     ) -> Self {
         let mut iterator = Self {
             tree,
@@ -236,9 +236,9 @@ mod test_utils {
         Schema::new(vec![Column::new("id", TypeId::Integer)])
     }
 
-    pub fn create_tuple(id: i32, value: &str, schema: &Schema) -> Tuple {
+    pub fn create_tuple(id: i32, value: &str, schema: &Schema) -> Arc<Tuple> {
         let values = vec![Value::new(id), Value::new(value)];
-        Tuple::new(&values, schema.clone(), RID::new(0, 0))
+        Arc::new(Tuple::new(&values, schema.clone(), RID::new(0, 0)))
     }
 
     pub fn create_test_metadata(table_name: String, index_name: String) -> IndexInfo {
