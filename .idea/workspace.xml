@@ -11,13 +11,7 @@
     </cargoProject>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/index/index.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" afterDir="false" />
-    </list>
+    <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system." />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -62,191 +56,194 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Cargo.Build `Test b_plus_tree_internal_page`.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Run.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test All Expressions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Buffer.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Catalog.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Client.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Common.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Concurrency.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Container.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Network.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Primer.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Recovery.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Server.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::binder.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::execution.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::execution::executors.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::execution::expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::execution::expressions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::execution::plans.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Sql::planner.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Storage.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test Types.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test abstract_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test abstract_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test aggregate_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test aggregate_expression::tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test aggregation_executor.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test aggregation_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test all_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test any_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test arithmetic_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test array_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_header_page.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_i.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_index.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_internal_page.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_leaf_page.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_page.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_persist.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test b_plus_tree_persist_test.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test binary_op_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test comparison_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test concurrency::watermark::tests::test_get_next_ts_and_register.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test concurrency::watermark::tests::test_update_commit_ts_and_get_watermark.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test constant_value_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test convert_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test datetime_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test db_instance.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test execution_engine.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test execution_engine::tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test expression_parser.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test expressions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test filter_executor.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test filter_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test filter_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test function_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test insert_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test integer_type.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test interval_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test is_check_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test lib.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test limit_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test lock_manager.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test log_manager.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test log_recovery.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test logic_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test logical_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test map_access_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test nested_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test nested_loop_join_executor.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test plan_builder.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test position_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test projection_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test qualified_wildcard_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test schema.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test schema_manager.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_auto_scaling.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_concurrent_task_execution.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_debug_threadpool.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_execute_tasks.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_graceful_shutdown.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test server::thread_pool::tests::test_shutdown_timeout.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sort_executor.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sort_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_case_when_simple.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_case_when_with_subquery.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_create_table_operations.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_cross_join.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_group_by_aggregates.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_group_by_column_names.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_insert_operations.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_join_operations.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_order_by (1).executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_order_by.executor&quot;: &quot;Debug&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_simple_queries.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_transaction_handling.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::execution_engine::tests::test_where_clause.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::executors::filter_executor::tests::test_filter_invalid_predicate.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::executors::filter_executor::tests::test_having_avg_filter.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::executors::filter_executor::tests::test_having_max_filter.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expression_parser::tests::test_parse_aggregate_functions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expression_parser::tests::test_parse_arithmetic_expressions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expression_parser::tests::test_parse_at_timezone.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expression_parser::tests::test_parse_at_timezone_invalid_types.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expression_parser::tests::test_parse_null_expressions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::arithmetic_expression::unit_tests::test_display_formatting.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::collate_expression::tests::test_get_child_at_invalid_index.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::comparison_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_null_comparisons.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_numeric_comparisons.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::convert_expression::tests::test_convert_with_join.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::filter_expression::tests::test_having_clause.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::filter_expression::tests::test_validation.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::expressions::overlay_expression::tests::test_basic_overlay.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_basic_aggregations.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_simple_selects.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_aggregations.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_error_handling.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::filter_plan::tests::construction::test_construction_with_empty_schema.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::filter_plan::tests::predicates::test_nested_predicate_structure.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_basic_display.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_nested_filters_display.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::execution::plans::topn_plan::tests::test_topn_node_display.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_plan_aggregate_column_names.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_group_by_with_aggregates.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_simple_group_by.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::plan_builder::tests::join_tests::test_inner_join.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::plan_builder::tests::subquery_tests::test_subquery_in_where.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sql::planner::schema_manager::tests::test_create_aggregation_output_schema.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test sqllogic.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_b_plus_tree_internal_page.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_and_get_key_value.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_ordering.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test storage::table::table_iterator::tests::test_table_iterator_transactions.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test string_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test struct_type.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test subquery_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test test_runner.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test tests::run_all_tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test tests::run_ddl_tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test tests::run_dml_tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test tests::run_query_tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test thread_pool.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test trim_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test tuple_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types_db::struct_type::tests::test_struct_equality.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types_db::value::basic_behavior_tests::test_vector_comparisons.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types_db::value::unit_tests::test_serialize_val.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types_db::value::unit_tests::test_serialize_value.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test types_db::value::unit_tests::test_value_debug.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test update_plan.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test value.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test watermark.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test watermark::tests.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test wildcard_expression.executor&quot;: &quot;Run&quot;,
-    &quot;Cargo.Test.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.rust.reset.selective.auto.import&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;org.rust.cargo.project.model.PROJECT_DISCOVERY&quot;: &quot;true&quot;,
-    &quot;org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon&quot;: &quot;&quot;,
-    &quot;org.rust.first.attach.projects&quot;: &quot;true&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;language.rust.cargo.check&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Cargo.Build `Test b_plus_tree_internal_page`.executor": "Run",
+    "Cargo.Run.executor": "Run",
+    "Cargo.Test All Expressions.executor": "Run",
+    "Cargo.Test Buffer.executor": "Run",
+    "Cargo.Test Catalog.executor": "Run",
+    "Cargo.Test Client.executor": "Run",
+    "Cargo.Test Common.executor": "Run",
+    "Cargo.Test Concurrency.executor": "Run",
+    "Cargo.Test Container.executor": "Run",
+    "Cargo.Test Network.executor": "Run",
+    "Cargo.Test Primer.executor": "Run",
+    "Cargo.Test Recovery.executor": "Run",
+    "Cargo.Test Server.executor": "Run",
+    "Cargo.Test Sql.executor": "Run",
+    "Cargo.Test Sql::binder.executor": "Run",
+    "Cargo.Test Sql::execution.executor": "Run",
+    "Cargo.Test Sql::execution::executors.executor": "Run",
+    "Cargo.Test Sql::execution::expression.executor": "Run",
+    "Cargo.Test Sql::execution::expressions.executor": "Run",
+    "Cargo.Test Sql::execution::plans.executor": "Run",
+    "Cargo.Test Sql::planner.executor": "Run",
+    "Cargo.Test Storage.executor": "Run",
+    "Cargo.Test Types.executor": "Run",
+    "Cargo.Test abstract_expression.executor": "Run",
+    "Cargo.Test abstract_plan.executor": "Run",
+    "Cargo.Test aggregate_expression.executor": "Run",
+    "Cargo.Test aggregate_expression::tests.executor": "Run",
+    "Cargo.Test aggregation_executor.executor": "Run",
+    "Cargo.Test aggregation_plan.executor": "Run",
+    "Cargo.Test all_expression.executor": "Run",
+    "Cargo.Test any_expression.executor": "Run",
+    "Cargo.Test arithmetic_expression.executor": "Run",
+    "Cargo.Test array_expression.executor": "Run",
+    "Cargo.Test b_plus_tree_header_page.executor": "Run",
+    "Cargo.Test b_plus_tree_i.executor": "Run",
+    "Cargo.Test b_plus_tree_index.executor": "Run",
+    "Cargo.Test b_plus_tree_internal_page.executor": "Run",
+    "Cargo.Test b_plus_tree_leaf_page.executor": "Run",
+    "Cargo.Test b_plus_tree_page.executor": "Run",
+    "Cargo.Test b_plus_tree_persist.executor": "Run",
+    "Cargo.Test b_plus_tree_persist_test.executor": "Run",
+    "Cargo.Test binary_op_expression.executor": "Run",
+    "Cargo.Test comparison_expression.executor": "Run",
+    "Cargo.Test concurrency::watermark::tests::test_get_next_ts_and_register.executor": "Run",
+    "Cargo.Test concurrency::watermark::tests::test_update_commit_ts_and_get_watermark.executor": "Run",
+    "Cargo.Test constant_value_expression.executor": "Run",
+    "Cargo.Test convert_expression.executor": "Run",
+    "Cargo.Test datetime_expression.executor": "Run",
+    "Cargo.Test db_instance.executor": "Run",
+    "Cargo.Test execution_engine.executor": "Run",
+    "Cargo.Test execution_engine::tests.executor": "Run",
+    "Cargo.Test expression_parser.executor": "Run",
+    "Cargo.Test expressions.executor": "Run",
+    "Cargo.Test filter_executor.executor": "Run",
+    "Cargo.Test filter_expression.executor": "Run",
+    "Cargo.Test filter_plan.executor": "Run",
+    "Cargo.Test function_expression.executor": "Run",
+    "Cargo.Test index_iterator_mem.executor": "Run",
+    "Cargo.Test index_scan_executor.executor": "Run",
+    "Cargo.Test insert_plan.executor": "Run",
+    "Cargo.Test integer_type.executor": "Run",
+    "Cargo.Test interval_expression.executor": "Run",
+    "Cargo.Test is_check_expression.executor": "Run",
+    "Cargo.Test lib.executor": "Run",
+    "Cargo.Test limit_plan.executor": "Run",
+    "Cargo.Test lock_manager.executor": "Run",
+    "Cargo.Test log_manager.executor": "Run",
+    "Cargo.Test log_recovery.executor": "Run",
+    "Cargo.Test logic_expression.executor": "Run",
+    "Cargo.Test logical_plan.executor": "Run",
+    "Cargo.Test map_access_expression.executor": "Run",
+    "Cargo.Test nested_expression.executor": "Run",
+    "Cargo.Test nested_loop_join_executor.executor": "Run",
+    "Cargo.Test plan_builder.executor": "Run",
+    "Cargo.Test position_expression.executor": "Run",
+    "Cargo.Test projection_plan.executor": "Run",
+    "Cargo.Test qualified_wildcard_expression.executor": "Run",
+    "Cargo.Test schema.executor": "Run",
+    "Cargo.Test schema_manager.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_auto_scaling.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_concurrent_task_execution.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_debug_threadpool.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_execute_tasks.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_graceful_shutdown.executor": "Run",
+    "Cargo.Test server::thread_pool::tests::test_shutdown_timeout.executor": "Run",
+    "Cargo.Test sort_executor.executor": "Run",
+    "Cargo.Test sort_plan.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_case_when_simple.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_case_when_with_subquery.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_create_table_operations.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_cross_join.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_group_by_aggregates.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_group_by_column_names.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_insert_operations.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_join_operations.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_order_by (1).executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_order_by.executor": "Debug",
+    "Cargo.Test sql::execution::execution_engine::tests::test_simple_queries.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_transaction_handling.executor": "Run",
+    "Cargo.Test sql::execution::execution_engine::tests::test_where_clause.executor": "Run",
+    "Cargo.Test sql::execution::executors::filter_executor::tests::test_filter_invalid_predicate.executor": "Run",
+    "Cargo.Test sql::execution::executors::filter_executor::tests::test_having_avg_filter.executor": "Run",
+    "Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter.executor": "Run",
+    "Cargo.Test sql::execution::executors::filter_executor::tests::test_having_max_filter.executor": "Run",
+    "Cargo.Test sql::execution::expression_parser::tests::test_parse_aggregate_functions.executor": "Run",
+    "Cargo.Test sql::execution::expression_parser::tests::test_parse_arithmetic_expressions.executor": "Run",
+    "Cargo.Test sql::execution::expression_parser::tests::test_parse_at_timezone.executor": "Run",
+    "Cargo.Test sql::execution::expression_parser::tests::test_parse_at_timezone_invalid_types.executor": "Run",
+    "Cargo.Test sql::execution::expression_parser::tests::test_parse_null_expressions.executor": "Run",
+    "Cargo.Test sql::execution::expressions::arithmetic_expression::unit_tests::test_display_formatting.executor": "Run",
+    "Cargo.Test sql::execution::expressions::collate_expression::tests::test_get_child_at_invalid_index.executor": "Run",
+    "Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::comparison_expression.executor": "Run",
+    "Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_null_comparisons.executor": "Run",
+    "Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_numeric_comparisons.executor": "Run",
+    "Cargo.Test sql::execution::expressions::convert_expression::tests::test_convert_with_join.executor": "Run",
+    "Cargo.Test sql::execution::expressions::filter_expression::tests::test_having_clause.executor": "Run",
+    "Cargo.Test sql::execution::expressions::filter_expression::tests::test_validation.executor": "Run",
+    "Cargo.Test sql::execution::expressions::overlay_expression::tests::test_basic_overlay.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_basic_aggregations.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_simple_selects.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_aggregations.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_error_handling.executor": "Run",
+    "Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins.executor": "Run",
+    "Cargo.Test sql::execution::plans::filter_plan::tests::construction::test_construction_with_empty_schema.executor": "Run",
+    "Cargo.Test sql::execution::plans::filter_plan::tests::predicates::test_nested_predicate_structure.executor": "Run",
+    "Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_basic_display.executor": "Run",
+    "Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_nested_filters_display.executor": "Run",
+    "Cargo.Test sql::execution::plans::topn_plan::tests::test_topn_node_display.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_plan_aggregate_column_names.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_group_by_with_aggregates.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_simple_group_by.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::join_tests::test_inner_join.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::subquery_tests::test_subquery_in_where.executor": "Run",
+    "Cargo.Test sql::planner::schema_manager::tests::test_create_aggregation_output_schema.executor": "Run",
+    "Cargo.Test sqllogic.executor": "Run",
+    "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_b_plus_tree_internal_page.executor": "Run",
+    "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_and_get_key_value.executor": "Run",
+    "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_ordering.executor": "Run",
+    "Cargo.Test storage::table::table_iterator::tests::test_table_iterator_transactions.executor": "Run",
+    "Cargo.Test string_expression.executor": "Run",
+    "Cargo.Test struct_type.executor": "Run",
+    "Cargo.Test subquery_expression.executor": "Run",
+    "Cargo.Test test_runner.executor": "Run",
+    "Cargo.Test tests::run_all_tests.executor": "Run",
+    "Cargo.Test tests::run_ddl_tests.executor": "Run",
+    "Cargo.Test tests::run_dml_tests.executor": "Run",
+    "Cargo.Test tests::run_query_tests.executor": "Run",
+    "Cargo.Test thread_pool.executor": "Run",
+    "Cargo.Test trim_expression.executor": "Run",
+    "Cargo.Test tuple_expression.executor": "Run",
+    "Cargo.Test types.executor": "Run",
+    "Cargo.Test types_db::struct_type::tests::test_struct_equality.executor": "Run",
+    "Cargo.Test types_db::value::basic_behavior_tests::test_vector_comparisons.executor": "Run",
+    "Cargo.Test types_db::value::unit_tests::test_serialize_val.executor": "Run",
+    "Cargo.Test types_db::value::unit_tests::test_serialize_value.executor": "Run",
+    "Cargo.Test types_db::value::unit_tests::test_value_debug.executor": "Run",
+    "Cargo.Test update_plan.executor": "Run",
+    "Cargo.Test value.executor": "Run",
+    "Cargo.Test watermark.executor": "Run",
+    "Cargo.Test watermark::tests.executor": "Run",
+    "Cargo.Test wildcard_expression.executor": "Run",
+    "Cargo.Test.executor": "Run",
+    "Cargo.Tests in 'tests'.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.rust.reset.selective.auto.import": "true",
+    "git-widget-placeholder": "master",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
+    "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
+    "org.rust.first.attach.projects": "true",
+    "settings.editor.selected.configurable": "language.rust.cargo.check",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/src/storage/page" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Test index_iterator_mem">
+  <component name="RunManager" selected="Cargo.Tests in 'tests'">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -721,27 +718,6 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test sql::execution::executors::filter_executor::tests::test_having_filter" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::executors::filter_executor::tests::test_having_filter -- --exact" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
-      </envs>
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
     <configuration name="Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
       <option name="command" value="test --package tkdb --lib sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries -- --exact" />
@@ -784,6 +760,23 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
+    <configuration name="Tests in 'tests'" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --test test_runner" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
     <list>
       <item itemvalue="Cargo.Run" />
       <item itemvalue="Cargo.Test Buffer" />
@@ -809,17 +802,17 @@
       <item itemvalue="Cargo.Test" />
       <item itemvalue="Cargo.Test index_iterator_mem" />
       <item itemvalue="Cargo.Test index_scan_executor" />
+      <item itemvalue="Cargo.Tests in 'tests'" />
       <item itemvalue="Cargo.Test log_manager" />
-      <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter" />
       <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Tests in 'tests'" />
         <item itemvalue="Cargo.Test index_iterator_mem" />
         <item itemvalue="Cargo.Test index_scan_executor" />
         <item itemvalue="Cargo.Test log_manager" />
         <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
-        <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_having_filter" />
       </list>
     </recent_temporary>
   </component>
@@ -881,7 +874,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="2246000" />
+      <workItem from="1746260136063" duration="2562000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />

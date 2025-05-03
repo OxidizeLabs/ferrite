@@ -203,11 +203,14 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
     match type_id {
         TypeId::Boolean | TypeId::TinyInt => 1,
         TypeId::SmallInt => 2,
-        TypeId::Integer => 4,
-        TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
-        TypeId::VarChar | TypeId::Invalid => 0,
-        TypeId::Vector => size_of::<Arc<Vec<Value>>>() as u64,
+        TypeId::Integer | TypeId::Float | TypeId::Date | TypeId::Time => 4,
+        TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp | TypeId::Interval => 8,
+        TypeId::VarChar | TypeId::Invalid | TypeId::Binary | TypeId::JSON => 0,
+        TypeId::UUID => 16,
+        TypeId::Vector | TypeId::Array => size_of::<Arc<Vec<Value>>>() as u64,
         TypeId::Char => 0,
+        TypeId::Enum => 4, // ID size, the string is variable
+        TypeId::Point => 16, // Two f64 values
         TypeId::Struct => 8, // Pointer size for struct
     }
 }
@@ -220,9 +223,19 @@ pub fn type_id_to_string(type_id: TypeId) -> String {
         TypeId::Integer => "Integer".to_string(),
         TypeId::BigInt => "BigInt".to_string(),
         TypeId::Decimal => "Decimal".to_string(),
+        TypeId::Float => "Float".to_string(),
         TypeId::VarChar => "VarChar".to_string(),
         TypeId::Timestamp => "Timestamp".to_string(),
+        TypeId::Date => "Date".to_string(),
+        TypeId::Time => "Time".to_string(),
+        TypeId::Interval => "Interval".to_string(),
         TypeId::Vector => "Vector".to_string(),
+        TypeId::Binary => "Binary".to_string(),
+        TypeId::JSON => "JSON".to_string(),
+        TypeId::UUID => "UUID".to_string(),
+        TypeId::Array => "Array".to_string(),
+        TypeId::Enum => "Enum".to_string(),
+        TypeId::Point => "Point".to_string(),
         TypeId::Invalid => "Invalid".to_string(),
         TypeId::Char => "Char".to_string(),
         TypeId::Struct => "Struct".to_string(),
