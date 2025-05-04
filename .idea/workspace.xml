@@ -264,7 +264,7 @@
   <component name="RsExternalLinterProjectSettings">
     <option name="channel" value="stable" />
   </component>
-  <component name="RunManager" selected="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types">
+  <component name="RunManager" selected="Cargo.Test Sql::execution::expressions">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />

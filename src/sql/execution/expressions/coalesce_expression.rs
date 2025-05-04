@@ -134,6 +134,13 @@ impl Display for CoalesceExpression {
             if i > 0 {
                 write!(f, ", ")?;
             }
+            // Handle NULL values specially when displaying
+            if let Expression::Constant(constant) = child.as_ref() {
+                if constant.get_return_type().get_type() == TypeId::Invalid {
+                    write!(f, "NULL")?;
+                    continue;
+                }
+            }
             write!(f, "{}", child)?;
         }
         write!(f, ")")
