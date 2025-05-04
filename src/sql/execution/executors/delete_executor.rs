@@ -323,7 +323,7 @@ mod tests {
             .unwrap();
 
         // Get table info and create TransactionalTableHeap
-        let (table_oid, table_heap) = {
+        let (table_oid, txn_table_heap) = {
             // Hold the execution context lock
             let exec_guard = execution_context.read();
             // Hold the catalog lock
@@ -334,12 +334,12 @@ mod tests {
 
             // Create values that will live beyond the lock scope
             let oid = table_info.get_table_oidt();
-            let heap = Arc::new(TransactionalTableHeap::new(
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(
                 table_info.get_table_heap(),
                 table_info.get_table_oidt(),
             ));
 
-            (oid, heap)
+            (oid, txn_table_heap)
         };
 
         // Insert test data
@@ -352,22 +352,21 @@ mod tests {
         ];
 
         for (id, value) in test_data {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(id), Value::new(value.to_string())],
-                &schema.clone(),
-                Default::default(),
-            );
+            let values = vec![
+                Value::new(id),
+                Value::new(value),
+            ];
 
             let tuple_meta = Arc::new(TupleMeta::new(ctx.transaction_context.get_transaction_id()));
 
-            table_heap
-                .insert_tuple(tuple_meta, &mut tuple, ctx.transaction_context.clone())
+            txn_table_heap
+                .insert_tuple_from_values(values, &schema, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
 
         // Verify initial table state
         let mut initial_count = 0;
-        let mut table_iter = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
+        let mut table_iter = txn_table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         while let Some((meta, tuple)) = table_iter.next() {
             if !meta.is_deleted() {
                 initial_count += 1;
@@ -446,7 +445,7 @@ mod tests {
         // Verify remaining tuples
         let mut remaining_count = 0;
         let mut remaining_ids = Vec::new();
-        let mut table_iter = table_heap.make_iterator(Some(verify_txn_ctx.clone()));
+        let mut table_iter = txn_table_heap.make_iterator(Some(verify_txn_ctx.clone()));
 
         while let Some((meta, tuple)) = table_iter.next() {
             // Only count and collect non-deleted tuples
