@@ -232,7 +232,7 @@ mod tests {
     }
 
     fn create_test_tuple() -> Tuple {
-        Tuple::new(&[], create_test_schema(), RID::new(0, 0))
+        Tuple::new(&[], &create_test_schema(), RID::new(0, 0))
     }
 
     fn create_constant_expression(value: Value) -> Arc<Expression> {

@@ -248,7 +248,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -263,7 +263,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -286,7 +286,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -301,7 +301,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());
@@ -316,7 +316,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Integer);

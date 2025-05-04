@@ -282,27 +282,27 @@ mod tests {
         let test_tuples = vec![
             Tuple::new(
                 &[Value::new(1), Value::new(10)],
-                schema.clone(),
+                &schema.clone(),
                 RID::new(0, 0),
             ),
             Tuple::new(
                 &[Value::new(2), Value::new(20)],
-                schema.clone(),
+                &schema,
                 RID::new(0, 1),
             ),
             Tuple::new(
                 &[Value::new(3), Value::new(30)],
-                schema.clone(),
+                &schema,
                 RID::new(0, 2),
             ),
             Tuple::new(
                 &[Value::new(4), Value::new(40)],
-                schema.clone(),
+                &schema,
                 RID::new(0, 3),
             ),
             Tuple::new(
                 &[Value::new(5), Value::new(50)],
-                schema.clone(),
+                &schema,
                 RID::new(0, 4),
             ),
         ];

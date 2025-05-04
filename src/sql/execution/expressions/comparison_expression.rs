@@ -229,8 +229,8 @@ mod unit_tests {
         ]);
         let rid = RID::new(0, 0);
 
-        let left_tuple = Tuple::new(&*vec![Value::new(5), Value::new(10)], schema.clone(), rid);
-        let right_tuple = Tuple::new(&*vec![Value::new(10), Value::new(15)], schema.clone(), rid);
+        let left_tuple = Tuple::new(&*vec![Value::new(5), Value::new(10)], &schema, rid);
+        let right_tuple = Tuple::new(&*vec![Value::new(10), Value::new(15)], &schema, rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0, // tuple_index

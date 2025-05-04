@@ -326,7 +326,7 @@ mod tests {
 
         let tuple = Tuple::new(
             &*vec![Value::new(1), Value::new("test"), Value::new(10.5)],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 

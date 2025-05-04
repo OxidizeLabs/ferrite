@@ -86,7 +86,7 @@ impl ProjectionExecutor {
                 // Create new tuple with projected values
                 Some(Tuple::new(
                     &values,
-                    self.plan.get_output_schema().clone(),
+                    &self.plan.get_output_schema(),
                     tuple.get_rid(),
                 ))
             }

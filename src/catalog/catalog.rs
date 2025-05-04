@@ -834,7 +834,7 @@ mod tests {
         // Create and insert a test tuple
         let mut tuple = Tuple::new(
             &[Value::new(1), Value::new("test".to_string())],
-            schema,
+            &schema,
             RID::new(0, 0),
         );
 

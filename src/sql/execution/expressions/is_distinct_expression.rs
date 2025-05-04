@@ -153,7 +153,7 @@ mod tests {
         ]);
         let tuple = Tuple::new(
             &vec![Value::new(42), Value::new("test")],
-            schema.clone(),
+            &schema,
             Default::default(),
         );
         (tuple, schema)

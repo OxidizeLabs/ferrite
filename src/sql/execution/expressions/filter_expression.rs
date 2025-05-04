@@ -115,7 +115,7 @@ impl ExpressionOps for FilterExpression {
                 );
 
                 // Create a new tuple with just the aggregate result
-                let agg_tuple = Tuple::new(&[agg_result], agg_schema.clone(), tuple.get_rid());
+                let agg_tuple = Tuple::new(&[agg_result], &agg_schema, tuple.get_rid());
 
                 // Log the new tuple structure
                 trace!(
@@ -178,7 +178,7 @@ impl ExpressionOps for FilterExpression {
                     .clone()]);
 
                 // Create a new tuple with just the aggregate result
-                let agg_tuple = Tuple::new(&[agg_result], agg_schema.clone(), left_tuple.get_rid());
+                let agg_tuple = Tuple::new(&[agg_result], &agg_schema, left_tuple.get_rid());
 
                 // Now evaluate the predicate against the aggregate tuple and schema
                 let pred_result = self.predicate.evaluate(&agg_tuple, &agg_schema)?;
@@ -371,7 +371,7 @@ mod tests {
                 Value::new(25),
                 Value::new(50000.0),
             ],
-            schema,
+            &schema,
             RID::new(0, 0),
         )
     }

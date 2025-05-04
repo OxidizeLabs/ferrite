@@ -323,7 +323,7 @@ mod tests {
 
     fn create_test_tuple(id: i32, name: &str) -> Tuple {
         let values = vec![Value::new(id), Value::new(name)];
-        Tuple::new(&values, create_test_schema(), RID::new(0, 0))
+        Tuple::new(&values, &create_test_schema(), RID::new(0, 0))
     }
 
     #[test]

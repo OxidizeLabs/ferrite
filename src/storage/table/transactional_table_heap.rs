@@ -10,6 +10,8 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::catalog::schema::Schema;
+use crate::types_db::value::Value;
 use log;
 use std::sync::Arc;
 
@@ -44,6 +46,48 @@ impl TransactionalTableHeap {
         self.table_heap
             .update_tuple(meta, tuple, rid, None)
             .map(|_| ())
+    }
+
+    /// Insert a tuple from values and schema directly
+    ///
+    /// # Parameters
+    ///
+    /// - `values`: Values for the tuple.
+    /// - `schema`: Schema for the tuple.
+    /// - `txn_ctx`: Transaction context.
+    ///
+    /// # Returns
+    ///
+    /// An `Result` containing the RID of the inserted tuple, or an error message.
+    pub fn insert_tuple_from_values(
+        &self,
+        values: Vec<Value>,
+        schema: &Schema,
+        txn_ctx: Arc<TransactionContext>,
+    ) -> Result<RID, String> {
+        let txn = txn_ctx.get_transaction();
+
+        // Transaction checks
+        if txn.get_state() != TransactionState::Running {
+            return Err("Transaction not in running state".to_string());
+        }
+
+        // Lock acquisition
+        let lock_manager = txn_ctx.get_lock_manager();
+        lock_manager
+            .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
+            .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
+
+        // Create metadata with transaction ID
+        let meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
+
+        // Perform insert using the new internal method
+        let rid = self.table_heap.insert_tuple_from_values(values, schema, meta)?;
+
+        // Transaction bookkeeping
+        txn.append_write_set(self.table_oid, rid);
+
+        Ok(rid)
     }
 
     pub fn insert_tuple(
@@ -446,6 +490,13 @@ mod tests {
                 self.txn_manager.clone(),
             ))
         }
+
+        fn create_test_schema() -> Schema {
+            Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ])
+        }
     }
 
     fn create_test_tuple() -> (TupleMeta, Tuple) {
@@ -454,9 +505,94 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
         let values = vec![Value::new(1), Value::new(100)];
-        let tuple = Tuple::new(&values, schema, RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0); // Initialize with 0, but this will be overwritten
         (meta, tuple)
+    }
+
+    #[test]
+    fn test_insert_tuple_from_values() {
+        let ctx = TestContext::new("test_insert_tuple_from_values");
+
+        // Create transaction
+        let txn_ctx = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
+        
+        // Create schema
+        let schema = TestContext::create_test_schema();
+        
+        // Create values
+        let values = vec![Value::new(1), Value::new(100)];
+        
+        // Insert tuple directly from values
+        let rid = ctx.txn_heap
+            .insert_tuple_from_values(values.clone(), &schema, txn_ctx.clone())
+            .expect("Insert from values failed");
+            
+        // Verify the tuple was inserted correctly
+        let (meta, tuple) = ctx.txn_heap
+            .get_tuple(rid, txn_ctx.clone())
+            .expect("Failed to get tuple");
+            
+        assert_eq!(tuple.get_value(0), Value::new(1));
+        assert_eq!(tuple.get_value(1), Value::new(100));
+        assert_eq!(meta.get_creator_txn_id(), txn_ctx.get_transaction().get_transaction_id());
+    }
+
+    #[test]
+    fn test_version_chain_with_values() {
+        let ctx = TestContext::new("test_version_chain_with_values");
+
+        // Create first transaction
+        let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
+        let txn1 = txn_ctx1.get_transaction();
+
+        // Create schema
+        let schema = TestContext::create_test_schema();
+        
+        // Create values
+        let values = vec![Value::new(1), Value::new(100)];
+        
+        // Insert tuple directly from values
+        let rid = ctx.txn_heap
+            .insert_tuple_from_values(values.clone(), &schema, txn_ctx1.clone())
+            .expect("Insert from values failed");
+
+        // Commit first transaction
+        ctx.txn_manager
+            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm());
+
+        // Create second transaction
+        let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
+
+        // Get the tuple to update
+        let (meta, tuple) = ctx.txn_heap
+            .get_tuple(rid, txn_ctx2.clone())
+            .expect("Failed to get tuple");
+
+        // Create a new tuple with modified values
+        let mut values = tuple.get_values();
+        values[1] = Value::new(200);
+        let new_tuple = Tuple::new(&values, &schema, rid);
+
+        ctx.txn_heap
+            .update_tuple(&meta, &new_tuple, rid, txn_ctx2.clone())
+            .expect("Update failed");
+
+        // Create third transaction to verify version chain
+        let txn_ctx3 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
+        let (old_meta, old_tuple) = ctx
+            .txn_heap
+            .get_tuple(rid, txn_ctx3)
+            .expect("Failed to get old version");
+
+        assert_eq!(
+            old_meta.get_creator_txn_id(),
+            txn1.get_transaction_id(),
+            "Creator transaction ID mismatch - expected {}, got {}",
+            txn1.get_transaction_id(),
+            old_meta.get_creator_txn_id()
+        );
+        assert_eq!(old_tuple.get_value(1), Value::new(100));
     }
 
     #[test]
@@ -506,6 +642,36 @@ mod tests {
             old_meta.get_creator_txn_id()
         );
         assert_eq!(old_tuple.get_values()[1], Value::new(100));
+    }
+
+    #[test]
+    fn test_isolation_levels_with_values() {
+        let ctx = TestContext::new("test_isolation_levels_with_values");
+
+        // Create READ_UNCOMMITTED transaction
+        let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
+        
+        // Create schema and values
+        let schema = TestContext::create_test_schema();
+        let values = vec![Value::new(1), Value::new(100)];
+        
+        // Insert tuple using the values API
+        let rid = ctx.txn_heap
+            .insert_tuple_from_values(values, &schema, txn_ctx1.clone())
+            .expect("Insert from values failed");
+
+        // Verify visibility based on isolation level
+        let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
+        assert!(
+            ctx.txn_heap.get_tuple(rid, txn_ctx2).is_err(),
+            "READ_COMMITTED should not see uncommitted tuple"
+        );
+
+        let txn_ctx3 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
+        assert!(
+            ctx.txn_heap.get_tuple(rid, txn_ctx3).is_ok(),
+            "READ_UNCOMMITTED should see uncommitted tuple"
+        );
     }
 
     #[test]

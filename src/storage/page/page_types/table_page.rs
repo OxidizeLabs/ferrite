@@ -949,7 +949,7 @@ mod unit_tests {
         ]);
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let meta = TupleMeta::new(123);
         (meta, tuple)
     }
@@ -1008,7 +1008,7 @@ mod unit_tests {
                 Column::new("name", TypeId::VarChar),
             ]);
             let values = vec![Value::from(inserted_count), Value::from("Test".to_string())];
-            let tuple = Tuple::new(&values, schema, next_rid);
+            let tuple = Tuple::new(&values, &schema, next_rid);
             let meta = TupleMeta::new(123);
             
             // Try to insert the tuple
@@ -1028,7 +1028,7 @@ mod unit_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::from(inserted_count + 1), Value::from("Test".to_string())];
-        let tuple = Tuple::new(&values, schema, next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         
         // Now check that get_next_tuple_offset returns None
         assert!(page.get_next_tuple_offset(&tuple).is_none());
@@ -1174,7 +1174,7 @@ mod tuple_operation_tests {
         ]);
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let meta = TupleMeta::new(123);
         (meta, tuple)
     }
@@ -1264,7 +1264,7 @@ mod tuple_operation_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::from(1), Value::from("Test".to_string())];
-        let tuple = Tuple::new(&values, schema, next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         let meta = TupleMeta::new(123);
 
         // Insert using the immutable method
@@ -1293,7 +1293,7 @@ mod tuple_operation_tests {
         ]);
         let values = vec![Value::from(1), Value::from("Test".to_string())];
         let incorrect_rid = RID::new(1, 999); // Wrong slot number
-        let tuple = Tuple::new(&values, schema, incorrect_rid);
+        let tuple = Tuple::new(&values, &schema, incorrect_rid);
         let meta = TupleMeta::new(123);
 
         // Insert should fail due to RID mismatch
@@ -1318,7 +1318,7 @@ mod error_handling_tests {
         ]);
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let meta = TupleMeta::new(123);
         (meta, tuple)
     }
@@ -1371,7 +1371,7 @@ mod capacity_tests {
         ]);
         let values = vec![Value::from(id), Value::from("Test".to_string())];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let meta = TupleMeta::new(123);
         (meta, tuple)
     }
@@ -1391,7 +1391,7 @@ mod capacity_tests {
                 Column::new("name", TypeId::VarChar),
             ]);
             let values = vec![Value::from(inserted_count), Value::from("Test".to_string())];
-            let tuple = Tuple::new(&values, schema, next_rid);
+            let tuple = Tuple::new(&values, &schema, next_rid);
             let meta = TupleMeta::new(123);
             
             // Try to insert the tuple
@@ -1411,7 +1411,7 @@ mod capacity_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::from(inserted_count + 1), Value::from("Test".to_string())];
-        let tuple = Tuple::new(&values, schema, next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         
         // Now check that get_next_tuple_offset returns None
         assert!(page.get_next_tuple_offset(&tuple).is_none());
@@ -1428,7 +1428,7 @@ mod capacity_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::from(1), Value::from("Test".to_string())];
-        let first_tuple = Tuple::new(&values, schema.clone(), first_rid);
+        let first_tuple = Tuple::new(&values, &schema, first_rid);
         let meta = TupleMeta::new(123);
         
         page.insert_tuple(&meta, &first_tuple).unwrap();
@@ -1437,7 +1437,7 @@ mod capacity_tests {
         // Insert second tuple with new RID
         let second_rid = page.get_next_rid();
         let values = vec![Value::from(2), Value::from("Test2".to_string())];
-        let second_tuple = Tuple::new(&values, schema, second_rid);
+        let second_tuple = Tuple::new(&values, &schema, second_rid);
         
         page.insert_tuple(&meta, &second_tuple).unwrap();
         let second_offset = page.tuple_info[1].0;
@@ -1476,7 +1476,7 @@ mod serialization_tests {
         ]);
         let values = vec![Value::new(42), Value::new("Test")];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let mut meta = TupleMeta::new(123);
         meta.set_commit_timestamp(123);
         (meta, tuple)
@@ -1496,7 +1496,7 @@ mod serialization_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::new(42), Value::new("Test")];
-        let tuple = Tuple::new(&values, schema, next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         let mut meta = TupleMeta::new(123);
         meta.set_commit_timestamp(123);
 
@@ -1637,7 +1637,7 @@ mod page_type_tests {
         ]);
         let values = vec![Value::new(1), Value::new("test")];
         let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
         let meta = TupleMeta::new(1);
         (meta, tuple)
     }
@@ -1663,7 +1663,7 @@ mod page_type_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::new(1), Value::new("test")];
-        let tuple = Tuple::new(&values, schema, next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         let meta = TupleMeta::new(1);
         
         let rid = page.insert_tuple(&meta, &tuple).unwrap();
@@ -1708,7 +1708,7 @@ mod page_type_tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let values = vec![Value::new(1), Value::new("test")];
-        let tuple = Tuple::new(&values, schema.clone(), next_rid);
+        let tuple = Tuple::new(&values, &schema, next_rid);
         let meta = TupleMeta::new(1);
 
         // Insert tuple
@@ -1717,7 +1717,7 @@ mod page_type_tests {
 
         // Update tuple with new values
         let new_values = vec![Value::new(1), Value::new("updated")];
-        let new_tuple = Tuple::new(&new_values, schema, rid);
+        let new_tuple = Tuple::new(&new_values, &schema, rid);
         page.update_tuple(&meta, &new_tuple, rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 

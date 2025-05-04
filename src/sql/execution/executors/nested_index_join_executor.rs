@@ -82,7 +82,7 @@ impl NestedIndexJoinExecutor {
 
         Arc::new(Tuple::new(
             &joined_values,
-            self.get_output_schema().clone(),
+            &self.get_output_schema(),
             RID::new(0, 0), // Use a placeholder RID for joined tuples
         ))
     }
@@ -454,7 +454,7 @@ mod tests {
         for (id, value) in left_data {
             let mut tuple = Tuple::new(
                 &vec![Value::new(id), Value::new(value.to_string())],
-                left_schema.clone(),
+                &left_schema,
                 RID::new(0, 0),
             );
             let rid = left_table
@@ -478,7 +478,7 @@ mod tests {
         for (id, data) in right_data {
             let mut tuple = Tuple::new(
                 &vec![Value::new(id), Value::new(data.to_string())],
-                right_schema.clone(),
+                &right_schema,
                 RID::new(0, 0),
             );
             let rid = right_table
@@ -781,12 +781,12 @@ mod tests {
         // Create test tuples
         let left_tuple = Tuple::new(
             &vec![Value::new(1), Value::new("A")],
-            left_schema.clone(),
+            &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
             &vec![Value::new(1), Value::new("X")],
-            right_schema.clone(),
+            &right_schema,
             RID::new(0, 0),
         );
 

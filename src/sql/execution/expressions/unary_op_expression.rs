@@ -236,7 +236,7 @@ mod tests {
             Column::new("decimal_col", TypeId::Decimal),
         ]);
         let values = vec![Value::new(true), Value::new(42), Value::new(3.14)];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)
     }
 

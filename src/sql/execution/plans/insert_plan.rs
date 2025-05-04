@@ -108,7 +108,7 @@ mod tests {
                     Value::new(name.to_string()),
                     Value::new(active),
                 ],
-                schema,
+                &schema,
                 Default::default(),
             ))
         }

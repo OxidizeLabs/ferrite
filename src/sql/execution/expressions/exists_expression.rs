@@ -132,7 +132,7 @@ mod tests {
             Value::new("John"), // name
             Value::new(30),     // age
         ];
-        Tuple::new(&values, create_test_schema(), RID::new(1, 1))
+        Tuple::new(&values, &create_test_schema(), RID::new(1, 1))
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
         let left_tuple = create_test_tuple();
         let right_tuple = Tuple::new(
             &vec![Value::new(1), Value::new("Engineering")],
-            right_schema.clone(),
+            &right_schema,
             RID::new(2, 1),
         );
 

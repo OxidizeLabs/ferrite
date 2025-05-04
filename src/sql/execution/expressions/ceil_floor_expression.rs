@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_ceil_floor_basic() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test ceiling
         let ceil_expr = CeilFloorExpression::new(
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn test_ceil_floor_with_scale() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test ceiling with scale 1
         let ceil_expr = CeilFloorExpression::new(
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn test_ceil_floor_edge_cases() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test with integer input
         let ceil_expr = CeilFloorExpression::new(

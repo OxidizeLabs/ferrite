@@ -235,7 +235,7 @@ mod tests {
             Value::new("John"), // name
             Value::new(25),     // age
         ];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)
     }
 

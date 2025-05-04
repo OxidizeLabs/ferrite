@@ -406,7 +406,7 @@ mod tests {
             schema: &Schema,
             txn_ctx: Option<Arc<TransactionContext>>,
         ) -> RID {
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let mut tuple = Tuple::new(&values, schema, RID::new(0, 0));
             let meta = Arc::new(TupleMeta::new(
                 txn_ctx
                     .as_ref()

@@ -13,7 +13,87 @@
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/catalog/catalog.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/catalog/catalog.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/concurrency/transaction.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/concurrency/transaction.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/concurrency/transaction_manager.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/concurrency/transaction_manager.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/recovery/log_record.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/recovery/log_record.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/execution_engine.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/execution_engine.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/aggregation_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/aggregation_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/delete_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/delete_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/filter_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/filter_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/hash_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/hash_join_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/index_scan_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/mock_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/mock_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/mock_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/mock_scan_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/nested_index_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/nested_index_join_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/nested_loop_join_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/nested_loop_join_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/projection_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/projection_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/seq_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/seq_scan_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/table_scan_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/table_scan_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/topn_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/topn_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/topn_per_group_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/topn_per_group_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/update_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/update_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/values_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/values_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/executors/window_executor.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/executors/window_executor.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/abstract_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/abstract_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/aggregate_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/aggregate_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/all_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/all_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/any_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/any_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/arithmetic_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/arithmetic_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/array_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/array_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/at_timezone_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/at_timezone_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/between_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/between_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/binary_op_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/binary_op_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/case_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/case_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/cast_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/cast_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/ceil_floor_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/ceil_floor_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/coalesce_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/coalesce_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/collate_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/collate_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/column_value_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/column_value_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/comparison_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/comparison_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/constant_value_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/constant_value_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/convert_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/convert_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/exists_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/exists_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/extract_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/extract_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/filter_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/filter_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/function_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/function_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/grouping_sets_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/grouping_sets_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/in_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/in_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/interval_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/interval_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/is_check_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/is_check_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/is_distinct_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/is_distinct_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/like_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/like_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/literal_value_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/literal_value_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/logic_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/logic_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/map_access_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/map_access_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/method_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/method_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/overlay_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/overlay_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/position_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/position_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/qualified_wildcard_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/qualified_wildcard_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/random_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/random_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/regex_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/regex_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/string_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/string_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/struct_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/struct_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/subquery_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/subquery_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/subscript_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/subscript_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/substring_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/substring_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/trim_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/trim_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/tuple_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/tuple_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/typed_string_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/typed_string_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/unary_op_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/unary_op_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/wildcard_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/wildcard_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/plans/insert_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/plans/insert_plan.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/plans/values_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/plans/values_plan.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/index/index.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/index_iterator_mem.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/table/table_iterator.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_iterator.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/table/transactional_table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/transactional_table_heap.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/table/tuple.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/tuple.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -224,6 +304,7 @@
     "Cargo.Test tests::run_dml_tests.executor": "Run",
     "Cargo.Test tests::run_query_tests.executor": "Run",
     "Cargo.Test thread_pool.executor": "Run",
+    "Cargo.Test transactional_table_heap.executor": "Run",
     "Cargo.Test trim_expression.executor": "Run",
     "Cargo.Test tuple_expression.executor": "Run",
     "Cargo.Test types.executor": "Run",
@@ -266,7 +347,7 @@
   <component name="RsExternalLinterProjectSettings">
     <option name="channel" value="stable" />
   </component>
-  <component name="RunManager" selected="Cargo.Test Types">
+  <component name="RunManager" selected="Cargo.Test Sql::execution::executors">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -729,13 +810,10 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::plans::abstract_plan::complex_behaviour::test_joins -- --exact" />
+    <configuration name="Test table_heap" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::table::table_heap" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="debug" />
-      </envs>
+      <envs />
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -749,8 +827,8 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test table_heap" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::table::table_heap" />
+    <configuration name="Test transactional_table_heap" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::table::transactional_table_heap" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -807,19 +885,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
+      <item itemvalue="Cargo.Test transactional_table_heap" />
       <item itemvalue="Cargo.Test abstract_plan" />
       <item itemvalue="Cargo.Test filter_executor" />
       <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_filter_equals" />
-      <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" />
       <item itemvalue="Cargo.Test table_heap" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Test filter_executor" />
+        <item itemvalue="Cargo.Test transactional_table_heap" />
         <item itemvalue="Cargo.Test table_heap" />
         <item itemvalue="Cargo.Test sql::execution::executors::filter_executor::tests::test_filter_equals" />
-        <item itemvalue="Cargo.Test filter_executor" />
         <item itemvalue="Cargo.Test abstract_plan" />
-        <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" />
       </list>
     </recent_temporary>
   </component>

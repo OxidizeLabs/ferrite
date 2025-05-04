@@ -399,7 +399,7 @@ mod tests {
                 Value::new(name.to_string()),
                 Value::new(age),
             ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
             let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             table_heap
                 .insert_tuple(meta, &mut tuple, transaction_context.clone())

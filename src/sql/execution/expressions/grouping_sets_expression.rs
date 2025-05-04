@@ -341,7 +341,7 @@ mod tests {
         ]);
         let tuple = Tuple::new(
             &[Value::new(1), Value::new(2)],
-            schema.clone(),
+            &schema,
             RID::new(1, 1),
         );
 
@@ -350,7 +350,7 @@ mod tests {
 
         // Create a second tuple and schema for join evaluation
         let schema2 = Schema::new(vec![Column::new("const_3", TypeId::Integer)]);
-        let tuple2 = Tuple::new(&[Value::new(3)], schema2.clone(), RID::new(2, 1));
+        let tuple2 = Tuple::new(&[Value::new(3)], &schema2, RID::new(2, 1));
 
         // Evaluate join should return an error
         assert!(expr

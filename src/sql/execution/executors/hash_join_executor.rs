@@ -317,7 +317,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(1), Value::new("Alice")],
-                    left_schema.clone(),
+                    &left_schema,
                     RID::new(1, 0),
                 )),
                 RID::new(1, 0),
@@ -325,7 +325,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(2), Value::new("Bob")],
-                    left_schema.clone(),
+                    &left_schema,
                     RID::new(1, 1),
                 )),
                 RID::new(1, 1),
@@ -333,7 +333,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(3), Value::new("Charlie")],
-                    left_schema.clone(),
+                    &left_schema,
                     RID::new(1, 2),
                 )),
                 RID::new(1, 2),
@@ -345,7 +345,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(1), Value::new(25)],
-                    right_schema.clone(),
+                    &right_schema,
                     RID::new(2, 0),
                 )),
                 RID::new(2, 0),
@@ -353,7 +353,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(2), Value::new(30)],
-                    right_schema.clone(),
+                    &right_schema.clone(),
                     RID::new(2, 1),
                 )),
                 RID::new(2, 1),
@@ -361,7 +361,7 @@ mod tests {
             (
                 Arc::new(Tuple::new(
                     &[Value::new(4), Value::new(35)],
-                    right_schema.clone(),
+                    &right_schema,
                     RID::new(2, 2),
                 )),
                 RID::new(2, 2),

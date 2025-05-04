@@ -241,7 +241,7 @@ mod tests {
             Value::new(name.to_string()),
             Value::new(age),
         ];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0);
         (meta, tuple)
     }

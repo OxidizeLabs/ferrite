@@ -806,7 +806,7 @@ impl TableHeap {
     pub fn insert_tuple_from_values(
         &self,
         values: Vec<Value>,
-        schema: Schema,
+        schema: &Schema,
         meta: Arc<TupleMeta>,
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
@@ -816,7 +816,7 @@ impl TableHeap {
         let page_guard = self.get_page(last_page_id)?;
         
         // Create a temporary tuple to check size (with dummy RID)
-        let temp_tuple = Tuple::new(&values, schema.clone(), RID::default());
+        let temp_tuple = Tuple::new(&values, &schema, RID::default());
         
         {
             let mut page = page_guard.write();
@@ -827,7 +827,7 @@ impl TableHeap {
                 let next_rid = page.get_next_rid();
                 
                 // Create the tuple with the correct RID
-                let tuple = Tuple::new(&values, schema.clone(), next_rid);
+                let tuple = Tuple::new(&values, &schema, next_rid);
                 
                 // Insert the tuple
                 match page.insert_tuple_with_rid(&meta, &tuple, next_rid) {
@@ -851,11 +851,11 @@ impl TableHeap {
     fn create_new_page_and_insert_from_values(
         &self,
         values: Vec<Value>,
-        schema: Schema,
+        schema: &Schema,
         meta: &TupleMeta,
     ) -> Result<RID, String> {
         // First check if tuple is too large for any page
-        let temp_tuple = Tuple::new(&values, schema.clone(), RID::default());
+        let temp_tuple = Tuple::new(&values, &schema, RID::default());
         let temp_page = TablePage::new(0);
         if temp_page.is_tuple_too_large(&temp_tuple) {
             return Err("Tuple is too large to fit in a page".to_string());
@@ -898,7 +898,7 @@ impl TableHeap {
 
         // Create the tuple with the correct RID for the new page
         let new_rid = RID::new(new_page_id, 0);
-        let tuple = Tuple::new(&values, schema, new_rid);
+        let tuple = Tuple::new(&values, &schema, new_rid);
 
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();
@@ -1218,7 +1218,7 @@ mod tests {
 
     fn create_test_tuple(schema: &Schema) -> (TupleMeta, Tuple) {
         let tuple_values = vec![Value::new(1), Value::new("Alice"), Value::new(25)];
-        let tuple = Tuple::new(&tuple_values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&tuple_values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0);
         (meta, tuple)
     }
@@ -1271,7 +1271,7 @@ mod tests {
                 )),
                 Value::new(20 + i),
             ];
-            let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
             let meta = TupleMeta::new(0);
 
             match table_heap.insert_tuple(Arc::new(meta), &tuple) {
@@ -1341,7 +1341,7 @@ mod tests {
         // Create a tuple that's too large for a single page
         let large_string = "x".repeat(4000); // Close to page size
         let values = vec![Value::new(1), Value::new(large_string), Value::new(25)];
-        let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0);
 
         // Attempt to insert should fail gracefully
@@ -1374,7 +1374,7 @@ mod tests {
             Value::new("Bob"), // Changed from "Alice"
             Value::new(30),    // Changed from 25
         ];
-        let mut updated_tuple = Tuple::new(&updated_values, schema.clone(), rid);
+        let mut updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
         // Update the tuple
         let updated_rid = table_heap
@@ -1428,7 +1428,7 @@ mod tests {
                 Value::new(format!("name{}", i)),
                 Value::new(20 + i),
             ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
             let meta = TupleMeta::new(0);
             let rid = table_heap
                 .insert_tuple(Arc::new(meta), &mut tuple)
@@ -1513,7 +1513,7 @@ mod tests {
         // Create a tuple that's just small enough to fit
         let large_string = "x".repeat(3000); // Large but should fit
         let values = vec![Value::new(1), Value::new(large_string), Value::new(25)];
-        let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0);
 
         // This should succeed
@@ -1522,7 +1522,7 @@ mod tests {
         // Now try with a slightly larger tuple that should fail
         let too_large_string = "x".repeat(4000);
         let values = vec![Value::new(1), Value::new(too_large_string), Value::new(25)];
-        let mut large_tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let mut large_tuple = Tuple::new(&values, &schema, RID::new(0, 0));
 
         // This should fail
         assert!(table_heap.insert_tuple(Arc::new(meta), &mut large_tuple).is_err());
@@ -1548,7 +1548,7 @@ mod tests {
         
         // Insert tuple from values
         let rid = table_heap
-            .insert_tuple_from_values(values.clone(), schema.clone(), Arc::new(meta))
+            .insert_tuple_from_values(values.clone(), &schema, Arc::new(meta))
             .expect("Failed to insert tuple from values");
             
         // Verify the tuple was inserted correctly
@@ -1582,7 +1582,7 @@ mod tests {
             ];
             let meta = TupleMeta::new(0);
             let rid = table_heap
-                .insert_tuple_from_values(values, schema.clone(), Arc::new(meta))
+                .insert_tuple_from_values(values, &schema, Arc::new(meta))
                 .expect("Failed to insert tuple");
             rids.push(rid);
         }
@@ -1625,7 +1625,7 @@ mod tests {
             let meta = TupleMeta::new(0);
             
             let rid = table_heap
-                .insert_tuple_from_values(values, schema.clone(), Arc::new(meta))
+                .insert_tuple_from_values(values, &schema, Arc::new(meta))
                 .expect("Failed to insert tuple");
                 
             rids.push(rid);
@@ -1666,7 +1666,7 @@ mod tests {
         let meta = TupleMeta::new(0);
         
         // Insert should fail due to tuple size
-        let result = table_heap.insert_tuple_from_values(values, schema, Arc::new(meta));
+        let result = table_heap.insert_tuple_from_values(values, &schema, Arc::new(meta));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("too large"));
     }

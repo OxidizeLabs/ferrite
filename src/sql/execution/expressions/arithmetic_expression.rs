@@ -357,7 +357,7 @@ mod unit_tests {
             Column::new("col2", TypeId::Decimal),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![Value::new(5), Value::new(2.5)], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![Value::new(5), Value::new(2.5)], &schema, rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
@@ -392,7 +392,7 @@ mod unit_tests {
     #[test]
     fn test_integer_operations() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let const5 = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(5),
@@ -426,7 +426,7 @@ mod unit_tests {
     #[test]
     fn test_decimal_operations() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let const5_5 = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(5.5),
@@ -459,7 +459,7 @@ mod unit_tests {
     #[test]
     fn test_mixed_type_operations() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(5),
@@ -492,7 +492,7 @@ mod unit_tests {
     #[test]
     fn test_division_by_zero() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let const5 = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(5),
@@ -633,7 +633,7 @@ mod unit_tests {
     #[test]
     fn test_arithmetic_overflow() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         // Test integer overflow
         let max_int = Arc::new(Expression::Constant(ConstantExpression::new(
@@ -662,7 +662,7 @@ mod unit_tests {
     #[test]
     fn test_nested_arithmetic() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         // Create (2 + 3) * 4
         let two = Arc::new(Expression::Constant(ConstantExpression::new(

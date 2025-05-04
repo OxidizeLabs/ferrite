@@ -194,7 +194,7 @@ impl ExpressionOps for AggregateExpression {
         merged_values.extend(left_tuple.get_values().iter().cloned());
         merged_values.extend(right_tuple.get_values().iter().cloned());
 
-        let merged_tuple = Tuple::new(&merged_values, merged_schema.clone(), RID::new(0, 0));
+        let merged_tuple = Tuple::new(&merged_values, &merged_schema, RID::new(0, 0));
 
         // Evaluate the aggregate using the merged tuple and schema
         self.evaluate(&merged_tuple, &merged_schema)
@@ -255,7 +255,7 @@ mod tests {
 
         let tuple = Tuple::new(
             &[Value::new(1), Value::new(10.5), Value::new(Val::Null)],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -325,7 +325,7 @@ mod tests {
 
         let tuple = Tuple::new(
             &[Value::new(1_i64), Value::new(10.5), Value::new(Val::Null)],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 

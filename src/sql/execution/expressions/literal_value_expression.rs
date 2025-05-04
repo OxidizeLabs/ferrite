@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn test_evaluate() {
         let schema = Schema::new(vec![Column::new("test", TypeId::Integer)]);
-        let tuple = Tuple::new(&*vec![Value::new(1)], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![Value::new(1)], &schema, RID::new(0, 0));
 
         // Create and evaluate a literal expression
         let expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
