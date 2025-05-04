@@ -126,8 +126,8 @@ pub trait Type {
             TypeId::Array => Value::from(Vec::<Value>::new()),
             TypeId::Enum => Value::from(Val::Enum(0, String::new())),
             TypeId::Point => Value::from(Val::Point(f64::MIN, f64::MIN)),
-            TypeId::Invalid => Value::from(Val::Null),
-            TypeId::Struct => Value::from(Val::Null),
+            TypeId::Invalid => Value::from(Null),
+            TypeId::Struct => Value::from(Null),
         }
     }
     fn get_max_value(type_id: TypeId) -> Value
