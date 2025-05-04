@@ -1308,6 +1308,23 @@ impl<T: Into<Val>> From<T> for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // Special case for NULL values
+        if let Val::Null = self.value_ {
+            return write!(f, "NULL");
+        }
+        
+        // Handle vectors directly to support mixed types
+        if let Val::Vector(vec) | Val::Array(vec) = &self.value_ {
+            write!(f, "[")?;
+            for (i, item) in vec.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", item)?;
+            }
+            return write!(f, "]");
+        }
+        
         // Use the appropriate type's to_string method for human-readable display
         let type_instance = crate::types_db::types::get_instance(self.type_id_);
         write!(f, "{}", type_instance.to_string(self))
