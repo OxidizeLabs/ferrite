@@ -12,35 +12,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/timestamp_type.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/timestamp_type.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/types.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/types.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/value.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/value.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/concurrent_inserts.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/concurrent_inserts.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1744823230237.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1744823230237.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746314259758.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746314259758.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324550181.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324550181.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324692974.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324692974.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324735440.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324735440.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324898068.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324898068.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324965057.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324965057.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325151376.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325151376.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325601548.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325601548.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325627846.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325627846.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -908,7 +880,7 @@
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
       <workItem from="1746260136063" duration="20605000" />
-      <workItem from="1746326420823" duration="4477000" />
+      <workItem from="1746326420823" duration="4783000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
