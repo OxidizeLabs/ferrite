@@ -13,20 +13,16 @@
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/expression_parser.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expression_parser.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/execution/plans/create_table_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/plans/create_table_plan.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/planner/schema_manager.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/schema_manager.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/types.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/types.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/boolean_type.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/boolean_type.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/types_db/value.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/value.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.log" beforeDir="false" afterPath="$PROJECT_DIR$/test.log" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.sql" beforeDir="false" afterPath="$PROJECT_DIR$/test.sql" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:dev" />
+  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:test" />
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
@@ -149,6 +145,7 @@
     "Cargo.Test position_expression.executor": "Run",
     "Cargo.Test projection_plan.executor": "Run",
     "Cargo.Test qualified_wildcard_expression.executor": "Run",
+    "Cargo.Test rid::tests.executor": "Run",
     "Cargo.Test schema.executor": "Run",
     "Cargo.Test schema_manager.executor": "Run",
     "Cargo.Test server::thread_pool::tests::test_auto_scaling.executor": "Run",
@@ -225,6 +222,7 @@
     "Cargo.Test tuple_expression.executor": "Run",
     "Cargo.Test types.executor": "Run",
     "Cargo.Test types_db::struct_type::tests::test_struct_equality.executor": "Run",
+    "Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type.executor": "Run",
     "Cargo.Test types_db::value::basic_behavior_tests::test_vector_comparisons.executor": "Run",
     "Cargo.Test types_db::value::unit_tests::test_serialize_val.executor": "Run",
     "Cargo.Test types_db::value::unit_tests::test_serialize_value.executor": "Run",
@@ -249,7 +247,7 @@
     "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
     "org.rust.first.attach.projects": "true",
     "run.code.analysis.last.selected.profile": "pProject Default",
-    "settings.editor.selected.configurable": "language.rust.cargo.check",
+    "settings.editor.selected.configurable": "language.rust",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -714,8 +712,8 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test index_iterator_mem" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::index::index_iterator_mem" />
+    <configuration name="Test rid::tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib common::rid::tests" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -731,10 +729,14 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test index_scan_executor" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib sql::execution::executors::index_scan_executor" />
+    <configuration name="Test types_db::types::edge_cases::test_invalid_max_value_type" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="test" />
+      <option name="command" value="test --package tkdb --lib types_db::types::edge_cases::test_invalid_max_value_type -- --exact" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
+      <envs>
+        <env name="RUST_LOG" value="debug" />
+        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
+      </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -765,9 +767,7 @@
       <option name="backtrace" value="SHORT" />
       <option name="isRedirectInput" value="false" />
       <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
+      <method v="2" />
     </configuration>
     <configuration name="Tests in 'tests'" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
@@ -810,19 +810,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
+      <item itemvalue="Cargo.Test rid::tests" />
+      <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
       <item itemvalue="Cargo.Test create_table_plan" />
       <item itemvalue="Cargo.Test expression_parser::tests" />
-      <item itemvalue="Cargo.Test index_iterator_mem" />
-      <item itemvalue="Cargo.Test index_scan_executor" />
       <item itemvalue="Cargo.Tests in 'tests'" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
+        <item itemvalue="Cargo.Test rid::tests" />
         <item itemvalue="Cargo.Tests in 'tests'" />
         <item itemvalue="Cargo.Test create_table_plan" />
         <item itemvalue="Cargo.Test expression_parser::tests" />
-        <item itemvalue="Cargo.Test index_iterator_mem" />
-        <item itemvalue="Cargo.Test index_scan_executor" />
       </list>
     </recent_temporary>
   </component>
@@ -884,7 +884,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="18488000" />
+      <workItem from="1746260136063" duration="19415000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
