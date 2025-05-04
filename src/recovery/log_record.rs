@@ -350,14 +350,14 @@ mod tests {
         let schema = create_test_schema();
         let values = vec![Value::new(1), Value::new("test")];
         let rid = RID::new(1, 1);
-        Tuple::new(&values, schema, rid)
+        Tuple::new(&values, &schema, rid)
     }
 
     fn create_test_tuple_updated() -> Tuple {
         let schema = create_test_schema();
         let values = vec![Value::new(1), Value::new("updated")];
         let rid = RID::new(1, 1);
-        Tuple::new(&values, schema, rid)
+        Tuple::new(&values, &schema, rid)
     }
 
     #[test]
@@ -535,7 +535,7 @@ mod tests {
         let large_string = "a".repeat(1000);
         let values = vec![Value::new(1), Value::new(large_string)];
         let rid = RID::new(1, 1);
-        Tuple::new(&values, schema, rid)
+        Tuple::new(&values, &schema, rid)
     }
 
     #[test]

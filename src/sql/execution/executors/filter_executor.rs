@@ -256,7 +256,7 @@ impl FilterExecutor {
 
         // Create a tuple with just the aggregate value for evaluation
         let agg_schema = Schema::new(vec![agg_expr.get_return_type().clone()]);
-        let agg_tuple = Tuple::new(&vec![agg_value], agg_schema.clone(), RID::new(0, 0));
+        let agg_tuple = Tuple::new(&vec![agg_value], &agg_schema, RID::new(0, 0));
 
         // Now evaluate the predicate on this aggregate tuple
         let predicate = filter_expr.get_predicate();
@@ -682,10 +682,9 @@ mod tests {
                 Value::new(age),
                 Value::new(salary),
             ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
             let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
-                .insert_tuple(meta, &mut tuple, transaction_context.clone())
+                .insert_tuple_from_values(values, schema, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
     }
@@ -1356,7 +1355,7 @@ mod tests {
                 Value::new(age),
                 Value::new(salary),
             ];
-            let mut tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
             let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
                 .insert_tuple(meta, &mut tuple, transaction_context.clone())

@@ -140,7 +140,7 @@ mod tests {
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = create_test_schema();
         let values = vec![Value::new(42), Value::new("test")];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(1, 1));
+        let tuple = Tuple::new(&values, &schema, RID::new(1, 1));
         (tuple, schema)
     }
 

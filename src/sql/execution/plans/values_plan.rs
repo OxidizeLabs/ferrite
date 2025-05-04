@@ -123,7 +123,7 @@ impl ValueRow {
                 })
                 .collect();
 
-            let dummy_tuple = Tuple::new(&dummy_values, schema.clone(), Default::default());
+            let dummy_tuple = Tuple::new(&dummy_values, &schema, Default::default());
 
             // Evaluate each expression
             for (idx, expr) in self.expressions.iter().enumerate() {

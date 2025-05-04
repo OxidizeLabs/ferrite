@@ -1009,7 +1009,7 @@ mod test_utils {
 
     pub fn create_tuple(id: i32, value: &str, schema: &Schema) -> Tuple {
         let values = vec![Value::new(id), Value::new(value)];
-        Tuple::new(&values, schema.clone(), RID::new(0, 0))
+        Tuple::new(&values, &schema.clone(), RID::new(0, 0))
     }
 
     pub fn create_test_metadata() -> IndexInfo {

@@ -231,7 +231,7 @@ impl ExpressionOps for MethodExpression {
         temp_values.extend(left_tuple.get_values().iter().cloned());
         temp_values.extend(right_tuple.get_values().iter().cloned());
 
-        let temp_tuple = Tuple::new(&temp_values, temp_schema.clone(), RID::new(0, 0));
+        let temp_tuple = Tuple::new(&temp_values, &temp_schema, RID::new(0, 0));
 
         // Create a temporary expression that just returns the already evaluated object
         let temp_expr = Expression::Constant(ConstantExpression::new(
@@ -441,7 +441,7 @@ mod tests {
 
         let values = vec![Value::new("test string"), Value::new(42)];
 
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(1, 1));
+        let tuple = Tuple::new(&values, &schema, RID::new(1, 1));
         (tuple, schema)
     }
 
@@ -746,13 +746,13 @@ mod tests {
         // Create tuples
         let left_tuple = Tuple::new(
             &[Value::new("left value")],
-            left_schema.clone(),
+            &left_schema,
             RID::new(1, 1),
         );
 
         let right_tuple = Tuple::new(
             &[Value::new("right value")],
-            right_schema.clone(),
+            &right_schema,
             RID::new(2, 1),
         );
 

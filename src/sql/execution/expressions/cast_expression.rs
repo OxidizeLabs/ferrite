@@ -268,7 +268,7 @@ mod tests {
                 Value::new("test"),                 // VarChar
                 Value::new(9223372036854775807i64), // BigInt (i64::MAX)
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
         (tuple, schema)
@@ -401,7 +401,7 @@ mod tests {
         let schema = create_test_schema();
         let tuple = Tuple::new(
             &vec![Value::new(Val::Null)],
-            Schema::new(vec![
+            &Schema::new(vec![
                 // Use Integer type for the column, even though we'll store NULL in it
                 Column::new("null_col", TypeId::Integer),
             ]),

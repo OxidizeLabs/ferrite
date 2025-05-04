@@ -57,7 +57,7 @@ impl MockScanExecutor {
             }
 
             let rid = RID::new(i as PageId, 0);
-            let tuple = Arc::new(Tuple::new(&values, schema.clone(), rid));
+            let tuple = Arc::new(Tuple::new(&values, &schema, rid));
             mock_data.push((tuple, rid));
         }
 

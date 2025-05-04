@@ -244,7 +244,7 @@ impl ExpressionOps for BinaryOpExpression {
         self.evaluate(
             &Tuple::new(
                 &[left_val, right_val],
-                temp_schema.clone(),
+                &temp_schema,
                 left_tuple.get_rid(),
             ),
             &temp_schema,
@@ -359,7 +359,7 @@ mod tests {
                 Value::new(false), // bool_col
                 Value::new(""),    // string_col
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -410,7 +410,7 @@ mod tests {
                 Value::new(false), // bool_col
                 Value::new(""),    // string_col
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -444,7 +444,7 @@ mod tests {
                 Value::new(false), // bool_col
                 Value::new(""),    // string_col
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -476,7 +476,7 @@ mod tests {
                 Value::new(false), // bool_col
                 Value::new(""),    // string_col
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -533,7 +533,7 @@ mod tests {
                 Value::new(false), // bool_col
                 Value::new(""),    // string_col
             ],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
@@ -564,8 +564,8 @@ mod tests {
         let left_schema = Schema::new(vec![Column::new("left_col", TypeId::Integer)]);
         let right_schema = Schema::new(vec![Column::new("right_col", TypeId::Integer)]);
 
-        let left_tuple = Tuple::new(&[Value::new(5)], left_schema.clone(), RID::new(0, 0));
-        let right_tuple = Tuple::new(&[Value::new(3)], right_schema.clone(), RID::new(0, 0));
+        let left_tuple = Tuple::new(&[Value::new(5)], &left_schema, RID::new(0, 0));
+        let right_tuple = Tuple::new(&[Value::new(3)], &right_schema, RID::new(0, 0));
 
         let left_expr = create_constant_expr(Value::new(5), TypeId::Integer);
         let right_expr = create_constant_expr(Value::new(3), TypeId::Integer);

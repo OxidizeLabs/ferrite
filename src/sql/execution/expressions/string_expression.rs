@@ -166,7 +166,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_val(), &Val::VarLen("hello".to_string()));
@@ -187,7 +187,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_val(), &Val::VarLen("HELLO".to_string()));
@@ -208,7 +208,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());

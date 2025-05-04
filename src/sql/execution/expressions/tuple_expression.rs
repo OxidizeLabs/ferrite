@@ -102,7 +102,7 @@ mod tests {
     fn test_tuple_expression_evaluate() {
         // Create a schema and tuple for testing
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         // Create constant expressions for the tuple elements
         let const1 = Arc::new(Expression::Constant(ConstantExpression::new(

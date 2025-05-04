@@ -627,7 +627,7 @@ mod tests {
                 Column::new("id", TypeId::Integer),
                 Column::new("value", TypeId::Integer),
             ]);
-            Tuple::new(&[Value::new(1), Value::new(100)], schema, RID::new(0, 0))
+            Tuple::new(&[Value::new(1), Value::new(100)], &schema, RID::new(0, 0))
         }
 
         fn begin_transaction(

@@ -206,7 +206,7 @@ impl AbstractExecutor for WindowExecutor {
             // Create new tuple with row number
             let mut values = tuple.get_values().to_vec();
             values.push(Value::new((self.tuple_index + 1) as i32));
-            let new_tuple = Arc::new(Tuple::new(&values, self.plan.get_output_schema().clone(), *rid));
+            let new_tuple = Arc::new(Tuple::new(&values, &self.plan.get_output_schema(), *rid));
 
             // Advance indices
             self.tuple_index += 1;

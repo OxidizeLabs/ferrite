@@ -202,7 +202,7 @@ mod tests {
 
         // Create a schema and tuple for evaluation
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         // Evaluate the expression
         let result = position_expr.evaluate(&tuple, &schema).unwrap();
@@ -230,7 +230,7 @@ mod tests {
 
         // Create a schema and tuple for evaluation
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         // Evaluate the expression
         let result = position_expr.evaluate(&tuple, &schema).unwrap();
@@ -258,7 +258,7 @@ mod tests {
 
         // Create a schema and tuple for evaluation
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
 
         // Evaluate the expression
         let result = position_expr.evaluate(&tuple, &schema).unwrap();

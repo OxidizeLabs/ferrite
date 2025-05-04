@@ -883,7 +883,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], &schema, rid);
 
         assert_eq!(expr.evaluate(&tuple, &schema).unwrap(), value);
         assert_eq!(expr.get_children().len(), 0);
@@ -897,7 +897,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], schema.clone(), rid);
+        let tuple = Tuple::new(&*vec![], &schema, rid);
 
         // The actual evaluation will depend on your MockExpression implementation
         assert!(expr.evaluate(&tuple, &schema).is_ok());
@@ -943,7 +943,7 @@ mod unit_tests {
         ));
 
         let schema = Schema::new(vec![Column::new("salary", TypeId::Integer)]);
-        let tuple = Tuple::new(&*vec![Value::new(100)], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&*vec![Value::new(100)], &schema, RID::new(0, 0));
 
         // Window functions can't be evaluated on a single tuple
         assert!(window_expr.evaluate(&tuple, &schema).is_err());

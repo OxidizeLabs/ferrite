@@ -77,7 +77,7 @@ impl IndexInfo {
 
     pub fn create_dummy_key(&self) -> Tuple {
         let key_schema = self.get_key_schema();
-        Tuple::new(&[Value::new(0)], key_schema.clone(), RID::new(0, 0))
+        Tuple::new(&[Value::new(0)], &key_schema, RID::new(0, 0))
     }
 
     pub fn get_key_schema(&self) -> &Schema {

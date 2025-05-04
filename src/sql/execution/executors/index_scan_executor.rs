@@ -153,7 +153,7 @@ impl IndexScanExecutor {
                             match child.as_ref() {
                                 Expression::Comparison(comp_expr) => {
                                     if let Ok(value) = comp_expr.get_right().evaluate(
-                                        &Tuple::new(&vec![], Schema::new(vec![]), RID::new(0, 0)),
+                                        &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
                                         &Schema::new(vec![]),
                                     ) {
                                         match comp_expr.get_comp_type() {
@@ -203,7 +203,7 @@ impl IndexScanExecutor {
             }
             Expression::Comparison(comp_expr) => {
                 if let Ok(value) = comp_expr.get_right().evaluate(
-                    &Tuple::new(&vec![], Schema::new(vec![]), RID::new(0, 0)),
+                    &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
                     &Schema::new(vec![]),
                 ) {
                     match comp_expr.get_comp_type() {
@@ -297,11 +297,11 @@ impl IndexScanExecutor {
 
         let start_tuple = final_start
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
 
         let end_tuple = final_end
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], key_schema.clone(), RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
 
         debug!(
             "Scan bounds: start={:?} (incl={}), end={:?} (incl={})",
@@ -609,7 +609,7 @@ mod index_scan_executor_tests {
             for i in 1..=10 {
                 let mut tuple = Tuple::new(
                     &vec![Value::new(i as i32), Value::new(i as i32 * 10)],
-                    schema.clone(),
+                    &schema,
                     RID::new(0, i),
                 );
                 let tuple_meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
@@ -654,7 +654,7 @@ mod index_scan_executor_tests {
             Value::new(id),      // id column
             Value::new(id * 10), // value column
         ];
-        Tuple::new(&values, schema.clone(), RID::new(0, 0))
+        Tuple::new(&values, &schema, RID::new(0, 0))
     }
 
     // Add this new struct for testing

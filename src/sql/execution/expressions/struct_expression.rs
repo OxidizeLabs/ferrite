@@ -181,7 +181,7 @@ mod tests {
             Value::new(30),         // age
             Value::new(50000.0),    // salary
         ];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(1, 1));
+        let tuple = Tuple::new(&values, &schema, RID::new(1, 1));
         (tuple, schema)
     }
 

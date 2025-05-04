@@ -122,7 +122,7 @@ mod tests {
         let schema = Schema::new(vec![]);
         let tuple = Tuple::new(
             &Vec::new(),
-            schema.clone(),
+            &schema,
             crate::common::rid::RID::new(0, 0),
         );
 

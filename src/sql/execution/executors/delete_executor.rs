@@ -354,7 +354,7 @@ mod tests {
         for (id, value) in test_data {
             let mut tuple = Tuple::new(
                 &vec![Value::new(id), Value::new(value.to_string())],
-                schema.clone(),
+                &schema.clone(),
                 Default::default(),
             );
 

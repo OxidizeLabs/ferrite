@@ -159,7 +159,7 @@ mod tests {
         let schema = Schema::new(vec![Column::new("ts", TypeId::Timestamp)]);
         let tuple = Tuple::new(
             &vec![Value::new(timestamp)],
-            schema.clone(),
+            &schema,
             crate::common::rid::RID::new(0, 0),
         );
         (tuple, schema)

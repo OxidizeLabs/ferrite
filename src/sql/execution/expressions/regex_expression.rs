@@ -293,7 +293,7 @@ mod tests {
     use crate::types_db::type_id::TypeId;
 
     fn create_test_tuple(values: Vec<Value>, schema: Schema) -> Tuple {
-        Tuple::new(&values, schema, RID::new(0, 0))
+        Tuple::new(&values, &schema, RID::new(0, 0))
     }
 
     fn create_test_schema() -> Schema {

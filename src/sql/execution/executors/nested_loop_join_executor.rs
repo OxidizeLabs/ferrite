@@ -78,7 +78,7 @@ impl NestedLoopJoinExecutor {
 
         Arc::new(Tuple::new(
             &joined_values,
-            self.get_output_schema().clone(),
+            &self.get_output_schema(),
             RID::new(0, 0), // Use a placeholder RID for joined tuples
         ))
     }
@@ -365,7 +365,7 @@ mod tests {
                 .unwrap();
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
@@ -374,7 +374,7 @@ mod tests {
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()
@@ -572,7 +572,7 @@ mod tests {
                 .unwrap();
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
@@ -581,7 +581,7 @@ mod tests {
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()
@@ -721,7 +721,7 @@ mod tests {
             ];
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
@@ -834,7 +834,7 @@ mod tests {
             ];
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, users_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
@@ -843,7 +843,7 @@ mod tests {
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, posts_schema.clone(), RID::new(0, 0));
+                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()

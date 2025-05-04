@@ -264,7 +264,7 @@ mod tests {
             Value::new(Val::Null),
         ];
 
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)
     }
 
@@ -442,7 +442,7 @@ mod tests {
     fn test_trim_empty_string() {
         let schema = Schema::new(vec![Column::new("col1", TypeId::VarChar)]);
         let values = vec![Value::new("")];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
 
         // Create a column reference expression
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
@@ -470,7 +470,7 @@ mod tests {
     fn test_trim_multiple_chars() {
         let schema = Schema::new(vec![Column::new("col1", TypeId::VarChar)]);
         let values = vec![Value::new("abc123abc")];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
 
         // Create a column reference expression
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(

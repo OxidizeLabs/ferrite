@@ -196,7 +196,7 @@ mod tests {
             Value::new("test string"), // str_col
             Value::new(3.14),          // dec_col
         ];
-        let tuple = Tuple::new(&values, schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)
     }
 
@@ -293,10 +293,10 @@ mod tests {
         let schema1 = Schema::new(vec![Column::new("left_int", TypeId::Integer)]);
         let schema2 = Schema::new(vec![Column::new("right_str", TypeId::VarChar)]);
 
-        let left_tuple = Tuple::new(&vec![Value::new(123)], schema1.clone(), RID::new(0, 0));
+        let left_tuple = Tuple::new(&vec![Value::new(123)], &schema1, RID::new(0, 0));
         let right_tuple = Tuple::new(
             &vec![Value::new("right value")],
-            schema2.clone(),
+            &schema2,
             RID::new(0, 0),
         );
 

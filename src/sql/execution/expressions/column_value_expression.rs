@@ -204,7 +204,7 @@ mod tests {
                 Value::new(true),
                 Value::new(3.14),
             ],
-            Schema::new(columns),
+            &Schema::new(columns),
             RID::new(0, 0),
         )
     }
@@ -259,7 +259,7 @@ mod tests {
                     Value::new(true),
                     Value::new(1.1),
                 ],
-                left_schema.clone(),
+                &left_schema,
                 Default::default(),
             );
 
@@ -270,7 +270,7 @@ mod tests {
                     Value::new(false),
                     Value::new(2.2),
                 ],
-                right_schema.clone(),
+                &right_schema,
                 Default::default(),
             );
 

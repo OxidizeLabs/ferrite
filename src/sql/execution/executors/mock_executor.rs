@@ -56,7 +56,7 @@ impl AbstractExecutor for MockExecutor {
         let (values, rid) = &self.tuples[self.current_tuple_idx];
         self.current_tuple_idx += 1;
         
-        let tuple = Arc::new(Tuple::new(values, self.schema.clone(), *rid));
+        let tuple = Arc::new(Tuple::new(values, &self.schema, *rid));
 
         Some((tuple, *rid))
     }

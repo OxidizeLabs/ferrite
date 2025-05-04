@@ -204,7 +204,7 @@ mod tests {
 
     fn create_empty_tuple() -> (Tuple, Schema) {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&[], schema.clone(), RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
         (tuple, schema)
     }
 

@@ -168,7 +168,7 @@ mod tests {
             Value::new(2),      // other.id
             Value::new("data"), // other.data
         ];
-        Tuple::new(&values, schema, RID::new(0, 0))
+        Tuple::new(&values, &schema, RID::new(0, 0))
     }
 
     #[test]
@@ -208,12 +208,12 @@ mod tests {
 
         let left_tuple = Tuple::new(
             &vec![Value::new(1), Value::new("John")],
-            left_schema.clone(),
+            &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
             &vec![Value::new(25), Value::new("data")],
-            right_schema.clone(),
+            &right_schema,
             RID::new(0, 0),
         );
 
@@ -318,7 +318,7 @@ mod tests {
 
         let tuple = Tuple::new(
             &vec![Value::new(1), Value::new("test"), Value::new(2)],
-            schema.clone(),
+            &schema,
             RID::new(0, 0),
         );
 
