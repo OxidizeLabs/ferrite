@@ -2,6 +2,7 @@ use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -11,7 +12,7 @@ pub struct InsertNode {
     output_schema: Arc<Schema>,
     table_oid: TableOidT,
     table_name: String,
-    tuples: Vec<Arc<Tuple>>,
+    values: Vec<Vec<Value>>,
     children: Vec<PlanNode>,
 }
 
@@ -20,14 +21,14 @@ impl InsertNode {
         output_schema: Schema,
         table_oid: TableOidT,
         table_name: String,
-        tuples: Vec<Arc<Tuple>>,
+        values: Vec<Vec<Value>>,
         children: Vec<PlanNode>,
     ) -> Self {
         Self {
             output_schema: Arc::new(output_schema),
             table_oid,
             table_name,
-            tuples,
+            values,
             children,
         }
     }
@@ -40,12 +41,12 @@ impl InsertNode {
         &self.table_name
     }
 
-    pub fn get_input_tuples(&self) -> &Vec<Arc<Tuple>> {
-        &self.tuples
+    pub fn get_input_values(&self) -> &Vec<Vec<Value>> {
+        &self.values
     }
 
-    pub fn get_input_tuples_mut(&mut self) -> &mut Vec<Arc<Tuple>> {
-        &mut self.tuples
+    pub fn get_input_values_mut(&mut self) -> &mut Vec<Vec<Value>> {
+        &mut self.values
     }
 }
 
@@ -101,16 +102,12 @@ mod tests {
             ])
         }
 
-        pub fn create_test_tuple(id: i32, name: &str, active: bool, schema: Schema) -> Arc<Tuple> {
-            Arc::new(Tuple::new(
-                &*vec![
-                    Value::new(id),
-                    Value::new(name.to_string()),
-                    Value::new(active),
-                ],
-                &schema,
-                Default::default(),
-            ))
+        pub fn create_test_values(id: i32, name: &str, active: bool) -> Vec<Value> {
+            vec![
+                Value::new(id),
+                Value::new(name.to_string()),
+                Value::new(active),
+            ]
         }
 
         pub fn create_values_plan(schema: Schema) -> PlanNode {
@@ -127,25 +124,25 @@ mod tests {
             let schema = create_test_schema();
             let table_oid = 1;
             let table_name = "test_table".to_string();
-            let tuples = vec![create_test_tuple(1, "test", true, schema.clone())];
+            let values = vec![create_test_values(1, "test", true)];
             let child = create_values_plan(schema.clone());
 
             let insert_node = InsertNode::new(
                 schema.clone(),
                 table_oid,
                 table_name.clone(),
-                tuples.clone(),
+                values.clone(),
                 vec![child],
             );
 
             assert_eq!(insert_node.get_table_oid(), table_oid);
             assert_eq!(insert_node.get_table_name(), table_name);
-            assert_eq!(insert_node.get_input_tuples(), &tuples);
+            assert_eq!(insert_node.get_input_values(), &values);
             assert_eq!(insert_node.get_type(), PlanType::Insert);
         }
 
         #[test]
-        fn test_empty_tuples_construction() {
+        fn test_empty_values_construction() {
             let schema = create_test_schema();
             let child = create_values_plan(schema.clone());
 
@@ -157,7 +154,7 @@ mod tests {
                 vec![child],
             );
 
-            assert!(insert_node.get_input_tuples().is_empty());
+            assert!(insert_node.get_input_values().is_empty());
         }
     }
 
@@ -296,17 +293,17 @@ mod tests {
         }
     }
 
-    mod tuple_handling {
+    mod value_handling {
         use super::helpers::*;
         use super::*;
 
         #[test]
-        fn test_multiple_tuples() {
+        fn test_multiple_values() {
             let schema = create_test_schema();
-            let tuples = vec![
-                create_test_tuple(1, "first", true, schema.clone()),
-                create_test_tuple(2, "second", false, schema.clone()),
-                create_test_tuple(3, "third", true, schema.clone()),
+            let values = vec![
+                create_test_values(1, "first", true),
+                create_test_values(2, "second", false),
+                create_test_values(3, "third", true),
             ];
             let child = create_values_plan(schema.clone());
 
@@ -314,34 +311,31 @@ mod tests {
                 schema,
                 1,
                 "test_table".to_string(),
-                tuples.clone(),
+                values.clone(),
                 vec![child],
             );
 
-            assert_eq!(insert_node.get_input_tuples(), &tuples);
-            assert_eq!(insert_node.get_input_tuples().len(), 3);
+            assert_eq!(insert_node.get_input_values(), &values);
+            assert_eq!(insert_node.get_input_values().len(), 3);
         }
 
         #[test]
-        fn test_tuple_data_integrity() {
+        fn test_value_data_integrity() {
             let schema = create_test_schema();
-            let tuple = create_test_tuple(42, "test_name", true, schema.clone());
-            let tuples = vec![tuple.clone()];
+            let test_values = create_test_values(42, "test_name", true);
+            let values = vec![test_values.clone()];
             let child = create_values_plan(schema.clone());
 
             let insert_node =
-                InsertNode::new(schema, 1, "test_table".to_string(), tuples, vec![child]);
+                InsertNode::new(schema, 1, "test_table".to_string(), values, vec![child]);
 
-            let stored_tuple = &insert_node.get_input_tuples()[0];
-            assert_eq!(stored_tuple, &tuple);
+            let stored_values = &insert_node.get_input_values()[0];
+            assert_eq!(stored_values, &test_values);
 
             // Verify individual values
-            assert_eq!(stored_tuple.get_value(0), Value::new(42));
-            assert_eq!(
-                stored_tuple.get_value(1),
-                Value::new("test_name".to_string())
-            );
-            assert_eq!(stored_tuple.get_value(2), Value::new(true));
+            assert_eq!(stored_values[0], Value::new(42));
+            assert_eq!(stored_values[1], Value::new("test_name".to_string()));
+            assert_eq!(stored_values[2], Value::new(true));
         }
     }
 }

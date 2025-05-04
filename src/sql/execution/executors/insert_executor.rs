@@ -131,11 +131,17 @@ impl AbstractExecutor for InsertExecutor {
                 };
 
                 let tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
+                let schema = self.plan.get_output_schema();
 
-                // Use TransactionalTableHeap's insert_tuple method
+                // Extract values from the tuple
+                let values: Vec<_> = (0..tuple.get_column_count())
+                    .map(|i| tuple.get_value(i).clone())
+                    .collect();
+
+                // Use insert_tuple_from_values instead of insert_tuple
                 match self
                     .txn_table_heap
-                    .insert_tuple(tuple_meta, &tuple, txn_ctx)
+                    .insert_tuple_from_values(values, schema, txn_ctx)
                 {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
@@ -320,7 +326,7 @@ mod tests {
                 .get_table_oidt()
         };
 
-        // Create insert plan
+        // Create insert plan with empty values vector (values come from child)
         let insert_plan = Arc::new(InsertNode::new(
             schema,
             table_oid,
