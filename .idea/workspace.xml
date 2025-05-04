@@ -13,9 +13,8 @@
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/boolean_type.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/boolean_type.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types_db/value.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/value.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -208,10 +207,14 @@
     "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_b_plus_tree_internal_page.executor": "Run",
     "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_and_get_key_value.executor": "Run",
     "Cargo.Test storage::page::page_types::b_plus_tree_internal_page::tests::test_insert_ordering.executor": "Run",
+    "Cargo.Test storage::page::page_types::table_page::capacity_tests::test_page_capacity.executor": "Run",
+    "Cargo.Test storage::page::page_types::table_page::unit_tests::test_page_full.executor": "Run",
+    "Cargo.Test storage::table::table_heap::tests::test_page_iteration.executor": "Run",
     "Cargo.Test storage::table::table_iterator::tests::test_table_iterator_transactions.executor": "Run",
     "Cargo.Test string_expression.executor": "Run",
     "Cargo.Test struct_type.executor": "Run",
     "Cargo.Test subquery_expression.executor": "Run",
+    "Cargo.Test table_heap.executor": "Run",
     "Cargo.Test test_runner.executor": "Run",
     "Cargo.Test tests::run_all_tests.executor": "Run",
     "Cargo.Test tests::run_ddl_tests.executor": "Run",
@@ -256,7 +259,7 @@
       <recent name="$PROJECT_DIR$/src/storage/page" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Test">
+  <component name="RunManager" selected="Cargo.Test Storage">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -648,7 +651,7 @@
         <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
+      <option name="channel" value="STABLE" />
       <option name="requiredFeatures" value="true" />
       <option name="allFeatures" value="false" />
       <option name="withSudo" value="false" />
@@ -678,8 +681,28 @@
       <option name="redirectInputPath" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="Test create_table_plan" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib sql::execution::plans::create_table_plan" />
+    <configuration name="Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::page::page_types::table_page::capacity_tests::test_page_capacity -- --exact" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs>
+        <env name="RUST_LOG" value="debug" />
+        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
+      </envs>
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test storage::page::page_types::table_page::unit_tests::test_page_full" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::page::page_types::table_page::unit_tests::test_page_full -- --exact" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -695,8 +718,8 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test expression_parser::tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib sql::execution::expression_parser::tests" />
+    <configuration name="Test storage::table::table_heap::tests::test_page_iteration" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::table::table_heap::tests::test_page_iteration -- --exact" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -712,8 +735,8 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test rid::tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib common::rid::tests" />
+    <configuration name="Test table_heap" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib storage::table::table_heap" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
       <option name="emulateTerminal" value="true" />
@@ -769,24 +792,6 @@
       <option name="redirectInputPath" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="Tests in 'tests'" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --test test_runner" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
     <list>
       <item itemvalue="Cargo.Run" />
       <item itemvalue="Cargo.Test Buffer" />
@@ -810,19 +815,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
-      <item itemvalue="Cargo.Test rid::tests" />
+      <item itemvalue="Cargo.Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" />
+      <item itemvalue="Cargo.Test storage::page::page_types::table_page::unit_tests::test_page_full" />
+      <item itemvalue="Cargo.Test storage::table::table_heap::tests::test_page_iteration" />
+      <item itemvalue="Cargo.Test table_heap" />
       <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
-      <item itemvalue="Cargo.Test create_table_plan" />
-      <item itemvalue="Cargo.Test expression_parser::tests" />
-      <item itemvalue="Cargo.Tests in 'tests'" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" />
+        <item itemvalue="Cargo.Test storage::page::page_types::table_page::unit_tests::test_page_full" />
+        <item itemvalue="Cargo.Test table_heap" />
+        <item itemvalue="Cargo.Test storage::table::table_heap::tests::test_page_iteration" />
         <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
-        <item itemvalue="Cargo.Test rid::tests" />
-        <item itemvalue="Cargo.Tests in 'tests'" />
-        <item itemvalue="Cargo.Test create_table_plan" />
-        <item itemvalue="Cargo.Test expression_parser::tests" />
       </list>
     </recent_temporary>
   </component>
@@ -884,7 +889,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="19415000" />
+      <workItem from="1746260136063" duration="20123000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
