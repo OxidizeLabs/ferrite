@@ -13,21 +13,20 @@
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/common/logger.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/common/logger.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sql/execution/expression_parser.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expression_parser.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/plans/create_table_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/plans/create_table_plan.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sql/planner/schema_manager.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/schema_manager.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/types.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/types.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/types_db/value.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/value.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test.log" beforeDir="false" afterPath="$PROJECT_DIR$/test.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test.sql" beforeDir="false" afterPath="$PROJECT_DIR$/test.sql" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:test" />
+  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:dev" />
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
@@ -118,11 +117,13 @@
     "Cargo.Test concurrency::watermark::tests::test_update_commit_ts_and_get_watermark.executor": "Run",
     "Cargo.Test constant_value_expression.executor": "Run",
     "Cargo.Test convert_expression.executor": "Run",
+    "Cargo.Test create_table_plan.executor": "Run",
     "Cargo.Test datetime_expression.executor": "Run",
     "Cargo.Test db_instance.executor": "Run",
     "Cargo.Test execution_engine.executor": "Run",
     "Cargo.Test execution_engine::tests.executor": "Run",
     "Cargo.Test expression_parser.executor": "Run",
+    "Cargo.Test expression_parser::tests.executor": "Run",
     "Cargo.Test expressions.executor": "Run",
     "Cargo.Test filter_executor.executor": "Run",
     "Cargo.Test filter_expression.executor": "Run",
@@ -257,7 +258,7 @@
       <recent name="$PROJECT_DIR$/src/storage/page" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Test Types">
+  <component name="RunManager" selected="Cargo.Test">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -679,6 +680,40 @@
       <option name="redirectInputPath" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="Test create_table_plan" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib sql::execution::plans::create_table_plan" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test expression_parser::tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib sql::execution::expression_parser::tests" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="Test index_iterator_mem" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="command" value="test --package tkdb --lib storage::index::index_iterator_mem" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
@@ -700,44 +735,6 @@
       <option name="command" value="test --package tkdb --lib sql::execution::executors::index_scan_executor" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test log_manager" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib recovery::log_manager" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries -- --exact" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
-      </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -773,6 +770,7 @@
       </method>
     </configuration>
     <configuration name="Tests in 'tests'" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="test" />
       <option name="command" value="test --package tkdb --test test_runner" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs />
@@ -812,19 +810,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
+      <item itemvalue="Cargo.Test create_table_plan" />
+      <item itemvalue="Cargo.Test expression_parser::tests" />
       <item itemvalue="Cargo.Test index_iterator_mem" />
       <item itemvalue="Cargo.Test index_scan_executor" />
       <item itemvalue="Cargo.Tests in 'tests'" />
-      <item itemvalue="Cargo.Test log_manager" />
-      <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
     </list>
     <recent_temporary>
       <list>
         <item itemvalue="Cargo.Tests in 'tests'" />
+        <item itemvalue="Cargo.Test create_table_plan" />
+        <item itemvalue="Cargo.Test expression_parser::tests" />
         <item itemvalue="Cargo.Test index_iterator_mem" />
         <item itemvalue="Cargo.Test index_scan_executor" />
-        <item itemvalue="Cargo.Test log_manager" />
-        <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_complex_queries" />
       </list>
     </recent_temporary>
   </component>
@@ -886,7 +884,7 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="16602000" />
+      <workItem from="1746260136063" duration="18488000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />

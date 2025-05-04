@@ -1498,7 +1498,7 @@ mod unit_tests {
         let serialized_string = bincode::serialize(&val_string).expect("Serialization failed");
         assert_eq!(
             serialized_string,
-            vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]
+            vec![11, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111]
         ); // Binary format for the string
 
         let val_vector = Val::Vector(vec![

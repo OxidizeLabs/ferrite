@@ -70,6 +70,8 @@ mod tests {
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
             Column::new("salary", TypeId::Decimal),
+            Column::new("date", TypeId::Date),
+
         ];
         Schema::new(columns)
     }
@@ -89,17 +91,21 @@ mod tests {
 
         // Verify output schema
         let output_schema = plan_node.get_output_schema();
-        assert_eq!(output_schema.get_columns().len(), 4);
+        assert_eq!(output_schema.get_columns().len(), 5);
         assert_eq!(output_schema.get_columns()[0].get_name(), "id");
         assert_eq!(output_schema.get_columns()[1].get_name(), "name");
         assert_eq!(output_schema.get_columns()[2].get_name(), "age");
         assert_eq!(output_schema.get_columns()[3].get_name(), "salary");
+        assert_eq!(output_schema.get_columns()[4].get_name(), "date");
+
 
         // Verify column types
         assert_eq!(output_schema.get_columns()[0].get_type(), TypeId::Integer);
         assert_eq!(output_schema.get_columns()[1].get_type(), TypeId::VarChar);
         assert_eq!(output_schema.get_columns()[2].get_type(), TypeId::Integer);
         assert_eq!(output_schema.get_columns()[3].get_type(), TypeId::Decimal);
+        assert_eq!(output_schema.get_columns()[4].get_type(), TypeId::Date);
+
     }
 
     #[test]
