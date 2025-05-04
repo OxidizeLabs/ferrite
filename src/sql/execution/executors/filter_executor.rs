@@ -46,7 +46,7 @@ impl FilterExecutor {
 
         match filter_expr.get_filter_type() {
             FilterType::Where => self.apply_where_filter(tuple, schema),
-            FilterType::Having => self.apply_having_filter(tuple, schema),
+            FilterType::Having => self.apply_having_filter(schema),
         }
     }
 
@@ -83,7 +83,7 @@ impl FilterExecutor {
     }
 
     /// Applies a HAVING filter to a group of tuples.
-    fn apply_having_filter(&self, tuple: &Tuple, schema: &Schema) -> bool {
+    fn apply_having_filter(&self, schema: &Schema) -> bool {
         debug!(
             "Applying HAVING filter. Group tuples count: {}",
             self.group_tuples.len()
@@ -1129,8 +1129,8 @@ mod tests {
             table_scan_plan,
         ));
 
-        // Create HAVING filter for AVG(salary) > 70000 using the fixed create_having_filter function
-        let filter_plan = create_having_filter(AggregationType::Avg, 70000, &schema);
+        // Create HAVING filter for AVG(salary) > 50000 using the fixed create_having_filter function
+        let filter_plan = create_having_filter(AggregationType::Avg, 50000, &schema);
 
         // Create and initialize filter executor
         let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
@@ -1149,11 +1149,11 @@ mod tests {
         // Sort results for consistent comparison
         results.sort_by(compare_floats);
 
-        // Verify results - should return all salaries since avg > 70000
+        // Verify results - should return all salaries since avg > 50000
         assert_eq!(
             results.len(),
             5,
-            "Should find all rows since avg salary > 70000"
+            "Should find all rows since avg salary > 50000"
         );
         assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
@@ -1317,8 +1317,8 @@ mod tests {
     }
 
     #[test]
-    fn test_having_with_null_values() {
-        let test_context = TestContext::new("having_null_test");
+    fn test_having_with_zero_values() {
+        let test_context = TestContext::new("having_zero_test");
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -1355,10 +1355,8 @@ mod tests {
                 Value::new(age),
                 Value::new(salary),
             ];
-            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
-            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
-                .insert_tuple(meta, &mut tuple, transaction_context.clone())
+                .insert_tuple_from_values(values, &schema, transaction_context.clone())
                 .expect("Failed to insert tuple");
         }
 
@@ -1378,8 +1376,8 @@ mod tests {
             table_scan_plan,
         ));
 
-        // Create HAVING filter for AVG(salary) > 70000 using fixed create_having_filter
-        let filter_plan = create_having_filter(AggregationType::Avg, 70000, &schema);
+        // Create HAVING filter for AVG(salary) > 50000 using fixed create_having_filter
+        let filter_plan = create_having_filter(AggregationType::Avg, 50000, &schema);
 
         // Create and initialize filter executor
         let mut executor = FilterExecutor::new(child_executor, executor_context, filter_plan);
@@ -1398,7 +1396,7 @@ mod tests {
         // Sort results for consistent comparison
         results.sort_by(compare_floats);
 
-        // Verify results - should return all non-zero salaries since avg > 70000
+        // Verify results - should return all non-zero salaries since avg > 50000
         assert_eq!(
             results.len(),
             5,

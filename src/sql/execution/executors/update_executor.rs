@@ -167,6 +167,7 @@ impl AbstractExecutor for UpdateExecutor {
             let output_schema = self.plan.get_output_schema();
 
             // Apply the updates to the tuple
+            let mut values = tuple.get_values();
             for (i, expr) in target_expressions.iter().step_by(2).enumerate() {
                 let col_idx = match expr.as_ref() {
                     Expression::ColumnRef(col_ref) => col_ref.get_column_index(),
@@ -178,9 +179,11 @@ impl AbstractExecutor for UpdateExecutor {
                     .evaluate(&tuple, output_schema)
                     .expect("Failed to evaluate expression");
 
-                let mut values = tuple.get_values();
                 values[col_idx] = new_value;
             }
+
+            // Create a new tuple with the updated values
+            let updated_tuple = Arc::new(Tuple::new(&values, self.plan.get_output_schema(), rid));
 
             // Create tuple meta
             let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
@@ -188,13 +191,13 @@ impl AbstractExecutor for UpdateExecutor {
             // Update the tuple using TransactionalTableHeap
             match self
                 .table_heap
-                .update_tuple(&tuple_meta, &tuple, rid, txn_ctx)
+                .update_tuple(&tuple_meta, &updated_tuple, rid, txn_ctx)
             {
                 Ok(new_rid) => {
                     debug!("Successfully updated tuple: {:?}", new_rid);
                     // Add the RID to our set of updated tuples
                     self.updated_rids.insert(rid);
-                    return Some((tuple, new_rid));
+                    return Some((updated_tuple, new_rid));
                 }
                 Err(e) => {
                     error!(
@@ -399,10 +402,9 @@ mod tests {
                 Value::new(name.to_string()),
                 Value::new(age),
             ];
-            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
             let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             table_heap
-                .insert_tuple(meta, &mut tuple, transaction_context.clone())
+                .insert_tuple_from_values(values, &schema, transaction_context.clone())
                 .unwrap();
         }
     }
