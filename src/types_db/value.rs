@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use chrono::NaiveDateTime;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
@@ -596,6 +597,13 @@ impl Value {
             sqlparser::ast::Value::Placeholder(s) => Ok(s.clone()),
             _ => Err(format!("Cannot convert {:?} to string", value)),
         }
+    }
+
+    /// Returns a technical representation of the value (e.g., "TIMESTAMP(42)")
+    pub fn technical_display(&self) -> String {
+        // Use the appropriate type's technical_display method
+        let type_instance = crate::types_db::types::get_instance(self.type_id_);
+        type_instance.technical_display(self)
     }
 }
 
@@ -1300,62 +1308,9 @@ impl<T: Into<Val>> From<T> for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match &self.value_ {
-            Val::Boolean(b) => write!(f, "{}", b),
-            Val::TinyInt(i) => write!(f, "{}", i),
-            Val::SmallInt(i) => write!(f, "{}", i),
-            Val::Integer(i) => write!(f, "{}", i),
-            Val::BigInt(i) => write!(f, "{}", i),
-            Val::Decimal(d) => write!(f, "{}", d),
-            Val::Float(fl) => write!(f, "{}", fl),
-            Val::Timestamp(t) => write!(f, "{}", t),
-            Val::Date(d) => write!(f, "DATE({})", d),
-            Val::Time(t) => write!(f, "TIME({})", t),
-            Val::Interval(i) => write!(f, "INTERVAL({})", i),
-            Val::VarLen(s) => write!(f, "{}", s),
-            Val::ConstLen(s) => write!(f, "{}", s),
-            Val::Binary(b) => write!(f, "BINARY[{} bytes]", b.len()),
-            Val::JSON(j) => write!(f, "{}", j),
-            Val::UUID(u) => write!(f, "{}", u),
-            Val::Vector(v) => {
-                write!(f, "[")?;
-                for (i, val) in v.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", val)?;
-                }
-                write!(f, "]")
-            }
-            Val::Array(a) => {
-                write!(f, "ARRAY[")?;
-                for (i, val) in a.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", val)?;
-                }
-                write!(f, "]")
-            }
-            Val::Enum(id, name) => write!(f, "ENUM({}: {})", id, name),
-            Val::Point(x, y) => write!(f, "POINT({}, {})", x, y),
-            Val::Null => write!(f, "NULL"),
-            Val::Struct => {
-                if let Some(values) = &self.struct_data {
-                    write!(f, "{{")?;
-                    // This assumes field names are stored elsewhere
-                    for (i, val) in values.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{}", val)?;
-                    }
-                    write!(f, "}}")
-                } else {
-                    write!(f, "{{EMPTY STRUCT}}")
-                }
-            }
-        }
+        // Use the appropriate type's to_string method for human-readable display
+        let type_instance = crate::types_db::types::get_instance(self.type_id_);
+        write!(f, "{}", type_instance.to_string(self))
     }
 }
 

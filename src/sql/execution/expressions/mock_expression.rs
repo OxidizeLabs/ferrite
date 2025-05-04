@@ -28,7 +28,11 @@ impl MockExpression {
             TypeId::Integer => Value::new(42i32),
             TypeId::BigInt => Value::new(42i64),
             TypeId::Decimal => Value::new(42.0f64),
-            TypeId::Timestamp => Value::new(42u64),
+            TypeId::Timestamp => {
+                // Format timestamp as "0 days 0:0:42 UTC"
+                let val = Val::Timestamp(42u64);
+                Value::new_with_type(val, TypeId::Timestamp)
+            },
             TypeId::VarChar => Value::new(name.clone()),
             TypeId::Vector => Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
             TypeId::Invalid => Value::new(Val::Null),

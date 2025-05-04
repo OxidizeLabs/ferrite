@@ -271,10 +271,12 @@ impl LogicalPlanBuilder {
 
             // Apply HAVING clause if it exists
             if let Some(having) = &select.having {
-                // Use the schema after aggregation for parsing the HAVING clause
+                // Use the original schema for parsing the HAVING clause instead of the aggregate schema
+                // This ensures columns like 'age' can be found when used inside aggregate functions
                 let having_expr = self
                     .expression_parser
-                    .parse_expression(having, &agg_schema_clone)?;
+                    .parse_expression(having, &schema)?;
+                
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name

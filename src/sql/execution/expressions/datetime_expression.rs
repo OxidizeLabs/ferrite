@@ -1021,12 +1021,13 @@ mod tests {
         ])
     }
 
-    fn create_test_tuple() -> Arc<Tuple> {
-        let tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
-        let mut values = tuple.get_values();
-        values.push(Value::new("2024-01-01T12:30:45Z"));
-        values.push(Value::new(42));
-        Arc::from(tuple)
+    fn create_test_tuple() -> Tuple {
+        let schema = create_test_schema();
+        let values = vec![
+            Value::new("2024-01-01T12:30:45Z"),
+            Value::new(42)
+        ];
+        Tuple::new(&values, schema, RID::new(0, 0))
     }
 
     #[test]
@@ -1352,15 +1353,11 @@ mod tests {
         let left_schema = Schema::new(vec![Column::new("left_ts", TypeId::Timestamp)]);
         let right_schema = Schema::new(vec![Column::new("right_ts", TypeId::Timestamp)]);
 
-        let mut left_tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
-        left_tuple
-            .get_values_mut()
-            .push(Value::new("2024-01-01T12:30:45Z"));
+        let left_values = vec![Value::new("2024-01-01T12:30:45Z")];
+        let right_values = vec![Value::new("2024-02-15T14:20:30Z")];
 
-        let mut right_tuple = Tuple::new(&[], Schema::new(vec![]), RID::new(0, 0));
-        right_tuple
-            .get_values_mut()
-            .push(Value::new("2024-02-15T14:20:30Z"));
+        let left_tuple = Tuple::new(&left_values, left_schema.clone(), RID::new(0, 0));
+        let right_tuple = Tuple::new(&right_values, right_schema.clone(), RID::new(0, 0));
 
         // Test date_trunc with left tuple column
         let left_trunc = DateTimeExpression::new(

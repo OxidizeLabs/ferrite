@@ -173,6 +173,38 @@ pub trait Type {
     fn min(&self, other: &Value) -> Value;
     fn max(&self, other: &Value) -> Value;
     fn to_string(&self, val: &Value) -> String;
+    fn technical_display(&self, val: &Value) -> String {
+        match val.get_val() {
+            Val::Boolean(b) => format!("BOOLEAN({})", b),
+            Val::TinyInt(i) => format!("TINYINT({})", i),
+            Val::SmallInt(i) => format!("SMALLINT({})", i),
+            Val::Integer(i) => format!("INTEGER({})", i),
+            Val::BigInt(i) => format!("BIGINT({})", i),
+            Val::Decimal(d) => format!("DECIMAL({})", d),
+            Val::Float(fl) => format!("FLOAT({})", fl),
+            Val::Timestamp(t) => format!("TIMESTAMP({})", t),
+            Val::Date(d) => format!("DATE({})", d),
+            Val::Time(t) => format!("TIME({})", t),
+            Val::Interval(i) => format!("INTERVAL({})", i),
+            Val::VarLen(s) => format!("VARCHAR(\"{}\")", s),
+            Val::ConstLen(s) => format!("CHAR(\"{}\")", s),
+            Val::Binary(b) => format!("BINARY[{} bytes]", b.len()),
+            Val::JSON(j) => format!("JSON({})", j),
+            Val::UUID(u) => format!("UUID({})", u),
+            Val::Vector(v) => {
+                let type_name = type_id_to_string(self.get_type_id());
+                format!("{}[{} items]", type_name, v.len())
+            }
+            Val::Array(a) => {
+                let type_name = type_id_to_string(self.get_type_id());
+                format!("{}[{} items]", type_name, a.len())
+            }
+            Val::Enum(id, name) => format!("ENUM({}: {})", id, name),
+            Val::Point(x, y) => format!("POINT({}, {})", x, y),
+            Val::Null => "NULL".to_string(),
+            Val::Struct => format!("STRUCT"),
+        }
+    }
     fn sqrt(&self, _val: &Value) -> Value {
         Value::new(Val::Null)
     }
