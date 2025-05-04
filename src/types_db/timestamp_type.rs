@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};

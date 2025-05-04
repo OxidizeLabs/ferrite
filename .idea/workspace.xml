@@ -13,8 +13,34 @@
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/page/page_types/table_page.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/table/table_heap.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/table/table_heap.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/datetime_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/execution/expressions/mock_expression.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/plan_builder.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/timestamp_type.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/timestamp_type.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/types.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/types.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types_db/value.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/types_db/value.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/concurrent_inserts.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/concurrent_inserts.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1744823230237.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1744823230237.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746314259758.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746314259758.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324550181.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324550181.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324692974.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324692974.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324735440.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324735440.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324898068.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324898068.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324965057.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746324965057.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325151376.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325151376.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325601548.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325601548.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325627846.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/data/test_1746325627846.log" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -183,8 +209,10 @@
     "Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_null_comparisons.executor": "Run",
     "Cargo.Test sql::execution::expressions::comparison_expression::unit_tests::test_numeric_comparisons.executor": "Run",
     "Cargo.Test sql::execution::expressions::convert_expression::tests::test_convert_with_join.executor": "Run",
+    "Cargo.Test sql::execution::expressions::datetime_expression::tests::test_date_part.executor": "Run",
     "Cargo.Test sql::execution::expressions::filter_expression::tests::test_having_clause.executor": "Run",
     "Cargo.Test sql::execution::expressions::filter_expression::tests::test_validation.executor": "Run",
+    "Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types.executor": "Run",
     "Cargo.Test sql::execution::expressions::overlay_expression::tests::test_basic_overlay.executor": "Run",
     "Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_basic_aggregations.executor": "Run",
     "Cargo.Test sql::execution::plans::abstract_plan::basic_behaviour::test_simple_selects.executor": "Run",
@@ -197,6 +225,7 @@
     "Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_basic_display.executor": "Run",
     "Cargo.Test sql::execution::plans::filter_plan::tests::string_representation::test_nested_filters_display.executor": "Run",
     "Cargo.Test sql::execution::plans::topn_plan::tests::test_topn_node_display.executor": "Run",
+    "Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates.executor": "Run",
     "Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_plan_aggregate_column_names.executor": "Run",
     "Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_group_by_with_aggregates.executor": "Run",
     "Cargo.Test sql::planner::plan_builder::tests::group_by_tests::test_simple_group_by.executor": "Run",
@@ -225,6 +254,7 @@
     "Cargo.Test tuple_expression.executor": "Run",
     "Cargo.Test types.executor": "Run",
     "Cargo.Test types_db::struct_type::tests::test_struct_equality.executor": "Run",
+    "Cargo.Test types_db::timestamp_type::tests::test_timestamp_to_string.executor": "Run",
     "Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type.executor": "Run",
     "Cargo.Test types_db::value::basic_behavior_tests::test_vector_comparisons.executor": "Run",
     "Cargo.Test types_db::value::unit_tests::test_serialize_val.executor": "Run",
@@ -250,7 +280,7 @@
     "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
     "org.rust.first.attach.projects": "true",
     "run.code.analysis.last.selected.profile": "pProject Default",
-    "settings.editor.selected.configurable": "language.rust",
+    "settings.editor.selected.configurable": "language.rust.cargo.check",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -259,7 +289,10 @@
       <recent name="$PROJECT_DIR$/src/storage/page" />
     </key>
   </component>
-  <component name="RunManager" selected="Cargo.Test Storage">
+  <component name="RsExternalLinterProjectSettings">
+    <option name="channel" value="stable" />
+  </component>
+  <component name="RunManager" selected="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -283,7 +316,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -304,7 +336,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -324,7 +355,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -344,7 +374,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -364,7 +393,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -384,7 +412,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -404,7 +431,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -424,7 +450,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -444,7 +469,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -464,7 +488,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -484,7 +507,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -504,7 +526,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -525,7 +546,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -546,7 +566,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -567,7 +586,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -588,7 +606,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -608,7 +625,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -624,11 +640,11 @@
       </method>
     </configuration>
     <configuration name="Test Sql::planner" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+      <option name="buildProfileId" value="test" />
       <option name="command" value="test --package tkdb --lib sql::planner" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -648,7 +664,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="STABLE" />
@@ -668,7 +683,6 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
@@ -681,85 +695,90 @@
       <option name="redirectInputPath" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::page::page_types::table_page::capacity_tests::test_page_capacity -- --exact" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs>
-        <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
-      </envs>
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test storage::page::page_types::table_page::unit_tests::test_page_full" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::page::page_types::table_page::unit_tests::test_page_full -- --exact" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test storage::table::table_heap::tests::test_page_iteration" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::table::table_heap::tests::test_page_iteration -- --exact" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test table_heap" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
-      <option name="command" value="test --package tkdb --lib storage::table::table_heap" />
-      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-      <envs />
-      <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
-      <option name="requiredFeatures" value="true" />
-      <option name="allFeatures" value="false" />
-      <option name="withSudo" value="false" />
-      <option name="buildTarget" value="REMOTE" />
-      <option name="backtrace" value="SHORT" />
-      <option name="isRedirectInput" value="false" />
-      <option name="redirectInputPath" value="" />
-      <method v="2">
-        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="Test types_db::types::edge_cases::test_invalid_max_value_type" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+    <configuration name="Test datetime_expression" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib types_db::types::edge_cases::test_invalid_max_value_type -- --exact" />
+      <option name="command" value="test --package tkdb --lib sql::execution::expressions::datetime_expression" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test sql::execution::expressions::datetime_expression::tests::test_date_part" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="test" />
+      <option name="command" value="test --package tkdb --lib sql::execution::expressions::datetime_expression::tests::test_date_part -- --exact" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs>
+        <env name="RUST_LOG" value="debug" />
+      </envs>
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="test" />
+      <option name="command" value="test --package tkdb --lib sql::execution::expressions::mock_expression::tests::test_mock_expression_types -- --exact" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs>
+        <env name="RUST_LOG" value="debug" />
+      </envs>
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="buildProfileId" value="test" />
+      <option name="command" value="test --package tkdb --lib sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates -- --exact" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs>
+        <env name="RUST_LOG" value="debug" />
+      </envs>
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test types_db::timestamp_type::tests::test_timestamp_to_string" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package tkdb --lib types_db::timestamp_type::tests::test_timestamp_to_string -- --exact" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
       <option name="emulateTerminal" value="true" />
       <option name="channel" value="DEFAULT" />
       <option name="requiredFeatures" value="true" />
@@ -779,10 +798,9 @@
       <option name="workingDirectory" value="file://$PROJECT_DIR$/src" />
       <envs>
         <env name="RUST_LOG" value="debug" />
-        <env name="RUSTC_BOOTSTRAP" value="&quot;1&quot;" />
       </envs>
       <option name="emulateTerminal" value="true" />
-      <option name="channel" value="DEFAULT" />
+      <option name="channel" value="STABLE" />
       <option name="requiredFeatures" value="true" />
       <option name="allFeatures" value="false" />
       <option name="withSudo" value="false" />
@@ -815,19 +833,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
-      <item itemvalue="Cargo.Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" />
-      <item itemvalue="Cargo.Test storage::page::page_types::table_page::unit_tests::test_page_full" />
-      <item itemvalue="Cargo.Test storage::table::table_heap::tests::test_page_iteration" />
-      <item itemvalue="Cargo.Test table_heap" />
-      <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
+      <item itemvalue="Cargo.Test datetime_expression" />
+      <item itemvalue="Cargo.Test sql::execution::expressions::datetime_expression::tests::test_date_part" />
+      <item itemvalue="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types" />
+      <item itemvalue="Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" />
+      <item itemvalue="Cargo.Test types_db::timestamp_type::tests::test_timestamp_to_string" />
     </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Cargo.Test storage::page::page_types::table_page::capacity_tests::test_page_capacity" />
-        <item itemvalue="Cargo.Test storage::page::page_types::table_page::unit_tests::test_page_full" />
-        <item itemvalue="Cargo.Test table_heap" />
-        <item itemvalue="Cargo.Test storage::table::table_heap::tests::test_page_iteration" />
-        <item itemvalue="Cargo.Test types_db::types::edge_cases::test_invalid_max_value_type" />
+        <item itemvalue="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types" />
+        <item itemvalue="Cargo.Test types_db::timestamp_type::tests::test_timestamp_to_string" />
+        <item itemvalue="Cargo.Test datetime_expression" />
+        <item itemvalue="Cargo.Test sql::execution::expressions::datetime_expression::tests::test_date_part" />
+        <item itemvalue="Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" />
       </list>
     </recent_temporary>
   </component>
@@ -889,7 +907,8 @@
       <workItem from="1746100661939" duration="12000" />
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
-      <workItem from="1746260136063" duration="20123000" />
+      <workItem from="1746260136063" duration="20605000" />
+      <workItem from="1746326420823" duration="4477000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
