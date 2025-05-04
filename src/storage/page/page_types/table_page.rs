@@ -758,6 +758,82 @@ impl TablePage {
             None
         }
     }
+
+    /// Inserts a tuple with a specified RID, bypassing the normal RID validation
+    /// Useful when moving tuples between pages
+    pub fn insert_tuple_with_rid(&mut self, meta: &TupleMeta, tuple: &Tuple, rid: RID) -> Option<RID> {
+        debug!(
+            "Inserting tuple with specified RID: {:?}. Current num_tuples: {}, tuple_info.len(): {}",
+            rid, self.header.num_tuples, self.tuple_info.len()
+        );
+
+        // Get the next available offset for the tuple
+        let tuple_offset = match self.get_next_tuple_offset(tuple) {
+            Some(offset) => {
+                debug!("Found available offset: {}", offset);
+                offset
+            }
+            None => {
+                debug!("No available offset found for tuple");
+                return None;
+            }
+        };
+
+        // Skip RID validation - use the provided RID
+
+        // Serialize tuple data
+        let tuple_data = match bincode::serialize(tuple) {
+            Ok(data) => {
+                debug!("Serialized tuple data length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                error!("Failed to serialize tuple: {}", e);
+                return None;
+            }
+        };
+
+        // Store tuple metadata and data
+        debug!(
+            "Storing tuple info - offset: {}, size: {}, meta txn_id: {}",
+            tuple_offset,
+            tuple_data.len(),
+            meta.get_creator_txn_id()
+        );
+        self.tuple_info
+            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+
+        // Write tuple data to page
+        let start = tuple_offset as usize;
+        let end = start + tuple_data.len();
+        debug!("Writing tuple data to page range [{}..{}]", start, end);
+
+        if end <= self.data.len() {
+            self.data[start..end].copy_from_slice(&tuple_data);
+            // Update header before returning
+            self.header.num_tuples += 1;
+            self.is_dirty = true;
+
+            // Serialize the page to ensure changes are persisted
+            let serialized = self.serialize();
+            self.data.copy_from_slice(&serialized);
+
+            debug!(
+                "Successfully inserted tuple with RID {:?}. New num_tuples: {}, tuple_info.len(): {}",
+                rid, self.header.num_tuples, self.tuple_info.len()
+            );
+            Some(rid)
+        } else {
+            // Rollback tuple_info change if write fails
+            error!(
+                "Write failed - end position {} exceeds data length {}",
+                end,
+                self.data.len()
+            );
+            self.tuple_info.pop();
+            None
+        }
+    }
 }
 
 /// Input type for has_space_for method
@@ -920,14 +996,41 @@ mod unit_tests {
     #[test]
     fn test_page_full() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
-
+        
         let mut inserted_count = 0;
-        while page.insert_tuple(&meta, &mut tuple).is_some() {
+        
+        // Keep inserting tuples until the page is full
+        loop {
+            // Create a new tuple with the correct RID for this insertion
+            let next_rid = page.get_next_rid();
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+            let values = vec![Value::from(inserted_count), Value::from("Test".to_string())];
+            let tuple = Tuple::new(&values, schema, next_rid);
+            let meta = TupleMeta::new(123);
+            
+            // Try to insert the tuple
+            if page.insert_tuple(&meta, &tuple).is_none() {
+                break;
+            }
+            
             inserted_count += 1;
         }
 
         assert!(inserted_count > 0);
+        
+        // Create one more tuple with the correct next RID
+        let next_rid = page.get_next_rid();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(inserted_count + 1), Value::from("Test".to_string())];
+        let tuple = Tuple::new(&values, schema, next_rid);
+        
+        // Now check that get_next_tuple_offset returns None
         assert!(page.get_next_tuple_offset(&tuple).is_none());
     }
 
@@ -1276,28 +1379,67 @@ mod capacity_tests {
     #[test]
     fn test_page_capacity() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
 
         let mut inserted_count = 0;
-        while page.insert_tuple(&meta, &mut tuple).is_some() {
+        
+        // Keep inserting tuples until the page is full
+        loop {
+            // Create a new tuple with the correct RID for this insertion
+            let next_rid = page.get_next_rid();
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+            let values = vec![Value::from(inserted_count), Value::from("Test".to_string())];
+            let tuple = Tuple::new(&values, schema, next_rid);
+            let meta = TupleMeta::new(123);
+            
+            // Try to insert the tuple
+            if page.insert_tuple(&meta, &tuple).is_none() {
+                break;
+            }
+            
             inserted_count += 1;
         }
 
         assert!(inserted_count > 0);
+        
+        // Create one more tuple with the correct next RID
+        let next_rid = page.get_next_rid();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(inserted_count + 1), Value::from("Test".to_string())];
+        let tuple = Tuple::new(&values, schema, next_rid);
+        
+        // Now check that get_next_tuple_offset returns None
         assert!(page.get_next_tuple_offset(&tuple).is_none());
     }
 
     #[test]
     fn test_space_management() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
-
+        
         // Insert first tuple
-        page.insert_tuple(&meta, &mut tuple).unwrap();
+        let first_rid = page.get_next_rid();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::from(1), Value::from("Test".to_string())];
+        let first_tuple = Tuple::new(&values, schema.clone(), first_rid);
+        let meta = TupleMeta::new(123);
+        
+        page.insert_tuple(&meta, &first_tuple).unwrap();
         let first_offset = page.tuple_info[0].0;
 
-        // Insert second tuple
-        page.insert_tuple(&meta, &mut tuple).unwrap();
+        // Insert second tuple with new RID
+        let second_rid = page.get_next_rid();
+        let values = vec![Value::from(2), Value::from("Test2".to_string())];
+        let second_tuple = Tuple::new(&values, schema, second_rid);
+        
+        page.insert_tuple(&meta, &second_tuple).unwrap();
         let second_offset = page.tuple_info[1].0;
 
         // Verify tuples are packed from the end of the page
@@ -1346,10 +1488,20 @@ mod serialization_tests {
 
         // Create and populate original page
         let mut original_page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple();
+        
+        // Get the next RID for the page
+        let next_rid = original_page.get_next_rid();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::new(42), Value::new("Test")];
+        let tuple = Tuple::new(&values, schema, next_rid);
+        let mut meta = TupleMeta::new(123);
+        meta.set_commit_timestamp(123);
 
         debug!("Inserting tuple into original page");
-        let rid = original_page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = original_page.insert_tuple(&meta, &tuple).unwrap();
         debug!("Original page state after insert:");
         debug!("  num_tuples: {}", original_page.header.num_tuples);
         debug!("  tuple_info: {:?}", original_page.tuple_info);
@@ -1505,8 +1657,16 @@ mod page_type_tests {
         assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
 
         // Test page type after tuple insertion
-        let (meta, mut tuple) = create_test_tuple();
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let next_rid = page.get_next_rid();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let values = vec![Value::new(1), Value::new("test")];
+        let tuple = Tuple::new(&values, schema, next_rid);
+        let meta = TupleMeta::new(1);
+        
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
         assert_eq!(page.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
 
@@ -1540,20 +1700,25 @@ mod page_type_tests {
     #[test]
     fn test_page_type_after_updates() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple();
-
-        // Insert tuple
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
-        assert_eq!(page.get_page_type(), PageType::Table);
-
-        // Update tuple with new values
+        
+        // Insert tuple with correct RID
+        let next_rid = page.get_next_rid();
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
+        let values = vec![Value::new(1), Value::new("test")];
+        let tuple = Tuple::new(&values, schema.clone(), next_rid);
+        let meta = TupleMeta::new(1);
+
+        // Insert tuple
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
+        assert_eq!(page.get_page_type(), PageType::Table);
+
+        // Update tuple with new values
         let new_values = vec![Value::new(1), Value::new("updated")];
-        let mut new_tuple = Tuple::new(&new_values, schema, rid);
-        page.update_tuple(&meta, &mut new_tuple, rid).unwrap();
+        let new_tuple = Tuple::new(&new_values, schema, rid);
+        page.update_tuple(&meta, &new_tuple, rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Update tuple meta

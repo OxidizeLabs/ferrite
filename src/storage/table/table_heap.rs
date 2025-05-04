@@ -139,9 +139,17 @@ impl TableHeap {
         {
             let mut page = page_guard.write();
             if page.has_space_for(tuple) {
-                let rid = page.insert_tuple(&meta, tuple).unwrap();
-                page.set_dirty(true);
-                return Ok(rid);
+                match page.insert_tuple(&meta, tuple) {
+                    Some(rid) => {
+                        page.set_dirty(true);
+                        return Ok(rid);
+                    }
+                    None => {
+                        // The page reported having space but insert failed
+                        // This could happen if space calculation is slightly off
+                        debug!("Page reported having space but insert failed, trying new page");
+                    }
+                }
             }
         }
 
@@ -635,9 +643,29 @@ impl TableHeap {
 
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();
-        new_page
-            .insert_tuple(meta, tuple)
-            .ok_or_else(|| "Failed to insert tuple into new page".to_string())
+        
+        // First verify the page has space for the tuple
+        if !new_page.has_space_for(tuple) {
+            debug!("New page {} unexpectedly has no space for tuple", new_page_id);
+            return Err(format!("New page {} has no space for tuple", new_page_id));
+        }
+        
+        // Create the RID the tuple should have
+        let new_rid = RID::new(new_page_id, 0);
+        debug!("Inserting tuple with RID {:?} into new page {}", new_rid, new_page_id);
+        
+        // Use the new method to bypass RID check
+        match new_page.insert_tuple_with_rid(meta, tuple, new_rid) {
+            Some(rid) => {
+                new_page.set_dirty(true);
+                debug!("Successfully inserted tuple into new page {}, RID: {:?}", new_page_id, rid);
+                Ok(rid)
+            }
+            None => {
+                debug!("Failed to insert tuple into new page {} despite having space", new_page_id);
+                Err(format!("Failed to insert tuple into new page {} despite space check passing", new_page_id))
+            }
+        }
     }
 
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard<TablePage>, String> {
