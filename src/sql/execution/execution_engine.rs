@@ -14,6 +14,7 @@ use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
 use crate::storage::table::tuple::TupleMeta;
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info};
@@ -22,6 +23,8 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
+use crate::concurrency::transaction_manager::TransactionManager;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -270,25 +273,26 @@ impl ExecutionEngine {
         let table_info = binding
             .get_table(plan.get_table_name())
             .ok_or_else(|| DBError::TableNotFound(plan.get_table_name().to_string()))?;
-
-        // Create tuple meta with just the transaction ID
-        let meta = TupleMeta::new(txn_ctx.get_transaction_id());
-
-        // Get the first tuple from input tuples
-        let input_tuples = plan.get_input_tuples_mut();
-        if input_tuples.is_empty() {
-            return Err(DBError::Execution("No tuples to insert".to_string()));
+        
+        // Get the table schema
+        let schema = table_info.get_table_schema();
+        
+        // Get the values to insert
+        let values_to_insert = plan.get_input_values();
+        if values_to_insert.is_empty() {
+            return Err(DBError::Execution("No values to insert".to_string()));
         }
 
-        // Get mutable table heap and insert tuple with transaction context
-        let table_heap = table_info.get_table_heap_mut();
-        let _table_heap_guard = table_heap.latch.write();
+        // Get table heap and create a transactional wrapper around it
+        let table_heap = table_info.get_table_heap();
+        let transactional_table_heap = TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
 
-        input_tuples
-            .iter_mut()
-            .map(| tuple | table_heap
-                .insert_tuple(Arc::from(meta), tuple)
-                .expect("Insert failed"));
+        // Insert each set of values
+        for value_set in values_to_insert {
+            transactional_table_heap
+                .insert_tuple_from_values(value_set.clone(), &schema, txn_ctx.clone())
+                .map_err(|e| DBError::Execution(format!("Insert failed: {}", e)))?;
+        }
 
         debug!("Insert executed successfully");
         Ok(())
