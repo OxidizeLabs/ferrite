@@ -12,7 +12,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sql/planner/logical_plan.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/sql/planner/logical_plan.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -264,7 +265,7 @@
   <component name="RsExternalLinterProjectSettings">
     <option name="channel" value="stable" />
   </component>
-  <component name="RunManager" selected="Cargo.Test Sql::execution::expressions">
+  <component name="RunManager" selected="Cargo.Test abstract_plan">
     <configuration name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command" nameIsGenerated="true">
       <option name="buildProfileId" value="dev" />
       <option name="command" value="run -- cli" />
@@ -667,9 +668,9 @@
       <option name="redirectInputPath" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="Test datetime_expression" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+    <configuration name="Test abstract_plan" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::expressions::datetime_expression" />
+      <option name="command" value="test --package tkdb --lib sql::execution::plans::abstract_plan" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs>
         <env name="RUST_LOG" value="debug" />
@@ -687,9 +688,9 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test sql::execution::expressions::datetime_expression::tests::test_date_part" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+    <configuration name="Test datetime_expression" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::execution::expressions::datetime_expression::tests::test_date_part -- --exact" />
+      <option name="command" value="test --package tkdb --lib sql::execution::expressions::datetime_expression" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs>
         <env name="RUST_LOG" value="debug" />
@@ -727,9 +728,9 @@
         <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
       </method>
     </configuration>
-    <configuration name="Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+    <configuration name="Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
       <option name="buildProfileId" value="test" />
-      <option name="command" value="test --package tkdb --lib sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates -- --exact" />
+      <option name="command" value="test --package tkdb --lib sql::execution::plans::abstract_plan::complex_behaviour::test_joins -- --exact" />
       <option name="workingDirectory" value="file://$PROJECT_DIR$" />
       <envs>
         <env name="RUST_LOG" value="debug" />
@@ -805,19 +806,19 @@
       <item itemvalue="Cargo.Test Storage" />
       <item itemvalue="Cargo.Test Types" />
       <item itemvalue="Cargo.Test" />
+      <item itemvalue="Cargo.Test abstract_plan" />
       <item itemvalue="Cargo.Test datetime_expression" />
-      <item itemvalue="Cargo.Test sql::execution::expressions::datetime_expression::tests::test_date_part" />
       <item itemvalue="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types" />
-      <item itemvalue="Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" />
+      <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" />
       <item itemvalue="Cargo.Test types_db::timestamp_type::tests::test_timestamp_to_string" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Cargo.Test abstract_plan" />
+        <item itemvalue="Cargo.Test sql::execution::plans::abstract_plan::complex_behaviour::test_joins" />
         <item itemvalue="Cargo.Test sql::execution::expressions::mock_expression::tests::test_mock_expression_types" />
         <item itemvalue="Cargo.Test types_db::timestamp_type::tests::test_timestamp_to_string" />
         <item itemvalue="Cargo.Test datetime_expression" />
-        <item itemvalue="Cargo.Test sql::execution::expressions::datetime_expression::tests::test_date_part" />
-        <item itemvalue="Cargo.Test sql::planner::plan_builder::tests::aggregation_tests::test_group_by_with_aggregates" />
       </list>
     </recent_temporary>
   </component>
@@ -880,7 +881,7 @@
       <workItem from="1746100682160" duration="6655000" />
       <workItem from="1746204939729" duration="1033000" />
       <workItem from="1746260136063" duration="20605000" />
-      <workItem from="1746326420823" duration="4783000" />
+      <workItem from="1746326420823" duration="5100000" />
     </task>
     <task id="LOCAL-00052" summary="Linting">
       <option name="closed" value="true" />
@@ -1324,7 +1325,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/src/sql/planner/logical_plan.rs</url>
-          <line>1334</line>
+          <line>1336</line>
           <option name="timeStamp" value="6" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">

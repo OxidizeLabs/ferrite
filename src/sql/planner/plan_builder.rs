@@ -882,7 +882,59 @@ impl LogicalPlanBuilder {
                         )
                     }
                 },
-                _ => return Err(format!("Unsupported join type: {:?}", join.join_operator)),
+                // Simple synonym for Inner join
+                JoinOperator::Join(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for joins".to_string()),
+                },
+                // Simple synonym for LeftOuter join
+                JoinOperator::Left(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for LEFT joins".to_string()),
+                },
+                // Simple synonym for RightOuter join
+                JoinOperator::Right(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for RIGHT joins".to_string()),
+                },
+                // Simple synonym for LeftSemi join
+                JoinOperator::Semi(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for SEMI joins".to_string()),
+                },
+                // Simple synonym for LeftAnti join
+                JoinOperator::Anti(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for ANTI joins".to_string()),
+                },
+                // APPLY joins require a table function on the right
+                JoinOperator::CrossApply => {
+                    return Err("CROSS APPLY joins are not yet supported".to_string())
+                },
+                JoinOperator::OuterApply => {
+                    return Err("OUTER APPLY joins are not yet supported".to_string())
+                },
+                // Time-series join variant
+                JoinOperator::AsOf { .. } => {
+                    return Err("AS OF joins are not yet supported".to_string())
+                },
+                // MySQL-specific join
+                JoinOperator::StraightJoin(constraint) => match constraint {
+                    JoinConstraint::On(expr) => self
+                        .expression_parser
+                        .parse_expression(expr, &joined_schema)?,
+                    _ => return Err("Only ON constraints are supported for STRAIGHT_JOIN".to_string()),
+                },
             };
 
             current_plan = Box::new(LogicalPlan::new(
