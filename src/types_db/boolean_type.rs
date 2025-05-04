@@ -9,6 +9,20 @@ impl BooleanType {
     pub fn new() -> Self {
         BooleanType
     }
+    
+    pub fn get_min_value(type_id: TypeId) -> Value {
+        if type_id != TypeId::Boolean {
+            panic!("Invalid type for min value");
+        }
+        Value::from(false)
+    }
+    
+    pub fn get_max_value(type_id: TypeId) -> Value {
+        if type_id != TypeId::Boolean {
+            panic!("Invalid type for max value");
+        }
+        Value::from(true)
+    }
 }
 
 impl Type for BooleanType {

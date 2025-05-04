@@ -1509,7 +1509,7 @@ mod unit_tests {
         assert_eq!(
             serialized_vector,
             vec![
-                9, 0, 0, 0, // Vector variant index
+                16, 0, 0, 0, // Vector variant index (updated from 9 to 16)
                 2, 0, 0, 0, 0, 0, 0, 0, // Vector length (2)
                 3, 0, 0, 0, // First Value: Integer variant index
                 1, 0, 0, 0, // First Value: value (1)
@@ -1542,7 +1542,8 @@ mod unit_tests {
             bincode::deserialize(&binary_integer).expect("Deserialization failed");
         assert_eq!(deserialized_integer, Val::Integer(42));
 
-        let binary_string = vec![7, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111];
+        // Update the binary_string test with the correct variant index (11 for VarLen)
+        let binary_string = vec![11, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111];
         let deserialized_string: Val =
             bincode::deserialize(&binary_string).expect("Deserialization failed");
         assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
