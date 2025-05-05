@@ -300,31 +300,31 @@ where
         unimplemented!()
     }
 
-    /// Scan a range of keys in the B+ tree
+    /// Custom range scan to find all keys in a given range [start, end]
     pub fn range_scan(&self, start: &K, end: &K) -> Result<Vec<(K, V)>, BPlusTreeError> {
-        // 1. Validate input parameters:
-        //    a. Check if start key <= end key using the comparator
-        //    b. If start > end, return empty result set
-        // 2. Check if tree is empty, if so return empty result set
-        // 3. Find the leaf page containing the start key:
-        //    a. Use find_leaf_page to navigate to correct starting leaf
-        // 4. Initialize result vector to collect matching key-value pairs
-        // 5. Process the first leaf page:
-        //    a. Find the index of the first key >= start key
-        //    b. Scan from this index to the end of the page:
-        //       - For each key <= end key, add (key, value) to result
-        //       - Stop if a key > end key is encountered
-        // 6. If all keys in the first leaf are processed and more pages exist:
-        //    a. Get the next_page_id from the current leaf
-        //    b. Unpin the current leaf
-        //    c. Fetch the next leaf page
-        //    d. Scan this leaf from beginning:
-        //       - For each key <= end key, add to result
-        //       - Stop if a key > end key is encountered
-        //    e. Repeat steps 6.a-d until all matching keys found or no more leaves
+        // 1. Validate input: if start > end (using comparator), return empty vector
+        // 2. Check if tree is empty, if so return empty vector
+        // 3. Initialize result vector to collect key-value pairs
+        // 4. Find the leaf containing the start key:
+        //    a. Call find_leaf_page(start) to get to starting leaf
+        // 5. Linear scan within the first leaf:
+        //    a. Find index of first key >= start using binary search
+        //    b. Scan from this index through all keys in the leaf:
+        //       - For each key <= end, add (key, value) to result
+        //       - If key > end, we're done, break and return result
+        // 6. If we've processed all keys in the current leaf:
+        //    a. Check if there's a next leaf (next_page_id)
+        //    b. If no next leaf, we're done, return result
+        //    c. Otherwise, fetch the next leaf page
+        //    d. Unpin the current leaf
+        //    e. Continue scanning this next leaf from beginning
+        //    f. Repeat steps 5b-6e until either:
+        //       - We find a key > end
+        //       - We reach the end of the leaf chain
         // 7. Unpin the final leaf page
-        // 8. Return the collected result vector
-        // 9. Ensure proper error handling and unpinning in all cases
+        // 8. Return the collected key-value pairs
+        // 9. This traversal uses the leaf node chain for efficient range scans,
+        //    which is a key advantage of B+ Trees over regular B-Trees
         unimplemented!()
     }
 
@@ -706,37 +706,183 @@ where
         unimplemented!()
     }
 
-    /// Validate the B+ tree structure
+    /// Validate the B+ tree structure with in-order traversal
     pub fn validate(&self) -> Result<(), BPlusTreeError> {
-        // 1. If tree is empty, return Ok
-        // 2. Fetch the root page
-        // 3. If root is a leaf, verify it has no next_page_id
-        // 4. If root is internal, validate each child recursively:
-        //    a. For each child pointer, fetch the child page
-        //    b. Verify keys in child are properly ordered relative to parent
-        //    c. Verify child has proper min/max number of keys
-        //    d. Recursively validate each child
-        // 5. For leaf pages:
-        //    a. Verify all leaf pages form a linked list
-        //    b. Verify keys across adjacent leaves are properly ordered
-        // 6. Verify all pages at same level have same distance to leaves
-        // 7. Count total keys in tree and verify it matches header
+        // 1. If tree is empty, return Ok (nothing to validate)
+        // 2. Perform multi-level validation:
+        //    a. Structure validation (B+ tree properties)
+        //    b. Key ordering validation (in-order traversal)
+        //    c. Balance validation (all leaf nodes at same depth)
+        // 3. Start with the root page:
+        //    a. Fetch the header page to get root_page_id
+        //    b. If root is invalid, tree is empty, return Ok
+        //    c. Fetch the root page
+        // 4. Validate root node specifically:
+        //    a. If root is a leaf, check it has no parent
+        //    b. If root is internal and not leaf, ensure it has at least one child
+        //    c. Root can have fewer than min_size keys (unlike other nodes)
+        // 5. For recursive validation of the tree structure:
+        //    a. Call validate_subtree(root_page, min_key, max_key, level, stats)
+        //    b. This recursively validates each node and its children
+        // 6. Verify all leaf nodes form a linked list:
+        //    a. Traverse leaf nodes using next_page_id pointers
+        //    b. Ensure keys are strictly increasing across leaves
+        // 7. Verify tree height matches header:
+        //    a. Track max depth to any leaf during traversal
+        //    b. Compare with tree_height from header
+        // 8. Count total keys and verify matches header num_keys
+        // 9. Return Ok if all validations pass, or appropriate error
         unimplemented!()
     }
 
-    /// Print the B+ tree structure (for debugging)
+    /// Helper method to recursively validate a subtree
+    fn validate_subtree(
+        &self,
+        page_id: PageId, 
+        min_key: Option<&K>,
+        max_key: Option<&K>,
+        level: u32,
+        stats: &mut ValidationStats,
+    ) -> Result<(), BPlusTreeError> {
+        // 1. Fetch the page with page_id
+        // 2. Determine if it's a leaf or internal page
+        // 3. For all nodes (both leaf and internal):
+        //    a. Verify all keys are in sorted order
+        //    b. Verify all keys are within the min_key and max_key range:
+        //       - All keys > min_key (if min_key is Some)
+        //       - All keys < max_key (if max_key is Some)
+        //    c. If not root, verify node has at least min_size keys
+        //    d. Verify node has at most max_size keys
+        // 4. For leaf nodes:
+        //    a. If this is the first leaf at this level, record the level in stats
+        //    b. Otherwise, verify this leaf is at the same level as other leaves
+        //    c. Add to the total key count in stats
+        //    d. If tracking leaf chain, store this leaf for later verification
+        // 5. For internal nodes:
+        //    a. For each child pointer:
+        //       - Determine the valid key range for this child
+        //       - Recursively validate the child subtree with updated range
+        //    b. Verify each key correctly separates its children's key ranges
+        // 6. Unpin the page when done
+        // 7. Return Ok if all validations pass, or appropriate error
+        unimplemented!()
+    }
+
+    /// Perform a level-order traversal (breadth-first) for debugging or visualization
     pub fn print_tree(&self) -> Result<(), BPlusTreeError> {
         // 1. If tree is empty, print "Empty tree" and return
         // 2. Print header information: height, size, root_id
-        // 3. Create a queue starting with the root page
-        // 4. While queue is not empty:
-        //    a. Dequeue a page and its level
-        //    b. Print indentation based on level
-        //    c. If page is leaf, print its keys and values
-        //    d. If page is internal, print its keys and child pointers
-        //    e. For internal pages, enqueue all children with level+1
-        // 5. Print a summary of the tree structure
+        // 3. Initialize a queue with (root_page_id, level=0)
+        // 4. While the queue is not empty:
+        //    a. Dequeue a (page_id, level) pair
+        //    b. Fetch the page
+        //    c. Determine if it's a leaf or internal page
+        //    d. Print level-appropriate indentation
+        //    e. Print page information:
+        //       - For internal nodes: keys and child pointers
+        //       - For leaf nodes: keys, values, and next_page_id
+        //    f. If internal node, enqueue all child pointers with level+1
+        //    g. Unpin the page
+        // 5. This traversal visits nodes level by level (breadth-first)
+        //    which is useful for visualizing the tree structure
         unimplemented!()
+    }
+
+    /// Perform an in-order traversal of all keys (debug/verification)
+    pub fn in_order_traversal(&self) -> Result<Vec<K>, BPlusTreeError> {
+        // 1. If tree is empty, return empty vector
+        // 2. Start with root page
+        // 3. If root is a leaf, collect all keys and return
+        // 4. For a B+ tree, in-order traversal can be done two ways:
+        //    a. Recursive approach (for small trees):
+        //       - For each internal node, recursively visit each child subtree
+        //       - The recursive call is made between each key
+        //       - This works but can cause stack overflow for large trees
+        //    b. Iterative approach using leaf-chain (for B+ trees):
+        //       - Find leftmost leaf using find_leftmost_leaf method
+        //       - Collect all keys from this leaf
+        //       - Follow next_page_id pointers collecting keys from each leaf
+        //       - This is more efficient as all values are in leaf nodes
+        // 5. Return the collected keys in sorted order
+        unimplemented!()
+    }
+
+    /// Find the leftmost leaf page in the tree (for range scans or in-order traversal)
+    fn find_leftmost_leaf(&self) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
+        // 1. Fetch the header page to get root_page_id
+        // 2. Check if root_page_id is valid:
+        //    a. If INVALID_PAGE_ID, return error (tree is empty)
+        // 3. Fetch the root page
+        // 4. While the current page is an internal page:
+        //    a. Cast the page to BPlusTreeInternalPage
+        //    b. Get the leftmost child pointer (index 0)
+        //    c. Fetch this child page
+        //    d. Unpin the current page
+        //    e. Update current page to the child
+        // 5. When a leaf page is reached:
+        //    a. Cast the page to BPlusTreeLeafPage
+        //    b. Return this leaf page (still pinned)
+        // 6. This leaf will contain the smallest keys in the tree
+        unimplemented!()
+    }
+
+    /// Perform a pre-order traversal (useful for serialization)
+    pub fn pre_order_traversal(&self) -> Result<Vec<PageId>, BPlusTreeError> {
+        // 1. If tree is empty, return empty vector
+        // 2. Initialize result vector to collect page IDs
+        // 3. Initialize a stack with root_page_id
+        // 4. While stack is not empty:
+        //    a. Pop page_id from stack
+        //    b. Add page_id to result vector (visit before children)
+        //    c. Fetch the page
+        //    d. If internal page:
+        //       - Push all child pointers to stack in reverse order
+        //         (so leftmost child is processed first)
+        //    e. Unpin the page
+        // 5. Return the collected page IDs in pre-order
+        // 6. Note: Pre-order traversal visits a node before its children,
+        //    which can be useful for serializing the tree structure
+        unimplemented!()
+    }
+
+    /// Perform a post-order traversal (useful for safe deletion)
+    pub fn post_order_traversal(&self) -> Result<Vec<PageId>, BPlusTreeError> {
+        // 1. If tree is empty, return empty vector
+        // 2. Initialize result vector to collect page IDs
+        // 3. Use a recursive helper function to perform traversal:
+        //    fn post_order_helper(page_id, result):
+        //       a. Fetch the page
+        //       b. If leaf page, add to result and return
+        //       c. If internal page:
+        //          - For each child pointer:
+        //            * Recursively call post_order_helper on child
+        //          - After all children processed, add this page_id to result
+        //       d. Unpin the page
+        // 4. Call post_order_helper starting with root_page_id
+        // 5. Return the collected page IDs in post-order
+        // 6. Note: Post-order traversal visits children before parents,
+        //    which ensures safe deletion (children deleted before parents)
+        unimplemented!()
+    }
+}
+
+/// Tracks statistics during B+ tree validation
+struct ValidationStats {
+    /// Maximum depth encountered during validation
+    max_depth: u32,
+    /// Total number of keys counted in the tree
+    total_keys: usize,
+    /// Level at which leaf nodes are found (to verify all leaves are at same level)
+    leaf_level: Option<u32>,
+}
+
+impl ValidationStats {
+    fn new() -> Self {
+        Self {
+            max_depth: 0,
+            total_keys: 0,
+            leaf_level: None,
+        }
     }
 }
 
