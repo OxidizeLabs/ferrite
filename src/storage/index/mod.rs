@@ -11,3 +11,4 @@ pub mod stl_equal_wrapper;
 pub mod stl_hash_wrapper;
 pub mod stl_ordered;
 pub mod stl_unordered;
+pub mod types;

@@ -1,5 +1,6 @@
 use crate::common::rid::RID;
 use crate::types_db::type_id::TypeId;
+use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 
 /// Trait for types that can be used as values in indexes

@@ -1,17 +1,16 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::common::config::DB_PAGE_SIZE;
 use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
 };
 use crate::storage::index::index::IndexInfo;
+use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
+use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
+use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::{
-    b_plus_tree_internal_page::BPlusTreeInternalPage,
-    b_plus_tree_leaf_page::BPlusTreeLeafPage,
+    b_plus_tree_internal_page::BPlusTreeInternalPage, b_plus_tree_leaf_page::BPlusTreeLeafPage,
 };
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::Type;
-use crate::types_db::value::{Val, Value};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::cmp::Ordering;
@@ -19,98 +18,6 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
-use crate::storage::page::page_guard::PageGuard;
-
-/// Trait for types that can be used as keys in indexes
-pub trait KeyType: Sized + Clone + PartialEq + PartialOrd {
-    /// Convert this key to a Value for storage
-    fn to_value(&self) -> Value;
-
-    /// Create a key from a Value
-    fn from_value(value: &Value) -> Result<Self, String>;
-
-    /// Get the TypeId for this key type
-    fn type_id() -> TypeId;
-}
-
-impl KeyType for i32 {
-    fn to_value(&self) -> Value {
-        Value::new_with_type(Val::Integer(*self), TypeId::Integer)
-    }
-
-    fn from_value(value: &Value) -> Result<Self, String> {
-        value.as_integer()
-    }
-
-    fn type_id() -> TypeId {
-        TypeId::Integer
-    }
-}
-
-// Similar implementations for other types like String, bool, etc.
-impl KeyType for String {
-    fn to_value(&self) -> Value {
-        Value::new_with_type(Val::VarLen(self.clone()), TypeId::VarChar)
-    }
-
-    fn from_value(value: &Value) -> Result<Self, String> {
-        match value.get_val() {
-            Val::VarLen(s) => Ok(s.clone()),
-            Val::ConstLen(s) => Ok(s.clone()),
-            _ => Err(format!("Cannot convert {:?} to String", value)),
-        }
-    }
-
-    fn type_id() -> TypeId {
-        TypeId::VarChar
-    }
-}
-
-/// Trait for types that can be used as values in indexes
-pub trait ValueType: Sized + Clone {
-    /// Convert this value to a Value for storage
-    fn to_value(&self) -> Value;
-
-    /// Create a value from a Value
-    fn from_value(value: &Value) -> Result<Self, String>;
-}
-
-// Implement for RID (Row ID) or whatever you use for values
-impl ValueType for RID {
-    fn to_value(&self) -> Value {
-        // Assuming RID can be represented as a BigInt or Struct
-        Value::new_with_type(Val::BigInt(self.to_i64()), TypeId::BigInt)
-    }
-
-    fn from_value(value: &Value) -> Result<Self, String> {
-        let id = value.as_bigint()?;
-        Ok(RID::from_i64(id))
-    }
-}
-
-/// Type for key comparators
-pub type I32Comparator = fn(&i32, &i32) -> Ordering;
-
-// Helper functions
-fn i32_comparator(a: &i32, b: &i32) -> Ordering {
-    a.cmp(b)
-}
-
-// KeyComparator trait
-pub trait KeyComparator<K: KeyType>: Fn(&K, &K) -> Ordering {
-    // Additional functionality can go here
-}
-
-// Implement KeyComparator for function types
-
-// This would be in the module where KeyComparator is defined
-impl<K> KeyComparator<K> for fn(&K, &K) -> Ordering
-where
-    K: KeyType,
-{
-    // Implement the required methods from the KeyComparator trait
-    // ...
-}
 
 pub struct TypedBPlusTreeIndex {
     // Index metadata, etc.
@@ -329,7 +236,10 @@ where
     }
 
     /// Find the leaf page that should contain the key
-    fn find_leaf_page(&self, key: &K) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
+    fn find_leaf_page(
+        &self,
+        key: &K,
+    ) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
         // 1. Fetch the header page to get the root_page_id
         //    a. If header page doesn't exist, return appropriate error
         // 2. Check if root_page_id is valid:
@@ -603,7 +513,12 @@ where
     }
 
     /// Update header page after operations
-    fn update_header(&self, root_id: PageId, height: u32, num_keys: usize) -> Result<(), BPlusTreeError> {
+    fn update_header(
+        &self,
+        root_id: PageId,
+        height: u32,
+        num_keys: usize,
+    ) -> Result<(), BPlusTreeError> {
         // 1. Fetch the header page using header_page_id
         // 2. Update the header page fields:
         //    a. Set root_page_id to root_id
@@ -738,7 +653,7 @@ where
     /// Helper method to recursively validate a subtree
     fn validate_subtree(
         &self,
-        page_id: PageId, 
+        page_id: PageId,
         min_key: Option<&K>,
         max_key: Option<&K>,
         level: u32,
