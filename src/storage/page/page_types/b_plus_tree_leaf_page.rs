@@ -417,7 +417,7 @@ mod tests {
     use super::*;
 
     // Helper function to create a test page
-    fn create_test_page() -> BPlusTreeLeafPage<i32, i32, fn(&i32, &i32) -> std::cmp::Ordering> {
+    fn create_test_page() -> BPlusTreeLeafPage<i32, i32, fn(&i32, &i32) -> Ordering> {
         BPlusTreeLeafPage::new_with_options(1, 4, i32::cmp)
     }
 

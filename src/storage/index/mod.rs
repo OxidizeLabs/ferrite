@@ -1,9 +1,7 @@
 pub mod b_plus_tree;
 pub mod b_plus_tree_index;
-pub mod b_plus_tree_persist;
 pub mod extendable_hash_table_index;
 pub mod generic_key;
-pub mod hash_comparator;
 pub mod index;
 pub mod index_iterator_mem;
 pub mod int_comparator;
