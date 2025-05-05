@@ -1,11 +1,11 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
-use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType};
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
+use crate::storage::index::types::{KeyComparator, KeyType};
 
 /// Leaf page structure for B+ Tree
 pub struct BPlusTreeLeafPage<K, V, C>

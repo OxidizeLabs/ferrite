@@ -12,7 +12,13 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
+      <change afterPath="$PROJECT_DIR$/src/storage/index/types/comparators.rs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/storage/index/types/key_types.rs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/storage/index/types/mod.rs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/storage/index/types/value_types.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree_index.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree_index.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/index/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/mod.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/page/page_types/b_plus_tree_leaf_page.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/page/page_types/b_plus_tree_leaf_page.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
