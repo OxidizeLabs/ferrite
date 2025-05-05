@@ -12,8 +12,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f909ab2e-ccc4-4da6-92e8-de6e59cc9ec3" name="Changes" comment="Refactor `LogManager` for enhanced thread safety and efficiency&#10;&#10;Encapsulated shared state into a `LogManagerState` structure and replaced `Arc` and `RwLock` with a more efficient `Mutex` for managing the flush thread handle. Updated log record handling to use `Arc` for improved memory management and enhanced commit handling logic to ensure durability guarantees with more precise flushing mechanisms. These changes improve clarity, thread safety, and performance of the logging system.">
-      <change beforePath="$PROJECT_DIR$/.idea/tkdb.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/tkdb.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/index/b_plus_tree_index.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/index/b_plus_tree_index.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
