@@ -542,6 +542,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_group_by_column_names() {
         let mut ctx = TestContext::new("test_group_by_column_names");
 

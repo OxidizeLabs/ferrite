@@ -303,7 +303,7 @@ mod tests {
 
     impl TestContext {
         fn new(test_name: &str) -> Self {
-            init_test_logger();
+            // init_test_logger();
             debug!("Creating new test context for: {}", test_name);
 
             let log_file_path = format!(
