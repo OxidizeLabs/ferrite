@@ -7,8 +7,10 @@ use crate::storage::index::index::IndexInfo;
 use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page::{PageTrait, PageType};
 use crate::storage::page::page_types::{
     b_plus_tree_internal_page::BPlusTreeInternalPage, b_plus_tree_leaf_page::BPlusTreeLeafPage,
+    b_plus_tree_header_page::BPlusTreeHeaderPage,
 };
 use crate::types_db::type_id::TypeId;
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,8 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
+use std::collections::VecDeque;
+use tokio::io::AsyncReadExt;
 
 pub struct TypedBPlusTreeIndex {
     // Index metadata, etc.
@@ -125,114 +129,319 @@ where
 {
     /// Initialize a new B+ tree
     pub fn init(&mut self) -> Result<(), BPlusTreeError> {
-        // 1. Check if header_page_id is valid - if so, tree is already initialized
-        // 2. Allocate a new header page using buffer_pool_manager
-        // 3. Initialize header with: root_page_id = INVALID_PAGE_ID, tree_height = 0, num_keys = 0
-        // 4. Store the header_page_id in self
-        // 5. Mark header page as dirty and unpin it
-        // 6. Return Ok(())
-        unimplemented!()
+        // If header_page_id is valid, tree is already initialized
+        if self.header_page_id != INVALID_PAGE_ID {
+            return Ok(());
+        }
+
+        // Allocate a new header page
+        let header_page = self.buffer_pool_manager
+            .new_page::<BPlusTreeHeaderPage>()
+            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+        
+        // Set initial values for the header
+        {
+            let mut header = header_page.write();
+            header.set_root_page_id(INVALID_PAGE_ID);
+            header.set_tree_height(0);
+            header.set_num_keys(0);
+            // The PageGuard will handle marking as dirty and unpinning when dropped
+        }
+        
+        // Store the header page ID for future reference
+        self.header_page_id = header_page.get_page_id();
+        
+        // The page will be automatically unpinned when header_page is dropped
+        Ok(())
     }
 
     /// Insert a key-value pair into the B+ tree
     pub fn insert(&self, key: K, value: V) -> Result<(), BPlusTreeError> {
-        // 1. If tree is not initialized (header_page_id is INVALID_PAGE_ID), initialize it first
-        // 2. If root is INVALID_PAGE_ID, create first leaf page as root:
-        //    a. Allocate a new leaf page with buffer_pool_manager.new_page()
-        //    b. Cast to leaf page type and initialize with leaf_max_size and comparator
-        //    c. Insert key-value pair into leaf using insert_key_value()
-        //    d. Update header page: set root_page_id to new page, tree_height = 1, num_keys = 1
-        //    e. Mark leaf page as dirty and unpin it
-        // 3. Otherwise, for an existing tree:
-        //    a. Fetch the header page to get root_page_id
-        //    b. Call find_leaf_page to traverse down to correct leaf for the key
-        //    c. Check if key already exists in leaf:
-        //       - If exists, update the value (replace) and return
-        //       - If not, continue with insertion
-        //    d. Try to insert the key-value pair into the leaf:
-        //       - If leaf has space (size < max_size), insert directly
-        //       - If successful, update header (increment num_keys)
-        //       - If leaf is full, initiate the split process:
-        //         * Call split_leaf_page which may trigger recursive splits
-        //         * This may cause a new root to be created if splits reach the root
-        // 4. Handle any concurrent modification issues with proper locking/latching
-        // 5. Ensure all pages are properly unpinned in all cases (both success and error)
-        unimplemented!()
+        // If tree is not initialized, initialize it first
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::BufferPoolError("Tree not initialized".to_string()));
+        }
+        
+        // Get header page to determine root page id
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id;
+        let tree_height;
+        let num_keys;
+        
+        {
+            let header = header_page.read();
+            root_page_id = header.get_root_page_id();
+            tree_height = header.get_tree_height();
+            num_keys = header.get_num_keys();
+        }
+
+        // If tree is empty (root is INVALID_PAGE_ID), create first leaf page as root
+        if root_page_id == INVALID_PAGE_ID {
+            // Allocate a new leaf page
+            let new_leaf_page = self.buffer_pool_manager
+                .new_page::<BPlusTreeLeafPage<K, V, C>>()
+                .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            
+            let new_page_id = new_leaf_page.get_page_id();
+            
+            // Initialize the leaf page
+            {
+                let mut leaf_write = new_leaf_page.write();
+                // Insert the key-value pair
+                leaf_write.insert_key_value(key, value);
+                // Other initialization would happen here if needed
+                // Note: There might need to be a set_root method in the leaf page
+            }
+            
+            // Update the header page with the new root
+            {
+                let mut header_write = header_page.write();
+                header_write.set_root_page_id(new_page_id);
+                header_write.set_tree_height(1);  // Height is 1 with just a root leaf
+                header_write.set_num_keys(1);     // We inserted 1 key
+            }
+            
+            return Ok(());
+        }
+        
+        // For existing tree, find the leaf page where the key should be inserted
+        let leaf_page = self.find_leaf_page(&key)?;
+        
+        // Handle the key insertion
+        let mut inserted = false;
+        let mut need_split = false;
+        let mut new_key_added = false;
+        
+        {
+            let mut leaf_write = leaf_page.write();
+            
+            // Check if key already exists
+            let key_index = leaf_write.find_key_index(&key);
+            if key_index < leaf_write.get_size() {
+                // Check if key at this position matches our key
+                if let Some(existing_key) = leaf_write.get_key_at(key_index) {
+                    if (self.comparator)(&key, existing_key) == Ordering::Equal {
+                        // Update existing value
+                        leaf_write.set_value_at(key_index, value.clone());
+                        inserted = true;
+                        // No new key added, just updated existing value
+                    }
+                }
+            }
+            
+            // If key doesn't exist yet
+            if !inserted {
+                // If leaf has space, insert directly
+                if leaf_write.get_size() < leaf_write.get_max_size() {
+                    leaf_write.insert_key_value(key.clone(), value.clone());
+                    inserted = true;
+                    new_key_added = true; // We added a new key
+                } else {
+                    // Mark for split
+                    need_split = true;
+                }
+            }
+        }
+        
+        // If we inserted without splitting
+        if inserted {
+            // Update num_keys in header if we added a new key
+            if new_key_added {
+                let mut header_write = header_page.write();
+                header_write.set_num_keys(num_keys + 1);
+            }
+            return Ok(());
+        }
+        
+        // If leaf is full, we need to split
+        if need_split {
+            // First insert the key-value pair into the leaf page
+            {
+                let mut leaf_write = leaf_page.write();
+                leaf_write.insert_key_value(key, value);
+            }
+            
+            // Then split the page
+            self.split_leaf_page(&leaf_page)?;
+            
+            // Update num_keys in header
+            {
+                let mut header_write = header_page.write();
+                header_write.set_num_keys(num_keys + 1);
+            }
+        }
+        
+        Ok(())
     }
 
     /// Search for a key in the B+ tree
     pub fn search(&self, key: &K) -> Result<Option<V>, BPlusTreeError> {
-        // 1. Check if the tree is initialized:
-        //    a. If header_page_id is INVALID_PAGE_ID, initialize or return None
-        // 2. Fetch the header page to get the root_page_id
-        //    a. If root_page_id is INVALID_PAGE_ID, tree is empty, return None
-        // 3. Call find_leaf_page to navigate to the appropriate leaf:
-        //    a. This traverses from root to leaf following appropriate pointers
-        //    b. Handles all navigation through internal nodes
-        // 4. Once at the leaf page, search for the key:
-        //    a. Use find_key_index to get potential position in the leaf
-        //    b. Check if the index is valid and the key matches:
-        //       - If the index is out of bounds or the key doesn't match, key not found
-        //       - If key matches, retrieve the value from the leaf at that index
-        // 5. Create a copy of the found value (if any) to return to caller
-        // 6. Unpin the leaf page (very important to prevent buffer pool exhaustion)
-        // 7. Return the value if found, or None if not found
-        // 8. Handle any errors during the process (page not found, invalid type, etc.)
-        unimplemented!()
+        // Check if the tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(None);
+        }
+
+        // Find the leaf page that would contain this key
+        let leaf_page_guard = match self.find_leaf_page(key) {
+            Ok(page) => page,
+            Err(BPlusTreeError::KeyNotFound) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let leaf_page_read = leaf_page_guard.read();
+        // Search for the key in the leaf page
+        let key_index = leaf_page_read.find_key_index(key);
+        
+        // Check if key exists in the leaf
+        if key_index < leaf_page_read.get_size() {
+            let key_at_index = leaf_page_read.get_key_at(key_index).unwrap();
+            if (self.comparator)(key, &key_at_index) == Ordering::Equal {
+                // Key found, return the value
+                match leaf_page_read.get_value_at(key_index) {
+                    Some(value) => return Ok(Some(value.clone())),
+                    None => return Ok(None),
+                }
+            }
+        }
+        
+        // Key not found
+        Ok(None)
     }
 
     /// Remove a key-value pair from the B+ tree
     pub fn remove(&self, key: &K) -> Result<bool, BPlusTreeError> {
-        // 1. Check if tree is initialized; if not, return false (nothing to remove)
-        // 2. Get root page ID from header page; if INVALID_PAGE_ID, return false
-        // 3. Find the leaf page containing the key:
-        //    a. Start at root page
-        //    b. Traverse down to leaf using find_leaf_page
-        //    c. Track parent pages during traversal (for rebalancing)
-        // 4. Search for the key in the leaf page:
-        //    a. Use find_key_index to locate exact position
-        //    b. If key not found (index out of bounds or key mismatch), return false
-        //    c. If key found, call remove_key_value_at to delete from leaf
-        // 5. Update header page metadata (decrement num_keys)
-        // 6. Check if leaf underflow occurred:
-        //    a. If leaf is root and now empty:
-        //       - Update header to mark tree as empty (set root_page_id = INVALID_PAGE_ID)
-        //       - Decrement tree height to 0 (tree is now empty)
-        //    b. If leaf is root but still has keys, no rebalancing needed
-        //    c. If leaf is not root and underflow occurred (size < min_size):
-        //       - Call check_and_handle_underflow to rebalance the tree
-        // 7. Mark all modified pages as dirty
-        // 8. Unpin all pages accessed during deletion
-        // 9. Return true (indicating successful deletion)
-        unimplemented!()
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(false);
+        }
+
+        // Fetch the header page and read basic info
+        let header_page = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".into()))?;
+        let (root_page_id, tree_height, mut num_keys) = {
+            let header = header_page.read();
+            if header.is_empty() {
+                return Ok(false);
+            }
+            (
+                header.get_root_page_id(),
+                header.get_tree_height(),
+                header.get_num_keys(),
+            )
+        };
+        drop(header_page); // Release header page
+
+        // If tree is empty, nothing to remove
+        if root_page_id == INVALID_PAGE_ID {
+            return Ok(false);
+        }
+
+        // Find the leaf page containing the key
+        let leaf_page = match self.find_leaf_page(key) {
+            Ok(page) => page,
+            Err(BPlusTreeError::KeyNotFound) => return Ok(false),
+            Err(e) => return Err(e),
+        };
+
+        // Search for the key in the leaf
+        let mut leaf = leaf_page.write();
+        let key_index = leaf.find_key_index(key);
+        if key_index >= leaf.get_size() {
+            return Ok(false); // Key not found
+        }
+        let existing_key = leaf.get_key_at(key_index).unwrap();
+        if (self.comparator)(key, existing_key) != Ordering::Equal {
+            return Ok(false); // Key not found
+        }
+
+        // Remove the key-value pair
+        leaf.remove_key_value_at(key_index);
+        num_keys = num_keys.saturating_sub(1); // Protect against underflow just in case
+
+        // Update header to decrement num_keys
+        self.update_header(root_page_id, tree_height, num_keys)?;
+
+        // If leaf is root and now empty, update tree to be empty
+        if leaf.is_root() && leaf.get_size() == 0 {
+            self.update_header(INVALID_PAGE_ID, 0, 0)?;
+            return Ok(true);
+        }
+
+        // Rebalancing is omitted in this snippet
+        Ok(true)
     }
 
     /// Custom range scan to find all keys in a given range [start, end]
     pub fn range_scan(&self, start: &K, end: &K) -> Result<Vec<(K, V)>, BPlusTreeError> {
-        // 1. Validate input: if start > end (using comparator), return empty vector
-        // 2. Check if tree is empty, if so return empty vector
-        // 3. Initialize result vector to collect key-value pairs
-        // 4. Find the leaf containing the start key:
-        //    a. Call find_leaf_page(start) to get to starting leaf
-        // 5. Linear scan within the first leaf:
-        //    a. Find index of first key >= start using binary search
-        //    b. Scan from this index through all keys in the leaf:
-        //       - For each key <= end, add (key, value) to result
-        //       - If key > end, we're done, break and return result
-        // 6. If we've processed all keys in the current leaf:
-        //    a. Check if there's a next leaf (next_page_id)
-        //    b. If no next leaf, we're done, return result
-        //    c. Otherwise, fetch the next leaf page
-        //    d. Unpin the current leaf
-        //    e. Continue scanning this next leaf from beginning
-        //    f. Repeat steps 5b-6e until either:
-        //       - We find a key > end
-        //       - We reach the end of the leaf chain
-        // 7. Unpin the final leaf page
-        // 8. Return the collected key-value pairs
-        // 9. This traversal uses the leaf node chain for efficient range scans,
-        //    which is a key advantage of B+ Trees over regular B-Trees
-        unimplemented!()
+        // Validate input range
+        if (self.comparator)(start, end) == Ordering::Greater {
+            return Ok(Vec::new()); // Empty range, return empty vector
+        }
+        
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(Vec::new());
+        }
+        
+        // Initialize result vector
+        let mut result = Vec::new();
+        
+        // Find the leaf containing the start key
+        let leaf_page_guard = match self.find_leaf_page(start) {
+            Ok(page) => page,
+            Err(BPlusTreeError::KeyNotFound) => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        
+        // Start scanning from this leaf
+        let mut current_leaf_guard = leaf_page_guard;
+        
+        loop {
+            let leaf_page = current_leaf_guard.read();
+            // Find the index of the first key >= start
+            let mut key_index = leaf_page.find_key_index(start);
+            let size = leaf_page.get_size();
+            
+            // Scan through keys in this leaf
+            while key_index < size {
+                if let Some(key) = leaf_page.get_key_at(key_index) {
+                    // Check if we've exceeded the end of the range
+                    if (self.comparator)(&key, end) == Ordering::Greater {
+                        return Ok(result); // Done with range scan
+                    }
+                    
+                    // Add key-value pair to result if value exists
+                    if let Some(value) = leaf_page.get_value_at(key_index) {
+                        result.push((key.clone(), value.clone()));
+                    }
+                }
+                
+                key_index += 1;
+            }
+            
+            // Move to next leaf if available
+            let next_page_id = match leaf_page.get_next_page_id() {
+                Some(id) if id != INVALID_PAGE_ID => id,
+                _ => break, // No more leaves or invalid next page
+            };
+            
+            // Drop current leaf before fetching next one
+            drop(leaf_page);
+            
+            // Get the next leaf page
+            let next_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
+                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+            
+            // Replace current_leaf_guard with the new page
+            current_leaf_guard = next_page;
+        }
+        
+        Ok(result)
     }
 
     /// Find the leaf page that should contain the key
@@ -240,245 +449,260 @@ where
         &self,
         key: &K,
     ) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
-        // 1. Fetch the header page to get the root_page_id
-        //    a. If header page doesn't exist, return appropriate error
-        // 2. Check if root_page_id is valid:
-        //    a. If INVALID_PAGE_ID, return error (tree is empty)
-        // 3. Fetch the root page using buffer_pool_manager.fetch_page
-        //    a. Start with the root page as current_page
-        // 4. Determine the page type (internal or leaf):
-        //    a. Check the page type field in the page header
-        // 5. While current_page is an internal page:
-        //    a. Cast current_page to BPlusTreeInternalPage<K, C>
-        //    b. Find the appropriate child pointer for the key:
-        //       - Use internal_page.find_child_for_key(key)
-        //       - This compares the key with the keys in the internal node
-        //       - Returns the page_id of the child to follow
-        //    c. Fetch the child page from buffer pool
-        //    d. Unpin the current (parent) page - no longer needed
-        //    e. Update current_page to the child page
-        //    f. Repeat until reaching a leaf page
-        // 6. When a leaf page is reached:
-        //    a. Cast current_page to BPlusTreeLeafPage<K, V, C>
-        //    b. Return the leaf page (still pinned for caller's use)
-        // 7. Handle any errors (page not found, invalid page type, etc.)
-        //    a. Ensure all pages are unpinned even in error cases
-        unimplemented!()
+        // Fetch the header page to get the root_page_id
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id;
+        
+        {
+            let header = header_page.read();
+            root_page_id = header.get_root_page_id();
+            
+            // Check if root_page_id is valid
+            if root_page_id == INVALID_PAGE_ID {
+                return Err(BPlusTreeError::KeyNotFound);
+            }
+        }
+        
+        // Start with the root page
+        let mut current_page_id = root_page_id;
+        
+        // Traverse down to leaf
+        loop {
+            // Try to fetch the current page as a leaf page first
+            if let Some(leaf_page) = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id) {
+                // If we successfully fetched a leaf page, return it
+                return Ok(leaf_page);
+            }
+            
+            // If not a leaf page, try as an internal page
+            if let Some(internal_page) = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id) {
+                
+                // Find the child page id for the key
+                let child_page_id;
+                {
+                    let internal = internal_page.read();
+                    // Find the appropriate child page for the key
+                    child_page_id = internal.find_child_for_key(key);
+                }
+                
+                // Drop the internal page before continuing
+                drop(internal_page);
+                
+                // Continue with this child
+                current_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+            } else {
+                // Neither a leaf nor an internal page, return error
+                return Err(BPlusTreeError::PageNotFound(current_page_id));
+            }
+        }
     }
 
     /// Split a leaf page when it becomes full
     fn split_leaf_page(
         &self,
-        leaf_page: &mut PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        leaf_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Allocate a new leaf page with buffer_pool_manager.new_page()
-        // 2. Determine split point at ceiling(max_size/2):
-        //    a. For a B+ tree, we typically split at the midpoint
-        //    b. This ensures balanced nodes after split (at least half-full)
-        // 3. Copy keys/values after split point to the new page:
-        //    a. For each position i from split_point to max_size-1:
-        //       - Get key/value at position i from original leaf
-        //       - Insert into new leaf page in the same order
-        //       - Remove from original leaf (or mark for removal)
-        //    b. Maintain sorted order in both pages
-        // 4. Update the linked list structure of leaf pages:
-        //    a. New page's next_page_id = original page's next_page_id
-        //    b. Original page's next_page_id = new page's page_id
-        //    c. This maintains the sequential access property of B+ Trees
-        // 5. Get the first key in the new page to use as separator key
-        //    a. Unlike B-Trees, in B+ Trees the separator goes to parent but also stays in leaf
-        // 6. Insert separator key and new page's page_id into parent:
-        //    a. If leaf_page is root (no parent):
-        //       - Call create_new_root with separator key
-        //       - This increases the tree height by 1
-        //    b. Otherwise:
-        //       - Find the parent page (track during tree traversal)
-        //       - Insert separator key and new page's page_id into parent
-        //       - If parent becomes full, recursively call split_internal_page
-        // 7. Update size fields in both leaf pages
-        // 8. Mark both pages as dirty
-        // 9. Unpin the new page (keep original locked if needed by caller)
-        unimplemented!()
+        // Allocate a new leaf page
+        let new_page = self.buffer_pool_manager
+            .new_page::<BPlusTreeLeafPage<K, V, C>>()
+            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+        
+        let new_page_id = new_page.get_page_id();
+        
+        // Perform the split operation
+        let separator_key;
+        {
+            // Get write access to both pages
+            let mut leaf_write = leaf_page.write();
+            let mut new_leaf_write = new_page.write();
+            
+            // Initialize the new leaf page if needed
+            // (depending on implementation, this might be done automatically)
+            
+            // Determine split point - ceiling(max_size/2)
+            let split_point = (leaf_write.get_max_size() + 1) / 2;
+            let current_size = leaf_write.get_size();
+            
+            // Copy keys/values after split point to the new page
+            for i in split_point..current_size {
+                if let (Some(key), Some(value)) = (leaf_write.get_key_at(i), leaf_write.get_value_at(i)) {
+                    new_leaf_write.insert_key_value(key.clone(), value.clone());
+                }
+            }
+            
+            // Update the linked list structure
+            new_leaf_write.set_next_page_id(leaf_write.get_next_page_id());
+            leaf_write.set_next_page_id(Some(new_page_id));
+            
+            // Get the first key in the new page to use as separator
+            separator_key = match new_leaf_write.get_key_at(0) {
+                Some(key) => key.clone(),
+                None => return Err(BPlusTreeError::InvalidPageType), // Should never happen
+            };
+
+            // Remove the moved keys from the original leaf
+            for i in split_point..current_size {
+                leaf_write.remove_key_value_at(split_point);
+            }
+        }
+
+        // Now handle the parent insertion - this may require creating a new root
+        // For now, let's simplify - if leaf is root, create a new root
+        let is_root;
+        let original_page_id = leaf_page.get_page_id();
+        
+        {
+            let leaf_read = leaf_page.read();
+            is_root = leaf_read.is_root(); 
+        }
+        
+        if is_root {
+            // Create a new root with the separator key
+            self.create_new_root(original_page_id, separator_key, new_page_id)?;
+            
+            // Update the leaf to no longer be root
+            let mut leaf_write = leaf_page.write();
+            leaf_write.set_root_status(false);
+        } else {
+            // Handle insertion into parent
+            // This would require tracking the parent during traversal
+            // For now, return an error as this needs additional implementation
+            return Err(BPlusTreeError::BufferPoolError("Parent insertion not implemented for non-root splits".to_string()));
+        }
+        
+        Ok(())
     }
 
     /// Split an internal page when it becomes full
     fn split_internal_page(
         &self,
-        internal_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
+        internal_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Allocate a new internal page with buffer_pool_manager.new_page()
-        // 2. Determine the split point at floor(max_size/2):
-        //    a. For internal nodes, we typically split at middle key
-        //    b. The middle key will be promoted to the parent
-        // 3. Get the middle key at split point (index = max_size/2)
-        //    a. Unlike leaf splits, the middle key goes up to parent and is removed from children
-        // 4. Copy keys/child pointers after middle key to the new page:
-        //    a. For keys, copy from (split_point+1) to (max_size-1)
-        //    b. For values (pointers), ensure proper transfer of child pointers:
-        //       - The child pointer immediately after middle key (at split_point+1)
-        //       - Goes to the leftmost position in the new page
-        //       - The remaining pointers follow their respective keys
-        // 5. Remove the middle key and all copied keys/pointers from original page
-        // 6. Insert the middle key and new page's page_id into parent:
-        //    a. If internal_page is root (no parent):
-        //       - Call create_new_root with middle key
-        //       - This increases tree height by 1
-        //    b. Otherwise:
-        //       - Find the parent page (track during tree traversal)
-        //       - Insert middle key and new page's page_id into parent
-        //       - If parent becomes full, recursively split it
-        // 7. Update child pointers - inform children about their new parent if necessary
-        // 8. Update size fields in both internal pages
-        // 9. Mark both pages as dirty
-        // 10. Unpin the new page (keep original locked if needed by caller)
-        unimplemented!()
+        // Allocate a new internal page
+        let new_page = self.buffer_pool_manager
+            .new_page::<BPlusTreeInternalPage<K, C>>()
+            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+        
+        let new_page_id = new_page.get_page_id();
+        
+        // Perform the split operation
+        let middle_key;
+        {
+            let mut internal_write = internal_page.write();
+            let mut new_internal_write = new_page.write();
+            
+            // Determine split point - floor(max_size/2)
+            let split_point = internal_write.get_max_size() / 2;
+            let current_size = internal_write.get_size();
+            
+            // The middle key (at split_point) will be promoted to the parent
+            middle_key = internal_write.get_key_at(split_point)
+                .ok_or_else(|| BPlusTreeError::InvalidPageType)?.clone();
+            
+            // Get the child that will be the leftmost pointer in the new page
+            // (This is the child pointer that goes immediately after the middle key)
+            let child_after_middle = internal_write.get_value_at(split_point + 1)
+                .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+            
+            // First insert the leftmost child pointer in the new page
+            // For an internal page, we need to setup the first child before any keys
+            new_internal_write.insert_key_value(middle_key.clone(), child_after_middle);
+            // This added a key and two pointers, but we only wanted one pointer (leftmost)
+            // We'll overwrite with the remaining keys and values
+            
+            // Now move the remaining keys and values
+            for i in (split_point + 1)..current_size {
+                if let Some(key) = internal_write.get_key_at(i) {
+                    if let Some(child_id) = internal_write.get_value_at(i + 1) {
+                        new_internal_write.insert_key_value(key.clone(), child_id);
+                    }
+                }
+            }
+            
+            // Now remove keys from original page: remove the middle key and all keys after it
+            for _ in (split_point)..current_size {
+                internal_write.remove_key_value_at(split_point);
+            }
+        }
+        
+        // Now handle the parent insertion
+        let is_root;
+        let original_page_id = internal_page.get_page_id();
+        
+        {
+            let internal_read = internal_page.read();
+            is_root = internal_read.is_root();
+        }
+        
+        if is_root {
+            // Current page is no longer the root
+            {
+                let mut internal_write = internal_page.write();
+                internal_write.set_root_status(false);
+            }
+            
+            // Create a new root with the middle key
+            self.create_new_root(original_page_id, middle_key, new_page_id)?;
+        } else {
+            // If not root, we need to insert the middle key and new page id into the parent
+            // This requires tracking the parent during traversal
+            return Err(BPlusTreeError::BufferPoolError("Parent insertion not implemented for internal pages".to_string()));
+        }
+        
+        Ok(())
     }
 
     /// Merge two leaf pages when they become too empty
     fn merge_leaf_pages(
         &self,
-        left_page: &mut PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        right_page: &mut PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        parent_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
+        left_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        right_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Verify merge is possible (left_size + right_size <= max_size)
-        //    a. If not possible, use redistribute_leaf_pages instead
-        // 2. Get current sizes of both pages
-        // 3. Get the separator key from parent at parent_key_index
-        //    a. In B+ trees, this key doesn't go to leaves (unlike B-trees)
-        // 4. Copy all keys/values from right page to left page:
-        //    a. Get each key/value pair from right page
-        //    b. Append to left page's keys/values arrays
-        //    c. Update left page's size accordingly
-        // 5. Update leaf page linked list:
-        //    a. Set left_page.next_page_id = right_page.next_page_id
-        //    b. This maintains the sequential access property
-        // 6. Remove the separator key from parent at parent_key_index
-        // 7. Remove right page's page_id from parent's child pointers
-        //    a. This is typically at index parent_key_index + 1
-        // 8. Check if parent needs rebalancing:
-        //    a. If parent is root and now has no keys:
-        //       - Left page becomes new root (collapse a level)
-        //       - Update header page (decrement tree height)
-        //    b. Otherwise, parent underflow will be handled by caller
-        // 9. Mark left page and parent page as dirty
-        // 10. Delete right page from buffer pool (or mark for reuse)
-        // 11. Return success
-        unimplemented!()
-    }
-
-    /// Merge two internal pages when they become too empty
-    fn merge_internal_pages(
-        &self,
-        left_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
-        right_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
-        parent_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
-        parent_key_index: usize,
-    ) -> Result<(), BPlusTreeError> {
-        // 1. Verify merge is possible (left_size + right_size + 1 <= max_size)
-        //    a. Add 1 because parent key will move down to left page
-        //    b. If not possible, use redistribute_internal_pages instead
-        // 2. Get current sizes of both pages
-        // 3. Get the separator key from parent at parent_key_index
-        //    a. Unlike leaf merges, in internal merges this key moves down
-        // 4. Append the separator key to left page:
-        //    a. This becomes the divider between left's and right's children
-        // 5. Copy all keys from right page to left page:
-        //    a. Get each key from right page
-        //    b. Append to left page's keys array
-        // 6. Copy all child pointers from right page to left page:
-        //    a. Get each child pointer from right page
-        //    b. Append to left page's values array
-        //    c. Each copied child now has left_page as its parent
-        // 7. Remove the separator key from parent at parent_key_index
-        // 8. Remove right page's page_id from parent's child pointers
-        //    a. This is typically at index parent_key_index + 1
-        // 9. Update left page's size and right page is now unused
-        // 10. Check if parent needs rebalancing:
-        //     a. If parent is root and now has no keys:
-        //        - Left page becomes new root (collapse a level)
-        //        - Update header page (decrement tree height)
-        //     b. Otherwise, parent underflow will be handled by caller
-        // 11. Mark left page and parent page as dirty
-        // 12. Delete right page from buffer pool (or mark for reuse)
-        // 13. Return success
-        unimplemented!()
+        // Implementation to be filled in
+        unimplemented!("merge_leaf_pages not implemented")
     }
 
     /// Redistribute keys between two leaf pages to avoid merge
     fn redistribute_leaf_pages(
         &self,
-        left_page: &mut PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        right_page: &mut PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        parent_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
+        left_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        right_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Calculate total keys in both pages
-        // 2. Calculate target size after redistribution:
-        //    a. Aim for roughly equal distribution (total ÷ 2)
-        //    b. Ensure both pages will be at least min_size
-        // 3. Determine which way to move keys:
-        //    a. If left_size > right_size, move from left to right
-        //    b. If right_size > left_size, move from right to left
-        // 4. If moving from left to right:
-        //    a. Calculate how many keys to move
-        //    b. For each key to move (starting from end of left):
-        //       - Get key/value from left page
-        //       - Insert at beginning of right page
-        //       - Remove from left page
-        // 5. If moving from right to left:
-        //    a. Calculate how many keys to move
-        //    b. For each key to move (starting from beginning of right):
-        //       - Get key/value from right page
-        //       - Insert at end of left page
-        //       - Remove from right page
-        // 6. Update the separator key in parent:
-        //    a. The separator should be the first key in right page
-        //    b. Get first key from right page
-        //    c. Replace parent key at parent_key_index
-        // 7. Update sizes of both leaf pages
-        // 8. Mark all three pages as dirty
-        // 9. Return success
-        unimplemented!()
+        // Implementation to be filled in
+        unimplemented!("redistribute_leaf_pages not implemented")
+    }
+
+    /// Merge two internal pages when they become too empty
+    fn merge_internal_pages(
+        &self,
+        left_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        right_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        parent_key_index: usize,
+    ) -> Result<(), BPlusTreeError> {
+        // Implementation to be filled in
+        unimplemented!("merge_internal_pages not implemented")
     }
 
     /// Redistribute keys between two internal pages to avoid merge
     fn redistribute_internal_pages(
         &self,
-        left_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
-        right_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
-        parent_page: &mut PageGuard<BPlusTreeInternalPage<K, C>>,
+        left_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        right_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Calculate total keys in both pages (including parent separator)
-        //    a. Total = left_size + right_size + 1 (for parent key)
-        // 2. Calculate target size after redistribution:
-        //    a. Aim for roughly equal distribution
-        //    b. Ensure both pages will be at least min_size
-        // 3. Get the current separator key from parent at parent_key_index
-        // 4. If moving from left to right (left_size > right_size):
-        //    a. Calculate how many keys to move
-        //    b. Save the last key of left page (will become new separator)
-        //    c. Move parent separator key to beginning of right page
-        //    d. For each key to move (except the last):
-        //       - Move key from left to right page
-        //       - Move corresponding child pointer from left to right
-        //    e. Move the last child pointer associated with the new separator
-        //    f. Update parent key at parent_key_index with saved last key
-        // 5. If moving from right to left (right_size > left_size):
-        //    a. Calculate how many keys to move
-        //    b. Move parent separator key to end of left page
-        //    c. Save the first key of right page (will become new separator)
-        //    d. Move first child pointer from right to left
-        //    e. For each additional key to move:
-        //       - Move key from right to left page
-        //       - Move corresponding child pointer from right to left
-        //    f. Update parent key at parent_key_index with saved first key
-        // 6. Update sizes of both internal pages
-        // 7. Mark all three pages as dirty
-        // 8. Return success
-        unimplemented!()
+        // Implementation to be filled in
+        unimplemented!("redistribute_internal_pages not implemented")
     }
 
     /// Create a new root page
@@ -488,28 +712,38 @@ where
         key: K,
         right_child_id: PageId,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Allocate a new internal page with buffer_pool_manager.new_page()
-        // 2. Initialize the new page as a root node using new_root_page:
-        //    a. Set is_root flag to true
-        //    b. Configure with internal_max_size and comparator
-        // 3. Populate the new root page:
-        //    a. Call populate_new_root with:
-        //       - left_child_id: ID of the original page (pre-split)
-        //       - key: The separator/middle key
-        //       - right_child_id: ID of the newly created page from split
-        //    b. This sets up a parent with one key and two child pointers
-        // 4. Update children to no longer be root nodes (if they were):
-        //    a. Fetch left_child and set is_root = false if it's an internal page
-        //    b. Fetch right_child and set is_root = false if it's an internal page
-        //    c. Mark both as dirty if changed
-        // 5. Get the header page and update:
-        //    a. Set root_page_id to the new root's page_id
-        //    b. Increment tree_height by 1
-        //    c. num_keys stays the same (splits don't add new keys, just reorganize)
-        // 6. Mark the header page and new root page as dirty
-        // 7. Unpin all pages (header, new root, and any children fetched)
-        // 8. Note: After this operation, the tree height increases by 1
-        unimplemented!()
+        // Allocate a new internal page
+        let new_page = self.buffer_pool_manager
+            .new_page::<BPlusTreeInternalPage<K, C>>()
+            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+        
+        let new_root_id = new_page.get_page_id();
+        
+        // Initialize as internal page and set up as root
+        {
+            let mut internal_write = new_page.write();
+            
+            // Use the populate_new_root method to set up the internal page with the separator key and child pointers
+            if !internal_write.populate_new_root(left_child_id, key, right_child_id) {
+                return Err(BPlusTreeError::BufferPoolError("Failed to populate new root page".to_string()));
+            }
+        }
+        
+        // Update the header page to point to the new root
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        {
+            let mut header_write = header_page.write();
+            
+            // Update the header to point to the new root and increment tree height
+            let current_height = header_write.get_tree_height();
+            header_write.set_root_page_id(new_root_id);
+            header_write.set_tree_height(current_height + 1);
+        }
+        
+        Ok(())
     }
 
     /// Update header page after operations
@@ -519,50 +753,88 @@ where
         height: u32,
         num_keys: usize,
     ) -> Result<(), BPlusTreeError> {
-        // 1. Fetch the header page using header_page_id
-        // 2. Update the header page fields:
-        //    a. Set root_page_id to root_id
-        //    b. Set tree_height to height
-        //    c. Set num_keys to num_keys
-        // 3. Mark the header page as dirty
-        // 4. Unpin the header page
-        unimplemented!()
+        // Fetch the header page
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        // Update the header fields
+        {
+            let mut header_write = header_page.write();
+            header_write.set_root_page_id(root_id);
+            header_write.set_tree_height(height);
+            header_write.set_num_keys(num_keys);
+        }
+        
+        Ok(())
     }
 
     /// Check if the B+ tree is empty
     pub fn is_empty(&self) -> bool {
-        // 1. Fetch the header page
-        // 2. Check if root_page_id is INVALID_PAGE_ID
-        // 3. Unpin the header page
-        // 4. Return the result
-        unimplemented!()
+        if self.header_page_id == INVALID_PAGE_ID {
+            return true;
+        }
+        
+        // Try to fetch the header page
+        let header_page = match self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+            Some(page) => page,
+            None => return true, // If we can't fetch the header, consider tree empty
+        };
+        
+        // Check root page ID
+        let root_page_id = header_page.read().get_root_page_id();
+        
+        // If root page ID is invalid, tree is empty
+        root_page_id == INVALID_PAGE_ID
     }
 
     /// Get the current height of the B+ tree
     pub fn get_height(&self) -> u32 {
-        // 1. Fetch the header page
-        // 2. Get the tree_height value
-        // 3. Unpin the header page
-        // 4. Return the height
-        unimplemented!()
+        if self.header_page_id == INVALID_PAGE_ID {
+            return 0;
+        }
+        
+        // Try to fetch the header page
+        let header_page = match self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+            Some(page) => page,
+            None => return 0,
+        };
+        
+        header_page.read().get_tree_height()
     }
 
     /// Get the root page ID
     pub fn get_root_page_id(&self) -> PageId {
-        // 1. Fetch the header page
-        // 2. Get the root_page_id value
-        // 3. Unpin the header page
-        // 4. Return the root_page_id
-        unimplemented!()
+        if self.header_page_id == INVALID_PAGE_ID {
+            return INVALID_PAGE_ID;
+        }
+        
+        // Try to fetch the header page
+        let header_page = match self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+            Some(page) => page,
+            None => return INVALID_PAGE_ID,
+        };
+        
+        header_page.read().get_root_page_id()
     }
 
     /// Get the total number of keys in the B+ tree
     pub fn get_size(&self) -> usize {
-        // 1. Fetch the header page
-        // 2. Get the num_keys value
-        // 3. Unpin the header page
-        // 4. Return the num_keys
-        unimplemented!()
+        if self.header_page_id == INVALID_PAGE_ID {
+            return 0;
+        }
+        
+        // Try to fetch the header page
+        let header_page = match self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+            Some(page) => page,
+            None => return 0,
+        };
+        
+        header_page.read().get_num_keys()
     }
 
     /// Find a sibling page for merging or redistribution
@@ -572,14 +844,39 @@ where
         child_index: usize,
         prefer_left: bool,
     ) -> Result<(usize, PageId), BPlusTreeError> {
-        // 1. Get the number of child pointers in parent_page
-        // 2. If prefer_left and child_index > 0:
-        //    a. Return (child_index-1, parent_page.get_value_at(child_index-1))
-        // 3. If !prefer_left and child_index < num_children-1:
-        //    a. Return (child_index, parent_page.get_value_at(child_index+1))
-        // 4. If no sibling found in preferred direction, try the other direction
-        // 5. If no sibling found in either direction, return an error
-        unimplemented!()
+        let parent_read = parent_page.read();
+        
+        // Get the number of child pointers in parent_page
+        let num_children = parent_read.get_size() + 1; // Internal page has (size + 1) children
+        
+        // Try to find a sibling in the preferred direction first
+        if prefer_left && child_index > 0 {
+            // Return left sibling (child_index - 1) and the separator key index (child_index - 1)
+            if let Some(sibling_id) = parent_read.get_value_at(child_index - 1) {
+                return Ok((child_index - 1, sibling_id));
+            }
+        } else if !prefer_left && child_index < num_children - 1 {
+            // Return right sibling (child_index + 1) and the separator key index (child_index)
+            if let Some(sibling_id) = parent_read.get_value_at(child_index + 1) {
+                return Ok((child_index, sibling_id));
+            }
+        }
+        
+        // If no sibling in preferred direction, try the other direction
+        if prefer_left && child_index < num_children - 1 {
+            // Couldn't find left sibling, try right sibling
+            if let Some(sibling_id) = parent_read.get_value_at(child_index + 1) {
+                return Ok((child_index, sibling_id));
+            }
+        } else if !prefer_left && child_index > 0 {
+            // Couldn't find right sibling, try left sibling
+            if let Some(sibling_id) = parent_read.get_value_at(child_index - 1) {
+                return Ok((child_index - 1, sibling_id));
+            }
+        }
+        
+        // If we get here, no siblings exist (should only happen for root with single child)
+        Err(BPlusTreeError::BufferPoolError("No sibling found for the given child".to_string()))
     }
 
     /// Check if a page needs rebalancing after removal
@@ -685,99 +982,314 @@ where
 
     /// Perform a level-order traversal (breadth-first) for debugging or visualization
     pub fn print_tree(&self) -> Result<(), BPlusTreeError> {
-        // 1. If tree is empty, print "Empty tree" and return
-        // 2. Print header information: height, size, root_id
-        // 3. Initialize a queue with (root_page_id, level=0)
-        // 4. While the queue is not empty:
-        //    a. Dequeue a (page_id, level) pair
-        //    b. Fetch the page
-        //    c. Determine if it's a leaf or internal page
-        //    d. Print level-appropriate indentation
-        //    e. Print page information:
-        //       - For internal nodes: keys and child pointers
-        //       - For leaf nodes: keys, values, and next_page_id
-        //    f. If internal node, enqueue all child pointers with level+1
-        //    g. Unpin the page
-        // 5. This traversal visits nodes level by level (breadth-first)
-        //    which is useful for visualizing the tree structure
-        unimplemented!()
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            println!("Empty tree - not initialized");
+            return Ok(());
+        }
+        
+        // Get header page to check if tree is empty
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id = header_page.read().get_root_page_id();
+        let tree_height = header_page.read().get_tree_height();
+        let num_keys = header_page.read().get_num_keys();
+        
+        // Print header information
+        println!("B+ Tree Information:");
+        println!("  Height: {}", tree_height);
+        println!("  Size (total keys): {}", num_keys);
+        println!("  Root Page ID: {}", root_page_id);
+        
+        // If tree is empty, return early
+        if root_page_id == INVALID_PAGE_ID {
+            println!("Empty tree - no root");
+            return Ok(());
+        }
+        
+        println!("\nTree Structure:");
+        
+        // Initialize queue for BFS
+        let mut queue = VecDeque::new();
+        queue.push_back((root_page_id, 0)); // (page_id, level)
+        
+        let mut current_level = 0;
+        
+        // Perform BFS
+        while let Some((page_id, level)) = queue.pop_front() {
+            // Print level separation if needed
+            if level > current_level {
+                println!("\nLevel {}:", level);
+                current_level = level;
+            }
+            
+            // Print indentation
+            let indent = "  ".repeat(level as usize + 1);
+            
+            // Try to get the page as a leaf page
+            if let Some(leaf_page) = self.buffer_pool_manager.fetch_page::<BPlusTreeLeafPage<K, V, C>>(page_id) {
+                let leaf_read = leaf_page.read();
+                
+                // Print leaf information
+                println!("{}[Leaf {}]: Size={}, Next={:?}", 
+                    indent, page_id, leaf_read.get_size(), leaf_read.get_next_page_id());
+                
+                // Print keys/values
+                if leaf_read.get_size() > 0 {
+                    print!("{}Keys: ", indent);
+                    for i in 0..leaf_read.get_size() {
+                        if let Some(key) = leaf_read.get_key_at(i) {
+                            print!("{} ", key);
+                            if i < leaf_read.get_size() - 1 {
+                                print!(", ");
+                            }
+                        }
+                    }
+                    println!();
+                }
+                continue;
+            }
+            
+            // Try to get the page as an internal page
+            if let Some(internal_page) = self.buffer_pool_manager.fetch_page::<BPlusTreeInternalPage<K, C>>(page_id) {
+                let internal_read = internal_page.read();
+                
+                // Print internal node information
+                println!("{}[Internal {}]: Size={}, IsRoot={}", 
+                    indent, page_id, internal_read.get_size(), internal_read.is_root());
+                
+                // Print keys
+                if internal_read.get_size() > 0 {
+                    print!("{}Keys: ", indent);
+                    for i in 0..internal_read.get_size() {
+                        if let Some(key) = internal_read.get_key_at(i) {
+                            print!("{} ", key);
+                            if i < internal_read.get_size() - 1 {
+                                print!(", ");
+                            }
+                        }
+                    }
+                    println!();
+                    
+                    // Print child pointers
+                    print!("{}Children: ", indent);
+                    for i in 0..=internal_read.get_size() { // One more child than keys
+                        if let Some(child_id) = internal_read.get_value_at(i) {
+                            print!("{} ", child_id);
+                            if i < internal_read.get_size() {
+                                print!(", ");
+                            }
+                            
+                            // Add child to queue for next level
+                            queue.push_back((child_id, level + 1));
+                        }
+                    }
+                    println!();
+                }
+                continue;
+            }
+            
+            // If we couldn't fetch the page as either type, print unknown
+            println!("{}[Unknown page type]: {}", indent, page_id);
+        }
+        
+        Ok(())
     }
 
     /// Perform an in-order traversal of all keys (debug/verification)
     pub fn in_order_traversal(&self) -> Result<Vec<K>, BPlusTreeError> {
-        // 1. If tree is empty, return empty vector
-        // 2. Start with root page
-        // 3. If root is a leaf, collect all keys and return
-        // 4. For a B+ tree, in-order traversal can be done two ways:
-        //    a. Recursive approach (for small trees):
-        //       - For each internal node, recursively visit each child subtree
-        //       - The recursive call is made between each key
-        //       - This works but can cause stack overflow for large trees
-        //    b. Iterative approach using leaf-chain (for B+ trees):
-        //       - Find leftmost leaf using find_leftmost_leaf method
-        //       - Collect all keys from this leaf
-        //       - Follow next_page_id pointers collecting keys from each leaf
-        //       - This is more efficient as all values are in leaf nodes
-        // 5. Return the collected keys in sorted order
-        unimplemented!()
+        // If tree is empty, return empty vector
+        if self.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Find the leftmost leaf (containing smallest keys)
+        let leaf_guard = self.find_leftmost_leaf()?;
+        
+        // Initialize result vector
+        let mut result = Vec::new();
+        let mut current_leaf = leaf_guard;
+        
+        // Traverse all leaf pages using next_page_id pointers
+        loop {
+            let leaf_read = current_leaf.read();
+            
+            // Collect all keys from current leaf
+            for i in 0..leaf_read.get_size() {
+                if let Some(key) = leaf_read.get_key_at(i) {
+                    result.push(key.clone());
+                }
+            }
+            
+            // Get next leaf page id
+            let next_page_id = match leaf_read.get_next_page_id() {
+                Some(id) if id != INVALID_PAGE_ID => id,
+                _ => break, // No more leaves
+            };
+            
+            // Drop the current read guard
+            drop(leaf_read);
+            
+            // Fetch the next leaf page
+            let next_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
+                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+            
+            // Update current leaf
+            current_leaf = next_page;
+        }
+        
+        Ok(result)
     }
 
     /// Find the leftmost leaf page in the tree (for range scans or in-order traversal)
     fn find_leftmost_leaf(&self) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
-        // 1. Fetch the header page to get root_page_id
-        // 2. Check if root_page_id is valid:
-        //    a. If INVALID_PAGE_ID, return error (tree is empty)
-        // 3. Fetch the root page
-        // 4. While the current page is an internal page:
-        //    a. Cast the page to BPlusTreeInternalPage
-        //    b. Get the leftmost child pointer (index 0)
-        //    c. Fetch this child page
-        //    d. Unpin the current page
-        //    e. Update current page to the child
-        // 5. When a leaf page is reached:
-        //    a. Cast the page to BPlusTreeLeafPage
-        //    b. Return this leaf page (still pinned)
-        // 6. This leaf will contain the smallest keys in the tree
-        unimplemented!()
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::BufferPoolError("Tree not initialized".to_string()));
+        }
+        
+        // Get header page to check if tree is empty
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id = header_page.read().get_root_page_id();
+        
+        // If tree is empty, return error
+        if root_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::BufferPoolError("Tree is empty".to_string()));
+        }
+        
+        // Start at the root
+        let mut current_page_id = root_page_id;
+        
+        // Keep going to the leftmost child until reaching a leaf
+        loop {
+            // Try to fetch as a leaf page first
+            if let Some(leaf_page) = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id) {
+                // Found a leaf page, return it
+                return Ok(leaf_page);
+            }
+            
+            // If not a leaf, try as an internal page
+            if let Some(internal_page) = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id) {
+                
+                // Get the leftmost child (index 0)
+                let leftmost_child_id = internal_page.read().get_value_at(0)
+                    .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+                
+                // Continue with this child
+                current_page_id = leftmost_child_id;
+            } else {
+                // Neither a leaf nor an internal page, return error
+                return Err(BPlusTreeError::InvalidPageType);
+            }
+        }
     }
 
     /// Perform a pre-order traversal (useful for serialization)
     pub fn pre_order_traversal(&self) -> Result<Vec<PageId>, BPlusTreeError> {
-        // 1. If tree is empty, return empty vector
-        // 2. Initialize result vector to collect page IDs
-        // 3. Initialize a stack with root_page_id
-        // 4. While stack is not empty:
-        //    a. Pop page_id from stack
-        //    b. Add page_id to result vector (visit before children)
-        //    c. Fetch the page
-        //    d. If internal page:
-        //       - Push all child pointers to stack in reverse order
-        //         (so leftmost child is processed first)
-        //    e. Unpin the page
-        // 5. Return the collected page IDs in pre-order
-        // 6. Note: Pre-order traversal visits a node before its children,
-        //    which can be useful for serializing the tree structure
-        unimplemented!()
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(Vec::new());
+        }
+        
+        // Get header page to check if tree is empty
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id = header_page.read().get_root_page_id();
+        
+        // If tree is empty, return empty vector
+        if root_page_id == INVALID_PAGE_ID {
+            return Ok(Vec::new());
+        }
+        
+        // Initialize result vector and stack for traversal
+        let mut result = Vec::new();
+        let mut stack = Vec::new();
+        stack.push(root_page_id);
+        
+        // Iterative pre-order traversal
+        while let Some(page_id) = stack.pop() {
+            // Add current page to result (visit before children)
+            result.push(page_id);
+            
+            // Check if this is an internal page - if so, process its children
+            if let Some(internal_page) = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id) {
+                
+                let internal_read = internal_page.read();
+                let size = internal_read.get_size();
+                
+                // Push children to stack in reverse order so leftmost is processed first
+                for i in (0..=size).rev() {
+                    if let Some(child_id) = internal_read.get_value_at(i) {
+                        stack.push(child_id);
+                    }
+                }
+            }
+            // If not an internal page, it's a leaf or unknown - just continue with the next stack item
+        }
+        
+        Ok(result)
     }
 
     /// Perform a post-order traversal (useful for safe deletion)
     pub fn post_order_traversal(&self) -> Result<Vec<PageId>, BPlusTreeError> {
-        // 1. If tree is empty, return empty vector
-        // 2. Initialize result vector to collect page IDs
-        // 3. Use a recursive helper function to perform traversal:
-        //    fn post_order_helper(page_id, result):
-        //       a. Fetch the page
-        //       b. If leaf page, add to result and return
-        //       c. If internal page:
-        //          - For each child pointer:
-        //            * Recursively call post_order_helper on child
-        //          - After all children processed, add this page_id to result
-        //       d. Unpin the page
-        // 4. Call post_order_helper starting with root_page_id
-        // 5. Return the collected page IDs in post-order
-        // 6. Note: Post-order traversal visits children before parents,
-        //    which ensures safe deletion (children deleted before parents)
-        unimplemented!()
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(Vec::new());
+        }
+        
+        // Get header page to check if tree is empty
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id = header_page.read().get_root_page_id();
+        
+        // If tree is empty, return empty vector
+        if root_page_id == INVALID_PAGE_ID {
+            return Ok(Vec::new());
+        }
+        
+        // Initialize result vector
+        let mut result = Vec::new();
+        
+        // Call recursive helper function
+        self.post_order_helper(root_page_id, &mut result)?;
+        
+        Ok(result)
+    }
+
+    /// Helper function for post-order traversal
+    fn post_order_helper(&self, page_id: PageId, result: &mut Vec<PageId>) -> Result<(), BPlusTreeError> {
+        // Check if this is an internal page
+        if let Some(internal_page) = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id) {
+            
+            let internal_read = internal_page.read();
+            let size = internal_read.get_size();
+            
+            // Process all children first (post-order)
+            for i in 0..=size {
+                if let Some(child_id) = internal_read.get_value_at(i) {
+                    self.post_order_helper(child_id, result)?;
+                }
+            }
+        }
+        
+        // After processing all children (or if leaf), add this page
+        result.push(page_id);
+        
+        Ok(())
     }
 }
 
