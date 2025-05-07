@@ -20,9 +20,16 @@ pub struct TypedStringExpression {
 
 impl TypedStringExpression {
     pub fn new(data_type: String, value: String, return_type: Column) -> Self {
+        // Strip quotes if present (handles 'value' format)
+        let clean_value = if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+            value[1..value.len()-1].to_string()
+        } else {
+            value
+        };
+        
         Self {
             data_type,
-            value,
+            value: clean_value,
             return_type,
             children: vec![],
         }
@@ -81,8 +88,29 @@ impl TypedStringExpression {
         }
     }
 
-    // Parse a timestamp string in the format YYYY-MM-DD HH:MM:SS[.SSS]
+    // Parse a timestamp string in the format YYYY-MM-DD HH:MM:SS[.SSS] or ISO8601/RFC3339
     fn parse_timestamp(&self, timestamp_str: &str) -> Result<Value, ExpressionError> {
+        // First try ISO8601/RFC3339 format (which includes formats like 2023-01-01T10:00:00Z)
+        if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp_str) {
+            let utc_dt = dt.with_timezone(&chrono::Utc);
+            return Ok(Value::new_with_type(
+                Val::Timestamp(utc_dt.timestamp() as u64),
+                TypeId::Timestamp,
+            ));
+        }
+        
+        // If that fails, try parsing with the T separator format without timezone
+        if timestamp_str.contains('T') {
+            if let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
+                let utc_dt = dt.and_utc();
+                return Ok(Value::new_with_type(
+                    Val::Timestamp(utc_dt.timestamp() as u64),
+                    TypeId::Timestamp,
+                ));
+            }
+        }
+        
+        // Finally try the default format
         let format = if timestamp_str.contains('.') {
             "%Y-%m-%d %H:%M:%S.%f"
         } else {
@@ -91,9 +119,12 @@ impl TypedStringExpression {
 
         match NaiveDateTime::parse_from_str(timestamp_str, format) {
             Ok(dt) => {
-                // Convert to UTC DateTime and format as RFC3339
+                // Convert to UTC DateTime
                 let utc_dt = dt.and_utc();
-                Ok(Value::new(utc_dt.to_rfc3339()))
+                Ok(Value::new_with_type(
+                    Val::Timestamp(utc_dt.timestamp() as u64),
+                    TypeId::Timestamp,
+                ))
             }
             Err(e) => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid timestamp format '{}': {}",
@@ -110,23 +141,29 @@ impl ExpressionOps for TypedStringExpression {
             "DATE" => self.parse_date(&self.value),
             "TIME" => self.parse_time(&self.value),
             "TIMESTAMP" => {
+                // Use the improved parse_timestamp method directly
                 let result = self.parse_timestamp(&self.value)?;
-                // If the return type is VarChar (for AT TIME ZONE), return as is
-                // Otherwise convert to timestamp
+                
+                // If the return type is VarChar (for AT TIME ZONE), convert to string
                 if self.return_type.get_type() == TypeId::VarChar {
-                    Ok(result)
-                } else {
-                    // Parse the RFC3339 string back to a timestamp value
-                    match DateTime::parse_from_rfc3339(&result.to_string()) {
-                        Ok(dt) => Ok(Value::new_with_type(
-                            Val::Timestamp(dt.timestamp() as u64),
-                            TypeId::Timestamp,
+                    // Format the timestamp as RFC3339
+                    match result.value_ {
+                        Val::Timestamp(ts) => {
+                            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(ts as i64, 0)
+                                .ok_or_else(|| {
+                                    ExpressionError::InvalidOperation(
+                                        "Invalid timestamp value".to_string(),
+                                    )
+                                })?;
+                            Ok(Value::new(Val::VarLen(dt.to_rfc3339())))
+                        }
+                        _ => Err(ExpressionError::InvalidOperation(
+                            "Expected timestamp value".to_string(),
                         )),
-                        Err(e) => Err(ExpressionError::InvalidOperation(format!(
-                            "Failed to convert to timestamp: {}",
-                            e
-                        ))),
                     }
+                } else {
+                    // Return the timestamp value directly
+                    Ok(result)
                 }
             }
             // For other data types, we'll return the string value and let the caller handle conversion
@@ -208,14 +245,28 @@ impl ExpressionOps for TypedStringExpression {
                 }
             }
             "TIMESTAMP" => {
+                // Try ISO8601/RFC3339 format first
+                if DateTime::parse_from_rfc3339(&self.value).is_ok() {
+                    return Ok(());
+                }
+                
+                // Try with T separator
+                if self.value.contains('T') {
+                    if NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok() {
+                        return Ok(());
+                    }
+                }
+                
+                // Try standard format
                 let format = if self.value.contains('.') {
                     "%Y-%m-%d %H:%M:%S.%f"
                 } else {
                     "%Y-%m-%d %H:%M:%S"
                 };
+                
                 if NaiveDateTime::parse_from_str(&self.value, format).is_err() {
                     return Err(ExpressionError::InvalidOperation(format!(
-                        "Invalid TIMESTAMP format: '{}'. Expected YYYY-MM-DD HH:MM:SS[.SSS]",
+                        "Invalid TIMESTAMP format: '{}'. Expected YYYY-MM-DD HH:MM:SS[.SSS], ISO8601, or RFC3339",
                         self.value
                     )));
                 }
@@ -331,5 +382,66 @@ mod tests {
         );
 
         assert_eq!(expr.to_string(), "DATE '2023-01-15'");
+    }
+
+    #[test]
+    fn test_iso8601_timestamp_parsing() {
+        // Test ISO8601/RFC3339 format
+        let expr = TypedStringExpression::new(
+            "TIMESTAMP".to_string(),
+            "2023-01-01T10:00:00Z".to_string(),
+            Column::new("timestamp_col", TypeId::Timestamp),
+        );
+
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+
+        let result = expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result.get_type_id(), TypeId::Timestamp);
+    }
+
+    #[test]
+    fn test_quoted_timestamp_parsing() {
+        // Test with quotes in the value (should be stripped)
+        let expr = TypedStringExpression::new(
+            "TIMESTAMP".to_string(),
+            "'2023-01-01T10:00:00Z'".to_string(),
+            Column::new("timestamp_col", TypeId::Timestamp),
+        );
+
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+
+        let result = expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result.get_type_id(), TypeId::Timestamp);
+    }
+
+    #[test]
+    fn test_timestamp_validation() {
+        // ISO8601/RFC3339 format should validate
+        let expr = TypedStringExpression::new(
+            "TIMESTAMP".to_string(),
+            "2023-01-01T10:00:00Z".to_string(),
+            Column::new("timestamp_col", TypeId::Timestamp),
+        );
+
+        let schema = Schema::new(vec![]);
+        assert!(expr.validate(&schema).is_ok());
+
+        // Standard format should also validate
+        let expr2 = TypedStringExpression::new(
+            "TIMESTAMP".to_string(),
+            "2023-01-01 10:00:00".to_string(),
+            Column::new("timestamp_col", TypeId::Timestamp),
+        );
+        assert!(expr2.validate(&schema).is_ok());
+
+        // Invalid format should fail validation
+        let expr3 = TypedStringExpression::new(
+            "TIMESTAMP".to_string(),
+            "2023/01/01".to_string(),
+            Column::new("timestamp_col", TypeId::Timestamp),
+        );
+        assert!(expr3.validate(&schema).is_err());
     }
 }
