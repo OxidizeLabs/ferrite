@@ -34,6 +34,8 @@ where
     size: usize,
     // Maximum size
     max_size: usize,
+    // Flag indicating if this is a root node
+    is_root: bool
 }
 
 impl<
@@ -51,7 +53,7 @@ where
 
 impl<K, V, C> BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + Debug + for<'de> Deserialize<'de>,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
@@ -67,7 +69,26 @@ where
             is_dirty: false,
             size: 0,
             max_size,
+            is_root: false
         }
+    }
+
+    /// Create a new leaf page that is a root node
+    pub fn new_root_page(page_id: PageId, max_size: usize, comparator: C) -> Self {
+        let mut page = Self::new_with_options(page_id, max_size, comparator);
+        page.is_root = true;
+        page
+    }
+
+    /// Set whether this leaf page is a root node
+    pub fn set_root_status(&mut self, is_root: bool) {
+        self.is_root = is_root;
+        self.is_dirty = true;
+    }
+
+    /// Check if this leaf page is a root node
+    pub fn is_root(&self) -> bool {
+        self.is_root
     }
 
     pub fn get_key_at(&self, index: usize) -> Option<&K> {
@@ -124,9 +145,9 @@ where
             let mid = low + (high - low) / 2;
             let cmp = (self.comparator)(key, &self.keys[mid]);
 
-            if cmp == std::cmp::Ordering::Equal {
+            if cmp == Ordering::Equal {
                 return mid;
-            } else if cmp == std::cmp::Ordering::Less {
+            } else if cmp == Ordering::Less {
                 high = mid;
             } else {
                 low = mid + 1;
@@ -145,7 +166,7 @@ where
 
         // Check if key already exists
         if index < self.size
-            && (self.comparator)(&key, &self.keys[index]) == std::cmp::Ordering::Equal
+            && (self.comparator)(&key, &self.keys[index]) == Ordering::Equal
         {
             // Update value if key exists
             self.values[index] = value;
@@ -285,6 +306,61 @@ where
             self.keys.push(key);
             self.values.push(value);
         }
+    }
+
+    /// Validates that the leaf page maintains all B+ tree invariants
+    /// Returns a Result with either () for success or a detailed error message
+    pub fn check_invariants(&self) -> Result<(), String>
+    where
+        K: Debug,
+    {
+        // 1. Check size constraints
+        if self.size > self.max_size {
+            return Err(format!(
+                "Leaf page size {} exceeds max size {}",
+                self.size, self.max_size
+            ));
+        }
+
+        // 2. If not root, ensure size is at least the minimum
+        if !self.is_root && self.size < self.get_min_size() {
+            return Err(format!(
+                "Leaf page size {} is smaller than the min size {} for non-root",
+                self.size,
+                self.get_min_size()
+            ));
+        }
+
+        // 3. Check that keys and values have the correct length matching size
+        if self.keys.len() != self.size || self.values.len() != self.size {
+            return Err(format!(
+                "Keys/Values length ({}/{}) does not match size {}",
+                self.keys.len(),
+                self.values.len(),
+                self.size
+            ));
+        }
+
+        // 4. Check that keys are sorted according to the comparator
+        for i in 1..self.size {
+            let cmp = (self.comparator)(&self.keys[i - 1], &self.keys[i]);
+            if cmp == Ordering::Greater {
+                return Err(format!(
+                    "Keys are out of order at index {} (key {:?} > key {:?})",
+                    i - 1,
+                    self.keys[i - 1],
+                    self.keys[i]
+                ));
+            }
+        }
+
+        // All invariants satisfied
+        Ok(())
+    }
+
+    /// Helper method for tests to check invariants and return a boolean
+    pub fn is_valid(&self) -> bool {
+        self.check_invariants().is_ok()
     }
 }
 
