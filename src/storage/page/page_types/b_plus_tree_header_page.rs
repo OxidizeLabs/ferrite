@@ -1,9 +1,8 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::mem;
-use serde::{Serialize, Deserialize};
 
 /// The header page for a B+ tree.
 /// This page keeps track of the root page ID and other metadata about the B+ tree.
@@ -385,17 +384,15 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::page::page::{Page, PageTrait};
     use crate::storage::page::page_guard::PageGuard;
     use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
-    use crate::storage::page::page_types::b_plus_tree_header_page::INVALID_PAGE_ID;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::tempdir;
-    use super::HeaderData;
 
     #[test]
     fn test_header_page_in_buffer_pool() {
@@ -426,52 +423,48 @@ mod integration_tests {
             replacer,       // replacer
         );
 
-        // Allocate a page for the header page
-        let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager
-            .new_page()
-            .expect("Failed to allocate new page");
-        let header_page_id = page.get_page_id();
-
-        // Create and write a header page
-        {
-            // Initialize a new header page
-            let mut header = BPlusTreeHeaderPage::new(header_page_id);
-            header.set_root_page_id(42);
-            header.set_tree_height(3);
-            header.set_num_keys(100);
-
-            // Write the header page data to the page
-            let header_data = header.serialize();
-            let mut page_data = page.write();
+        // Allocate a page for the header page and store its ID
+        let header_page_id = {
+            let page = buffer_pool_manager
+                .new_page::<BPlusTreeHeaderPage>()
+                .expect("Failed to allocate new page");
             
-            // Copy only what fits in the page
-            let copy_len = std::cmp::min(header_data.len(), page_data.get_data_mut().len());
-            page_data.get_data_mut()[..copy_len].copy_from_slice(&header_data[..copy_len]);
-
-            // Mark the page as dirty and unpin it
-            buffer_pool_manager.unpin_page(header_page_id, true, AccessType::Lookup);
-        }
-
+            // Get the page ID before modifying
+            let page_id = page.get_page_id();
+            
+            // Modify the header page directly through the page guard
+            {
+                let mut page_data = page.write();
+                page_data.set_root_page_id(42);
+                page_data.set_tree_height(3);
+                page_data.set_num_keys(100);
+                
+                // Mark the page as dirty
+                page_data.set_dirty(true);
+            }
+            
+            // Page guard will be dropped here, automatically decrementing pin count
+            page_id
+        };
+        
+        // Force a flush to ensure data is written to disk
+        buffer_pool_manager.flush_page(header_page_id).expect("Failed to flush page");
+        
         // Fetch and verify the header page
         {
             let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager
                 .fetch_page(header_page_id)
                 .expect("Failed to fetch header page");
 
-            // Get the raw data
+            // Read the header page values directly using the accessor methods
             let page_data = page.read();
-            let header_data = page_data.get_data();
             
-            // Deserialize
-            let deserialized: HeaderData = bincode::deserialize(&header_data[..])
-                .expect("Failed to deserialize HeaderData");
-                
             // Verify the header page values
-            assert_eq!(deserialized.root_page_id, 42);
-            assert_eq!(deserialized.tree_height, 3);
-            assert_eq!(deserialized.num_keys, 100);
-
-            buffer_pool_manager.unpin_page(header_page_id, false, AccessType::Lookup);
+            assert_eq!(page_data.get_root_page_id(), 42);
+            assert_eq!(page_data.get_tree_height(), 3);
+            assert_eq!(page_data.get_num_keys(), 100);
+            
+            // Page guard will be dropped here, automatically handling the pin count
         }
     }
 }
@@ -479,51 +472,119 @@ mod integration_tests {
 // #[cfg(test)]
 // mod e2e_tests {
 //     use crate::buffer::buffer_pool_manager::BufferPoolManager;
+//     use crate::buffer::lru_k_replacer::LRUKReplacer;
 //     use crate::common::config::INVALID_PAGE_ID;
-//     use crate::storage::index::b_plus_tree_index::BPlusTreeIndex;
-//
+//     use crate::storage::disk::disk_manager::FileDiskManager;
+//     use crate::storage::disk::disk_scheduler::DiskScheduler;
+//     use crate::storage::index::b_plus_tree_index::{BPlusTreeIndex, IndexInfo, KeyComparator};
+//     use parking_lot::RwLock;
+//     use std::cmp::Ordering;
+//     use std::mem::size_of;
+//     use std::sync::Arc;
+//     use tempfile::tempdir;
+//     use crate::storage::index::index::IndexType;
+// 
+//     fn create_test_buffer_pool_manager() -> Arc<BufferPoolManager> {
+//         // Create temporary directory
+//         let temp_dir = tempdir().expect("Failed to create temporary directory");
+//         let db_file_path = temp_dir
+//             .path()
+//             .join("test.db")
+//             .to_string_lossy()
+//             .to_string();
+//         let log_file_path = temp_dir
+//             .path()
+//             .join("test.log")
+//             .to_string_lossy()
+//             .to_string();
+//             
+//         // Create dependencies for buffer pool manager
+//         let disk_manager = Arc::new(FileDiskManager::new(
+//             db_file_path,
+//             log_file_path,
+//             4096, // Standard page size as buffer size
+//         ));
+//         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+//         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(100, 2))); // 100 frames, K=2
+//         
+//         // Create buffer pool manager
+//         Arc::new(BufferPoolManager::new(
+//             100,            // pool_size
+//             disk_scheduler, // disk_scheduler
+//             disk_manager,   // disk_manager
+//             replacer,       // replacer
+//         ))
+//     }
+// 
+//     // Define the comparison function as a standalone function pointer
+//     fn compare_ints(a: &i32, b: &i32) -> Ordering {
+//         a.cmp(b)
+//     }
+// 
 //     #[test]
 //     fn test_header_page_updates_during_tree_operations() {
-//         let buffer_pool_manager = BufferPoolManager::new(100);
-//         let mut tree = BPlusTreeIndex::new(buffer_pool_manager);
-//
+//         let buffer_pool_manager = create_test_buffer_pool_manager();
+//         
+//         // Create index info with appropriate parameters
+//         let index_info = IndexInfo::new(Default::default(), "".to_string(), 0, "".to_string(), 0, false, IndexType::BPlusTreeIndex, vec![]);
+//         
+//         // Create the BPlusTreeIndex with the correct parameters
+//         let mut tree = BPlusTreeIndex::<i32, i32, _>::new(
+//             index_info,
+//             compare_ints,
+//             buffer_pool_manager.clone(),
+//         );
+// 
 //         // Get initial state
 //         let initial_height = tree.get_height();
 //         assert_eq!(initial_height, 0);
-//
+// 
 //         // Insert enough elements to cause splits and height increases
-//         for i in 0..1000 {
+//         for i in 0..100 {  // Reduced from 1000 for faster tests
 //             tree.insert(&i, i + 1000);
 //         }
-//
+// 
 //         // Verify height increased
 //         let new_height = tree.get_height();
 //         assert!(new_height > initial_height);
-//
+// 
 //         // Verify key count
-//         assert_eq!(tree.get_size(), 1000);
-//
+//         assert_eq!(tree.get_size(), 100);  // Adjusted count
+// 
 //         // Verify header page root ID points to valid page
 //         assert_ne!(tree.get_root_page_id(), INVALID_PAGE_ID);
 //     }
-//
+// 
 //     #[test]
 //     fn test_empty_tree_after_deletion() {
-//         let buffer_pool_manager = BufferPoolManager::new(100);
-//         let mut tree = BPlusTreeIndex::new(buffer_pool_manager);
-//
+//         let buffer_pool_manager = create_test_buffer_pool_manager();
+//         
+//         // Create index info with appropriate parameters
+//         let index_info = IndexInfo {
+//             key_size: size_of::<i32>(),
+//             value_size: size_of::<i32>(),
+//             branch_factor: 4, // Small value for testing
+//         };
+//         
+//         // Create the BPlusTreeIndex with the correct parameters
+//         let mut tree = BPlusTreeIndex::<i32, i32, _>::new(
+//             index_info,
+//             compare_ints,
+//             buffer_pool_manager.clone(),
+//         );
+// 
 //         // Insert and then delete a key
 //         tree.insert(&1, 1001);
 //         assert_eq!(tree.get_size(), 1);
 //         assert!(!tree.is_empty());
-//
+// 
 //         // Delete the key
 //         tree.remove(&1);
-//
+// 
 //         // Verify tree is empty
 //         assert_eq!(tree.get_size(), 0);
 //         assert!(tree.is_empty());
-//
+// 
 //         // Verify header page reflects emptiness
 //         assert_eq!(tree.get_root_page_id(), INVALID_PAGE_ID);
 //     }
