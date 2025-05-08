@@ -923,3 +923,217 @@ mod tests {
         assert_eq!(watermark.get_next_ts(), 1);
     }
 }
+
+mod concurrency_tests {
+    use std::sync::Arc;
+    use std::thread;
+    use parking_lot::Mutex;
+    use super::*;
+
+    #[test]
+    fn test_concurrent_get_next_ts() {
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 10;
+        let timestamps_per_thread = 100;
+
+        // Spawn threads that each get multiple timestamps
+        let handles: Vec<_> = (0..num_threads)
+            .map(|_| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    let mut timestamps = Vec::with_capacity(timestamps_per_thread);
+                    for _ in 0..timestamps_per_thread {
+                        let ts = watermark.lock().get_next_ts();
+                        timestamps.push(ts);
+                    }
+                    timestamps
+                })
+            })
+            .collect();
+
+        // Collect results from all threads
+        let mut all_timestamps = Vec::new();
+        for handle in handles {
+            all_timestamps.extend(handle.join().unwrap());
+        }
+
+        // Sort timestamps to check for uniqueness
+        all_timestamps.sort();
+
+        // Verify all timestamps are unique
+        for i in 1..all_timestamps.len() {
+            assert_ne!(all_timestamps[i-1], all_timestamps[i],
+                       "Duplicate timestamp found: {}", all_timestamps[i]);
+        }
+
+        // Verify the count is correct
+        assert_eq!(all_timestamps.len(), num_threads * timestamps_per_thread);
+
+        // Verify the range is as expected (should be 1 to num_threads*timestamps_per_thread)
+        assert_eq!(*all_timestamps.first().unwrap(), 1);
+        assert_eq!(*all_timestamps.last().unwrap(), (num_threads * timestamps_per_thread) as u64);
+    }
+
+    #[test]
+    fn test_concurrent_add_remove_txns() {
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 5;
+
+        // First get some timestamps to use
+        let mut timestamps = Vec::new();
+        for _ in 0..num_threads {
+            timestamps.push(watermark.lock().get_next_ts());
+        }
+
+        // Each thread adds its timestamp, then removes it
+        let handles: Vec<_> = timestamps
+            .iter()
+            .map(|&ts| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    // Add the transaction
+                    {
+                        let mut w = watermark.lock();
+                        w.add_txn(ts);
+                    }
+
+                    // Small sleep to increase chance of thread interleaving
+                    thread::sleep(std::time::Duration::from_millis(10));
+
+                    // Remove the transaction
+                    {
+                        let mut w = watermark.lock();
+                        w.remove_txn(ts);
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // After all threads complete, watermark should reflect next_ts
+        // With num_threads=5, next_ts=6, and since 6>5, watermark = next_ts-1 = 5
+        let final_watermark = watermark.lock().get_watermark();
+        assert_eq!(final_watermark, num_threads as u64);
+    }
+
+    #[test]
+    fn test_concurrent_mixed_operations() {
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 8;
+
+        // Spawn threads doing different operations
+        let handles: Vec<_> = (0..num_threads)
+            .map(|i| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    match i % 4 {
+                        0 => {
+                            // Thread just gets timestamps
+                            let mut timestamps = Vec::new();
+                            for _ in 0..10 {
+                                let ts = watermark.lock().get_next_ts();
+                                timestamps.push(ts);
+                            }
+                            timestamps
+                        },
+                        1 => {
+                            // Thread registers and unregisters transactions
+                            let mut w = watermark.lock();
+                            let ts = w.get_next_ts_and_register();
+                            thread::sleep(std::time::Duration::from_millis(20));
+                            w.unregister_txn(ts);
+                            vec![ts]
+                        },
+                        2 => {
+                            // Thread updates commit timestamp
+                            let mut w = watermark.lock();
+                            w.update_commit_ts(100 + i);
+                            vec![100 + i]
+                        },
+                        3 => {
+                            // Thread clones the watermark
+                            let w = watermark.lock().clone_watermark();
+                            vec![w.get_watermark()]
+                        },
+                        _ => unreachable!()
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // After all these operations, watermark should be valid
+        // We can't predict exact value due to thread ordering, but it should be >= 1
+        let final_watermark = watermark.lock().get_watermark();
+        assert!(final_watermark >= 1);
+    }
+
+    #[test]
+    fn test_concurrent_watermark_updates() {
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+
+        // Thread 1: Keep adding and removing same transaction repeatedly
+        let watermark_clone1 = Arc::clone(&watermark);
+        let handle1 = thread::spawn(move || {
+            let ts = 5; // Fixed timestamp
+            for _ in 0..100 {
+                {
+                    let mut w = watermark_clone1.lock();
+                    w.add_txn(ts);
+                }
+                thread::sleep(std::time::Duration::from_millis(1));
+                {
+                    let mut w = watermark_clone1.lock();
+                    w.remove_txn(ts);
+                }
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+        });
+
+        // Thread 2: Update commit timestamp repeatedly
+        let watermark_clone2 = Arc::clone(&watermark);
+        let handle2 = thread::spawn(move || {
+            for i in 0..50 {
+                let mut w = watermark_clone2.lock();
+                w.update_commit_ts(10 + i);
+                thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+
+        // Thread 3: Get next timestamp repeatedly
+        let watermark_clone3 = Arc::clone(&watermark);
+        let handle3 = thread::spawn(move || {
+            let mut timestamps = Vec::new();
+            for _ in 0..100 {
+                let ts = watermark_clone3.lock().get_next_ts();
+                timestamps.push(ts);
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+            timestamps
+        });
+
+        // Wait for all threads to complete
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+        let timestamps = handle3.join().unwrap();
+
+        // Verify timestamps are unique and in increasing order
+        for i in 1..timestamps.len() {
+            assert!(timestamps[i] > timestamps[i-1],
+                    "Timestamps not in increasing order: {} not > {}",
+                    timestamps[i], timestamps[i-1]);
+        }
+
+        // Final watermark should be valid (>= 59 due to last commit timestamp)
+        let final_watermark = watermark.lock().get_watermark();
+        assert!(final_watermark >= 59, "Final watermark {} is too low", final_watermark);
+    }
+}
