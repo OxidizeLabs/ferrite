@@ -687,4 +687,129 @@ mod tests {
         
         assert_ne!(cloned.get_watermark(), original.get_watermark());
     }
+
+    #[test]
+    fn test_threshold_boundary_exact() {
+        // This test specifically checks the behavior at our threshold boundary (5)
+        let mut watermark = Watermark::new();
+        
+        // Set next_ts to exactly 5
+        for _ in 0..4 {
+            watermark.get_next_ts();
+        }
+        
+        // Verify next_ts is 5
+        assert_eq!(watermark.get_next_ts(), 5);
+        
+        // Force update of watermark with no active transactions
+        watermark.update_commit_ts(5);
+        
+        // Observe behavior at threshold
+        let wm = watermark.get_watermark();
+        assert!(wm == 5 || wm == 6, "Expected 5 or 6, got {}", wm);
+        
+        // Now go just above threshold
+        watermark.update_commit_ts(6);
+        assert_eq!(watermark.get_watermark(), 6);
+    }
+    
+    #[test]
+    fn test_rapid_operations() {
+        // Test rapid sequence of mixed operations
+        let mut watermark = Watermark::new();
+        
+        // Set commit timestamp
+        watermark.update_commit_ts(10);
+        
+        // Get and register
+        let ts1 = watermark.get_next_ts_and_register();
+        
+        // Update commit again
+        watermark.update_commit_ts(20);
+        
+        // Get another timestamp
+        let ts2 = watermark.get_next_ts();
+        
+        // Test with explicit get_watermark calls
+        let wm1 = watermark.get_watermark();
+        assert_eq!(wm1, ts1);
+        
+        // Add and immediately remove
+        watermark.add_txn(ts2);
+        watermark.remove_txn(ts2);
+        
+        // Watermark should be unchanged
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Unregister and verify watermark
+        let final_wm = watermark.unregister_txn(ts1);
+        
+        // After unregistering all transactions, watermark should be based on the 
+        // commit timestamp - exact value depends on implementation
+        // In our case: final_wm is 21 (not 20) because the update_commit_ts(20) sets next_ts to 21
+        // When we remove all transactions, watermark is based on next_ts
+        assert_eq!(final_wm, 21);
+    }
+    
+    #[test]
+    fn test_mixed_timestamp_values() {
+        let mut watermark = Watermark::new();
+        
+        // Mix of high and low timestamp values
+        watermark.add_txn(100);
+        watermark.add_txn(5);
+        watermark.add_txn(1000);
+        watermark.add_txn(1);
+        
+        // Watermark should be minimum
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Remove in mixed order
+        watermark.remove_txn(5);
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        watermark.remove_txn(1);
+        assert_eq!(watermark.get_watermark(), 100);
+        
+        watermark.remove_txn(100);
+        assert_eq!(watermark.get_watermark(), 1000);
+        
+        // Final removal
+        watermark.remove_txn(1000);
+        let final_wm = watermark.get_watermark();
+        
+        // Since we manually added transactions without using get_next_ts(), 
+        // the next_ts value is still at its initial value of 1.
+        // When no active transactions, watermark is based on next_ts
+        assert_eq!(final_wm, 1, "Expected 1, got {}", final_wm);
+    }
+    
+    #[test]
+    fn test_consecutive_commit_updates() {
+        let mut watermark = Watermark::new();
+        
+        // Register a transaction
+        let ts = watermark.get_next_ts_and_register();
+        
+        // Multiple consecutive commit updates without removing the transaction
+        watermark.update_commit_ts(10);
+        watermark.update_commit_ts(20);
+        watermark.update_commit_ts(30);
+        
+        // Watermark should still be the transaction
+        assert_eq!(watermark.get_watermark(), ts);
+        
+        // Remove transaction
+        watermark.remove_txn(ts);
+        
+        // Watermark should now be the last commit ts
+        assert_eq!(watermark.get_watermark(), 30);
+        
+        // More commit updates with no active transactions
+        watermark.update_commit_ts(40);
+        assert_eq!(watermark.get_watermark(), 40);
+        
+        watermark.update_commit_ts(50);
+        assert_eq!(watermark.get_watermark(), 50);
+    }
 }
