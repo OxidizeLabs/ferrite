@@ -22,6 +22,8 @@ pub struct BPlusTreeHeaderPage {
     pin_count: i32,
     /// Dirty flag
     is_dirty: bool,
+    /// Order of the B+ tree
+    order: u32,
 }
 
 impl BPlusTreeHeaderPage {
@@ -35,9 +37,20 @@ impl BPlusTreeHeaderPage {
             page_id,
             pin_count: 1,
             is_dirty: false,
+            order: 0,
         };
         page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
         page
+    }
+    
+    /// Set the order of the B+ tree
+    pub fn set_order(&mut self, order: u32) {
+        self.order = order;
+    }
+
+    /// Get the order of the B+ tree
+    pub fn get_order(&self) -> u32 {
+        self.order
     }
 
     /// Get the root page ID
@@ -106,6 +119,7 @@ impl BPlusTreeHeaderPage {
             root_page_id: self.root_page_id,
             tree_height: self.tree_height,
             num_keys: self.num_keys,
+            order: self.order,
         };
         
         bincode::serialize(&header_data).expect("Failed to serialize BPlusTreeHeaderPage")
@@ -122,6 +136,7 @@ impl BPlusTreeHeaderPage {
         page.root_page_id = header_data.root_page_id;
         page.tree_height = header_data.tree_height;
         page.num_keys = header_data.num_keys;
+        page.order = header_data.order;
         
         page
     }
@@ -596,4 +611,5 @@ pub struct HeaderData {
     pub root_page_id: PageId,
     pub tree_height: u32,
     pub num_keys: usize,
+    pub order: u32,
 }
