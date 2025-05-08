@@ -812,4 +812,114 @@ mod tests {
         watermark.update_commit_ts(50);
         assert_eq!(watermark.get_watermark(), 50);
     }
+
+    #[test]
+    fn test_timestamp_near_zero() {
+        // Test with timestamp values very close to zero
+        let mut watermark = Watermark::new();
+        
+        // Initial state
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Add transactions with values near zero
+        watermark.add_txn(1);
+        watermark.add_txn(2);
+        
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Update commit to near zero
+        watermark.update_commit_ts(1);
+        
+        // Still use transaction as min
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Remove transactions
+        watermark.remove_txn(1);
+        assert_eq!(watermark.get_watermark(), 2);
+        
+        watermark.remove_txn(2);
+        
+        // With next_ts=2 (since we called update_commit_ts(1) which sets next_ts=2),
+        // and 2 < 5, watermark should be 2
+        assert_eq!(watermark.get_watermark(), 2);
+    }
+    
+    #[test]
+    fn test_add_remove_same_transaction_repeatedly() {
+        // Test adding and removing the same transaction multiple times
+        let mut watermark = Watermark::new();
+        
+        let ts1 = watermark.get_next_ts(); // 1
+        let ts2 = watermark.get_next_ts(); // 2
+        
+        // Add ts1 multiple times (should be idempotent)
+        watermark.add_txn(ts1);
+        watermark.add_txn(ts1);
+        watermark.add_txn(ts1);
+        
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Add ts2
+        watermark.add_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Remove ts1 once - should remove it completely
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts2);
+        
+        // Remove ts1 again - should have no effect
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts2);
+        
+        // Remove ts2
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), 3);
+    }
+    
+    #[test]
+    fn test_interleaved_updates_and_transactions() {
+        // Test interleaving commit updates with transaction operations
+        let mut watermark = Watermark::new();
+        
+        // Initial get_next_ts
+        let ts1 = watermark.get_next_ts(); // 1
+        
+        // Update commit
+        watermark.update_commit_ts(10);
+        
+        // Add transaction
+        watermark.add_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // New transaction
+        let ts2 = watermark.get_next_ts(); // Should be > 10
+        assert!(ts2 > 10);
+        
+        // Add new transaction
+        watermark.add_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Update commit again
+        watermark.update_commit_ts(20);
+        
+        // Still has ts1 as min
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Remove transactions in reverse of acquisition
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), 20);
+    }
+    
+    #[test]
+    fn test_default_constructor() {
+        // Test the Default implementation for Watermark
+        let watermark = Watermark::default();
+        
+        // Should have same behavior as new()
+        assert_eq!(watermark.get_watermark(), 1);
+        assert_eq!(watermark.get_next_ts(), 1);
+    }
 }
