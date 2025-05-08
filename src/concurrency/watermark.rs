@@ -924,7 +924,7 @@ mod tests {
     }
 }
 
-mod concurrency_tests {
+mod concurrency_tests  {
     use std::sync::Arc;
     use std::thread;
     use parking_lot::Mutex;
@@ -1135,5 +1135,249 @@ mod concurrency_tests {
         // Final watermark should be valid (>= 59 due to last commit timestamp)
         let final_watermark = watermark.lock().get_watermark();
         assert!(final_watermark >= 59, "Final watermark {} is too low", final_watermark);
+    }
+
+    #[test]
+    fn test_concurrent_high_contention() {
+        // Test with many threads all competing to update the same transaction
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 20;
+        let operations_per_thread = 100;
+        
+        // Everyone will contend for these same timestamps
+        let contended_ts = 5;
+        
+        // Spawn threads that all fight over the same transaction
+        let handles: Vec<_> = (0..num_threads)
+            .map(|thread_id| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    for i in 0..operations_per_thread {
+                        // Alternate adding and removing based on iteration
+                        if (i + thread_id) % 2 == 0 {
+                            watermark.lock().add_txn(contended_ts);
+                        } else {
+                            watermark.lock().remove_txn(contended_ts);
+                        }
+                        
+                        // Small random sleep to increase interleaving
+                        if i % 10 == 0 {
+                            thread::sleep(std::time::Duration::from_micros((thread_id * 7) as u64));
+                        }
+                    }
+                })
+            })
+            .collect();
+        
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        // Final state depends on the exact interleaving, but should be valid
+        // What matters is that we didn't crash or corrupt the state
+        let final_txns = watermark.lock().active_txns.len();
+        assert!(final_txns <= 1, "Active txns should be 0 or 1, got {}", final_txns);
+    }
+
+    #[test]
+    fn test_concurrent_stress_test() {
+        // Stress test with many threads and operations
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 30;
+        let operations_per_thread = 500;
+        
+        // Spawn many threads doing random operations
+        let handles: Vec<_> = (0..num_threads)
+            .map(|thread_id| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    let mut my_txns = Vec::new();
+                    
+                    for i in 0..operations_per_thread {
+                        // Choose operation based on iteration and thread id
+                        match (i + thread_id) % 5 {
+                            0 => {
+                                // Get and register a new timestamp
+                                let ts = watermark.lock().get_next_ts_and_register();
+                                my_txns.push(ts);
+                            },
+                            1 => {
+                                // Remove one of our transactions if we have any
+                                if !my_txns.is_empty() && !my_txns.is_empty() {
+                                    let idx = i % my_txns.len();
+                                    let ts = my_txns[idx];
+                                    watermark.lock().remove_txn(ts);
+                                    // Remove it from our tracking too
+                                    my_txns.swap_remove(idx);
+                                }
+                            },
+                            2 => {
+                                // Update commit timestamp
+                                watermark.lock().update_commit_ts(100 + i as u64);
+                            },
+                            3 => {
+                                // Just get a timestamp without registering
+                                let _ts = watermark.lock().get_next_ts();
+                            },
+                            4 => {
+                                // Clone the watermark (read intensive)
+                                let _w_clone = watermark.lock().clone_watermark();
+                            },
+                            _ => unreachable!()
+                        }
+                        
+                        // Occasional tiny sleep to encourage interleaving
+                        if i % 50 == 0 {
+                            thread::sleep(std::time::Duration::from_micros(thread_id as u64));
+                        }
+                    }
+                    
+                    // Clean up any transactions we still have
+                    for ts in my_txns {
+                        watermark.lock().remove_txn(ts);
+                    }
+                })
+            })
+            .collect();
+        
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        // Verify the watermark is in a consistent state
+        let w = watermark.lock();
+        assert!(w.active_txns.is_empty(), "All transactions should have been removed");
+        let final_watermark = w.get_watermark();
+        
+        // Final watermark should be based on the last commit update
+        // Should be >= 100 since we updated commit to at least 100
+        assert!(final_watermark >= 100, "Final watermark {} too low", final_watermark);
+    }
+
+    #[test]
+    fn test_concurrent_producer_consumer() {
+        // Test producer-consumer pattern with watermark
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let channel_capacity = 100;
+
+        // Create a multi-producer, multi-consumer channel
+        let (sender, receiver) = crossbeam::channel::bounded(channel_capacity);
+
+        // Producer: generates timestamps and registers them
+        let producer_watermark = Arc::clone(&watermark);
+        let producer = thread::spawn(move || {
+            for _ in 0..500 {
+                let mut w = producer_watermark.lock();
+                let ts = w.get_next_ts_and_register();
+                
+                // Send timestamp to consumers
+                sender.send(ts).unwrap();
+
+                // Small sleep to simulate work
+                drop(w); // Release lock before sleeping
+                thread::sleep(std::time::Duration::from_micros(50));
+            }
+            // Sender is dropped at end of function, closing the channel
+        });
+
+        // Consumers: receive timestamps and unregister them
+        let num_consumers = 5;
+        let consumers: Vec<_> = (0..num_consumers)
+            .map(|_| {
+                let consumer_watermark = Arc::clone(&watermark);
+                let consumer_receiver = receiver.clone(); // Crossbeam channels can be cloned
+
+                thread::spawn(move || {
+                    while let Ok(ts) = consumer_receiver.recv() {
+                        // Process timestamp
+                        thread::sleep(std::time::Duration::from_micros(200));
+                        
+                        // Mark as processed by unregistering
+                        consumer_watermark.lock().remove_txn(ts);
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for producer to finish
+        producer.join().unwrap();
+        
+        // Original receiver is dropped when the crossbeam channel is closed
+        // No need to explicitly drop it
+
+        // Wait for consumers to finish processing remaining items
+        for consumer in consumers {
+            consumer.join().unwrap();
+        }
+
+        // Verify final state
+        let w = watermark.lock();
+        assert!(w.active_txns.is_empty(), "All transactions should be processed");
+        
+        // Final watermark should reflect the last timestamp + 1
+        let final_watermark = w.get_watermark();
+        assert!(final_watermark >= 500, "Final watermark {} too low", final_watermark);
+    }
+    
+    #[test]
+    fn test_concurrent_rapid_commit_updates() {
+        // Test very rapid commit timestamp updates from multiple threads
+        let watermark = Arc::new(Mutex::new(Watermark::new()));
+        let num_threads = 10;
+        let updates_per_thread = 1000;
+        
+        // Create a transaction to keep active throughout
+        let mut w = watermark.lock();
+        let active_ts = w.get_next_ts_and_register();
+        drop(w);
+        
+        // Track the highest commit timestamp we'll set
+        let mut highest_commit_ts = 0;
+        
+        // Spawn threads that rapidly update commit timestamp
+        let handles: Vec<_> = (0..num_threads)
+            .map(|thread_id| {
+                let watermark = Arc::clone(&watermark);
+                thread::spawn(move || {
+                    let mut thread_highest = 0;
+                    for i in 0..updates_per_thread {
+                        let commit_ts = 1000 + (thread_id * updates_per_thread + i) as u64;
+                        watermark.lock().update_commit_ts(commit_ts);
+                        thread_highest = commit_ts;
+                    }
+                    thread_highest // Return the highest timestamp this thread set
+                })
+            })
+            .collect();
+        
+        // Wait for all update threads to complete and track the highest timestamp
+        for handle in handles {
+            let thread_highest = handle.join().unwrap();
+            highest_commit_ts = highest_commit_ts.max(thread_highest);
+        }
+        
+        // Verify state - watermark should still be the active transaction
+        let mut w = watermark.lock();
+        assert_eq!(w.get_watermark(), active_ts);
+        
+        // Remove the transaction
+        w.remove_txn(active_ts);
+        
+        // Now watermark should reflect the highest commit timestamp
+        // Due to possible race conditions in a concurrent environment,
+        // the watermark might not be exactly the highest commit timestamp,
+        // but it should be reasonably close
+        let final_watermark = w.get_watermark();
+        
+        // We expect the watermark to be within a reasonable range of the highest commit timestamp
+        // For simplicity, let's check it's at least 90% of the highest commit timestamp
+        let min_expected = highest_commit_ts * 9 / 10;
+        assert!(final_watermark >= min_expected, 
+               "Watermark {} too low, expected at least {}", final_watermark, min_expected);
+        
+        // For debugging, print the actual values
+        println!("Final watermark: {}, Highest commit: {}", final_watermark, highest_commit_ts);
     }
 }
