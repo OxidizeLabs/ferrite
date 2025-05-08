@@ -279,4 +279,412 @@ mod tests {
         watermark.remove_txn(ts2);
         assert_eq!(watermark.get_watermark(), new_commit_ts);
     }
+
+    #[test]
+    fn test_threshold_behavior() {
+        // Test behavior around our threshold value (5)
+        let mut watermark = Watermark::new();
+        
+        // Initialize with watermark = 1
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // First get some timestamps
+        for _ in 0..4 {
+            watermark.get_next_ts();
+        }
+        
+        // Now next_ts should be 5
+        assert_eq!(watermark.get_next_ts(), 5);
+        
+        // Next timestamp should be 6, but watermark hasn't been updated
+        // because we haven't added/removed any transactions
+        
+        // Let's update the commit timestamp to force an update
+        watermark.update_commit_ts(5);
+        
+        // With no active transactions and commit_ts=5, watermark should be 5
+        assert_eq!(watermark.get_watermark(), 5);
+        
+        // Update commit to above threshold
+        watermark.update_commit_ts(6);
+        assert_eq!(watermark.get_watermark(), 6);
+    }
+    
+    #[test]
+    fn test_commit_with_active_txns() {
+        let mut watermark = Watermark::new();
+        
+        // Add a few active transactions
+        let ts1 = watermark.get_next_ts_and_register(); // 1
+        let ts2 = watermark.get_next_ts_and_register(); // 2
+        
+        // Update commit timestamp
+        let new_commit_ts = 20;
+        watermark.update_commit_ts(new_commit_ts);
+        
+        // Watermark should still be minimum of active transactions
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Remove one transaction
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts2);
+        
+        // Remove last transaction
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), new_commit_ts);
+    }
+    
+    #[test]
+    fn test_lower_commit_ts_than_active_txn() {
+        let mut watermark = Watermark::new();
+        
+        // Get a high transaction
+        let ts1 = watermark.get_next_ts_and_register(); // 1
+        let ts2 = watermark.get_next_ts_and_register(); // 2
+        
+        // Try to set commit ts below active transactions
+        watermark.update_commit_ts(5);
+        
+        // Watermark should still be minimum active transaction
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // After removing all transactions
+        watermark.remove_txn(ts1);
+        watermark.remove_txn(ts2);
+        
+        // Watermark should be commit timestamp
+        assert_eq!(watermark.get_watermark(), 5);
+    }
+
+    #[test]
+    fn test_edge_timestamp_values() {
+        let mut watermark = Watermark::new();
+        
+        // Test with very large commit timestamp
+        let large_ts = u64::MAX - 10;
+        watermark.update_commit_ts(large_ts);
+        
+        // Get the actual watermark after setting large_ts
+        let actual_watermark = watermark.get_watermark();
+        // The watermark should be related to the large timestamp
+        // It might be exactly large_ts or large_ts + 1 depending on implementation
+        assert!(actual_watermark <= large_ts + 1);
+        
+        // Next timestamp should work and be greater than large_ts
+        let next = watermark.get_next_ts();
+        assert!(next > large_ts);
+        
+        // Adding a small transaction should make watermark equal to that transaction
+        watermark.add_txn(1);
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Removing it should restore a large timestamp watermark
+        watermark.remove_txn(1);
+        // Just check it's a large timestamp near our original value
+        let final_watermark = watermark.get_watermark();
+        assert!(final_watermark >= large_ts - 1 && final_watermark <= large_ts + 1);
+    }
+    
+    #[test]
+    fn test_reregistration_of_same_timestamp() {
+        let mut watermark = Watermark::new();
+        
+        // Get and register a timestamp
+        let ts = watermark.get_next_ts();
+        watermark.add_txn(ts);
+        
+        // Try to add the same timestamp again
+        watermark.add_txn(ts);
+        
+        // Should behave as if it was added once
+        watermark.remove_txn(ts);
+        
+        // After one removal, it should be gone from active transactions
+        assert_eq!(watermark.get_watermark(), 2); // Next available
+    }
+    
+    #[test]
+    fn test_complex_transaction_pattern() {
+        let mut watermark = Watermark::new();
+        
+        // Get several timestamps
+        let ts1 = watermark.get_next_ts(); // 1
+        let ts2 = watermark.get_next_ts(); // 2
+        let ts3 = watermark.get_next_ts(); // 3
+        let ts4 = watermark.get_next_ts(); // 4
+        
+        // Add them in an interesting order
+        watermark.add_txn(ts2);
+        watermark.add_txn(ts4);
+        watermark.add_txn(ts1);
+        
+        // Check watermark is minimum active
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Update commit timestamp
+        watermark.update_commit_ts(10);
+        
+        // Watermark should still be minimum active
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Remove in a different order
+        watermark.remove_txn(ts2);
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        watermark.remove_txn(ts1);
+        assert_eq!(watermark.get_watermark(), ts4);
+        
+        // Add ts3 after some have been removed
+        watermark.add_txn(ts3);
+        assert_eq!(watermark.get_watermark(), ts3);
+        
+        // Remove the rest
+        watermark.remove_txn(ts3);
+        watermark.remove_txn(ts4);
+        
+        // Watermark should now be commit timestamp
+        assert_eq!(watermark.get_watermark(), 10);
+    }
+    
+    #[test]
+    fn test_empty_watermark_initialization() {
+        // Test that a fresh watermark behaves as expected
+        let watermark = Watermark::new();
+        
+        // Initial watermark should be 1
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // First timestamp should be 1
+        assert_eq!(watermark.get_next_ts(), 1);
+        
+        // Second timestamp should be 2
+        assert_eq!(watermark.get_next_ts(), 2);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_transaction() {
+        let mut watermark = Watermark::new();
+        
+        // Initialize watermark
+        let ts1 = watermark.get_next_ts_and_register();
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Try to remove a transaction that doesn't exist
+        watermark.remove_txn(999);
+        
+        // Watermark should remain unchanged
+        assert_eq!(watermark.get_watermark(), ts1);
+        
+        // Remove the actual transaction
+        watermark.remove_txn(ts1);
+        
+        // Now watermark should update
+        assert_eq!(watermark.get_watermark(), 2);
+    }
+    
+    #[test]
+    fn test_sequential_commit_updates() {
+        let mut watermark = Watermark::new();
+        
+        // Initial state
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Update commit timestamp in sequence
+        watermark.update_commit_ts(5);
+        assert_eq!(watermark.get_watermark(), 5);
+        
+        watermark.update_commit_ts(10);
+        assert_eq!(watermark.get_watermark(), 10);
+        
+        // Add a transaction
+        watermark.add_txn(2);
+        assert_eq!(watermark.get_watermark(), 2);
+        
+        // Update commit again, but watermark should still be the active transaction
+        watermark.update_commit_ts(15);
+        assert_eq!(watermark.get_watermark(), 2);
+        
+        // Remove the transaction, watermark should now be the commit timestamp
+        watermark.remove_txn(2);
+        assert_eq!(watermark.get_watermark(), 15);
+    }
+    
+    #[test]
+    fn test_decreasing_commit_timestamp() {
+        let mut watermark = Watermark::new();
+        
+        // Set a high commit timestamp
+        watermark.update_commit_ts(20);
+        assert_eq!(watermark.get_watermark(), 20);
+        
+        // Try to set a lower commit timestamp
+        watermark.update_commit_ts(10);
+        
+        // Watermark should now be 10
+        assert_eq!(watermark.get_watermark(), 10);
+        
+        // Check next timestamp is still sensible
+        let next = watermark.get_next_ts();
+        assert!(next > 10);
+    }
+    
+    #[test]
+    fn test_complex_add_remove_pattern() {
+        let mut watermark = Watermark::new();
+        
+        // Register multiple transactions
+        let t1 = watermark.get_next_ts_and_register();
+        let t2 = watermark.get_next_ts_and_register();
+        let t3 = watermark.get_next_ts_and_register();
+        
+        assert_eq!(watermark.get_watermark(), t1);
+        
+        // Remove the middle one
+        watermark.remove_txn(t2);
+        assert_eq!(watermark.get_watermark(), t1);
+        
+        // Remove the first one
+        watermark.remove_txn(t1);
+        assert_eq!(watermark.get_watermark(), t3);
+        
+        // Add a new one that's smaller than t3
+        watermark.add_txn(2);
+        assert_eq!(watermark.get_watermark(), 2);
+        
+        // Remove all
+        watermark.remove_txn(2);
+        watermark.remove_txn(t3);
+        
+        // Watermark should now be next timestamp
+        let current = watermark.get_watermark();
+        assert!(current >= 4); // Greater than or equal to 4 since we've used 1,2,3
+    }
+
+    #[test]
+    fn test_method_consistency() {
+        let mut watermark = Watermark::new();
+        
+        // Test that get_next_ts_and_register is equivalent to get_next_ts + add_txn
+        let mut watermark2 = Watermark::new();
+        
+        let ts1 = watermark.get_next_ts_and_register();
+        
+        let ts2 = watermark2.get_next_ts();
+        watermark2.add_txn(ts2);
+        
+        // Both should have same state now
+        assert_eq!(watermark.get_watermark(), watermark2.get_watermark());
+        assert_eq!(ts1, ts2);
+        
+        // Verify unregister_txn is equivalent to remove_txn + get_watermark
+        let wm1 = watermark.unregister_txn(ts1);
+        
+        watermark2.remove_txn(ts2);
+        let wm2 = watermark2.get_watermark();
+        
+        assert_eq!(wm1, wm2);
+    }
+    
+    #[test]
+    fn test_watermark_invariants() {
+        let mut watermark = Watermark::new();
+        
+        // Watermark should always be at most the next timestamp
+        let ts1 = watermark.get_next_ts_and_register();
+        let ts2 = watermark.get_next_ts_and_register();
+        let ts3 = watermark.get_next_ts_and_register();
+        
+        assert!(watermark.get_watermark() <= watermark.get_next_ts());
+        
+        // Remove transactions in different orders and check the invariant holds
+        watermark.remove_txn(ts2);
+        assert!(watermark.get_watermark() <= watermark.get_next_ts());
+        
+        watermark.remove_txn(ts1);
+        assert!(watermark.get_watermark() <= watermark.get_next_ts());
+        
+        watermark.remove_txn(ts3);
+        assert!(watermark.get_watermark() <= watermark.get_next_ts());
+    }
+    
+    #[test]
+    fn test_boundary_one() {
+        let mut watermark = Watermark::new();
+        
+        // Test with timestamp 1
+        watermark.add_txn(1);
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Update commit timestamp to 1
+        watermark.update_commit_ts(1);
+        assert_eq!(watermark.get_watermark(), 1);
+        
+        // Remove transaction
+        watermark.remove_txn(1);
+        // After removing, should be related to commit ts
+        assert!(watermark.get_watermark() == 1 || watermark.get_watermark() == 2);
+    }
+    
+    #[test]
+    fn test_many_transactions() {
+        let mut watermark = Watermark::new();
+        let mut txns = Vec::new();
+        
+        // Register 100 transactions
+        for _ in 0..100 {
+            txns.push(watermark.get_next_ts_and_register());
+        }
+        
+        // Watermark should be the minimum
+        assert_eq!(watermark.get_watermark(), txns[0]);
+        
+        // Remove 50 random transactions
+        for i in (0..100).step_by(2) {
+            watermark.remove_txn(txns[i]);
+        }
+        
+        // Watermark should be the new minimum
+        assert_eq!(watermark.get_watermark(), txns[1]);
+        
+        // Remove the rest
+        for i in (1..100).step_by(2) {
+            watermark.remove_txn(txns[i]);
+        }
+        
+        // All removed, watermark should be next_ts - 1 (because next_ts > 5 in our algorithm)
+        let final_watermark = watermark.get_watermark();
+        // After registering 100 transactions, next_ts should be 101
+        // But our algorithm sets watermark to next_ts - 1 when next_ts > 5 and no active transactions
+        assert_eq!(final_watermark, 100);
+    }
+    
+    #[test]
+    fn test_watermark_clone_independence() {
+        let mut original = Watermark::new();
+        
+        // Setup original with some state
+        let ts1 = original.get_next_ts_and_register();
+        let ts2 = original.get_next_ts_and_register();
+        
+        // Clone it
+        let mut cloned = original.clone_watermark();
+        
+        // Modify original
+        original.remove_txn(ts1);
+        
+        // Clone should be unaffected
+        assert_eq!(cloned.get_watermark(), ts1);
+        
+        // Modify clone
+        cloned.remove_txn(ts2);
+        
+        // Original should still have ts2
+        assert!(original.active_txns.contains(&ts2));
+        
+        // Both should be fully independent
+        cloned.update_commit_ts(50);
+        original.update_commit_ts(100);
+        
+        assert_ne!(cloned.get_watermark(), original.get_watermark());
+    }
 }
