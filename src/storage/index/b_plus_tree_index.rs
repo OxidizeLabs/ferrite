@@ -775,8 +775,140 @@ where
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
-        // Implementation to be filled in
-        unimplemented!("redistribute_leaf_pages not implemented")
+        // 1. Acquire write locks on all pages
+        let mut left_write = left_page.write();
+        let mut right_write = right_page.write();
+        let mut parent_write = parent_page.write();
+        
+        // 2. Verify preconditions
+        // Ensure pages are adjacent siblings in parent
+        if parent_write.get_value_at(parent_key_index) != Some(left_page.get_page_id()) ||
+           parent_write.get_value_at(parent_key_index + 1) != Some(right_page.get_page_id()) {
+            return Err(BPlusTreeError::BufferPoolError(
+                "Leaf pages are not adjacent siblings in parent".to_string()
+            ));
+        }
+        
+        // 3. Determine sizes and target redistribution
+        let left_size = left_write.get_size();
+        let right_size = right_write.get_size();
+        let total_size = left_size + right_size;
+        let min_size = left_write.get_max_size() / 2; // Assuming min_size is half of max_size
+        
+        // Check if redistribution is possible
+        if total_size < min_size * 2 {
+            return Err(BPlusTreeError::BufferPoolError(
+                "Not enough keys for redistribution".to_string()
+            ));
+        }
+        
+        // Calculate desired sizes after redistribution (approximately balanced)
+        let target_size = total_size / 2;
+        
+        // 4. Determine direction of redistribution
+        if left_size < right_size {
+            // Move keys from right to left
+            let keys_to_move = right_size - target_size;
+            
+            // Move keys from the beginning of right page to end of left page
+            for i in 0..keys_to_move {
+                // Retrieve key and value first to avoid borrowing issues
+                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
+                let value_to_move = right_write.get_value_at(i).map(|v| v.clone());
+                
+                if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
+                    left_write.insert_key_value(key, value);
+                }
+            }
+            
+            // Remove the moved keys from right page
+            for _ in 0..keys_to_move {
+                right_write.remove_key_value_at(0);
+            }
+            
+            // Update the separator key in parent to the first key in right page
+            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            if let Some(new_sep) = new_separator {
+                // Fix: Replace set_key_at with proper method to update a key
+                if parent_write.get_key_at(parent_key_index).is_some() {
+                    parent_write.remove_key_value_at(parent_key_index);
+                    parent_write.insert_key_value(new_sep, right_page.get_page_id());
+                }
+            } else {
+                return Err(BPlusTreeError::BufferPoolError(
+                    "Right page is unexpectedly empty after redistribution".to_string()
+                ));
+            }
+        } else {
+            // Move keys from left to right
+            let keys_to_move = left_size - target_size;
+            let start_index = left_size - keys_to_move;
+            
+            // Create a temporary vector to store the keys/values to move
+            let mut keys_values = Vec::with_capacity(keys_to_move);
+            for i in start_index..left_size {
+                let key_to_move = left_write.get_key_at(i).map(|k| k.clone());
+                let value_to_move = left_write.get_value_at(i).map(|v| v.clone());
+                
+                if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
+                    keys_values.push((key, value));
+                }
+            }
+            
+            // Insert keys at the beginning of right page
+            // Fix: Use available methods instead of insert_key_value_at
+            for (key, value) in keys_values.iter().rev() {
+                // Get all existing keys and values in the right page
+                let right_size = right_write.get_size();
+                let mut right_keys_values = Vec::with_capacity(right_size);
+                
+                for j in 0..right_size {
+                    let k = right_write.get_key_at(j).map(|key| key.clone());
+                    let v = right_write.get_value_at(j).map(|val| val.clone());
+                    if let (Some(key), Some(val)) = (k, v) {
+                        right_keys_values.push((key, val));
+                    }
+                }
+                
+                
+                // Clear the right page
+                for _ in 0..right_size {
+                    right_write.remove_key_value_at(0);
+                }
+                
+                // Insert the new key-value at the beginning
+                right_write.insert_key_value(key.clone(), value.clone());
+                
+                // Re-insert the original keys
+                for (k, v) in right_keys_values {
+                    right_write.insert_key_value(k, v);
+                }
+            }
+            
+            // Remove the moved keys from left page
+            // Store size first to avoid borrowing issues
+            let current_left_size = left_write.get_size();
+            for index in 0..keys_to_move {
+                left_write.remove_key_value_at(current_left_size - 1 - index);
+            }
+            
+            // Update the separator key in parent to the first key in right page
+            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            if let Some(new_sep) = new_separator {
+                // Fix: Replace set_key_at with proper method to update a key
+                if parent_write.get_key_at(parent_key_index).is_some() {
+                    parent_write.remove_key_value_at(parent_key_index);
+                    parent_write.insert_key_value(new_sep, right_page.get_page_id());
+                }
+            } else {
+                return Err(BPlusTreeError::BufferPoolError(
+                    "Right page is unexpectedly empty after redistribution".to_string()
+                ));
+            }
+        }
+        
+        // The locks will be released when the write guards are dropped
+        Ok(())
     }
 
     /// Merge two internal pages when they become too empty
@@ -902,8 +1034,161 @@ where
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
-        // Implementation to be filled in
-        unimplemented!("redistribute_internal_pages not implemented")
+        // 1. Acquire write locks on all pages
+        let mut left_write = left_page.write();
+        let mut right_write = right_page.write();
+        let mut parent_write = parent_page.write();
+        
+        // 2. Verify preconditions
+        // Ensure pages are adjacent siblings in parent
+        if parent_write.get_value_at(parent_key_index) != Some(left_page.get_page_id()) ||
+           parent_write.get_value_at(parent_key_index + 1) != Some(right_page.get_page_id()) {
+            return Err(BPlusTreeError::BufferPoolError(
+                "Internal pages are not adjacent siblings in parent".to_string()
+            ));
+        }
+        
+        // Get separator key from parent
+        let separator_key = parent_write.get_key_at(parent_key_index)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Invalid parent key index".to_string()))?
+            .clone();
+        
+        // 3. Determine sizes and target redistribution
+        let left_size = left_write.get_size();
+        let right_size = right_write.get_size();
+        let total_entries = left_size + right_size + 1; // +1 for separator key
+        let min_size = left_write.get_max_size() / 2; // Assuming min_size is half of max_size
+        
+        // Check if redistribution is possible
+        if total_entries < min_size * 2 {
+            return Err(BPlusTreeError::BufferPoolError(
+                "Not enough keys for redistribution".to_string()
+            ));
+        }
+        
+        // Calculate target sizes after redistribution (approximately balanced)
+        let target_size = total_entries / 2;
+        
+        // 4. Determine direction of redistribution
+        if left_size < right_size {
+            // Move entries from right to left
+            // First, get the leftmost child from right page
+            let right_first_child = right_write.get_value_at(0)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Right page has no children".to_string()))?;
+            
+            // Move separator key from parent to left page, with rightmost child pointer
+            left_write.insert_key_value(separator_key, right_first_child);
+            
+            // Calculate how many more keys to move (excluding the first child already moved)
+            let additional_keys_to_move = target_size - left_size - 1;
+            
+            // Move additional keys and children from right to left
+            for i in 0..additional_keys_to_move {
+                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
+                let child_id_to_move = right_write.get_value_at(i+1).map(|v| v.clone());
+                
+                if let (Some(key), Some(child_id)) = (key_to_move, child_id_to_move) {
+                    left_write.insert_key_value(key, child_id);
+                }
+            }
+            
+            // Get the new separator key from right page
+            let new_separator = right_write.get_key_at(additional_keys_to_move)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Not enough keys in right page".to_string()))?
+                .clone();
+            
+            // Update parent with new separator key
+            parent_write.remove_key_value_at(parent_key_index);
+            parent_write.insert_key_value(new_separator, right_page.get_page_id());
+            
+            // Update right page: remove moved keys and update leftmost child
+            // We need to keep the old rightmost child of right page as its new leftmost child
+            let new_right_first_child = right_write.get_value_at(additional_keys_to_move + 1)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Invalid right page layout".to_string()))?;
+            
+            // Remove the transferred keys/values from right page
+            for _ in 0..=additional_keys_to_move {
+                right_write.remove_key_value_at(0);
+            }
+        } else {
+            // Move entries from left to right
+            
+            // First, get the rightmost key and child from left page
+            let left_size = left_write.get_size();
+            let left_last_key = left_write.get_key_at(left_size - 1)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Left page has no keys".to_string()))?
+                .clone();
+            let left_last_child = left_write.get_value_at(left_size)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Left page has invalid child count".to_string()))?;
+            
+            // Calculate how many keys to move
+            let keys_to_move = left_size - target_size;
+            
+            // Save right page's leftmost child
+            let right_first_child = right_write.get_value_at(0)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Right page has no children".to_string()))?;
+            
+            // Shift everything in right page to make room
+            // To avoid modifying while iterating, we'll collect all keys/values first
+            let right_size = right_write.get_size();
+            let mut right_kv_pairs = Vec::with_capacity(right_size);
+            
+            for i in 0..right_size {
+                let key = right_write.get_key_at(i).map(|k| k.clone());
+                let child_id = right_write.get_value_at(i+1).map(|v| v.clone());
+                
+                if let (Some(k), Some(v)) = (key, child_id) {
+                    right_kv_pairs.push((k, v));
+                }
+            }
+            
+            // Clear right page except for its leftmost child pointer
+            while right_write.get_size() > 0 {
+                right_write.remove_key_value_at(0);
+            }
+            
+            // Insert separator key from parent with left's rightmost child
+            right_write.insert_key_value(separator_key, left_last_child);
+            
+            // Move the keys to move from left to right (except the last one that becomes the new separator)
+            let start_idx = left_size - keys_to_move;
+            let end_idx = left_size - 1; // Exclude the last key which becomes the separator
+            
+            // Create a temporary vector of keys to move
+            let mut keys_to_move_vec = Vec::with_capacity(keys_to_move);
+            for i in start_idx..end_idx {
+                let key = left_write.get_key_at(i).map(|k| k.clone());
+                let child_id = left_write.get_value_at(i+1).map(|v| v.clone());
+                
+                if let (Some(k), Some(v)) = (key, child_id) {
+                    keys_to_move_vec.push((k, v));
+                }
+            }
+            
+            // Insert the keys to move
+            for (key, child_id) in keys_to_move_vec {
+                right_write.insert_key_value(key, child_id);
+            }
+            
+            // Put back the original keys in right page
+            for (key, child_id) in right_kv_pairs {
+                right_write.insert_key_value(key, child_id);
+            }
+            
+            // Update parent with last key from left as new separator
+            parent_write.remove_key_value_at(parent_key_index);
+            parent_write.insert_key_value(left_last_key, right_page.get_page_id());
+            
+            // Remove transferred keys from left page
+            // Store current size to avoid borrowing issues
+            let current_left_size = left_write.get_size();
+            for i in 0..keys_to_move {
+                left_write.remove_key_value_at(current_left_size - 1 - i);
+            }
+        }
+        
+        // The locks will be released when the write guards are dropped
+        Ok(())
     }
 
     /// Create a new root page
@@ -1086,37 +1371,317 @@ where
         page_id: PageId,
         is_leaf: bool,
     ) -> Result<bool, BPlusTreeError> {
-        // 1. Fetch the page (type depends on is_leaf)
-        // 2. Check if page is root:
-        //    a. If root and no keys but has children (only for internal pages):
-        //       - Get the only child page ID
-        //       - Update header to make this child the new root
-        //       - Decrement tree height
-        //       - Return true (tree structure changed)
-        //    b. If root but doesn't meet collapse criteria, return false
-        // 3. Check if page violates minimum size requirement:
-        //    a. Get min_size for page type (typically max_size/2)
-        //    b. If page size >= min_size, return false (no rebalancing needed)
-        // 4. Find the parent page:
-        //    a. Either via tracking during traversal or searching from root
-        // 5. Find the index of page_id in parent's child pointers
-        // 6. Try to find a sibling page:
-        //    a. Prefer left sibling if available
-        //    b. Otherwise, use right sibling
-        //    c. Get sibling page ID from parent
-        // 7. Fetch the sibling page
-        // 8. Decide whether to merge or redistribute:
-        //    a. Calculate total keys in both pages (+ separator for internal)
-        //    b. If total <= max_size, perform merge
-        //    c. Otherwise, redistribute keys
-        // 9. If is_leaf, call appropriate leaf page function:
-        //    a. merge_leaf_pages or redistribute_leaf_pages
-        // 10. If not is_leaf, call appropriate internal page function:
-        //     a. merge_internal_pages or redistribute_internal_pages
-        // 11. Check if parent needs rebalancing after operation:
-        //     a. If parent size < min_size, recursively call check_and_handle_underflow
-        // 12. Return true (rebalancing occurred)
-        unimplemented!()
+        // 1. Fetch the header page to get basic tree info
+        let header_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+        
+        let root_page_id = header_page.read().get_root_page_id();
+        let tree_height = header_page.read().get_tree_height();
+        
+        // Drop header page to avoid resource conflicts
+        drop(header_page);
+        
+        // 2. Check if page is the root
+        if page_id == root_page_id {
+            // If this is the root page, handle special cases
+            if is_leaf {
+                // If root is a leaf, it can have any number of keys (no underflow)
+                return Ok(false);
+            } else {
+                // If root is internal and has only one child, collapse the tree
+                let page = self.buffer_pool_manager
+                    .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id)
+                    .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch internal page".to_string()))?;
+                
+                let size;
+                let only_child_id;
+                
+                {
+                    let internal_read = page.read();
+                    size = internal_read.get_size();
+                    
+                    if size == 0 {
+                        // Root has no keys, check if it has one child
+                        only_child_id = internal_read.get_value_at(0);
+                    } else {
+                        // Root has keys, no need to collapse
+                        return Ok(false);
+                    }
+                }
+                
+                // If root has no keys but one child, make the child the new root
+                if let Some(child_id) = only_child_id {
+                    // Update the child to be the new root
+                    if is_leaf {
+                        // Child is a leaf page
+                        let child_page = self.buffer_pool_manager
+                            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(child_id)
+                            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch leaf page".to_string()))?;
+                        
+                        {
+                            let mut child_write = child_page.write();
+                            child_write.set_root_status(true);
+                        }
+                    } else {
+                        // Child is an internal page
+                        let child_page = self.buffer_pool_manager
+                            .fetch_page::<BPlusTreeInternalPage<K, C>>(child_id)
+                            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch internal page".to_string()))?;
+                        
+                        {
+                            let mut child_write = child_page.write();
+                            child_write.set_root_status(true);
+                        }
+                    }
+                    
+                    // Update header to point to new root and decrement tree height
+                    let header_page = self.buffer_pool_manager
+                        .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                        .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+                    
+                    {
+                        let mut header_write = header_page.write();
+                        header_write.set_root_page_id(child_id);
+                        header_write.set_tree_height(tree_height - 1);
+                    }
+                    
+                    // Delete the old root page
+                    self.buffer_pool_manager.delete_page(page_id)
+                        .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
+                    
+                    return Ok(true); // Tree structure changed
+                }
+                
+                // If we get here, root has no keys and no children, which should never happen
+                return Err(BPlusTreeError::BufferPoolError("Invalid root page state".to_string()));
+            }
+        }
+        
+        // 3. For non-root pages, check minimum size requirement
+        let min_size = if is_leaf {
+            self.leaf_max_size / 2
+        } else {
+            self.internal_max_size / 2
+        };
+        
+        let page_size;
+        
+        // Check the current size of the page
+        if is_leaf {
+            let page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch leaf page".to_string()))?;
+            
+            page_size = page.read().get_size();
+            
+            // If page has enough keys, no rebalancing needed
+            if page_size >= min_size {
+                return Ok(false);
+            }
+            
+            // Otherwise, drop the page before proceeding to rebalancing
+            drop(page);
+        } else {
+            let page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch internal page".to_string()))?;
+            
+            page_size = page.read().get_size();
+            
+            // If page has enough keys, no rebalancing needed
+            if page_size >= min_size {
+                return Ok(false);
+            }
+            
+            // Otherwise, drop the page before proceeding to rebalancing
+            drop(page);
+        }
+        
+        // 4. Page needs rebalancing - find the parent page
+        let parent_page_id = self.find_parent_page_id(page_id, root_page_id)?;
+        let parent_page = self.buffer_pool_manager
+            .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch parent page".to_string()))?;
+        
+        // 5. Find the index of the current page in the parent's child pointers
+        let parent_read = parent_page.read();
+        let mut child_index = 0;
+        let mut found = false;
+        
+        for i in 0..=parent_read.get_size() {
+            if parent_read.get_value_at(i) == Some(page_id) {
+                child_index = i;
+                found = true;
+                break;
+            }
+        }
+        
+        if !found {
+            return Err(BPlusTreeError::BufferPoolError("Page not found in parent".to_string()));
+        }
+        
+        // Drop the parent read lock before modifying
+        drop(parent_read);
+        
+        // 6. Find a sibling for redistribution or merging
+        let (sibling_index, sibling_id) = self.find_sibling(&parent_page, child_index, true)?;
+        
+        // 7. Decide whether to merge or redistribute
+        let sibling_page_id = sibling_id;
+        
+        if is_leaf {
+            // Get leaf pages
+            let current_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch leaf page".to_string()))?;
+            
+            let sibling_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(sibling_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch sibling leaf page".to_string()))?;
+            
+            // Calculate total size
+            let total_size = current_page.read().get_size() + sibling_page.read().get_size();
+            let max_size = current_page.read().get_max_size();
+            
+            // Determine if merge or redistribution is needed
+            if total_size <= max_size {
+                // Merge the pages
+                let parent_key_index = if sibling_index < child_index {
+                    // Sibling is to the left
+                    child_index - 1
+                } else {
+                    // Sibling is to the right
+                    sibling_index - 1
+                };
+                
+                // Ensure left page is always first argument, right page is second
+                if sibling_index < child_index {
+                    // Sibling is on the left
+                    self.merge_leaf_pages(&sibling_page, &current_page, &parent_page, parent_key_index)?;
+                } else {
+                    // Sibling is on the right
+                    self.merge_leaf_pages(&current_page, &sibling_page, &parent_page, parent_key_index)?;
+                }
+            } else {
+                // Redistribute keys
+                let parent_key_index = if sibling_index < child_index {
+                    // Sibling is to the left
+                    child_index - 1
+                } else {
+                    // Sibling is to the right
+                    sibling_index - 1
+                };
+                
+                // Ensure left page is always first argument, right page is second
+                if sibling_index < child_index {
+                    // Sibling is on the left
+                    self.redistribute_leaf_pages(&sibling_page, &current_page, &parent_page, parent_key_index)?;
+                } else {
+                    // Sibling is on the right
+                    self.redistribute_leaf_pages(&current_page, &sibling_page, &parent_page, parent_key_index)?;
+                }
+            }
+        } else {
+            // Handle internal pages
+            let current_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch internal page".to_string()))?;
+            
+            let sibling_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(sibling_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch sibling internal page".to_string()))?;
+            
+            // Calculate total entries (keys + separator from parent)
+            let total_entries = current_page.read().get_size() + sibling_page.read().get_size() + 1;
+            let max_size = current_page.read().get_max_size();
+            
+            // Determine if merge or redistribution is needed
+            if total_entries <= max_size {
+                // Merge the pages
+                let parent_key_index = if sibling_index < child_index {
+                    // Sibling is to the left
+                    child_index - 1
+                } else {
+                    // Sibling is to the right
+                    sibling_index - 1
+                };
+                
+                // Ensure left page is always first argument, right page is second
+                if sibling_index < child_index {
+                    // Sibling is on the left
+                    self.merge_internal_pages(&sibling_page, &current_page, &parent_page, parent_key_index)?;
+                } else {
+                    // Sibling is on the right
+                    self.merge_internal_pages(&current_page, &sibling_page, &parent_page, parent_key_index)?;
+                }
+            } else {
+                // Redistribute keys
+                let parent_key_index = if sibling_index < child_index {
+                    // Sibling is to the left
+                    child_index - 1
+                } else {
+                    // Sibling is to the right
+                    sibling_index - 1
+                };
+                
+                // Ensure left page is always first argument, right page is second
+                if sibling_index < child_index {
+                    // Sibling is on the left
+                    self.redistribute_internal_pages(&sibling_page, &current_page, &parent_page, parent_key_index)?;
+                } else {
+                    // Sibling is on the right
+                    self.redistribute_internal_pages(&current_page, &sibling_page, &parent_page, parent_key_index)?;
+                }
+            }
+        }
+        
+        // 8. Check if parent needs rebalancing (it lost a key during merge)
+        let parent_size = parent_page.read().get_size();
+        if parent_size < min_size && parent_page_id != root_page_id {
+            // Recursively handle parent underflow
+            return self.check_and_handle_underflow(parent_page_id, false);
+        }
+        
+        Ok(true) // Rebalancing occurred
+    }
+    
+    /// Helper method to find the parent page ID of a given page
+    fn find_parent_page_id(&self, child_page_id: PageId, root_page_id: PageId) -> Result<PageId, BPlusTreeError> {
+        // If the child is the root, it has no parent
+        if child_page_id == root_page_id {
+            return Err(BPlusTreeError::BufferPoolError("Root page has no parent".to_string()));
+        }
+        
+        // Start search from the root
+        let mut queue = VecDeque::new();
+        queue.push_back(root_page_id);
+        
+        // Breadth-first search for the parent
+        while let Some(page_id) = queue.pop_front() {
+            // Try to fetch as internal page
+            if let Some(page) = self.buffer_pool_manager.fetch_page::<BPlusTreeInternalPage<K, C>>(page_id) {
+                let page_read = page.read();
+                
+                // Check if any of the child pointers match our target
+                for i in 0..=page_read.get_size() {
+                    if page_read.get_value_at(i) == Some(child_page_id) {
+                        return Ok(page_id); // Found the parent
+                    }
+                }
+                
+                // If not found, add all children to the queue
+                for i in 0..=page_read.get_size() {
+                    if let Some(next_page_id) = page_read.get_value_at(i) {
+                        queue.push_back(next_page_id);
+                    }
+                }
+            }
+            // If not an internal page, skip (e.g., if it's a leaf)
+        }
+        
+        // If we get here, we couldn't find the parent
+        Err(BPlusTreeError::BufferPoolError(format!("Parent not found for page {}", child_page_id)))
     }
 
     /// Perform a level-order traversal (breadth-first) for debugging or visualization
@@ -1502,3 +2067,4 @@ pub fn create_index(
         _ => Err(format!("Unsupported index key type: {:?}", key_type)),
     }
 }
+
