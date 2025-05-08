@@ -146,9 +146,7 @@ impl TableHeap {
                         return Ok(rid);
                     }
                     None => {
-                        // The page reported having space but insert failed
-                        // This could happen if space calculation is slightly off
-                        debug!("Page reported having space but insert failed, trying new page");
+                        return Err("Failed to insert tuple into page despite having space".to_string());
                     }
                 }
             }
@@ -759,9 +757,12 @@ impl TableHeap {
         {
             let mut page = page_guard.write();
             if page.has_space_for(tuple) {
-                let rid = page.insert_tuple(&meta, tuple).unwrap();
-                page.set_dirty(true);
-                return Ok(rid);
+                if let Some(rid) = page.insert_tuple(&meta, tuple) {
+                    page.set_dirty(true);
+                    return Ok(rid);
+                } else {
+                    return Err("Failed to insert tuple into page".to_string());
+                }
             }
         }
 

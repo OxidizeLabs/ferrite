@@ -630,6 +630,25 @@ mod tests {
             Tuple::new(&[Value::new(1), Value::new(100)], &schema, RID::new(0, 0))
         }
 
+        // New helper method to insert a tuple directly from values
+        fn insert_tuple_from_values(
+            &self,
+            table_heap: &Arc<TableHeap>,
+            txn_id: TxnId,
+            values: &[Value],
+        ) -> Result<RID, String> {
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+            
+            let mut tuple = Tuple::new(values, &schema, RID::new(0, 0));
+            
+            table_heap
+                .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
+                .map_err(|e| e.to_string())
+        }
+
         fn begin_transaction(
             &self,
             isolation_level: IsolationLevel,
@@ -692,7 +711,12 @@ mod tests {
 
         // Create test table and insert tuple
         let (table_oid, table_heap) = ctx.create_test_table();
-        let mut tuple = TestContext::create_test_tuple();
+        
+        // Use the new helper method to insert tuple
+        let rid = ctx.insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)]).unwrap();
+
+        // Append to write set
+        txn.append_write_set(table_oid, rid);
 
         // Create transaction context
         let txn_ctx = Arc::new(TransactionContext::new(
@@ -700,14 +724,6 @@ mod tests {
             ctx.lock_manager(),
             ctx.txn_manager(),
         ));
-
-        // Insert tuple
-        let rid = table_heap
-            .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
-            .unwrap();
-
-        // Append to write set
-        txn.append_write_set(table_oid, rid);
 
         // Commit transaction
         assert!(ctx
@@ -733,7 +749,10 @@ mod tests {
 
         let (meta, committed_tuple) = result.unwrap();
         assert_eq!(meta.get_creator_txn_id(), txn_id);
-        assert_eq!(committed_tuple.get_values(), tuple.get_values());
+        
+        // Check the values against what we inserted
+        let expected_values = vec![Value::new(1), Value::new(100)];
+        assert_eq!(committed_tuple.get_values(), expected_values.as_slice());
 
         // Cleanup
         ctx.txn_manager()
@@ -752,7 +771,11 @@ mod tests {
 
         // Create test table and insert tuple
         let (table_oid, table_heap) = ctx.create_test_table();
-        let mut tuple = TestContext::create_test_tuple();
+        
+        // Use the new helper method to insert tuple
+        let rid = ctx.insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)]).unwrap();
+
+        txn.append_write_set(table_oid, rid);
 
         // Create transaction context
         let txn_ctx = Arc::new(TransactionContext::new(
@@ -760,13 +783,6 @@ mod tests {
             ctx.lock_manager(),
             ctx.txn_manager(),
         ));
-
-        // Insert tuple
-        let rid = table_heap
-            .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
-            .unwrap();
-
-        txn.append_write_set(table_oid, rid);
 
         // Abort transaction
         ctx.txn_manager().abort(txn.clone());
@@ -820,23 +836,28 @@ mod tests {
             ctx.txn_manager(),
         ));
 
-        // Insert with txn1
-        let mut tuple = TestContext::create_test_tuple();
+        // Insert with txn1 using the values directly
+        let values = vec![Value::new(1), Value::new(100)];
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::Integer),
+        ]);
+        
         let rid = txn_table_heap
-            .insert_tuple(
-                Arc::from(TupleMeta::new(txn1.get_transaction_id())),
-                &mut tuple,
-                txn_ctx1.clone(),
+            .insert_tuple_from_values(
+                values,
+                &schema,
+                txn_ctx1
             )
             .unwrap();
 
         // Try to update with txn2 before txn1 commits - should fail
-        let mut modified_tuple = tuple;
-        modified_tuple.get_values_mut()[1] = Value::new(200);
+        let values = vec![Value::new(1), Value::new(200)];
+        let mut tuple_update = Tuple::new(&*values, &schema, rid);
 
         let update_result = txn_table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
-            &mut modified_tuple,
+            &mut tuple_update,
             rid,
             txn_ctx2.clone(),
         );
@@ -848,7 +869,7 @@ mod tests {
         // Now txn2 should succeed in updating
         let update_result = txn_table_heap.update_tuple(
             &TupleMeta::new(txn2.get_transaction_id()),
-            &mut modified_tuple,
+            &mut tuple_update,
             rid,
             txn_ctx2.clone(),
         );
@@ -901,9 +922,16 @@ mod tests {
         let txns: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Verify all transactions got unique IDs
-        let mut txn_ids: Vec<_> = txns.iter().map(|txn| txn.get_transaction_id()).collect();
-        txn_ids.sort();
-        txn_ids.dedup();
-        assert_eq!(txn_ids.len(), thread_count);
+        let txn_ids: Vec<_> = txns.iter().map(|txn| txn.get_transaction_id()).collect();
+        let unique_ids: std::collections::HashSet<_> = txn_ids.iter().collect();
+        assert_eq!(unique_ids.len(), thread_count);
+
+        // Verify all transactions are tracked by the manager
+        for txn in txns {
+            assert!(ctx
+                .txn_manager()
+                .get_transaction(&txn.get_transaction_id())
+                .is_some());
+        }
     }
 }
