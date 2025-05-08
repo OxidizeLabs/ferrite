@@ -49,24 +49,6 @@ impl TypedBPlusTreeIndex {
             implementation: Box::new(index),
         }
     }
-
-    // pub fn insert(&self, key: &Value, value: &Value) -> Result<(), BPlusTreeError> {
-    //     match self.type_id {
-    //         TypeId::Integer => {
-    //             let index = self
-    //                 .implementation
-    //                 .downcast_ref::<BPlusTreeIndex<i32, RID, I32Comparator>>()
-    //                 .ok_or(BPlusTreeError::InvalidPageType)?;
-    //             let key = i32::from_value(key)?;
-    //             let value = RID::from_value(value)?;
-    //             index.insert(key, value)
-    //         }
-    //         // Handle other types
-    //         _ => Err(BPlusTreeError::InvalidPageType),
-    //     }
-    // }
-
-    // Similar implementations for search, remove, range_scan, etc.
 }
 
 impl From<String> for BPlusTreeError {
@@ -192,8 +174,7 @@ where
                 let mut leaf_write = new_leaf_page.write();
                 // Insert the key-value pair
                 leaf_write.insert_key_value(key, value);
-                // Other initialization would happen here if needed
-                // Note: There might need to be a set_root method in the leaf page
+                leaf_write.set_root_status(true);
             }
             
             // Update the header page with the new root
@@ -371,7 +352,21 @@ where
             return Ok(true);
         }
 
-        // Rebalancing is omitted in this snippet
+        // Check if the leaf page needs rebalancing
+        let leaf_page_id = leaf_page.get_page_id();
+        let leaf_size = leaf.get_size();
+        let min_size = self.leaf_max_size / 2;
+        let needs_rebalancing = !leaf.is_root() && leaf_size < min_size;
+        
+        // Release the lock on the leaf page
+        drop(leaf);
+        
+        // Perform rebalancing if needed
+        if needs_rebalancing {
+            // Call the rebalancing logic
+            let _ = self.check_and_handle_underflow(leaf_page_id, true)?;
+        }
+
         Ok(true)
     }
 
@@ -522,7 +517,8 @@ where
             let mut new_leaf_write = new_page.write();
             
             // Initialize the new leaf page if needed
-            // (depending on implementation, this might be done automatically)
+            new_leaf_write.set_root_status(false);
+            new_leaf_write.set_next_page_id(None);
             
             // Determine split point - ceiling(max_size/2)
             let split_point = (leaf_write.get_max_size() + 1) / 2;
@@ -552,7 +548,6 @@ where
         }
 
         // Now handle the parent insertion - this may require creating a new root
-        // For now, let's simplify - if leaf is root, create a new root
         let is_root;
         let original_page_id = leaf_page.get_page_id();
         
@@ -569,10 +564,32 @@ where
             let mut leaf_write = leaf_page.write();
             leaf_write.set_root_status(false);
         } else {
-            // Handle insertion into parent
-            // This would require tracking the parent during traversal
-            // For now, return an error as this needs additional implementation
-            return Err(BPlusTreeError::BufferPoolError("Parent insertion not implemented for non-root splits".to_string()));
+            // Get the header page to find the root
+            let header_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+            
+            let root_page_id = header_page.read().get_root_page_id();
+            drop(header_page);
+            
+            // Find the parent page of the leaf
+            let parent_page_id = self.find_parent_page_id(original_page_id, root_page_id)?;
+            let parent_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch parent page".to_string()))?;
+            
+            // Insert the separator key into the parent
+            let mut parent_write = parent_page.write();
+            parent_write.insert_key_value(separator_key, new_page_id);
+            
+            // Check if parent is now full and needs splitting
+            if parent_write.get_size() >= parent_write.get_max_size() {
+                // Release parent write lock first
+                drop(parent_write);
+                
+                // Recursively split the parent
+                self.split_internal_page(&parent_page)?;
+            }
         }
         
         Ok(())
@@ -595,6 +612,9 @@ where
         {
             let mut internal_write = internal_page.write();
             let mut new_internal_write = new_page.write();
+            
+            // Initialize the new internal page
+            new_internal_write.set_root_status(false);
             
             // Determine split point - floor(max_size/2)
             let split_point = internal_write.get_max_size() / 2;
@@ -649,9 +669,32 @@ where
             // Create a new root with the middle key
             self.create_new_root(original_page_id, middle_key, new_page_id)?;
         } else {
-            // If not root, we need to insert the middle key and new page id into the parent
-            // This requires tracking the parent during traversal
-            return Err(BPlusTreeError::BufferPoolError("Parent insertion not implemented for internal pages".to_string()));
+            // Get the header page to find the root
+            let header_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string()))?;
+            
+            let root_page_id = header_page.read().get_root_page_id();
+            drop(header_page);
+            
+            // Find the parent page of the internal page being split
+            let parent_page_id = self.find_parent_page_id(original_page_id, root_page_id)?;
+            let parent_page = self.buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
+                .ok_or_else(|| BPlusTreeError::BufferPoolError("Failed to fetch parent page".to_string()))?;
+            
+            // Insert the middle key into the parent, associating it with the new page ID
+            let mut parent_write = parent_page.write();
+            parent_write.insert_key_value(middle_key, new_page_id);
+            
+            // Check if parent is now full and needs splitting
+            if parent_write.get_size() >= parent_write.get_max_size() {
+                // Release parent write lock first
+                drop(parent_write);
+                
+                // Recursively split the parent
+                self.split_internal_page(&parent_page)?;
+            }
         }
         
         Ok(())
@@ -750,6 +793,7 @@ where
         
         // Store parent information before dropping the write guard
         let parent_needs_rebalancing = !is_parent_root && parent_size < parent_write.get_max_size() / 2;
+        let parent_page_id = parent_page.get_page_id();
         
         // Release the right page (it's been merged)
         drop(left_write);
@@ -760,8 +804,8 @@ where
         
         // Check if parent needs rebalancing after removing a key
         if parent_needs_rebalancing {
-            // We'd need to handle parent underflow recursively here
-            // But we'll return success for now and assume it'll be handled separately
+            // Recursively handle parent underflow
+            self.check_and_handle_underflow(parent_page_id, false)?;
         }
         
         Ok(())
@@ -947,8 +991,9 @@ where
         }
         
         // 3. Move the separator key from parent to the left page
-        left_write.insert_key_value(separator_key, right_write.get_value_at(0)
-            .ok_or_else(|| BPlusTreeError::BufferPoolError("Right page has no children".to_string()))?);
+        let right_first_child = right_write.get_value_at(0)
+            .ok_or_else(|| BPlusTreeError::BufferPoolError("Right page has no children".to_string()))?;
+        left_write.insert_key_value(separator_key, right_first_child);
         
         // 4. Copy all keys and child pointers from right page to left page
         // Skip the first child pointer of right page as it's already handled with the separator key
@@ -956,10 +1001,6 @@ where
             if let Some(key) = right_write.get_key_at(i) {
                 if let Some(child_id) = right_write.get_value_at(i + 1) {
                     left_write.insert_key_value(key.clone(), child_id);
-                    
-                    // Update child's parent pointer if there's a mechanism for that
-                    // This would require reaching down to the child page and updating its parent_id
-                    // Omitted for now, but would be implemented here
                 }
             }
         }
@@ -1007,6 +1048,7 @@ where
         
         // Store parent information before dropping the write guard
         let parent_needs_rebalancing = !is_parent_root && parent_size < parent_write.get_max_size() / 2;
+        let parent_page_id = parent_page.get_page_id();
         
         // Release the page guards
         drop(left_write);
@@ -1019,8 +1061,8 @@ where
         
         // 8. Check if parent needs rebalancing after removing a key
         if parent_needs_rebalancing {
-            // We'd need to handle parent underflow recursively here
-            // But we'll return success for now and assume it'll be handled separately
+            // Recursively handle parent underflow
+            self.check_and_handle_underflow(parent_page_id, false)?;
         }
         
         Ok(())
