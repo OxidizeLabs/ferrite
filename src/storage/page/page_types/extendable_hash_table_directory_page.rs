@@ -427,16 +427,13 @@ impl ExtendableHTableDirectoryPage {
                         let local_depth_bucket = self.get_local_depth(bucket_idx);
                         let local_depth_other = self.get_local_depth(other_idx);
                         debug!(
-                        "Bucket idx: {}, Other idx: {}, Page ID: {:?}, Local depth bucket: {}, Local depth other: {}",
-                        bucket_idx, other_idx, page_id, local_depth_bucket, local_depth_other
-                    );
+                            "Bucket idx: {}, Other idx: {}, Page ID: {:?}, Local depth bucket: {}, Local depth other: {}",
+                            bucket_idx, other_idx, page_id, local_depth_bucket, local_depth_other
+                        );
                         assert_eq!(
-                            local_depth_bucket,
-                            local_depth_other,
+                            local_depth_bucket, local_depth_other,
                             "Local depth mismatch between bucket_idx: {} and other_idx: {} for page_id: {}",
-                            bucket_idx,
-                            other_idx,
-                            page_id
+                            bucket_idx, other_idx, page_id
                         );
                     }
                 }
@@ -473,7 +470,10 @@ impl ExtendableHTableDirectoryPage {
 
         println!(
             "======== DIRECTORY (size: {} | global_depth: {} | max_depth: {} | local_depths: {}) ========",
-            size, self.get_global_depth(), self.get_max_depth(), self.local_depths.len()
+            size,
+            self.get_global_depth(),
+            self.get_max_depth(),
+            self.local_depths.len()
         );
         println!(
             "| {:<width_bucket_idx$} | {:<width_page_id$} | {:<width_local_depth$} |",

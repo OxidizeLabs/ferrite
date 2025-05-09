@@ -146,7 +146,9 @@ impl TableHeap {
                         return Ok(rid);
                     }
                     None => {
-                        return Err("Failed to insert tuple into page despite having space".to_string());
+                        return Err(
+                            "Failed to insert tuple into page despite having space".to_string()
+                        );
                     }
                 }
             }
@@ -204,10 +206,10 @@ impl TableHeap {
                 current_meta.get_commit_timestamp(),
                 UndoLink::new(
                     current_meta.get_creator_txn_id(),
-                    current_meta.get_undo_log_idx()
-                )
+                    current_meta.get_undo_log_idx(),
+                ),
             );
-      
+
             // Append the undo log to the transaction and get its index
             let undo_link = txn.append_undo_log(Arc::from(undo_log));
 
@@ -622,11 +624,7 @@ impl TableHeap {
         }
     }
 
-    fn create_new_page_and_insert(
-        &self,
-        meta: &TupleMeta,
-        tuple: &Tuple,
-    ) -> Result<RID, String> {
+    fn create_new_page_and_insert(&self, meta: &TupleMeta, tuple: &Tuple) -> Result<RID, String> {
         // First check if tuple is too large for any page
         let temp_page = TablePage::new(0); // Temporary page just for size check
         if temp_page.is_tuple_too_large(tuple) {
@@ -673,27 +671,42 @@ impl TableHeap {
 
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();
-        
+
         // First verify the page has space for the tuple
         if !new_page.has_space_for(tuple) {
-            debug!("New page {} unexpectedly has no space for tuple", new_page_id);
+            debug!(
+                "New page {} unexpectedly has no space for tuple",
+                new_page_id
+            );
             return Err(format!("New page {} has no space for tuple", new_page_id));
         }
-        
+
         // Create the RID the tuple should have
         let new_rid = RID::new(new_page_id, 0);
-        debug!("Inserting tuple with RID {:?} into new page {}", new_rid, new_page_id);
-        
+        debug!(
+            "Inserting tuple with RID {:?} into new page {}",
+            new_rid, new_page_id
+        );
+
         // Use the new method to bypass RID check
         match new_page.insert_tuple_with_rid(meta, tuple, new_rid) {
             Some(rid) => {
                 new_page.set_dirty(true);
-                debug!("Successfully inserted tuple into new page {}, RID: {:?}", new_page_id, rid);
+                debug!(
+                    "Successfully inserted tuple into new page {}, RID: {:?}",
+                    new_page_id, rid
+                );
                 Ok(rid)
             }
             None => {
-                debug!("Failed to insert tuple into new page {} despite having space", new_page_id);
-                Err(format!("Failed to insert tuple into new page {} despite space check passing", new_page_id))
+                debug!(
+                    "Failed to insert tuple into new page {} despite having space",
+                    new_page_id
+                );
+                Err(format!(
+                    "Failed to insert tuple into new page {} despite space check passing",
+                    new_page_id
+                ))
             }
         }
     }
@@ -777,7 +790,7 @@ impl TableHeap {
         rid: RID,
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
-        
+
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
 
@@ -815,21 +828,21 @@ impl TableHeap {
         // Get the last page
         let last_page_id = *self.last_page_id.read();
         let page_guard = self.get_page(last_page_id)?;
-        
+
         // Create a temporary tuple to check size (with dummy RID)
         let temp_tuple = Tuple::new(&values, &schema, RID::default());
-        
+
         {
             let mut page = page_guard.write();
-            
+
             // Check if page has space
             if page.has_space_for(&temp_tuple) {
                 // Get the next RID
                 let next_rid = page.get_next_rid();
-                
+
                 // Create the tuple with the correct RID
                 let tuple = Tuple::new(&values, &schema, next_rid);
-                
+
                 // Insert the tuple
                 match page.insert_tuple_with_rid(&meta, &tuple, next_rid) {
                     Some(rid) => {
@@ -895,7 +908,10 @@ impl TableHeap {
         // Update table heap's last page pointer
         *self.last_page_id.write() = new_page_id;
 
-        debug!("Page links updated, inserting tuple into new page {}", new_page_id);
+        debug!(
+            "Page links updated, inserting tuple into new page {}",
+            new_page_id
+        );
 
         // Create the tuple with the correct RID for the new page
         let new_rid = RID::new(new_page_id, 0);
@@ -903,25 +919,40 @@ impl TableHeap {
 
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();
-        
+
         // First verify the page has space for the tuple
         if !new_page.has_space_for(&tuple) {
-            debug!("New page {} unexpectedly has no space for tuple", new_page_id);
+            debug!(
+                "New page {} unexpectedly has no space for tuple",
+                new_page_id
+            );
             return Err(format!("New page {} has no space for tuple", new_page_id));
         }
-        
-        debug!("Inserting tuple with RID {:?} into new page {}", new_rid, new_page_id);
-        
+
+        debug!(
+            "Inserting tuple with RID {:?} into new page {}",
+            new_rid, new_page_id
+        );
+
         // Use the insert_tuple_with_rid method to bypass RID check
         match new_page.insert_tuple_with_rid(meta, &tuple, new_rid) {
             Some(rid) => {
                 new_page.set_dirty(true);
-                debug!("Successfully inserted tuple into new page {}, RID: {:?}", new_page_id, rid);
+                debug!(
+                    "Successfully inserted tuple into new page {}, RID: {:?}",
+                    new_page_id, rid
+                );
                 Ok(rid)
             }
             None => {
-                debug!("Failed to insert tuple into new page {} despite having space", new_page_id);
-                Err(format!("Failed to insert tuple into new page {} despite space check passing", new_page_id))
+                debug!(
+                    "Failed to insert tuple into new page {} despite having space",
+                    new_page_id
+                );
+                Err(format!(
+                    "Failed to insert tuple into new page {} despite space check passing",
+                    new_page_id
+                ))
             }
         }
     }
@@ -1497,12 +1528,18 @@ mod tests {
 
         // Try to update a non-existent tuple
         let (meta, mut tuple) = create_test_tuple(&schema);
-        assert!(table_heap
-            .update_tuple(Arc::new(meta), &mut tuple, invalid_rid, None)
-            .is_err());
+        assert!(
+            table_heap
+                .update_tuple(Arc::new(meta), &mut tuple, invalid_rid, None)
+                .is_err()
+        );
 
         // Try to update tuple meta for non-existent tuple
-        assert!(table_heap.update_tuple_meta(Arc::new(meta), invalid_rid).is_err());
+        assert!(
+            table_heap
+                .update_tuple_meta(Arc::new(meta), invalid_rid)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1526,53 +1563,57 @@ mod tests {
         let mut large_tuple = Tuple::new(&values, &schema, RID::new(0, 0));
 
         // This should fail
-        assert!(table_heap.insert_tuple(Arc::new(meta), &mut large_tuple).is_err());
+        assert!(
+            table_heap
+                .insert_tuple(Arc::new(meta), &mut large_tuple)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_insert_tuple_from_values() {
         let ctx = StorageTestContext::new("test_insert_from_values");
         let table_heap = ctx.create_table_heap();
-        
+
         // Create schema
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
         ]);
-        
+
         // Create values
         let values = vec![Value::new(1), Value::new("Alice"), Value::new(25)];
-        
+
         // Create metadata
         let meta = TupleMeta::new(0);
-        
+
         // Insert tuple from values
         let rid = table_heap
             .insert_tuple_from_values(values.clone(), &schema, Arc::new(meta))
             .expect("Failed to insert tuple from values");
-            
+
         // Verify the tuple was inserted correctly
         let (_, retrieved_tuple) = table_heap.get_tuple(rid).expect("Failed to get tuple");
-        
+
         assert_eq!(retrieved_tuple.get_value(0), Value::new(1));
         assert_eq!(retrieved_tuple.get_value(1), Value::new("Alice"));
         assert_eq!(retrieved_tuple.get_value(2), Value::new(25));
         assert_eq!(retrieved_tuple.get_rid(), rid);
     }
-    
+
     #[test]
     fn test_insert_multiple_tuples_from_values() {
         let ctx = StorageTestContext::new("test_insert_multiple_from_values");
         let table_heap = ctx.create_table_heap();
-        
+
         // Create schema
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
             Column::new("age", TypeId::Integer),
         ]);
-        
+
         // Insert multiple tuples
         let mut rids = Vec::new();
         for i in 0..10 {
@@ -1587,7 +1628,7 @@ mod tests {
                 .expect("Failed to insert tuple");
             rids.push(rid);
         }
-        
+
         // Verify all tuples were inserted correctly
         for (i, rid) in rids.iter().enumerate() {
             let (_, tuple) = table_heap.get_tuple(*rid).expect("Failed to get tuple");
@@ -1596,76 +1637,86 @@ mod tests {
             assert_eq!(tuple.get_value(2), Value::new(20 + i as i32));
         }
     }
-    
+
     #[test]
     fn test_insert_tuple_from_values_across_pages() {
         let ctx = StorageTestContext::new("test_insert_across_pages");
         let table_heap = ctx.create_table_heap();
-        
+
         // Create schema
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
             Column::new("data", TypeId::VarChar), // Larger field to fill pages faster
         ]);
-        
+
         // Insert enough tuples to span multiple pages
         let mut rids = Vec::new();
         let mut page_ids = HashSet::new();
-        
+
         // Insert 50 tuples with larger data to force page splits
         for i in 0..50 {
             // Create a larger string to fill pages faster
-            let large_data = format!("This is a somewhat larger string that will help fill pages more quickly when we insert multiple tuples. Tuple index: {}", i);
-            
+            let large_data = format!(
+                "This is a somewhat larger string that will help fill pages more quickly when we insert multiple tuples. Tuple index: {}",
+                i
+            );
+
             let values = vec![
                 Value::new(i),
                 Value::new(format!("Name_{}", i)),
                 Value::new(large_data),
             ];
             let meta = TupleMeta::new(0);
-            
+
             let rid = table_heap
                 .insert_tuple_from_values(values, &schema, Arc::new(meta))
                 .expect("Failed to insert tuple");
-                
+
             rids.push(rid);
             page_ids.insert(rid.get_page_id());
         }
-        
+
         // Verify we created multiple pages
-        assert!(page_ids.len() > 1, "Expected multiple pages, got {}", page_ids.len());
-        
+        assert!(
+            page_ids.len() > 1,
+            "Expected multiple pages, got {}",
+            page_ids.len()
+        );
+
         // Verify tuples were inserted correctly across pages
         for (i, rid) in rids.iter().enumerate() {
             let (_, tuple) = table_heap.get_tuple(*rid).expect("Failed to get tuple");
             assert_eq!(tuple.get_value(0), Value::new(i as i32));
             assert_eq!(tuple.get_value(1), Value::new(format!("Name_{}", i)));
-            
+
             // Check that the large data was stored correctly
-            let expected_data = format!("This is a somewhat larger string that will help fill pages more quickly when we insert multiple tuples. Tuple index: {}", i);
+            let expected_data = format!(
+                "This is a somewhat larger string that will help fill pages more quickly when we insert multiple tuples. Tuple index: {}",
+                i
+            );
             assert_eq!(tuple.get_value(2), Value::new(expected_data));
         }
     }
-    
+
     #[test]
     fn test_tuple_too_large_for_page() {
         let ctx = StorageTestContext::new("test_tuple_too_large");
         let table_heap = ctx.create_table_heap();
-        
+
         // Create schema
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("huge_data", TypeId::VarChar),
         ]);
-        
+
         // Create values with a string too large to fit in a page
         let huge_string = "x".repeat(5000); // Larger than page size
         let values = vec![Value::new(1), Value::new(huge_string)];
-        
+
         // Create metadata
         let meta = TupleMeta::new(0);
-        
+
         // Insert should fail due to tuple size
         let result = table_heap.insert_tuple_from_values(values, &schema, Arc::new(meta));
         assert!(result.is_err());

@@ -352,10 +352,7 @@ mod tests {
         ];
 
         for (id, value) in test_data {
-            let values = vec![
-                Value::new(id),
-                Value::new(value),
-            ];
+            let values = vec![Value::new(id), Value::new(value)];
 
             let tuple_meta = Arc::new(TupleMeta::new(ctx.transaction_context.get_transaction_id()));
 
@@ -429,7 +426,10 @@ mod tests {
             // Verify the deleted tuple has id > 3
             let id = tuple.get_value(0);
             let id_val = id.get_val();
-            assert!(id_val > &Val::from(3), "Should only delete tuples with id > 3");
+            assert!(
+                id_val > &Val::from(3),
+                "Should only delete tuples with id > 3"
+            );
         }
 
         assert_eq!(delete_count, 2, "Should have deleted 2 tuples");

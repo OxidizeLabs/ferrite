@@ -50,14 +50,10 @@ impl ExpressionOps for IsCheckExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "IS TRUE can only be applied to boolean values".to_string(),
-                        ))
+                        ));
                     }
                 };
-                if negated {
-                    !is_true
-                } else {
-                    is_true
-                }
+                if negated { !is_true } else { is_true }
             }
             IsCheckType::False { negated } => {
                 let is_false = match value.get_val() {
@@ -66,30 +62,18 @@ impl ExpressionOps for IsCheckExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "IS FALSE can only be applied to boolean values".to_string(),
-                        ))
+                        ));
                     }
                 };
-                if negated {
-                    !is_false
-                } else {
-                    is_false
-                }
+                if negated { !is_false } else { is_false }
             }
             IsCheckType::Unknown { negated } => {
                 let is_unknown = value.is_null();
-                if negated {
-                    !is_unknown
-                } else {
-                    is_unknown
-                }
+                if negated { !is_unknown } else { is_unknown }
             }
             IsCheckType::Null { negated } => {
                 let is_null = value.is_null();
-                if negated {
-                    !is_null
-                } else {
-                    is_null
-                }
+                if negated { !is_null } else { is_null }
             }
         };
         Ok(Value::new(result))
@@ -113,14 +97,10 @@ impl ExpressionOps for IsCheckExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "IS TRUE can only be applied to boolean values".to_string(),
-                        ))
+                        ));
                     }
                 };
-                if negated {
-                    !is_true
-                } else {
-                    is_true
-                }
+                if negated { !is_true } else { is_true }
             }
             IsCheckType::False { negated } => {
                 let is_false = match value.get_val() {
@@ -129,30 +109,18 @@ impl ExpressionOps for IsCheckExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "IS FALSE can only be applied to boolean values".to_string(),
-                        ))
+                        ));
                     }
                 };
-                if negated {
-                    !is_false
-                } else {
-                    is_false
-                }
+                if negated { !is_false } else { is_false }
             }
             IsCheckType::Unknown { negated } => {
                 let is_unknown = value.is_null();
-                if negated {
-                    !is_unknown
-                } else {
-                    is_unknown
-                }
+                if negated { !is_unknown } else { is_unknown }
             }
             IsCheckType::Null { negated } => {
                 let is_null = value.is_null();
-                if negated {
-                    !is_null
-                } else {
-                    is_null
-                }
+                if negated { !is_null } else { is_null }
             }
         };
         Ok(Value::new(result))
@@ -235,11 +203,7 @@ mod tests {
             Column::new("int_col", TypeId::Integer),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(
-            &*vec![Value::new(true), Value::new(42)],
-            &schema,
-            rid,
-        );
+        let tuple = Tuple::new(&*vec![Value::new(true), Value::new(42)], &schema, rid);
         (tuple, schema)
     }
 

@@ -64,7 +64,7 @@ impl ExpressionOps for SubscriptExpression {
                 return Err(ExpressionError::InvalidType(format!(
                     "Cannot perform subscript operation on non-vector type: {:?}",
                     value.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -92,7 +92,7 @@ impl ExpressionOps for SubscriptExpression {
                     _ => {
                         return Err(ExpressionError::InvalidType(
                             "Array index must be an integer".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -115,11 +115,7 @@ impl ExpressionOps for SubscriptExpression {
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
-                                    if -i > len {
-                                        0
-                                    } else {
-                                        (len + i) as usize
-                                    }
+                                    if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
                                 }
@@ -127,7 +123,7 @@ impl ExpressionOps for SubscriptExpression {
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range start index must be an integer".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }
@@ -141,11 +137,7 @@ impl ExpressionOps for SubscriptExpression {
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
-                                    if -i > len {
-                                        0
-                                    } else {
-                                        (len + i) as usize
-                                    }
+                                    if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
                                 }
@@ -153,7 +145,7 @@ impl ExpressionOps for SubscriptExpression {
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range end index must be an integer".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }
@@ -190,7 +182,7 @@ impl ExpressionOps for SubscriptExpression {
                 return Err(ExpressionError::InvalidType(format!(
                     "Cannot perform subscript operation on non-vector type: {:?}",
                     value.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -218,7 +210,7 @@ impl ExpressionOps for SubscriptExpression {
                     _ => {
                         return Err(ExpressionError::InvalidType(
                             "Array index must be an integer".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -246,11 +238,7 @@ impl ExpressionOps for SubscriptExpression {
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
-                                    if -i > len {
-                                        0
-                                    } else {
-                                        (len + i) as usize
-                                    }
+                                    if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
                                 }
@@ -258,7 +246,7 @@ impl ExpressionOps for SubscriptExpression {
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range start index must be an integer".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }
@@ -277,11 +265,7 @@ impl ExpressionOps for SubscriptExpression {
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
-                                    if -i > len {
-                                        0
-                                    } else {
-                                        (len + i) as usize
-                                    }
+                                    if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
                                 }
@@ -289,7 +273,7 @@ impl ExpressionOps for SubscriptExpression {
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range end index must be an integer".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }

@@ -2,6 +2,8 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
+use crate::concurrency::transaction::{IsolationLevel, Transaction};
+use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::wal_manager::WALManager;
 use crate::sql::execution::check_option::CheckOptions;
@@ -13,8 +15,8 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
-use crate::storage::table::tuple::TupleMeta;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
+use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info};
@@ -23,8 +25,6 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
-use crate::concurrency::transaction_manager::TransactionManager;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -273,10 +273,10 @@ impl ExecutionEngine {
         let table_info = binding
             .get_table(plan.get_table_name())
             .ok_or_else(|| DBError::TableNotFound(plan.get_table_name().to_string()))?;
-        
+
         // Get the table schema
         let schema = table_info.get_table_schema();
-        
+
         // Get the values to insert
         let values_to_insert = plan.get_input_values();
         if values_to_insert.is_empty() {
@@ -285,7 +285,8 @@ impl ExecutionEngine {
 
         // Get table heap and create a transactional wrapper around it
         let table_heap = table_info.get_table_heap();
-        let transactional_table_heap = TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
+        let transactional_table_heap =
+            TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
 
         // Insert each set of values
         for value_set in values_to_insert {

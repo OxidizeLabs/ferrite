@@ -228,7 +228,7 @@ impl DateTimeExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Unsupported date_trunc part: {:?}",
                     part
-                )))
+                )));
             }
         };
         Ok(Utc.from_utc_datetime(&truncated))
@@ -384,7 +384,7 @@ impl ExpressionOps for DateTimeExpression {
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
-                            ))
+                            ));
                         }
                     };
                     let result = self.evaluate_date_trunc(part, timestamp)?;
@@ -425,7 +425,7 @@ impl ExpressionOps for DateTimeExpression {
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
-                            ))
+                            ));
                         }
                     };
                     let result = self.evaluate_date_part(part, timestamp)?;
@@ -681,7 +681,7 @@ impl ExpressionOps for DateTimeExpression {
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
-                            ))
+                            ));
                         }
                     };
                     let result = self.evaluate_date_trunc(part, timestamp)?;
@@ -727,7 +727,7 @@ impl ExpressionOps for DateTimeExpression {
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
-                            ))
+                            ));
                         }
                     };
                     let result = self.evaluate_date_part(part, timestamp)?;
@@ -1023,10 +1023,7 @@ mod tests {
 
     fn create_test_tuple() -> Tuple {
         let schema = create_test_schema();
-        let values = vec![
-            Value::new("2024-01-01T12:30:45Z"),
-            Value::new(42)
-        ];
+        let values = vec![Value::new("2024-01-01T12:30:45Z"), Value::new(42)];
         Tuple::new(&values, &schema, RID::new(0, 0))
     }
 

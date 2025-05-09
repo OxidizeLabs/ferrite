@@ -1,11 +1,11 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
+use crate::storage::index::types::{KeyComparator, KeyType};
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
-use crate::storage::index::types::{KeyComparator, KeyType};
 
 /// Leaf page structure for B+ Tree
 pub struct BPlusTreeLeafPage<K, V, C>
@@ -35,14 +35,14 @@ where
     // Maximum size
     max_size: usize,
     // Flag indicating if this is a root node
-    is_root: bool
+    is_root: bool,
 }
 
 impl<
-        K: Clone + Send + Sync + 'static,
-        V: Clone + Send + Sync + 'static,
-        C: Fn(&K, &K) -> Ordering + 'static + Send + Sync,
-    > PageTypeId for BPlusTreeLeafPage<K, V, C>
+    K: Clone + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    C: Fn(&K, &K) -> Ordering + 'static + Send + Sync,
+> PageTypeId for BPlusTreeLeafPage<K, V, C>
 where
     K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
@@ -69,7 +69,7 @@ where
             is_dirty: false,
             size: 0,
             max_size,
-            is_root: false
+            is_root: false,
         }
     }
 
@@ -165,9 +165,7 @@ where
         let index = self.find_key_index(&key);
 
         // Check if key already exists
-        if index < self.size
-            && (self.comparator)(&key, &self.keys[index]) == Ordering::Equal
-        {
+        if index < self.size && (self.comparator)(&key, &self.keys[index]) == Ordering::Equal {
             // Update value if key exists
             self.values[index] = value;
         } else {

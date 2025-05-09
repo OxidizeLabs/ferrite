@@ -10,7 +10,7 @@ impl IntervalType {
     pub fn new() -> Self {
         IntervalType
     }
-    
+
     /// Format interval in a human-readable way
     fn format_interval(seconds: i64) -> String {
         let abs_seconds = seconds.abs();
@@ -18,16 +18,16 @@ impl IntervalType {
         let hours = (abs_seconds % (24 * 60 * 60)) / 3600;
         let minutes = (abs_seconds % 3600) / 60;
         let secs = abs_seconds % 60;
-        
+
         let mut result = String::new();
         if seconds < 0 {
             result.push('-');
         }
-        
+
         if days > 0 {
             result.push_str(&format!("{} days ", days));
         }
-        
+
         result.push_str(&format!("{:02}:{:02}:{:02}", hours, minutes, secs));
         result
     }
@@ -108,7 +108,10 @@ impl Type for IntervalType {
             }
             Val::Integer(r) => {
                 // Adding seconds as Integer
-                Ok(Value::new_with_type(Val::Interval(*r as i64), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(*r as i64),
+                    TypeId::Interval,
+                ))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-interval types to Interval".to_string()),
@@ -127,7 +130,10 @@ impl Type for IntervalType {
             }
             Val::Integer(r) => {
                 // Subtracting seconds as Integer
-                Ok(Value::new_with_type(Val::Interval(-(*r as i64)), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(-(*r as i64)),
+                    TypeId::Interval,
+                ))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-interval types from Interval".to_string()),
@@ -138,15 +144,24 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Integer(r) => {
                 // Multiplying interval by a scalar
-                Ok(Value::new_with_type(Val::Interval(0 * (*r as i64)), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(0 * (*r as i64)),
+                    TypeId::Interval,
+                ))
             }
             Val::BigInt(r) => {
                 // Multiplying interval by a scalar
-                Ok(Value::new_with_type(Val::Interval(0 * *r), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(0 * *r),
+                    TypeId::Interval,
+                ))
             }
             Val::Decimal(r) => {
                 // Multiplying interval by a scalar
-                Ok(Value::new_with_type(Val::Interval((0.0 * *r) as i64), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval((0.0 * *r) as i64),
+                    TypeId::Interval,
+                ))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Interval by non-numeric type".to_string()),
@@ -160,15 +175,24 @@ impl Type for IntervalType {
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
             Val::Integer(r) => {
                 // Dividing interval by a scalar
-                Ok(Value::new_with_type(Val::Interval(0 / (*r as i64)), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(0 / (*r as i64)),
+                    TypeId::Interval,
+                ))
             }
             Val::BigInt(r) => {
                 // Dividing interval by a scalar
-                Ok(Value::new_with_type(Val::Interval(0 / *r), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(0 / *r),
+                    TypeId::Interval,
+                ))
             }
             Val::Decimal(r) => {
                 // Dividing interval by a scalar
-                Ok(Value::new_with_type(Val::Interval((0.0 / *r) as i64), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval((0.0 / *r) as i64),
+                    TypeId::Interval,
+                ))
             }
             Val::Interval(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Interval(r) => {
@@ -184,7 +208,9 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Integer(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::Integer(r) => Value::new_with_type(Val::Interval(0 % (*r as i64)), TypeId::Interval),
+            Val::Integer(r) => {
+                Value::new_with_type(Val::Interval(0 % (*r as i64)), TypeId::Interval)
+            }
             Val::BigInt(r) => Value::new_with_type(Val::Interval(0 % *r), TypeId::Interval),
             Val::Interval(r) if *r == 0 => Value::new(Val::Null),
             Val::Interval(r) => Value::new_with_type(Val::Interval(0 % *r), TypeId::Interval),
@@ -196,7 +222,9 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Interval(r) => Value::new_with_type(Val::Interval(0.min(*r)), TypeId::Interval),
             Val::BigInt(r) => Value::new_with_type(Val::Interval(0.min(*r)), TypeId::Interval),
-            Val::Integer(r) => Value::new_with_type(Val::Interval(0.min(*r as i64)), TypeId::Interval),
+            Val::Integer(r) => {
+                Value::new_with_type(Val::Interval(0.min(*r as i64)), TypeId::Interval)
+            }
             _ => Value::new(Val::Null),
         }
     }
@@ -205,7 +233,9 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Interval(r) => Value::new_with_type(Val::Interval(0.max(*r)), TypeId::Interval),
             Val::BigInt(r) => Value::new_with_type(Val::Interval(0.max(*r)), TypeId::Interval),
-            Val::Integer(r) => Value::new_with_type(Val::Interval(0.max(*r as i64)), TypeId::Interval),
+            Val::Integer(r) => {
+                Value::new_with_type(Val::Interval(0.max(*r as i64)), TypeId::Interval)
+            }
             _ => Value::new(Val::Null),
         }
     }
@@ -219,4 +249,4 @@ impl Type for IntervalType {
     }
 }
 
-pub static INTERVAL_TYPE_INSTANCE: IntervalType = IntervalType; 
+pub static INTERVAL_TYPE_INSTANCE: IntervalType = IntervalType;

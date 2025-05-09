@@ -153,7 +153,7 @@ impl BinaryOpExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Invalid comparison operator: {:?}",
                     self.op
-                )))
+                )));
             }
         };
         Ok(Value::from(result))
@@ -173,7 +173,7 @@ impl BinaryOpExpression {
                         return Err(ExpressionError::InvalidOperation(format!(
                             "Invalid logical operator: {:?}",
                             self.op
-                        )))
+                        )));
                     }
                 };
                 Ok(Value::from(result))
@@ -242,11 +242,7 @@ impl ExpressionOps for BinaryOpExpression {
         ]);
 
         self.evaluate(
-            &Tuple::new(
-                &[left_val, right_val],
-                &temp_schema,
-                left_tuple.get_rid(),
-            ),
+            &Tuple::new(&[left_val, right_val], &temp_schema, left_tuple.get_rid()),
             &temp_schema,
         )
     }

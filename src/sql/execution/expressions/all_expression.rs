@@ -53,7 +53,7 @@ impl ExpressionOps for AllExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "ALL operation requires array/vector right operand".to_string(),
-                ))
+                ));
             }
         };
 
@@ -75,7 +75,7 @@ impl ExpressionOps for AllExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "Unsupported operator for ALL: {:?}",
                         self.compare_op
-                    )))
+                    )));
                 }
             };
 
@@ -117,7 +117,7 @@ impl ExpressionOps for AllExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "ALL operation requires array/vector right operand".to_string(),
-                ))
+                ));
             }
         };
 
@@ -139,7 +139,7 @@ impl ExpressionOps for AllExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "Unsupported operator for ALL: {:?}",
                         self.compare_op
-                    )))
+                    )));
                 }
             };
 

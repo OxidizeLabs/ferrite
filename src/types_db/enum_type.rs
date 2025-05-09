@@ -135,4 +135,4 @@ impl Type for EnumType {
     }
 }
 
-pub static ENUM_TYPE_INSTANCE: EnumType = EnumType; 
+pub static ENUM_TYPE_INSTANCE: EnumType = EnumType;

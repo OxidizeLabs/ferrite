@@ -50,7 +50,7 @@ impl ExpressionOps for TrimExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "TRIM requires string input, got {:?}",
                     string_value.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -70,7 +70,7 @@ impl ExpressionOps for TrimExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "TRIM characters must be a string, got {:?}",
                         chars_value.get_type_id()
-                    )))
+                    )));
                 }
             }
         } else {
@@ -118,7 +118,7 @@ impl ExpressionOps for TrimExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "TRIM requires string input, got {:?}",
                     string_value.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -143,7 +143,7 @@ impl ExpressionOps for TrimExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "TRIM characters must be a string, got {:?}",
                         chars_value.get_type_id()
-                    )))
+                    )));
                 }
             }
         } else {

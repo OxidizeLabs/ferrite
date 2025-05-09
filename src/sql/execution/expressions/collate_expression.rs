@@ -120,11 +120,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(
-            &Vec::new(),
-            &schema,
-            crate::common::rid::RID::new(0, 0),
-        );
+        let tuple = Tuple::new(&Vec::new(), &schema, crate::common::rid::RID::new(0, 0));
 
         let result = collate_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, string_val);
@@ -149,10 +145,12 @@ mod tests {
         let schema = Schema::new(vec![]);
         let result = collate_expr.validate(&schema);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("can only be applied to string types"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("can only be applied to string types")
+        );
     }
 
     #[test]

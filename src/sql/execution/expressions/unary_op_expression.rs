@@ -204,7 +204,7 @@ impl ExpressionOps for UnaryOpExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Unsupported unary operator: {:?}",
                     self.op
-                )))
+                )));
             }
         }
         Ok(())

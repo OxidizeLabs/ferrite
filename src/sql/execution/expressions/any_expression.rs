@@ -67,7 +67,7 @@ impl ExpressionOps for AnyExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "Right side of ANY/SOME must be a vector or subquery result".to_string(),
-                ))
+                ));
             }
         };
 
@@ -116,7 +116,7 @@ impl ExpressionOps for AnyExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "Right side of ANY/SOME must be a vector or subquery result".to_string(),
-                ))
+                ));
             }
         };
 

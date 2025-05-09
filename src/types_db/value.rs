@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use chrono::NaiveDateTime;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
@@ -174,7 +173,12 @@ impl Value {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self.value_,
-            Val::Decimal(_) | Val::Float(_) | Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_)
+            Val::Decimal(_)
+                | Val::Float(_)
+                | Val::TinyInt(_)
+                | Val::SmallInt(_)
+                | Val::Integer(_)
+                | Val::BigInt(_)
         )
     }
 
@@ -191,7 +195,7 @@ impl Value {
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
     }
-    
+
     fn is_zero(&self, val: &Value) -> bool {
         match val.get_val() {
             Val::Integer(i) => *i == 0,
@@ -331,15 +335,17 @@ impl Value {
             },
             Point => {
                 if data.len() >= 16 {
-                    let x_arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
-                    let y_arr: [u8; 8] = data[8..16].try_into().expect("slice with incorrect length");
+                    let x_arr: [u8; 8] =
+                        data[0..8].try_into().expect("slice with incorrect length");
+                    let y_arr: [u8; 8] =
+                        data[8..16].try_into().expect("slice with incorrect length");
                     let x = f64::from_le_bytes(x_arr);
                     let y = f64::from_le_bytes(y_arr);
                     Value::new_with_type(Val::Point(x, y), TypeId::Point)
                 } else {
                     Value::new(Val::Null)
                 }
-            },
+            }
             Vector => Value::new_with_type(Val::Vector(Vec::new()), Vector),
             Array => Value::new_with_type(Val::Array(Vec::new()), Array),
             Enum => Value::new_with_type(Val::Enum(0, String::new()), Enum),
@@ -423,15 +429,30 @@ impl Value {
             }
 
             (Val::Boolean(_), _) => Err(format!("Cannot cast Boolean to {:?}", target_type)),
-            (Val::Float(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
+            (Val::Float(f), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(f.to_string()),
+                target_type,
+            )),
             (Val::Float(_), _) => Err(format!("Cannot cast Float to {:?}", target_type)),
-            (Val::Timestamp(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
+            (Val::Timestamp(t), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(t.to_string()),
+                target_type,
+            )),
             (Val::Timestamp(_), _) => Err(format!("Cannot cast Timestamp to {:?}", target_type)),
-            (Val::Date(d), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(d.to_string()), target_type)),
+            (Val::Date(d), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(d.to_string()),
+                target_type,
+            )),
             (Val::Date(_), _) => Err(format!("Cannot cast Date to {:?}", target_type)),
-            (Val::Time(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
+            (Val::Time(t), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(t.to_string()),
+                target_type,
+            )),
             (Val::Time(_), _) => Err(format!("Cannot cast Time to {:?}", target_type)),
-            (Val::Interval(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
+            (Val::Interval(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
             (Val::Interval(_), _) => Err(format!("Cannot cast Interval to {:?}", target_type)),
             (Val::Binary(_), _) => Err(format!("Cannot cast Binary to {:?}", target_type)),
             (Val::JSON(_), _) => Err(format!("Cannot cast JSON to {:?}", target_type)),
@@ -554,7 +575,7 @@ impl Value {
             Val::Interval(i) => Value::new_with_type(Val::Interval(*i), TypeId::Interval),
             Val::Point(x, y) => Value::new_with_type(Val::Point(*x, *y), TypeId::Point),
             Val::Null => Value::new(Val::Null),
-            
+
             // For these types, we need to clone but can potentially optimize later
             // with reference counting or other techniques
             Val::VarLen(s) => Value::new_with_type(Val::VarLen(s.clone()), TypeId::VarChar),
@@ -569,7 +590,7 @@ impl Value {
                 let mut result = Value::new_with_type(Val::Struct, TypeId::Struct);
                 result.struct_data = self.struct_data.clone();
                 result
-            },
+            }
         }
     }
 
@@ -756,13 +777,23 @@ impl Type for Value {
             )),
 
             (Val::Boolean(_), _) => Err("Cannot add Boolean values".to_string()),
-            (Val::Float(a), Val::Float(b)) => Ok(Value::new_with_type(Val::Float(a + b), TypeId::Float)),
+            (Val::Float(a), Val::Float(b)) => {
+                Ok(Value::new_with_type(Val::Float(a + b), TypeId::Float))
+            }
             (Val::Timestamp(_), _) => Err("Cannot add Timestamp values".to_string()),
             (Val::Date(_), _) => Err("Cannot add Date values".to_string()),
             (Val::Time(_), _) => Err("Cannot add Time values".to_string()),
-            (Val::Interval(a), Val::Interval(b)) => Ok(Value::new_with_type(Val::Interval(a + b), TypeId::Interval)),
-            (Val::VarLen(a), Val::VarLen(b)) => Ok(Value::new_with_type(Val::VarLen(a.clone() + b), TypeId::VarChar)),
-            (Val::ConstLen(a), Val::ConstLen(b)) => Ok(Value::new_with_type(Val::ConstLen(a.clone() + b), TypeId::Char)),
+            (Val::Interval(a), Val::Interval(b)) => {
+                Ok(Value::new_with_type(Val::Interval(a + b), TypeId::Interval))
+            }
+            (Val::VarLen(a), Val::VarLen(b)) => Ok(Value::new_with_type(
+                Val::VarLen(a.clone() + b),
+                TypeId::VarChar,
+            )),
+            (Val::ConstLen(a), Val::ConstLen(b)) => Ok(Value::new_with_type(
+                Val::ConstLen(a.clone() + b),
+                TypeId::Char,
+            )),
             (Val::Binary(_), _) => Err("Cannot add Binary values".to_string()),
             (Val::JSON(_), _) => Err("Cannot add JSON values".to_string()),
             (Val::UUID(_), _) => Err("Cannot add UUID values".to_string()),
@@ -789,7 +820,7 @@ impl Type for Value {
             (a, b) => Err(format!("Cannot add {:?} and {:?}", a, b)),
         }
     }
-    
+
     fn subtract(&self, other: &Value) -> Result<Value, String> {
         match (self.get_type_id(), other.get_type_id()) {
             (TypeId::Integer, TypeId::Integer) => {
@@ -822,7 +853,10 @@ impl Type for Value {
                 let a = self.get_val();
                 let b = other.get_val();
                 if let (Val::Float(a_val), Val::Float(b_val)) = (a, b) {
-                    Ok(Value::new_with_type(Val::Float(a_val - b_val), TypeId::Float))
+                    Ok(Value::new_with_type(
+                        Val::Float(a_val - b_val),
+                        TypeId::Float,
+                    ))
                 } else {
                     Err(format!("Invalid Float values for subtraction"))
                 }
@@ -834,7 +868,10 @@ impl Type for Value {
                 let a = self.get_val();
                 let b = other.get_val();
                 if let (Val::Interval(a_val), Val::Interval(b_val)) = (a, b) {
-                    Ok(Value::new_with_type(Val::Interval(a_val - b_val), TypeId::Interval))
+                    Ok(Value::new_with_type(
+                        Val::Interval(a_val - b_val),
+                        TypeId::Interval,
+                    ))
                 } else {
                     Err(format!("Invalid Interval values for subtraction"))
                 }
@@ -890,7 +927,10 @@ impl Type for Value {
                 let a = self.get_val();
                 let b = other.get_val();
                 if let (Val::Float(a_val), Val::Float(b_val)) = (a, b) {
-                    Ok(Value::new_with_type(Val::Float(a_val * b_val), TypeId::Float))
+                    Ok(Value::new_with_type(
+                        Val::Float(a_val * b_val),
+                        TypeId::Float,
+                    ))
                 } else {
                     Err(format!("Invalid Float values for multiplication"))
                 }
@@ -956,7 +996,10 @@ impl Type for Value {
                     if *b_val == 0.0 {
                         return Err("Division by zero".to_string());
                     }
-                    Ok(Value::new_with_type(Val::Float(a_val / b_val), TypeId::Float))
+                    Ok(Value::new_with_type(
+                        Val::Float(a_val / b_val),
+                        TypeId::Float,
+                    ))
                 } else {
                     Err(format!("Invalid Float values for division"))
                 }
@@ -1312,7 +1355,7 @@ impl Display for Value {
         if let Val::Null = self.value_ {
             return write!(f, "NULL");
         }
-        
+
         // Handle vectors directly to support mixed types
         if let Val::Vector(vec) | Val::Array(vec) = &self.value_ {
             write!(f, "[")?;
@@ -1324,7 +1367,7 @@ impl Display for Value {
             }
             return write!(f, "]");
         }
-        
+
         // Use the appropriate type's to_string method for human-readable display
         let type_instance = crate::types_db::types::get_instance(self.type_id_);
         write!(f, "{}", type_instance.to_string(self))
@@ -1334,8 +1377,11 @@ impl Display for Value {
 // Add Debug implementation to show full type information
 impl Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?}, struct_data: {:?} }}",
-               self.value_, self.size_, self.manage_data_, self.type_id_, self.struct_data)
+        write!(
+            f,
+            "Value {{ value_: {:?}, size_: {:?}, manage_data_: {}, type_id_: {:?}, struct_data: {:?} }}",
+            self.value_, self.size_, self.manage_data_, self.type_id_, self.struct_data
+        )
     }
 }
 
@@ -1369,15 +1415,15 @@ impl Hash for Value {
                 for value in v {
                     value.hash(state);
                 }
-            },
+            }
             Val::Enum(id, s) => {
                 id.hash(state);
                 s.hash(state);
-            },
+            }
             Val::Point(x, y) => {
                 x.to_bits().hash(state);
                 y.to_bits().hash(state);
-            },
+            }
             Val::Null => (), // Null doesn't need additional hashing
         }
     }

@@ -59,8 +59,7 @@ impl ExpressionOps for ColumnRefExpression {
     ) -> Result<Value, ExpressionError> {
         trace!(
             "ColumnRef evaluate_join - tuple_index: {}, column_index: {}",
-            self.tuple_index,
-            self.column_index
+            self.tuple_index, self.column_index
         );
         trace!(
             "Left tuple: {:?}, Right tuple: {:?}",
@@ -83,8 +82,7 @@ impl ExpressionOps for ColumnRefExpression {
 
         trace!(
             "Selected tuple values: {:?}, using column_index: {}",
-            values,
-            self.column_index
+            values, self.column_index
         );
         Ok(values[self.column_index].clone())
     }

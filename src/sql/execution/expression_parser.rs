@@ -54,7 +54,9 @@ use crate::sql::execution::expressions::regex_expression::{RegexExpression, Rege
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
 use crate::sql::execution::expressions::subquery_expression::SubqueryExpression;
 use crate::sql::execution::expressions::subquery_expression::SubqueryType;
-use crate::sql::execution::expressions::subscript_expression::{Subscript as InternalSubscript, SubscriptExpression};
+use crate::sql::execution::expressions::subscript_expression::{
+    Subscript as InternalSubscript, SubscriptExpression,
+};
 use crate::sql::execution::expressions::substring_expression::SubstringExpression;
 use crate::sql::execution::expressions::trim_expression::{TrimExpression, TrimType};
 use crate::sql::execution::expressions::tuple_expression::TupleExpression;
@@ -65,9 +67,15 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::{BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr, Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, WindowFrameBound, WindowType, AccessExpr, ValueWithSpan};
-use std::sync::Arc;
+use sqlparser::ast::{
+    AccessExpr, BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg,
+    FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
+    JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, ValueWithSpan,
+    WindowFrameBound, WindowType,
+};
 use sqlparser::tokenizer::{Location, Span};
+use std::sync::Arc;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -111,11 +119,11 @@ impl ExpressionParser {
                 if parts.len() != 2 {
                     return Err("Only table.column compound identifiers are supported".to_string());
                 }
-            
+
                 let table_alias = &parts[0].value;
                 let column_name = &parts[1].value;
                 let qualified_name = format!("{}.{}", table_alias, column_name);
-            
+
                 debug!("Parsing compound identifier: {}", qualified_name);
                 debug!("Schema has {} columns:", schema.get_column_count());
                 for i in 0..schema.get_column_count() as usize {
@@ -127,7 +135,7 @@ impl ExpressionParser {
                         col.get_type()
                     );
                 }
-            
+
                 // First, try to find the column using the qualified name directly
                 if let Some(column_idx) = schema.get_qualified_column_index(&qualified_name) {
                     debug!(
@@ -135,7 +143,7 @@ impl ExpressionParser {
                         qualified_name, column_idx
                     );
                     let column = schema.get_column(column_idx).unwrap().clone();
-            
+
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         column_idx,
@@ -144,12 +152,12 @@ impl ExpressionParser {
                     )));
                 }
                 debug!("Qualified column '{}' not found directly", qualified_name);
-            
+
                 // Second, try to find any column that matches the pattern table_alias.column_name
                 for (idx, col) in schema.get_columns().iter().enumerate() {
                     let col_name = col.get_name();
                     debug!("Checking column '{}' for pattern match", col_name);
-            
+
                     // Check if the column name is already qualified with the same table alias
                     if col_name.starts_with(&format!("{}.", table_alias)) {
                         let parts: Vec<&str> = col_name.split('.').collect();
@@ -171,7 +179,7 @@ impl ExpressionParser {
                     "No column found with pattern match for '{}'",
                     qualified_name
                 );
-            
+
                 // Third, if the table alias matches a known alias and the column exists without qualification
                 // This handles cases where the schema has unqualified column names but we're using qualified references
                 let unqualified_idx = schema.get_column_index(column_name);
@@ -180,10 +188,10 @@ impl ExpressionParser {
                         "Found unqualified column '{}' at index {}, will qualify with '{}'",
                         column_name, idx, table_alias
                     );
-            
+
                     let mut column = schema.get_column(idx).unwrap().clone();
                     column.set_name(qualified_name);
-            
+
                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                         0,
                         idx,
@@ -192,22 +200,22 @@ impl ExpressionParser {
                     )));
                 }
                 debug!("No unqualified column '{}' found", column_name);
-            
+
                 // If we get here, the column wasn't found
                 Err(format!(
                     "Column {}.{} not found in schema",
                     table_alias, column_name
                 ))
             }
-            
+
             Expr::Value(value) => Ok(Expression::Literal(LiteralValueExpression::new(
                 value.clone().into(),
             )?)),
-            
+
             Expr::BinaryOp { left, op, right } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-            
+
                 // Convert arithmetic binary operators to ArithmeticExpression
                 match op {
                     BinaryOperator::Plus
@@ -216,7 +224,7 @@ impl ExpressionParser {
                     | BinaryOperator::Divide => {
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-            
+
                         // Check if types are compatible for arithmetic
                         match (left_type, right_type) {
                             (TypeId::Integer, TypeId::Integer)
@@ -251,14 +259,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-            
+
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "AND operator requires boolean operands, got {:?} AND {:?}",
                                 left_type, right_type
                             ));
                         }
-            
+
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -270,14 +278,14 @@ impl ExpressionParser {
                         // Validate that both operands are boolean
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-            
+
                         if left_type != TypeId::Boolean || right_type != TypeId::Boolean {
                             return Err(format!(
                                 "OR operator requires boolean operands, got {:?} OR {:?}",
                                 left_type, right_type
                             ));
                         }
-            
+
                         Ok(Expression::Logic(LogicExpression::new(
                             left_expr.clone(),
                             right_expr.clone(),
@@ -295,7 +303,7 @@ impl ExpressionParser {
                         // Validate that the types are comparable
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
-            
+
                         match (left_type, right_type) {
                             (TypeId::Integer, TypeId::Integer)
                             | (TypeId::Decimal, TypeId::Decimal)
@@ -318,7 +326,7 @@ impl ExpressionParser {
                                     BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
                                     _ => unreachable!(),
                                 };
-            
+
                                 // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
                                 let right_expr = match right_expr.as_ref() {
                                     Expression::Literal(lit) => {
@@ -330,7 +338,7 @@ impl ExpressionParser {
                                     }
                                     _ => right_expr,
                                 };
-            
+
                                 Ok(Expression::Comparison(ComparisonExpression::new(
                                     left_expr.clone(),
                                     right_expr.clone(),
@@ -353,7 +361,7 @@ impl ExpressionParser {
                     )?)),
                 }
             }
-            
+
             Expr::UnaryOp { op, expr } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::UnaryOp(UnaryOpExpression::new(
@@ -361,7 +369,7 @@ impl ExpressionParser {
                     op.clone(),
                 )?))
             }
-            
+
             Expr::IsNull(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -370,7 +378,7 @@ impl ExpressionParser {
                     Column::new("is_null", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsNotNull(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -379,7 +387,7 @@ impl ExpressionParser {
                     Column::new("is_not_null", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsTrue(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -388,7 +396,7 @@ impl ExpressionParser {
                     Column::new("is_true", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsNotTrue(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -397,7 +405,7 @@ impl ExpressionParser {
                     Column::new("is_not_true", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsFalse(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -406,7 +414,7 @@ impl ExpressionParser {
                     Column::new("is_false", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsNotFalse(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -415,7 +423,7 @@ impl ExpressionParser {
                     Column::new("is_not_false", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsUnknown(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -424,7 +432,7 @@ impl ExpressionParser {
                     Column::new("is_unknown", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsNotUnknown(expr) => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::IsCheck(IsCheckExpression::new(
@@ -433,7 +441,7 @@ impl ExpressionParser {
                     Column::new("is_not_unknown", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::Between {
                 expr,
                 negated,
@@ -443,7 +451,7 @@ impl ExpressionParser {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let low = Arc::new(self.parse_expression(low, schema)?);
                 let high = Arc::new(self.parse_expression(high, schema)?);
-            
+
                 let low_compare = Expression::Comparison(ComparisonExpression::new(
                     expr.clone(),
                     low.clone(),
@@ -454,7 +462,7 @@ impl ExpressionParser {
                     },
                     vec![expr.clone(), low],
                 ));
-            
+
                 let high_compare = Expression::Comparison(ComparisonExpression::new(
                     expr.clone(),
                     high.clone(),
@@ -465,19 +473,19 @@ impl ExpressionParser {
                     },
                     vec![expr.clone(), high],
                 ));
-            
+
                 let result = Expression::Logic(LogicExpression::new(
                     Arc::new(low_compare.clone()),
                     Arc::new(high_compare.clone()),
                     LogicType::And,
                     vec![Arc::new(low_compare), Arc::new(high_compare)],
                 ));
-            
+
                 Ok(result)
             }
-            
+
             Expr::Function(func) => self.parse_function(func, schema),
-            
+
             Expr::Case {
                 operand,
                 conditions,
@@ -488,35 +496,35 @@ impl ExpressionParser {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
                     None => None,
                 };
-            
+
                 // Extract both conditions and results from the conditions
                 // The sqlparser::ast::Expr::Case struct combines WHEN/THEN pairs in a single "conditions" vector
                 // where each entry is a (condition, result) pair
                 let mut when_exprs = Vec::new();
                 let mut then_exprs = Vec::new();
-                
+
                 for when_then in conditions {
                     // Each condition has a when (condition) and a then (result)
                     let when_expr = Arc::new(self.parse_expression(&when_then.condition, schema)?);
                     let then_expr = Arc::new(self.parse_expression(&when_then.result, schema)?);
-                    
+
                     when_exprs.push(when_expr);
                     then_exprs.push(then_expr);
                 }
-            
+
                 // Parse ELSE result if present
                 let else_expr = match else_result {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
                     None => None,
                 };
-            
+
                 // Create the CASE expression
                 Ok(Expression::Case(
                     CaseExpression::new(base_expr, when_exprs, then_exprs, else_expr)
                         .map_err(|e| e.to_string())?,
                 ))
             }
-            
+
             Expr::Cast {
                 expr,
                 data_type,
@@ -525,19 +533,19 @@ impl ExpressionParser {
             } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let target_type = match data_type {
-                    DataType::Int(_) | DataType::Integer(_) => {
-                        TypeId::Integer
-                    }
+                    DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
                     DataType::BigInt(_) => TypeId::BigInt,
-                    DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => TypeId::Decimal,
+                    DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
+                        TypeId::Decimal
+                    }
                     DataType::Char(_) => TypeId::Char,
                     DataType::Varchar(_) => TypeId::VarChar,
                     DataType::Boolean => TypeId::Boolean,
                     _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
                 };
-            
+
                 let mut cast_expr = CastExpression::new(inner_expr, target_type);
-            
+
                 // Handle format if present
                 if let Some(format_expr) = format {
                     match format_expr {
@@ -550,20 +558,20 @@ impl ExpressionParser {
                         }
                     }
                 }
-            
+
                 Ok(Expression::Cast(cast_expr))
             }
-            
+
             Expr::Nested(expr) => {
                 // For nested expressions, just parse the inner expression
                 self.parse_expression(expr, schema)
             }
-            
+
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
             } => Ok(self.parse_at_timezone(timestamp, time_zone, schema)?),
-            
+
             Expr::SimilarTo {
                 negated,
                 expr,
@@ -572,7 +580,7 @@ impl ExpressionParser {
             } => {
                 let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let parsed_pattern = Arc::new(self.parse_expression(pattern, schema)?);
-            
+
                 Ok(Expression::Regex(RegexExpression::new(
                     parsed_expr,
                     parsed_pattern,
@@ -585,7 +593,7 @@ impl ExpressionParser {
                     Column::new("similar_to", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::RLike {
                 negated,
                 expr,
@@ -594,7 +602,7 @@ impl ExpressionParser {
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let pattern = Arc::new(self.parse_expression(pattern, schema)?);
-            
+
                 Ok(Expression::Regex(RegexExpression::new(
                     expr,
                     pattern,
@@ -607,7 +615,7 @@ impl ExpressionParser {
                     Column::new("rlike", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::AnyOp {
                 left,
                 compare_op,
@@ -616,7 +624,7 @@ impl ExpressionParser {
             } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-            
+
                 Ok(Expression::Any(AnyExpression::new(
                     left_expr,
                     right_expr,
@@ -624,7 +632,7 @@ impl ExpressionParser {
                     *is_some,
                 )))
             }
-            
+
             Expr::AllOp {
                 left,
                 compare_op,
@@ -632,14 +640,14 @@ impl ExpressionParser {
             } => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
-            
+
                 Ok(Expression::All(AllExpression::new(
                     left_expr,
                     right_expr,
                     compare_op.clone(),
                 )))
             }
-            
+
             Expr::Convert {
                 is_try,
                 expr,
@@ -649,7 +657,7 @@ impl ExpressionParser {
                 styles,
             } => {
                 let inner_expr = Arc::new(self.parse_expression(&expr, schema)?);
-            
+
                 // Parse the target type if specified
                 let target_type = match data_type {
                     Some(dtype) => Some(match dtype {
@@ -662,15 +670,15 @@ impl ExpressionParser {
                         DataType::Varchar(_) => TypeId::VarChar,
                         DataType::Boolean => TypeId::Boolean,
                         _ => {
-                            return Err(format!("Unsupported conversion target type: {:?}", dtype))
+                            return Err(format!("Unsupported conversion target type: {:?}", dtype));
                         }
                     }),
                     None => None,
                 };
-            
+
                 // Parse the character set if specified
                 let charset_str = charset.clone().map(|name| name.to_string());
-            
+
                 // Parse style expressions
                 let style_exprs = styles
                     .iter()
@@ -679,7 +687,7 @@ impl ExpressionParser {
                     .into_iter()
                     .map(Arc::new)
                     .collect();
-            
+
                 // Determine return type
                 let return_type = match target_type {
                     Some(typ) => Column::new("convert_result", typ),
@@ -688,7 +696,7 @@ impl ExpressionParser {
                         None => inner_expr.get_return_type().clone(),
                     },
                 };
-            
+
                 Ok(Expression::Convert(ConvertExpression::new(
                     inner_expr,
                     target_type,
@@ -698,10 +706,10 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
-            
+
             Expr::Ceil { expr, field } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-            
+
                 let datetime_field = match field {
                     CeilFloorKind::DateTimeField(field) => Some(match field {
                         sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
@@ -741,7 +749,10 @@ impl ExpressionParser {
                     CeilFloorKind::Scale(scale_expr) => {
                         let scale_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
                             value: scale_expr.clone(),
-                             span: Span { start: Location::new(0, 0), end:  Location::new(0, 0)},
+                            span: Span {
+                                start: Location::new(0, 0),
+                                end: Location::new(0, 0),
+                            },
                         });
                         let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
@@ -752,7 +763,7 @@ impl ExpressionParser {
                         )?));
                     }
                 };
-            
+
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
                     CeilFloorOperation::Ceil,
                     inner_expr,
@@ -760,10 +771,10 @@ impl ExpressionParser {
                     datetime_field,
                 )?))
             }
-            
+
             Expr::Floor { expr, field } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-            
+
                 let datetime_field = match field {
                     CeilFloorKind::DateTimeField(field) => Some(match field {
                         sqlparser::ast::DateTimeField::Year => DateTimeField::Year,
@@ -803,7 +814,10 @@ impl ExpressionParser {
                     CeilFloorKind::Scale(scale_expr) => {
                         let scale_expr = Expr::Value(ValueWithSpan {
                             value: scale_expr.clone(),
-                            span: Span { start: Location::new(0,0), end: Location::new(0,0) },
+                            span: Span {
+                                start: Location::new(0, 0),
+                                end: Location::new(0, 0),
+                            },
                         });
                         let scale = Arc::new(self.parse_expression(&scale_expr, schema)?);
                         return Ok(Expression::CeilFloor(CeilFloorExpression::new(
@@ -814,7 +828,7 @@ impl ExpressionParser {
                         )?));
                     }
                 };
-            
+
                 Ok(Expression::CeilFloor(CeilFloorExpression::new(
                     CeilFloorOperation::Floor,
                     inner_expr,
@@ -822,35 +836,35 @@ impl ExpressionParser {
                     datetime_field,
                 )?))
             }
-            
+
             Expr::Position { expr, r#in } => {
                 let substring_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let string_expr = Arc::new(self.parse_expression(r#in, schema)?);
-            
+
                 // Validate that both expressions return string types
                 let substring_type = substring_expr.get_return_type().get_type();
                 let string_type = string_expr.get_return_type().get_type();
-            
+
                 if !matches!(substring_type, TypeId::VarChar | TypeId::Char) {
                     return Err(format!(
                         "POSITION substring must be a string type, got {:?}",
                         substring_type
                     ));
                 }
-            
+
                 if !matches!(string_type, TypeId::VarChar | TypeId::Char) {
                     return Err(format!(
                         "POSITION string must be a string type, got {:?}",
                         string_type
                     ));
                 }
-            
+
                 Ok(Expression::Position(PositionExpression::new(
                     substring_expr,
                     string_expr,
                 )))
             }
-            
+
             Expr::Overlay {
                 expr,
                 overlay_what,
@@ -860,16 +874,16 @@ impl ExpressionParser {
                 let base_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let overlay_what_expr = Arc::new(self.parse_expression(overlay_what, schema)?);
                 let overlay_from_expr = Arc::new(self.parse_expression(overlay_from, schema)?);
-            
+
                 let overlay_for_expr = if let Some(for_expr) = overlay_for {
                     Some(Arc::new(self.parse_expression(for_expr, schema)?))
                 } else {
                     None
                 };
-            
+
                 // Determine return type (always a string)
                 let return_type = Column::new("overlay_result", TypeId::VarChar);
-            
+
                 Ok(Expression::Overlay(OverlayExpression::new(
                     base_expr,
                     overlay_what_expr,
@@ -878,7 +892,7 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
-            
+
             Expr::IsDistinctFrom(left, right) => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
@@ -889,7 +903,7 @@ impl ExpressionParser {
                     Column::new("is_distinct", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::IsNotDistinctFrom(left, right) => {
                 let left_expr = Arc::new(self.parse_expression(left, schema)?);
                 let right_expr = Arc::new(self.parse_expression(right, schema)?);
@@ -900,7 +914,7 @@ impl ExpressionParser {
                     Column::new("is_not_distinct", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::InList {
                 expr,
                 list,
@@ -924,7 +938,7 @@ impl ExpressionParser {
                     Column::new("in_list", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::InSubquery {
                 expr,
                 subquery,
@@ -940,7 +954,7 @@ impl ExpressionParser {
                     Column::new("in_list", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::InUnnest {
                 expr,
                 array_expr,
@@ -955,7 +969,7 @@ impl ExpressionParser {
                     Column::new("in_unnest", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::Like {
                 negated,
                 any,
@@ -969,7 +983,7 @@ impl ExpressionParser {
                 escape_char.clone(),
                 Column::new("like", TypeId::Boolean),
             ))),
-            
+
             Expr::ILike {
                 negated,
                 any,
@@ -983,7 +997,7 @@ impl ExpressionParser {
                 escape_char.clone(),
                 Column::new("ilike", TypeId::Boolean),
             ))),
-            
+
             Expr::Extract {
                 field,
                 syntax,
@@ -1011,35 +1025,35 @@ impl ExpressionParser {
                     Column::new("extract", TypeId::Integer),
                 )))
             }
-            
+
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
                 special,
-                shorthand
+                shorthand,
             } => {
                 let string_expr = Arc::new(self.parse_expression(expr, schema)?);
-            
+
                 // Parse the FROM expression
                 let from_expr = match substring_from {
                     Some(from) => Arc::new(self.parse_expression(from, schema)?),
                     None => return Err("SUBSTRING requires FROM clause".to_string()),
                 };
-            
+
                 // Parse the optional FOR expression
                 let for_expr = match substring_for {
                     Some(for_expr) => Some(Arc::new(self.parse_expression(for_expr, schema)?)),
                     None => None,
                 };
-            
+
                 Ok(Expression::Substring(SubstringExpression::new(
                     string_expr,
                     from_expr,
                     for_expr,
                 )))
             }
-            
+
             Expr::Trim {
                 expr,
                 trim_where,
@@ -1053,10 +1067,10 @@ impl ExpressionParser {
                     Some(sqlparser::ast::TrimWhereField::Both) => TrimType::Both,
                     None => TrimType::Both,
                 };
-            
+
                 // Create the children vector with the main expression first
                 let mut children = vec![parsed_expr];
-            
+
                 // Add trim characters if specified
                 if let Some(chars) = trim_characters {
                     // If there are multiple trim characters, concatenate them into a single string
@@ -1066,21 +1080,19 @@ impl ExpressionParser {
                             .iter()
                             .map(|expr| {
                                 match expr {
-                                    Expr::Value(ValueWithSpan { 
+                                    Expr::Value(ValueWithSpan {
                                         value: sqlparser::ast::Value::SingleQuotedString(s),
-                                        span: _,  // Use _ to ignore the span
-                                    }) => {
-                                        s.clone()
-                                    }
+                                        span: _, // Use _ to ignore the span
+                                    }) => s.clone(),
                                     _ => String::new(), // Skip non-string literals
                                 }
                             })
                             .collect::<String>();
-            
+
                         children.push(Arc::new(self.parse_expression(
                             &Expr::Value(ValueWithSpan {
                                 value: sqlparser::ast::Value::SingleQuotedString(concat_chars),
-                                span: Span::new(Location::new(0,0), Location::new(0,0)),
+                                span: Span::new(Location::new(0, 0), Location::new(0, 0)),
                             }),
                             schema,
                         )?));
@@ -1089,14 +1101,14 @@ impl ExpressionParser {
                         children.push(Arc::new(self.parse_expression(first_char, schema)?));
                     }
                 }
-            
+
                 Ok(Expression::Trim(TrimExpression::new(
                     trim_type,
                     children,
                     Column::new("trim", TypeId::VarChar),
                 )))
             }
-            
+
             Expr::Collate { expr, collation } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let collation_str = collation.to_string();
@@ -1106,7 +1118,7 @@ impl ExpressionParser {
                     Column::new("collate", TypeId::VarChar),
                 )))
             }
-            
+
             Expr::TypedString { data_type, value } => {
                 Ok(Expression::TypedString(TypedStringExpression::new(
                     data_type.to_string(),
@@ -1225,7 +1237,7 @@ impl ExpressionParser {
                     ),
                 )))
             }
-            
+
             Expr::Exists { subquery, negated } => {
                 // The schema parameter is now called _outer_schema in parse_subquery
                 let subquery_expr = Arc::new(self.parse_subquery(subquery, schema)?);
@@ -1235,12 +1247,12 @@ impl ExpressionParser {
                     Column::new("exists", TypeId::Boolean),
                 )))
             }
-            
+
             Expr::Subquery(query) => {
                 // The schema parameter is now called _outer_schema in parse_subquery
                 self.parse_subquery(query, schema)
             }
-            
+
             Expr::GroupingSets(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1256,7 +1268,7 @@ impl ExpressionParser {
                     Column::new("grouping_sets", TypeId::Vector),
                 )))
             }
-            
+
             Expr::Cube(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1272,7 +1284,7 @@ impl ExpressionParser {
                     Column::new("cube", TypeId::Vector),
                 )))
             }
-            
+
             Expr::Rollup(groups) => {
                 let mut parsed_groups = Vec::new();
                 for group in groups {
@@ -1288,7 +1300,7 @@ impl ExpressionParser {
                     Column::new("rollup", TypeId::Vector),
                 )))
             }
-            
+
             Expr::Tuple(exprs) => {
                 // Parse each expression in the tuple
                 let parsed_exprs: Result<Vec<Arc<Expression>>, String> = exprs
@@ -1305,7 +1317,7 @@ impl ExpressionParser {
                     ))
                 })
             }
-            
+
             Expr::Struct { values, fields } => {
                 // Parse each value expression
                 let mut parsed_values = Vec::new();
@@ -1343,7 +1355,7 @@ impl ExpressionParser {
                             return Err(format!(
                                 "Unsupported struct field type: {:?}",
                                 field.field_type
-                            ))
+                            ));
                         }
                     };
 
@@ -1363,7 +1375,7 @@ impl ExpressionParser {
                     return_type,
                 )))
             }
-            
+
             Expr::Array(array) => {
                 // Parse each element in the array
                 let mut elements = Vec::new();
@@ -1401,7 +1413,7 @@ impl ExpressionParser {
                     Column::new("array", TypeId::Vector),
                 )))
             }
-            
+
             Expr::Interval(interval) => {
                 // Parse the interval value expression
                 let value_expr = self.parse_expression(&interval.value, schema)?;
@@ -1424,7 +1436,7 @@ impl ExpressionParser {
                     Column::new("interval", TypeId::Struct),
                 )))
             }
-            
+
             Expr::Wildcard(token) => {
                 // Create a wildcard expression that will return all columns as a vector
                 Ok(Expression::Wildcard(WildcardExpression::new(Column::new(
@@ -1432,10 +1444,14 @@ impl ExpressionParser {
                     TypeId::Vector,
                 ))))
             }
-            
+
             Expr::QualifiedWildcard(name, _) => {
                 // Extract the qualifier parts (e.g., ["schema", "table"] from schema.table.*)
-                let qualifier: Vec<String> = name.0.iter().map(|i| i.as_ident().unwrap().value.clone()).collect();
+                let qualifier: Vec<String> = name
+                    .0
+                    .iter()
+                    .map(|i| i.as_ident().unwrap().value.clone())
+                    .collect();
 
                 // Create a qualified wildcard expression
                 Ok(Expression::QualifiedWildcard(
@@ -1455,11 +1471,11 @@ impl ExpressionParser {
                     ),
                 ))
             }
-            
+
             Expr::CompoundFieldAccess { root, access_chain } => {
                 // First, parse the root expression
                 let mut expr = self.parse_expression(root, schema)?;
-                
+
                 // Apply each access in the chain sequentially
                 for access in access_chain {
                     match access {
@@ -1467,16 +1483,19 @@ impl ExpressionParser {
                             // For dot notation, the field is usually an identifier
                             if let Expr::Identifier(ident) = field_expr {
                                 let field_name = ident.value.clone();
-                                
+
                                 // Get the type of the current expression
                                 let curr_type = expr.get_return_type().get_type();
-                                
+
                                 if curr_type == TypeId::Struct {
                                     // Access field in a struct
                                     expr = Expression::MapAccess(MapAccessExpression::new(
                                         Arc::new(expr),
                                         vec![MapAccessKey::String(field_name.clone())],
-                                        Column::new(&format!("field_{}", field_name), TypeId::Invalid),
+                                        Column::new(
+                                            &format!("field_{}", field_name),
+                                            TypeId::Invalid,
+                                        ),
                                     ));
                                 } else {
                                     return Err(format!(
@@ -1485,16 +1504,19 @@ impl ExpressionParser {
                                     ));
                                 }
                             } else {
-                                return Err("Dot notation field access requires identifier".to_string());
+                                return Err(
+                                    "Dot notation field access requires identifier".to_string()
+                                );
                             }
-                        },
+                        }
                         AccessExpr::Subscript(subscript) => {
                             match subscript {
                                 SQLSubscript::Index { index } => {
                                     // Parse the index expression
-                                    let index_expr = Arc::new(self.parse_expression(&index, schema)?);
+                                    let index_expr =
+                                        Arc::new(self.parse_expression(&index, schema)?);
                                     let curr_type = expr.get_return_type().get_type();
-                                    
+
                                     if curr_type == TypeId::Vector || curr_type == TypeId::Array {
                                         // For array/vector access
                                         expr = Expression::Subscript(SubscriptExpression::new(
@@ -1502,49 +1524,77 @@ impl ExpressionParser {
                                             InternalSubscript::Single(index_expr),
                                             Column::new("array_element", TypeId::Invalid),
                                         ));
-                                    } else if curr_type == TypeId::Struct || curr_type == TypeId::JSON {
+                                    } else if curr_type == TypeId::Struct
+                                        || curr_type == TypeId::JSON
+                                    {
                                         // For map/struct access with bracket notation
                                         // Determine if this is a numeric or string index
                                         match &index {
                                             Expr::Value(value) => {
-                                                if let SQLValue::SingleQuotedString(s) = &value.value {
+                                                if let SQLValue::SingleQuotedString(s) =
+                                                    &value.value
+                                                {
                                                     // String key for map access
-                                                    expr = Expression::MapAccess(MapAccessExpression::new(
-                                                        Arc::new(expr),
-                                                        vec![MapAccessKey::String(s.clone())],
-                                                        Column::new(&format!("field_{}", s), TypeId::Invalid),
-                                                    ));
-                                                } else if let SQLValue::Number(n, _) = &value.value {
+                                                    expr = Expression::MapAccess(
+                                                        MapAccessExpression::new(
+                                                            Arc::new(expr),
+                                                            vec![MapAccessKey::String(s.clone())],
+                                                            Column::new(
+                                                                &format!("field_{}", s),
+                                                                TypeId::Invalid,
+                                                            ),
+                                                        ),
+                                                    );
+                                                } else if let SQLValue::Number(n, _) = &value.value
+                                                {
                                                     // Numeric index for array access within a struct
-                                                    expr = Expression::MapAccess(MapAccessExpression::new(
-                                                        Arc::new(expr),
-                                                        vec![MapAccessKey::Number(n.parse::<i64>().unwrap_or(0))],
-                                                        Column::new(&format!("index_{}", n), TypeId::Invalid),
-                                                    ));
+                                                    expr = Expression::MapAccess(
+                                                        MapAccessExpression::new(
+                                                            Arc::new(expr),
+                                                            vec![MapAccessKey::Number(
+                                                                n.parse::<i64>().unwrap_or(0),
+                                                            )],
+                                                            Column::new(
+                                                                &format!("index_{}", n),
+                                                                TypeId::Invalid,
+                                                            ),
+                                                        ),
+                                                    );
                                                 } else {
                                                     return Err(format!(
-                                                        "Unsupported map/struct index type: {:?}", 
+                                                        "Unsupported map/struct index type: {:?}",
                                                         value
                                                     ));
                                                 }
-                                            },
+                                            }
                                             Expr::Identifier(ident) => {
                                                 // Identifier as a string key
-                                                expr = Expression::MapAccess(MapAccessExpression::new(
-                                                    Arc::new(expr),
-                                                    vec![MapAccessKey::String(ident.value.clone())],
-                                                    Column::new(&format!("field_{}", ident.value), TypeId::Invalid),
-                                                ));
-                                            },
+                                                expr = Expression::MapAccess(
+                                                    MapAccessExpression::new(
+                                                        Arc::new(expr),
+                                                        vec![MapAccessKey::String(
+                                                            ident.value.clone(),
+                                                        )],
+                                                        Column::new(
+                                                            &format!("field_{}", ident.value),
+                                                            TypeId::Invalid,
+                                                        ),
+                                                    ),
+                                                );
+                                            }
                                             _ => {
                                                 // For dynamic keys, we'll need to use a different approach
                                                 // Let's wrap the index expression in a function or method call
                                                 let func_name = format!("access_at_index");
-                                                expr = Expression::Function(FunctionExpression::new(
-                                                    func_name,
-                                                    vec![Arc::new(expr), index_expr],
-                                                    Column::new("dynamic_field", TypeId::Invalid),
-                                                ));
+                                                expr =
+                                                    Expression::Function(FunctionExpression::new(
+                                                        func_name,
+                                                        vec![Arc::new(expr), index_expr],
+                                                        Column::new(
+                                                            "dynamic_field",
+                                                            TypeId::Invalid,
+                                                        ),
+                                                    ));
                                             }
                                         }
                                     } else {
@@ -1553,35 +1603,43 @@ impl ExpressionParser {
                                             curr_type
                                         ));
                                     }
-                                },
-                                SQLSubscript::Slice { lower_bound, upper_bound, stride } => {
+                                }
+                                SQLSubscript::Slice {
+                                    lower_bound,
+                                    upper_bound,
+                                    stride,
+                                } => {
                                     // Handle array slicing - convert SQL expressions to our expressions
-                                    let lower_expr = lower_bound.as_ref().map(|e| 
-                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(|_| 
-                                            Expression::Constant(ConstantExpression::new(
-                                                Value::new(0),
-                                                Column::new("lower_bound", TypeId::Integer),
-                                                vec![],
-                                            ))
+                                    let lower_expr = lower_bound.as_ref().map(|e| {
+                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(
+                                            |_| {
+                                                Expression::Constant(ConstantExpression::new(
+                                                    Value::new(0),
+                                                    Column::new("lower_bound", TypeId::Integer),
+                                                    vec![],
+                                                ))
+                                            },
                                         ))
-                                    );
-                                    
-                                    let upper_expr = upper_bound.as_ref().map(|e| 
-                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(|_| 
-                                            Expression::Constant(ConstantExpression::new(
-                                                Value::new(-1), // -1 indicates the end of array
-                                                Column::new("upper_bound", TypeId::Integer),
-                                                vec![],
-                                            ))
+                                    });
+
+                                    let upper_expr = upper_bound.as_ref().map(|e| {
+                                        Arc::new(self.parse_expression(e, schema).unwrap_or_else(
+                                            |_| {
+                                                Expression::Constant(ConstantExpression::new(
+                                                    Value::new(-1), // -1 indicates the end of array
+                                                    Column::new("upper_bound", TypeId::Integer),
+                                                    vec![],
+                                                ))
+                                            },
                                         ))
-                                    );
-                                    
+                                    });
+
                                     // Create Range subscript
                                     let slice_subscript = InternalSubscript::Range {
                                         start: lower_expr,
                                         end: upper_expr,
                                     };
-                                    
+
                                     expr = Expression::Subscript(SubscriptExpression::new(
                                         Arc::new(expr),
                                         slice_subscript,
@@ -1592,14 +1650,14 @@ impl ExpressionParser {
                         }
                     }
                 }
-                
+
                 Ok(expr)
             }
-            
+
             Expr::JsonAccess { .. } => {
                 Err("JSON access expressions are not yet supported".to_string())
             }
-            
+
             _ => Err(format!("Unsupported expression type: {:?}", expr)),
         }
     }
@@ -2019,10 +2077,8 @@ impl ExpressionParser {
     pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
         debug!("Extracting table name from: {:?}", table_name);
         match table_name {
-            ObjectName(parts) if parts.len() == 1 => {
-                match &parts[0] {
-                    ObjectNamePart::Identifier(ident) => Ok(ident.value.clone()),
-                }
+            ObjectName(parts) if parts.len() == 1 => match &parts[0] {
+                ObjectNamePart::Identifier(ident) => Ok(ident.value.clone()),
             },
             _ => Err("Only single table INSERT statements are supported".to_string()),
         }
@@ -2069,7 +2125,7 @@ impl ExpressionParser {
                         Expression::Comparison(_) => (),
                         _ => {
                             return Err("Join condition must be a comparison or AND of comparisons"
-                                .to_string())
+                                .to_string());
                         }
                     }
                 }
@@ -2349,12 +2405,15 @@ impl ExpressionParser {
 
         // Parse the timezone expression
         let timezone_expr = match timezone {
-            Expr::Value(sqlparser::ast::ValueWithSpan { value: tz_value, span }) => {
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: tz_value,
+                span,
+            }) => {
                 debug!("Processing timezone string literal: {:?}", tz_value);
                 // Extract the string value from the sqlparser Value
                 let tz_str = Value::from_sqlparser_value(&tz_value)
                     .map_err(|e| format!("Failed to extract timezone string: {}", e))?;
-                
+
                 // Create a constant expression for the timezone string
                 Arc::new(Expression::Constant(ConstantExpression::new(
                     Value::new(tz_str),
@@ -2392,7 +2451,11 @@ impl ExpressionParser {
         )))
     }
 
-    fn parse_setexpr(&self, set_expr: &SetExpr, _outer_schema: &Schema) -> Result<Expression, String> {
+    fn parse_setexpr(
+        &self,
+        set_expr: &SetExpr,
+        _outer_schema: &Schema,
+    ) -> Result<Expression, String> {
         debug!("Parsing set_expr: {:?}", set_expr);
 
         // For now, we only support SELECT expressions
@@ -2409,7 +2472,9 @@ impl ExpressionParser {
                             self.get_table_schema(&table_name)?
                         }
                         _ => {
-                            debug!("Unsupported table factor in subquery, falling back to outer schema");
+                            debug!(
+                                "Unsupported table factor in subquery, falling back to outer schema"
+                            );
                             _outer_schema.clone()
                         }
                     }
@@ -2480,7 +2545,7 @@ impl ExpressionParser {
                         return Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Decimal),
-                        ))
+                        ));
                     }
                     "SUM" => {
                         // Determine type based on argument
@@ -2519,7 +2584,7 @@ impl ExpressionParser {
                         return Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Integer),
-                        ))
+                        ));
                     }
                     "MIN" | "MAX" => {
                         // Determine type based on argument
@@ -2561,7 +2626,7 @@ impl ExpressionParser {
                             return Ok((
                                 SubqueryType::Scalar,
                                 Column::new("subquery_result", TypeId::Vector),
-                            ))
+                            ));
                         }
                     },
                     schema,
@@ -2674,7 +2739,7 @@ impl ExpressionParser {
         let window_spec = match spec {
             WindowType::WindowSpec(spec) => spec,
             WindowType::NamedWindow(_) => {
-                return Err("Named windows are not supported yet".to_string())
+                return Err("Named windows are not supported yet".to_string());
             }
         };
 
@@ -3573,7 +3638,7 @@ mod tests {
                     return Err(format!(
                         "Expected IsCheck expression for {}, got {:?}",
                         expr_str, expr
-                    ))
+                    ));
                 }
             }
         }
@@ -3597,7 +3662,7 @@ mod tests {
                         return Err(format!(
                             "Expected IsCheck expression for WHEN condition, got {:?}",
                             when_expr
-                        ))
+                        ));
                     }
                 }
             }
@@ -3697,7 +3762,9 @@ mod tests {
         );
 
         // Test USING constraint
-        let using_cols = vec![ObjectName(vec![ObjectNamePart::Identifier(Ident::new("id"))])];
+        let using_cols = vec![ObjectName(vec![ObjectNamePart::Identifier(Ident::new(
+            "id",
+        ))])];
         let using_join = JoinOperator::Inner(JoinConstraint::Using(using_cols));
         let result = ctx.expression_parser().process_join_operator(
             &using_join,

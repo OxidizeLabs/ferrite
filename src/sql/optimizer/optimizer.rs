@@ -114,8 +114,11 @@ impl Optimizer {
                                     table_schema.get_column_index(&first_col.get_name())
                                 {
                                     if key_attrs[0] == col_idx {
-                                        info!("Converting table scan to index scan using index {} on table {}",
-                                              index_info.get_index_name(), table_name);
+                                        info!(
+                                            "Converting table scan to index scan using index {} on table {}",
+                                            index_info.get_index_name(),
+                                            table_name
+                                        );
 
                                         return Ok(Box::new(LogicalPlan::new(
                                             LogicalPlanType::IndexScan {

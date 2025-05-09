@@ -339,11 +339,7 @@ mod tests {
             Column::new("const_1", TypeId::Integer),
             Column::new("const_2", TypeId::Integer),
         ]);
-        let tuple = Tuple::new(
-            &[Value::new(1), Value::new(2)],
-            &schema,
-            RID::new(1, 1),
-        );
+        let tuple = Tuple::new(&[Value::new(1), Value::new(2)], &schema, RID::new(1, 1));
 
         // Evaluate should return an error
         assert!(expr.evaluate(&tuple, &schema).is_err());
@@ -353,8 +349,9 @@ mod tests {
         let tuple2 = Tuple::new(&[Value::new(3)], &schema2, RID::new(2, 1));
 
         // Evaluate join should return an error
-        assert!(expr
-            .evaluate_join(&tuple, &schema, &tuple2, &schema2)
-            .is_err());
+        assert!(
+            expr.evaluate_join(&tuple, &schema, &tuple2, &schema2)
+                .is_err()
+        );
     }
 }

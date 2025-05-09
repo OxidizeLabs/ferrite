@@ -71,7 +71,6 @@ mod tests {
             Column::new("age", TypeId::Integer),
             Column::new("salary", TypeId::Decimal),
             Column::new("date", TypeId::Date),
-
         ];
         Schema::new(columns)
     }
@@ -98,14 +97,12 @@ mod tests {
         assert_eq!(output_schema.get_columns()[3].get_name(), "salary");
         assert_eq!(output_schema.get_columns()[4].get_name(), "date");
 
-
         // Verify column types
         assert_eq!(output_schema.get_columns()[0].get_type(), TypeId::Integer);
         assert_eq!(output_schema.get_columns()[1].get_type(), TypeId::VarChar);
         assert_eq!(output_schema.get_columns()[2].get_type(), TypeId::Integer);
         assert_eq!(output_schema.get_columns()[3].get_type(), TypeId::Decimal);
         assert_eq!(output_schema.get_columns()[4].get_type(), TypeId::Date);
-
     }
 
     #[test]

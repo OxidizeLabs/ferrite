@@ -254,9 +254,11 @@ mod tests {
 
         // Test that cloning with too many children panics
         let seed_expr2 = seed_expr.clone();
-        assert!(std::panic::catch_unwind(|| {
-            expr.clone_with_children(vec![seed_expr, seed_expr2]);
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                expr.clone_with_children(vec![seed_expr, seed_expr2]);
+            })
+            .is_err()
+        );
     }
 }

@@ -52,7 +52,7 @@ impl ExpressionOps for PositionExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION substring must be a string".to_string(),
-                ))
+                ));
             }
         };
 
@@ -61,7 +61,7 @@ impl ExpressionOps for PositionExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION string must be a string".to_string(),
-                ))
+                ));
             }
         };
 
@@ -100,7 +100,7 @@ impl ExpressionOps for PositionExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION substring must be a string".to_string(),
-                ))
+                ));
             }
         };
 
@@ -109,7 +109,7 @@ impl ExpressionOps for PositionExpression {
             _ => {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION string must be a string".to_string(),
-                ))
+                ));
             }
         };
 

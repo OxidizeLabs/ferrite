@@ -424,8 +424,7 @@ impl BufferPoolManager {
 
         trace!(
             "Successfully deleted page {} from frame {}",
-            page_id,
-            frame_id
+            page_id, frame_id
         );
         Ok(())
     }
@@ -501,8 +500,7 @@ impl BufferPoolManager {
                 replacer.set_evictable(frame_id, true);
                 trace!(
                     "Marked frame {} as evictable for page {}",
-                    frame_id,
-                    old_page_id
+                    frame_id, old_page_id
                 );
             }
 
@@ -513,8 +511,7 @@ impl BufferPoolManager {
     fn evict_old_page(&self, frame_id: FrameId, old_page_id: PageId) {
         trace!(
             "Starting eviction of page {} from frame {}",
-            old_page_id,
-            frame_id
+            old_page_id, frame_id
         );
 
         // Get the page to evict
@@ -522,8 +519,7 @@ impl BufferPoolManager {
             let mut pages = self.pages.write();
             trace!(
                 "Taking ownership of page {} from frame {}",
-                old_page_id,
-                frame_id
+                old_page_id, frame_id
             );
             pages[frame_id as usize].take()
         };
@@ -536,9 +532,7 @@ impl BufferPoolManager {
 
             trace!(
                 "Page {} state before eviction: dirty={}, pin_count={}",
-                old_page_id,
-                needs_writeback,
-                pin_count
+                old_page_id, needs_writeback, pin_count
             );
 
             if needs_writeback {
@@ -558,8 +552,7 @@ impl BufferPoolManager {
 
         trace!(
             "Completed eviction of page {} from frame {}",
-            old_page_id,
-            frame_id
+            old_page_id, frame_id
         );
     }
 
@@ -582,9 +575,7 @@ impl BufferPoolManager {
                     let page_id = page.read().get_page_id();
                     trace!(
                         "Frame {} (page {}) has pin count {}",
-                        frame_id,
-                        page_id,
-                        pin_count
+                        frame_id, page_id, pin_count
                     );
 
                     let is_evictable = pin_count == 0;
@@ -609,9 +600,7 @@ impl BufferPoolManager {
                     let page_id = page.read().get_page_id();
                     trace!(
                         "Verifying frame {} (page {}) pin count: {}",
-                        frame_id,
-                        page_id,
-                        pin_count
+                        frame_id, page_id, pin_count
                     );
                     pin_count == 0
                 } else {
@@ -1090,7 +1079,7 @@ mod tests {
 
         // Wait for all threads and collect results
         for handle in handles {
-            handle.join().expect("Thread failed");
+            let _ = handle.join().expect("Thread failed");
         }
 
         // Verify final state

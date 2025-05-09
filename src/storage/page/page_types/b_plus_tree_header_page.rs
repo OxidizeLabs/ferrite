@@ -42,7 +42,7 @@ impl BPlusTreeHeaderPage {
         page.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
         page
     }
-    
+
     /// Set the order of the B+ tree
     pub fn set_order(&mut self, order: u32) {
         self.order = order;
@@ -121,23 +121,23 @@ impl BPlusTreeHeaderPage {
             num_keys: self.num_keys,
             order: self.order,
         };
-        
+
         bincode::serialize(&header_data).expect("Failed to serialize BPlusTreeHeaderPage")
     }
 
     /// Deserialize bytes into a header page
     pub fn deserialize(data: &[u8], page_id: PageId) -> Self {
         // Deserialize just the data fields
-        let header_data: HeaderData = bincode::deserialize(data)
-            .expect("Failed to deserialize BPlusTreeHeaderPage");
-        
+        let header_data: HeaderData =
+            bincode::deserialize(data).expect("Failed to deserialize BPlusTreeHeaderPage");
+
         // Create a new page with the deserialized data
         let mut page = Self::new_with_options(page_id);
         page.root_page_id = header_data.root_page_id;
         page.tree_height = header_data.tree_height;
         page.num_keys = header_data.num_keys;
         page.order = header_data.order;
-        
+
         page
     }
 }
@@ -443,28 +443,30 @@ mod integration_tests {
             let page = buffer_pool_manager
                 .new_page::<BPlusTreeHeaderPage>()
                 .expect("Failed to allocate new page");
-            
+
             // Get the page ID before modifying
             let page_id = page.get_page_id();
-            
+
             // Modify the header page directly through the page guard
             {
                 let mut page_data = page.write();
                 page_data.set_root_page_id(42);
                 page_data.set_tree_height(3);
                 page_data.set_num_keys(100);
-                
+
                 // Mark the page as dirty
                 page_data.set_dirty(true);
             }
-            
+
             // Page guard will be dropped here, automatically decrementing pin count
             page_id
         };
-        
+
         // Force a flush to ensure data is written to disk
-        buffer_pool_manager.flush_page(header_page_id).expect("Failed to flush page");
-        
+        buffer_pool_manager
+            .flush_page(header_page_id)
+            .expect("Failed to flush page");
+
         // Fetch and verify the header page
         {
             let page: PageGuard<BPlusTreeHeaderPage> = buffer_pool_manager
@@ -473,12 +475,12 @@ mod integration_tests {
 
             // Read the header page values directly using the accessor methods
             let page_data = page.read();
-            
+
             // Verify the header page values
             assert_eq!(page_data.get_root_page_id(), 42);
             assert_eq!(page_data.get_tree_height(), 3);
             assert_eq!(page_data.get_num_keys(), 100);
-            
+
             // Page guard will be dropped here, automatically handling the pin count
         }
     }
@@ -498,7 +500,7 @@ mod integration_tests {
 //     use std::sync::Arc;
 //     use tempfile::tempdir;
 //     use crate::storage::index::index::IndexType;
-// 
+//
 //     fn create_test_buffer_pool_manager() -> Arc<BufferPoolManager> {
 //         // Create temporary directory
 //         let temp_dir = tempdir().expect("Failed to create temporary directory");
@@ -512,7 +514,7 @@ mod integration_tests {
 //             .join("test.log")
 //             .to_string_lossy()
 //             .to_string();
-//             
+//
 //         // Create dependencies for buffer pool manager
 //         let disk_manager = Arc::new(FileDiskManager::new(
 //             db_file_path,
@@ -521,7 +523,7 @@ mod integration_tests {
 //         ));
 //         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 //         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(100, 2))); // 100 frames, K=2
-//         
+//
 //         // Create buffer pool manager
 //         Arc::new(BufferPoolManager::new(
 //             100,            // pool_size
@@ -530,76 +532,76 @@ mod integration_tests {
 //             replacer,       // replacer
 //         ))
 //     }
-// 
+//
 //     // Define the comparison function as a standalone function pointer
 //     fn compare_ints(a: &i32, b: &i32) -> Ordering {
 //         a.cmp(b)
 //     }
-// 
+//
 //     #[test]
 //     fn test_header_page_updates_during_tree_operations() {
 //         let buffer_pool_manager = create_test_buffer_pool_manager();
-//         
+//
 //         // Create index info with appropriate parameters
 //         let index_info = IndexInfo::new(Default::default(), "".to_string(), 0, "".to_string(), 0, false, IndexType::BPlusTreeIndex, vec![]);
-//         
+//
 //         // Create the BPlusTreeIndex with the correct parameters
 //         let mut tree = BPlusTreeIndex::<i32, i32, _>::new(
 //             index_info,
 //             compare_ints,
 //             buffer_pool_manager.clone(),
 //         );
-// 
+//
 //         // Get initial state
 //         let initial_height = tree.get_height();
 //         assert_eq!(initial_height, 0);
-// 
+//
 //         // Insert enough elements to cause splits and height increases
 //         for i in 0..100 {  // Reduced from 1000 for faster tests
 //             tree.insert(&i, i + 1000);
 //         }
-// 
+//
 //         // Verify height increased
 //         let new_height = tree.get_height();
 //         assert!(new_height > initial_height);
-// 
+//
 //         // Verify key count
 //         assert_eq!(tree.get_size(), 100);  // Adjusted count
-// 
+//
 //         // Verify header page root ID points to valid page
 //         assert_ne!(tree.get_root_page_id(), INVALID_PAGE_ID);
 //     }
-// 
+//
 //     #[test]
 //     fn test_empty_tree_after_deletion() {
 //         let buffer_pool_manager = create_test_buffer_pool_manager();
-//         
+//
 //         // Create index info with appropriate parameters
 //         let index_info = IndexInfo {
 //             key_size: size_of::<i32>(),
 //             value_size: size_of::<i32>(),
 //             branch_factor: 4, // Small value for testing
 //         };
-//         
+//
 //         // Create the BPlusTreeIndex with the correct parameters
 //         let mut tree = BPlusTreeIndex::<i32, i32, _>::new(
 //             index_info,
 //             compare_ints,
 //             buffer_pool_manager.clone(),
 //         );
-// 
+//
 //         // Insert and then delete a key
 //         tree.insert(&1, 1001);
 //         assert_eq!(tree.get_size(), 1);
 //         assert!(!tree.is_empty());
-// 
+//
 //         // Delete the key
 //         tree.remove(&1);
-// 
+//
 //         // Verify tree is empty
 //         assert_eq!(tree.get_size(), 0);
 //         assert!(tree.is_empty());
-// 
+//
 //         // Verify header page reflects emptiness
 //         assert_eq!(tree.get_root_page_id(), INVALID_PAGE_ID);
 //     }

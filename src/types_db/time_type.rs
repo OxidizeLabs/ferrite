@@ -11,7 +11,7 @@ impl TimeType {
     pub fn new() -> Self {
         TimeType
     }
-    
+
     /// Convert a time value to a NaiveTime
     fn as_naive_time(seconds_from_midnight: i32) -> Option<NaiveTime> {
         if seconds_from_midnight < 0 || seconds_from_midnight >= 24 * 60 * 60 {
@@ -114,7 +114,10 @@ impl Type for TimeType {
             Val::Time(r) => {
                 // Subtracting two times yields an interval (in seconds)
                 let diff = -*r;
-                Ok(Value::new_with_type(Val::Interval(diff as i64), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(diff as i64),
+                    TypeId::Interval,
+                ))
             }
             Val::Integer(r) => {
                 // Subtracting seconds from a time
@@ -187,4 +190,4 @@ impl Type for TimeType {
     }
 }
 
-pub static TIME_TYPE_INSTANCE: TimeType = TimeType; 
+pub static TIME_TYPE_INSTANCE: TimeType = TimeType;

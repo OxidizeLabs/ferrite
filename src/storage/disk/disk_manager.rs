@@ -298,7 +298,9 @@ impl FileDiskManager {
                     debug!("Log data read from offset {}", offset);
                 } else {
                     log_data[bytes_read..].fill(0);
-                    warn!("Log data read incomplete (EOF reached), partially filled buffer with zeroes");
+                    warn!(
+                        "Log data read incomplete (EOF reached), partially filled buffer with zeroes"
+                    );
                 }
                 Ok(true)
             }
@@ -1233,9 +1235,11 @@ mod tests {
             }
 
             // Force an error by reading an invalid page
-            assert!(disk_manager
-                .read_page(PageId::MAX, &mut read_buffer)
-                .is_ok());
+            assert!(
+                disk_manager
+                    .read_page(PageId::MAX, &mut read_buffer)
+                    .is_ok()
+            );
 
             // Log metrics
             disk_manager.log_metrics();

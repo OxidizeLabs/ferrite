@@ -1492,7 +1492,7 @@ fn extract_join_keys(
                     vec![],
                 )))];
                 right_keys = vec![Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(true), 
+                    Value::new(true),
                     Column::new("TRUE", TypeId::Boolean),
                     vec![],
                 )))];
@@ -1508,7 +1508,7 @@ fn extract_join_keys(
             vec![],
         )))];
         right_keys = vec![Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(true), 
+            Value::new(true),
             Column::new("TRUE", TypeId::Boolean),
             vec![],
         )))];

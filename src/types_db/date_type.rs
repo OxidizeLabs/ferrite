@@ -1,7 +1,7 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use chrono::{NaiveDate, Datelike};
+use chrono::NaiveDate;
 
 /// Implementation for DateType (stored as i32 days from Unix epoch)
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
@@ -11,7 +11,7 @@ impl DateType {
     pub fn new() -> Self {
         DateType
     }
-    
+
     /// Convert a date value to a NaiveDate
     fn as_naive_date(days: i32) -> Option<NaiveDate> {
         // Unix epoch is 1970-01-01
@@ -95,7 +95,10 @@ impl Type for DateType {
         match other.get_val() {
             Val::Date(r) => {
                 // Subtracting two dates yields an interval (in days)
-                Ok(Value::new_with_type(Val::Interval(-(*r as i64)), TypeId::Interval))
+                Ok(Value::new_with_type(
+                    Val::Interval(-(*r as i64)),
+                    TypeId::Interval,
+                ))
             }
             Val::Integer(r) => {
                 // Subtracting days from a date
@@ -103,7 +106,10 @@ impl Type for DateType {
             }
             Val::Interval(days) => {
                 // Subtracting an interval from a date
-                Ok(Value::new_with_type(Val::Date(-(*days as i32)), TypeId::Date))
+                Ok(Value::new_with_type(
+                    Val::Date(-(*days as i32)),
+                    TypeId::Date,
+                ))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-date/interval types from Date".to_string()),
@@ -160,4 +166,4 @@ impl Type for DateType {
     }
 }
 
-pub static DATE_TYPE_INSTANCE: DateType = DateType; 
+pub static DATE_TYPE_INSTANCE: DateType = DateType;

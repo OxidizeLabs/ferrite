@@ -129,9 +129,7 @@ impl Type for ArrayType {
     fn to_string(&self, val: &Value) -> String {
         match val.get_val() {
             Val::Array(a) => {
-                let elements: Vec<String> = a.iter()
-                    .map(|v| ToString::to_string(&v))
-                    .collect();
+                let elements: Vec<String> = a.iter().map(|v| ToString::to_string(&v)).collect();
                 format!("[{}]", elements.join(", "))
             }
             Val::Null => "NULL".to_string(),
@@ -140,4 +138,4 @@ impl Type for ArrayType {
     }
 }
 
-pub static ARRAY_TYPE_INSTANCE: ArrayType = ArrayType; 
+pub static ARRAY_TYPE_INSTANCE: ArrayType = ArrayType;

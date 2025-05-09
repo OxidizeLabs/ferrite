@@ -292,16 +292,8 @@ mod tests {
     fn test_coalesce_evaluate_join() {
         let left_schema = Schema::new(vec![]);
         let right_schema = Schema::new(vec![]);
-        let left_tuple = Tuple::new(
-            &*vec![],
-            &left_schema,
-            crate::common::rid::RID::new(0, 0),
-        );
-        let right_tuple = Tuple::new(
-            &*vec![],
-            &right_schema,
-            crate::common::rid::RID::new(0, 0),
-        );
+        let left_tuple = Tuple::new(&*vec![], &left_schema, crate::common::rid::RID::new(0, 0));
+        let right_tuple = Tuple::new(&*vec![], &right_schema, crate::common::rid::RID::new(0, 0));
 
         let expr = CoalesceExpression::new(
             vec![

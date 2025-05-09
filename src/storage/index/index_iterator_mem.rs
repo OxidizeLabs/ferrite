@@ -80,14 +80,15 @@ impl IndexIterator {
                     let key_attrs = tree_guard.get_metadata().get_key_attrs().clone();
                     let schema = start.get_schema();
                     let mut values = start.get_values();
-                    
+
                     // Only modify the first key (the one we're iterating on)
                     for &idx in &key_attrs {
-                        if idx == 0 {  // Assuming we're always iterating on the first column
+                        if idx == 0 {
+                            // Assuming we're always iterating on the first column
                             values[idx] = last_key.clone();
                         }
                     }
-                    
+
                     // Create a new tuple with the modified values
                     let new_start = Arc::new(Tuple::new(&values, &schema, RID::new(0, 0)));
                     debug!("Continuing range scan from key: {:?}", new_start);
@@ -267,7 +268,7 @@ mod test_utils {
         let metadata = create_test_metadata("test_table".to_string(), "test_index".to_string());
         Arc::new(RwLock::new(BPlusTree::new(order, Arc::from(metadata))))
     }
-    
+
     pub fn create_text_txn() -> Transaction {
         Transaction::new(0, IsolationLevel::ReadCommitted)
     }
@@ -286,7 +287,7 @@ mod tests {
         let schema = create_test_schema();
         let tree = create_test_tree(4);
         let txn = create_text_txn();
-        
+
         // Insert test data in a separate scope
         {
             let mut tree_guard = tree.write();

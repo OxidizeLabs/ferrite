@@ -155,4 +155,4 @@ impl Type for PointType {
     }
 }
 
-pub static POINT_TYPE_INSTANCE: PointType = PointType; 
+pub static POINT_TYPE_INSTANCE: PointType = PointType;

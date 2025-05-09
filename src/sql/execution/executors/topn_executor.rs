@@ -285,26 +285,10 @@ mod tests {
                 &schema.clone(),
                 RID::new(0, 0),
             ),
-            Tuple::new(
-                &[Value::new(2), Value::new(20)],
-                &schema,
-                RID::new(0, 1),
-            ),
-            Tuple::new(
-                &[Value::new(3), Value::new(30)],
-                &schema,
-                RID::new(0, 2),
-            ),
-            Tuple::new(
-                &[Value::new(4), Value::new(40)],
-                &schema,
-                RID::new(0, 3),
-            ),
-            Tuple::new(
-                &[Value::new(5), Value::new(50)],
-                &schema,
-                RID::new(0, 4),
-            ),
+            Tuple::new(&[Value::new(2), Value::new(20)], &schema, RID::new(0, 1)),
+            Tuple::new(&[Value::new(3), Value::new(30)], &schema, RID::new(0, 2)),
+            Tuple::new(&[Value::new(4), Value::new(40)], &schema, RID::new(0, 3)),
+            Tuple::new(&[Value::new(5), Value::new(50)], &schema, RID::new(0, 4)),
         ];
 
         // Create catalog

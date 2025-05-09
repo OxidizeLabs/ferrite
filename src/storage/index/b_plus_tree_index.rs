@@ -1,8 +1,10 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
 };
+use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::index::index::IndexInfo;
 use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
@@ -22,9 +24,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
-use std::sync::RwLock;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::buffer::lru_k_replacer::LRUKReplacer;
 
 // Error type for B+Tree operations
 #[derive(Debug, Error)]
@@ -132,7 +131,7 @@ where
             _marker: PhantomData,
         }
     }
-    
+
     /// Initialize a new B+ tree with specified order
     pub fn init_with_order(&mut self, order: u32) -> Result<(), BPlusTreeError> {
         // If header_page_id is valid, tree is already initialized
@@ -162,31 +161,37 @@ where
         // The page will be automatically unpinned when header_page is dropped
         Ok(())
     }
-    
+
     /// Initialize a new B+ tree with default order
     pub fn init(&mut self) -> Result<(), BPlusTreeError> {
         // Default order of 4
         self.init_with_order(4)
     }
-    
+
     /// Calculate the maximum size of leaf nodes based on order
     fn calculate_leaf_max_size(&self) -> usize {
-        let header_page = match self.buffer_pool_manager.fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+        let header_page = match self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+        {
             Some(page) => page,
             None => return 0, // Default to 0 if header page not found
         };
-        
+
         let order = header_page.read().get_order();
         order as usize
     }
-    
+
     /// Calculate the maximum size of internal nodes based on order
     fn calculate_internal_max_size(&self) -> usize {
-        let header_page = match self.buffer_pool_manager.fetch_page::<BPlusTreeHeaderPage>(self.header_page_id) {
+        let header_page = match self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+        {
             Some(page) => page,
             None => return 0, // Default to 0 if header page not found
         };
-        
+
         let order = header_page.read().get_order();
         order as usize
     }
@@ -579,7 +584,9 @@ where
         // Get the max size based on order
         let leaf_max_size = self.calculate_leaf_max_size();
         if leaf_max_size == 0 {
-            return Err(BPlusTreeError::BufferPoolError("Invalid leaf max size".to_string()));
+            return Err(BPlusTreeError::BufferPoolError(
+                "Invalid leaf max size".to_string(),
+            ));
         }
 
         // Allocate a new leaf page
@@ -692,7 +699,9 @@ where
         // Get the max size based on order
         let internal_max_size = self.calculate_internal_max_size();
         if internal_max_size == 0 {
-            return Err(BPlusTreeError::BufferPoolError("Invalid internal max size".to_string()));
+            return Err(BPlusTreeError::BufferPoolError(
+                "Invalid internal max size".to_string(),
+            ));
         }
 
         // Allocate a new internal page
@@ -2374,108 +2383,117 @@ pub fn create_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
-    use crate::common::config::INVALID_PAGE_ID;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::storage::index::index::{IndexInfo, IndexType};
-    use std::sync::Arc;
     use parking_lot::RwLock;
+    use std::sync::Arc;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_basic_tree_operations() {
         // Create a simple test environment
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db").to_str().unwrap().to_string();
-        let log_path = temp_dir.path().join("test.log").to_str().unwrap().to_string();
-        
+        let db_path = temp_dir
+            .path()
+            .join("test.db")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join("test.log")
+            .to_str()
+            .unwrap()
+            .to_string();
+
         // Initialize disk manager
         let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 4096));
-        
+
         // Create buffer pool manager components
         let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(50, 2)));
-        
+
         // Create buffer pool manager
         let buffer_pool_manager = Arc::new(BufferPoolManager::new(
             50, // pool_size
             disk_scheduler,
             disk_manager,
-            replacer
+            replacer,
         ));
-        
+
         // Create a simple schema
         let key_schema = Schema::new(vec![]);
-        
+
         // Create metadata for index
         let metadata = IndexInfo::new(
             key_schema,
             "test_index".to_string(),
             1, // index_oid
             "test_table".to_string(),
-            4, // key_size (4 bytes for i32)
+            4,     // key_size (4 bytes for i32)
             false, // is_primary_key
             IndexType::BPlusTreeIndex,
             vec![0], // key_attrs
         );
-        
+
         // Create B+ tree
         let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
             i32_comparator,
             metadata,
             buffer_pool_manager,
         );
-        
+
         // Initialize tree with order 4
         assert!(tree.init_with_order(4).is_ok());
         assert!(tree.is_empty());
-        
+
         // Insert a test key-value pair
         let key = 42;
         let value = RID::new(1, 1);
         assert!(tree.insert(key, value.clone()).is_ok());
-        
+
         // Search for the key
         let result = tree.search(&key).unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap(), value);
-        
+
         // Remove the key
         let remove_result = tree.remove(&key).unwrap();
         assert!(remove_result);
-        
+
         // Verify key is removed
         let search_result = tree.search(&key).unwrap();
         assert!(search_result.is_none());
-        
+
         // Add several keys to potentially trigger page splits and merges
         for i in 1..10 {
             assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
         }
-        
+
         // Verify all keys exist
         for i in 1..10 {
             let result = tree.search(&i).unwrap();
             assert!(result.is_some());
             assert_eq!(result.unwrap(), RID::new(1, i as u32));
         }
-        
+
         // Test range scan
         let range_result = tree.range_scan(&3, &7).unwrap();
         assert_eq!(range_result.len(), 5); // Should include 3, 4, 5, 6, 7
-        
+
         // Remove keys to potentially trigger merges
         for i in 3..7 {
             assert!(tree.remove(&i).unwrap());
         }
-        
+
         // Verify keys were removed
         for i in 3..7 {
             assert!(tree.search(&i).unwrap().is_none());
         }
-        
+
         // Verify remaining keys still exist
         for i in 1..3 {
             assert!(tree.search(&i).unwrap().is_some());

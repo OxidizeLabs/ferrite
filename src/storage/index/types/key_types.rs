@@ -44,4 +44,4 @@ impl KeyType for String {
     fn type_id() -> TypeId {
         TypeId::VarChar
     }
-} 
+}

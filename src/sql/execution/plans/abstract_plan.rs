@@ -633,7 +633,7 @@ impl PlanNode {
                         return Err(format!(
                             "Failed to create child executor for Limit node: {}",
                             e
-                        ))
+                        ));
                     }
                 };
 

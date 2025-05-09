@@ -326,9 +326,10 @@ mod tests {
         assert_eq!(&page.get_data()[0..128], &expected_data);
 
         // Test data boundaries
-        assert!(page
-            .set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20])
-            .is_err());
+        assert!(
+            page.set_data(DB_PAGE_SIZE as usize - 10, &[1u8; 20])
+                .is_err()
+        );
         assert!(page.set_data(DB_PAGE_SIZE as usize, &[1u8]).is_err());
     }
 

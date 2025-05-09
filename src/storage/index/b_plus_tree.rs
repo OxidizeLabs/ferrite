@@ -1146,9 +1146,7 @@ mod basic_behavior_tests {
         assert!(tree_write_guard.insert_entry(&tuple, rid, &txn));
 
         // Verify the value exists
-        let result = tree_write_guard
-            .scan_key(&tuple, &txn)
-            .unwrap();
+        let result = tree_write_guard.scan_key(&tuple, &txn).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].1, rid);
 
@@ -1156,9 +1154,7 @@ mod basic_behavior_tests {
         assert!(tree_write_guard.delete_entry(&tuple, rid, &txn));
 
         // Verify the value is gone
-        let result2 = tree_write_guard
-            .scan_key(&tuple, &txn)
-            .unwrap();
+        let result2 = tree_write_guard.scan_key(&tuple, &txn).unwrap();
         assert!(result2.is_empty());
     }
 
@@ -1178,11 +1174,7 @@ mod basic_behavior_tests {
         // Insert test data ensuring full tuples
         for i in 1..=5 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(
-                &tuple,
-                RID::new(0, i as u32),
-                &txn
-            ));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             debug!("Inserted value {}", i);
         }
 
@@ -1311,7 +1303,6 @@ mod advanced_tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::transaction::Transaction;
     use rand::prelude::*;
     use rand::rng;
 
@@ -1339,9 +1330,7 @@ mod advanced_tests {
         let tree_guard = tree.read();
         for i in 0..10 {
             let tuple = create_tuple(i, &format!("val{}", i), &schema);
-            let result = tree_guard
-                .scan_key(&tuple, &txn)
-                .unwrap();
+            let result = tree_guard.scan_key(&tuple, &txn).unwrap();
             assert_eq!(result.len(), 1);
         }
     }
@@ -1441,11 +1430,7 @@ mod advanced_tests {
         {
             let mut tree_guard = tree.write();
             let existing_tuple = create_tuple(100, "exists", &schema);
-            assert!(tree_guard.insert_entry(
-                &existing_tuple,
-                RID::new(0, 100),
-                &txn
-            ));
+            assert!(tree_guard.insert_entry(&existing_tuple, RID::new(0, 100), &txn));
         }
 
         let missing_tuple = create_tuple(999, "missing", &schema);
@@ -1535,11 +1520,7 @@ mod split_behavior_tests {
         // Insert keys in ascending order to force splits
         for i in 1..=7 {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(
-                &tuple,
-                RID::new(0, i as u32),
-                &txn
-            ));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1616,20 +1597,14 @@ mod split_behavior_tests {
         // Insert multiple entries with the same key
         for i in 1..=5 {
             let tuple = create_tuple(1, &format!("value1_{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(
-                &tuple,
-                RID::new(0, i as u32),
-                &txn
-            ));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             println!("\nAfter inserting duplicate 1 (#{}):", i);
             println!("{}", tree_write_guard.visualize());
         }
 
         // Collect all values
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_write_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_write_guard.scan_key(&search_tuple, &txn).unwrap();
 
         assert_eq!(result.len(), 5, "Should find all 5 duplicate entries");
     }
@@ -1652,11 +1627,7 @@ mod split_behavior_tests {
 
         for &i in &insert_sequence {
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(
-                &tuple,
-                RID::new(0, i as u32),
-                &txn
-            ));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1697,11 +1668,7 @@ mod split_behavior_tests {
         for i in (1..=6).rev() {
             // Insert in reverse order
             let tuple = create_tuple(i, &format!("value{}", i), &schema);
-            assert!(tree_write_guard.insert_entry(
-                &tuple,
-                RID::new(0, i as u32),
-                &txn
-            ));
+            assert!(tree_write_guard.insert_entry(&tuple, RID::new(0, i as u32), &txn));
             println!("\nAfter inserting key {}:", i);
             println!("{}", tree_write_guard.visualize());
         }
@@ -1813,9 +1780,7 @@ mod scan_key_tests {
         let txn = create_text_txn();
 
         let search_tuple = create_tuple(1, "value1", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert!(result.is_empty(), "Empty tree should return no results");
     }
 
@@ -1837,9 +1802,7 @@ mod scan_key_tests {
 
         // Search for non-existent key
         let search_tuple = create_tuple(10, "value10", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert!(
             result.is_empty(),
             "Should find no results for non-existent key"
@@ -1867,9 +1830,7 @@ mod scan_key_tests {
 
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert_eq!(
             result.len(),
             3,
@@ -1904,9 +1865,7 @@ mod scan_key_tests {
 
         // Search for duplicates
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert_eq!(
             result.len(),
             5,
@@ -1954,9 +1913,7 @@ mod scan_key_tests {
 
         // Search for key 1
         let search_tuple = create_tuple(1, "value1_1", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert_eq!(result.len(), 5, "Should find all 5 duplicates of key 1");
 
         // Verify correct RIDs were found
@@ -1986,19 +1943,11 @@ mod scan_key_tests {
 
         // Delete some duplicates using the exact same tuples we inserted
         assert!(
-            tree_guard.delete_entry(
-                &inserted_tuples[1].0,
-                inserted_tuples[1].1,
-                &txn
-            ),
+            tree_guard.delete_entry(&inserted_tuples[1].0, inserted_tuples[1].1, &txn),
             "Failed to delete second tuple"
         );
         assert!(
-            tree_guard.delete_entry(
-                &inserted_tuples[3].0,
-                inserted_tuples[3].1,
-                &txn
-            ),
+            tree_guard.delete_entry(&inserted_tuples[3].0, inserted_tuples[3].1, &txn),
             "Failed to delete fourth tuple"
         );
 
@@ -2006,9 +1955,7 @@ mod scan_key_tests {
 
         // Search for remaining duplicates
         let search_tuple = create_tuple(1, "value", &schema);
-        let result = tree_guard
-            .scan_key(&search_tuple, &txn)
-            .unwrap();
+        let result = tree_guard.scan_key(&search_tuple, &txn).unwrap();
         assert_eq!(result.len(), 3, "Should find remaining 3 duplicates");
 
         // Verify correct RIDs remain

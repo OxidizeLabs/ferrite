@@ -555,7 +555,11 @@ mod tests {
         let expected_size = LogRecord::HEADER_SIZE as i32
             + size_of::<RID>() as i32
             + size_of::<i32>() as i32
-            + insert_record.get_insert_tuple().unwrap().get_length().unwrap() as i32;
+            + insert_record
+                .get_insert_tuple()
+                .unwrap()
+                .get_length()
+                .unwrap() as i32;
 
         assert_eq!(insert_record.get_size(), expected_size);
     }
@@ -726,14 +730,14 @@ mod tests {
         );
         assert_eq!(commit_record.get_log_record_type(), LogRecordType::Commit);
     }
-    
+
     #[test]
     fn test_arc_clone_consistency() {
         let tuple = create_test_tuple();
         let arc_tuple = Arc::new(tuple);
         let rid = arc_tuple.get_rid();
-        
-        // Create two log records sharing the same tuple 
+
+        // Create two log records sharing the same tuple
         let record1 = LogRecord::new_insert_delete_record(
             DUMMY_TXN_ID,
             DUMMY_PREV_LSN,
@@ -741,7 +745,7 @@ mod tests {
             rid,
             arc_tuple.clone(),
         );
-        
+
         let record2 = LogRecord::new_insert_delete_record(
             DUMMY_TXN_ID + 1,
             DUMMY_PREV_LSN,
@@ -749,10 +753,10 @@ mod tests {
             rid,
             arc_tuple,
         );
-        
+
         // Both records should point to the same tuple
         assert!(std::ptr::eq(
-            record1.get_insert_tuple().unwrap(), 
+            record1.get_insert_tuple().unwrap(),
             record2.get_delete_tuple().unwrap()
         ));
     }

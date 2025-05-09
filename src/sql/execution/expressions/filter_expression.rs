@@ -101,12 +101,9 @@ impl ExpressionOps for FilterExpression {
                     .evaluate(tuple, schema)?;
 
                 // Create a new schema with just the aggregate column
-                let agg_schema = Schema::new(vec![self
-                    .aggregate
-                    .as_ref()
-                    .unwrap()
-                    .get_return_type()
-                    .clone()]);
+                let agg_schema = Schema::new(vec![
+                    self.aggregate.as_ref().unwrap().get_return_type().clone(),
+                ]);
 
                 // Log the aggregate result
                 trace!(
@@ -170,12 +167,9 @@ impl ExpressionOps for FilterExpression {
                     .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
                 // Create a new schema with just the aggregate column
-                let agg_schema = Schema::new(vec![self
-                    .aggregate
-                    .as_ref()
-                    .unwrap()
-                    .get_return_type()
-                    .clone()]);
+                let agg_schema = Schema::new(vec![
+                    self.aggregate.as_ref().unwrap().get_return_type().clone(),
+                ]);
 
                 // Create a new tuple with just the aggregate result
                 let agg_tuple = Tuple::new(&[agg_result], &agg_schema, left_tuple.get_rid());
@@ -276,7 +270,10 @@ impl ExpressionOps for FilterExpression {
                 // Then check return type
                 let pred_type = self.predicate.get_return_type();
                 if pred_type.get_type() != TypeId::Boolean {
-                    trace!("FilterExpression: Predicate return type mismatch. Expected Boolean, got {:?}", pred_type.get_type());
+                    trace!(
+                        "FilterExpression: Predicate return type mismatch. Expected Boolean, got {:?}",
+                        pred_type.get_type()
+                    );
                     return Err(ExpressionError::TypeMismatch {
                         expected: TypeId::Boolean,
                         actual: pred_type.get_type(),
@@ -294,12 +291,9 @@ impl ExpressionOps for FilterExpression {
                 }
 
                 // Validate the predicate against the aggregate schema
-                let agg_schema = Schema::new(vec![self
-                    .aggregate
-                    .as_ref()
-                    .unwrap()
-                    .get_return_type()
-                    .clone()]);
+                let agg_schema = Schema::new(vec![
+                    self.aggregate.as_ref().unwrap().get_return_type().clone(),
+                ]);
                 trace!("FilterExpression: Validating HAVING predicate against aggregate schema");
 
                 // First validate the predicate and propagate any errors
