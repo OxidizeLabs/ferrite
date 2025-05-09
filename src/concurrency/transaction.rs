@@ -1,4 +1,6 @@
-use crate::common::config::{Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID};
+use crate::common::config::{
+    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID,
+};
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
@@ -11,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use std::time::Instant;
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,14 +96,13 @@ impl UndoLog {
 }
 
 impl UndoLink {
-    
     pub fn new(txn_id: TxnId, log_idx: usize) -> Self {
         Self {
             prev_txn: txn_id,
-            prev_log_idx: log_idx
+            prev_log_idx: log_idx,
         }
     }
-    
+
     /// Checks if the undo link points to something.
     pub fn is_valid(&self) -> bool {
         self.prev_txn != INVALID_TXN_ID
@@ -243,15 +243,16 @@ impl Transaction {
     /// The undo log entry at the specified index.
     pub fn get_undo_log(&self, log_id: usize) -> Arc<UndoLog> {
         debug!(
-        "Getting undo log at index {} for txn {}. Current undo logs: {}",
-        log_id,
-        self.txn_id,
-        self.undo_logs.lock().unwrap().len()
-    );
+            "Getting undo log at index {} for txn {}. Current undo logs: {}",
+            log_id,
+            self.txn_id,
+            self.undo_logs.lock().unwrap().len()
+        );
 
         // Lock the mutex and clone the Arc before returning
         let undo_logs = self.undo_logs.lock().unwrap();
-        undo_logs.get(log_id)
+        undo_logs
+            .get(log_id)
             .expect(&format!("Undo log at index {} not found", log_id))
             .clone()
     }
@@ -302,7 +303,7 @@ impl Transaction {
             .or_insert_with(Vec::new)
             .push(predicate);
     }
-    
+
     /// Sets the transaction state to tainted.
     pub fn set_tainted(&self) {
         let mut state = self.state.write();
@@ -355,8 +356,12 @@ impl Transaction {
     pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
         debug!(
             "Transaction.is_tuple_visible(): txn_id={}, isolation={:?}, read_ts={}, meta={{creator={}, commit_ts={}, deleted={}}}",
-            self.txn_id, self.isolation_level, *self.read_ts.read(), 
-            meta.get_creator_txn_id(), meta.get_commit_timestamp(), meta.is_deleted()
+            self.txn_id,
+            self.isolation_level,
+            *self.read_ts.read(),
+            meta.get_creator_txn_id(),
+            meta.get_commit_timestamp(),
+            meta.is_deleted()
         );
 
         match self.isolation_level {
@@ -366,14 +371,15 @@ impl Transaction {
                 visible
             }
             IsolationLevel::ReadCommitted => {
-                let visible = (meta.is_committed() || meta.get_creator_txn_id() == self.txn_id) && !meta.is_deleted();
+                let visible = (meta.is_committed() || meta.get_creator_txn_id() == self.txn_id)
+                    && !meta.is_deleted();
                 log::debug!("READ_COMMITTED visibility: {}", visible);
                 visible
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                let visible = meta.is_committed() &&
-                    meta.get_commit_timestamp() <= *self.read_ts.read() &&
-                    !meta.is_deleted();
+                let visible = meta.is_committed()
+                    && meta.get_commit_timestamp() <= *self.read_ts.read()
+                    && !meta.is_deleted();
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
             }
@@ -435,17 +441,19 @@ mod tests {
         ]);
         Tuple::new(&[Value::from(1), Value::from(100)], &schema, RID::new(0, 0))
     }
-    
+
     mod basic_behaviour {
-        use std::sync::Arc;
-        use std::thread;
         use crate::common::config::{TimeStampOidT, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID};
         use crate::common::rid::RID;
-        use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog};
         use crate::concurrency::transaction::tests::create_test_tuple;
+        use crate::concurrency::transaction::{
+            IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
+        };
         use crate::sql::execution::expressions::abstract_expression::Expression::Mock;
         use crate::sql::execution::expressions::mock_expression::MockExpression;
         use crate::types_db::value::Value;
+        use std::sync::Arc;
+        use std::thread;
 
         #[test]
         fn test_transaction_basic_properties() {
@@ -486,7 +494,7 @@ mod tests {
                 vec![true, false],
                 Arc::new(tuple1),
                 100,
-                UndoLink::new(INVALID_TXN_ID, 0)
+                UndoLink::new(INVALID_TXN_ID, 0),
             );
 
             // Append first undo log
@@ -504,7 +512,7 @@ mod tests {
                 vec![true, false],
                 Arc::new(tuple2),
                 200,
-                link1.clone() // Clone the link to avoid moving it
+                link1.clone(), // Clone the link to avoid moving it
             );
 
             // Append second undo log
@@ -531,7 +539,7 @@ mod tests {
                 vec![true, false],
                 Arc::new(tuple3),
                 150, // changed timestamp
-                UndoLink::new(INVALID_TXN_ID, 0)
+                UndoLink::new(INVALID_TXN_ID, 0),
             );
 
             txn.modify_undo_log(link1.prev_log_idx, Arc::new(modified_log1));
@@ -658,7 +666,7 @@ mod tests {
             assert_eq!(txn.txn_id_human_readable(), 1);
         }
     }
-    
+
     mod watermark_integration_tests {
         use super::*;
 
@@ -667,17 +675,17 @@ mod tests {
             // Test that begin() correctly gets a timestamp and registers with watermark
             let mut txn = Transaction::new(1, IsolationLevel::ReadCommitted);
             let mut watermark = Watermark::new();
-            
+
             // Initial watermark state
             let initial_ts = watermark.get_watermark();
-            
+
             // Begin transaction
             txn.begin(&mut watermark);
-            
+
             // Verify transaction state and timestamps
             assert_eq!(txn.get_state(), TransactionState::Running);
             assert!(txn.read_ts() > 0);
-            
+
             // Verify watermark updated - the active transactions should affect the watermark
             assert!(watermark.get_watermark() <= txn.read_ts());
         }
@@ -687,19 +695,19 @@ mod tests {
             // Test that commit() correctly updates the watermark
             let mut txn = Transaction::new(1, IsolationLevel::ReadCommitted);
             let mut watermark = Watermark::new();
-            
+
             // Begin transaction
             txn.begin(&mut watermark);
             let read_ts = txn.read_ts();
-            
+
             // Commit transaction
             let commit_ts = txn.commit(&mut watermark);
-            
+
             // Verify transaction state and timestamps
             assert_eq!(txn.get_state(), TransactionState::Committed);
             assert!(commit_ts > read_ts);
             assert_eq!(txn.commit_ts(), commit_ts);
-            
+
             // After commit, watermark should reflect that this transaction is no longer active
             assert!(watermark.get_watermark() != read_ts);
         }
@@ -709,17 +717,17 @@ mod tests {
             // Test that abort() correctly updates the watermark
             let mut txn = Transaction::new(1, IsolationLevel::ReadCommitted);
             let mut watermark = Watermark::new();
-            
+
             // Begin transaction
             txn.begin(&mut watermark);
             let read_ts = txn.read_ts();
-            
+
             // Abort transaction
             txn.abort(&mut watermark);
-            
+
             // Verify transaction state
             assert_eq!(txn.get_state(), TransactionState::Aborted);
-            
+
             // After abort, watermark should reflect that this transaction is no longer active
             assert!(watermark.get_watermark() != read_ts);
         }
@@ -728,38 +736,38 @@ mod tests {
         fn test_multiple_transactions_with_watermark() {
             // Test multiple transactions interacting with a single watermark
             let mut watermark = Watermark::new();
-            
+
             // Create and begin multiple transactions
             let mut txn1 = Transaction::new(1, IsolationLevel::ReadCommitted);
             let mut txn2 = Transaction::new(2, IsolationLevel::RepeatableRead);
             let mut txn3 = Transaction::new(3, IsolationLevel::Serializable);
-            
+
             txn1.begin(&mut watermark);
             txn2.begin(&mut watermark);
             txn3.begin(&mut watermark);
-            
+
             let read_ts1 = txn1.read_ts();
             let read_ts2 = txn2.read_ts();
             let read_ts3 = txn3.read_ts();
-            
+
             // With all transactions active, watermark should be the minimum timestamp
             assert_eq!(watermark.get_watermark(), read_ts1);
-            
+
             // Commit txn1
             txn1.commit(&mut watermark);
-            
+
             // After committing txn1, watermark should move to the next minimum
             assert_eq!(watermark.get_watermark(), read_ts2);
-            
+
             // Abort txn2
             txn2.abort(&mut watermark);
-            
+
             // After aborting txn2, watermark should move to txn3
             assert_eq!(watermark.get_watermark(), read_ts3);
-            
+
             // Commit txn3
             txn3.commit(&mut watermark);
-            
+
             // After committing all transactions, watermark should be higher than all read timestamps
             let final_watermark = watermark.get_watermark();
             assert!(final_watermark > read_ts3);
@@ -772,18 +780,45 @@ mod tests {
         #[test]
         fn test_isolation_level_from_str_valid_inputs() {
             // Test all valid isolation level strings with different casing
-            assert_eq!(IsolationLevel::from_str("read uncommitted"), Some(IsolationLevel::ReadUncommitted));
-            assert_eq!(IsolationLevel::from_str("READ UNCOMMITTED"), Some(IsolationLevel::ReadUncommitted));
-            assert_eq!(IsolationLevel::from_str("Read Uncommitted"), Some(IsolationLevel::ReadUncommitted));
-            
-            assert_eq!(IsolationLevel::from_str("read committed"), Some(IsolationLevel::ReadCommitted));
-            assert_eq!(IsolationLevel::from_str("READ COMMITTED"), Some(IsolationLevel::ReadCommitted));
-            
-            assert_eq!(IsolationLevel::from_str("repeatable read"), Some(IsolationLevel::RepeatableRead));
-            assert_eq!(IsolationLevel::from_str("REPEATABLE READ"), Some(IsolationLevel::RepeatableRead));
-            
-            assert_eq!(IsolationLevel::from_str("serializable"), Some(IsolationLevel::Serializable));
-            assert_eq!(IsolationLevel::from_str("SERIALIZABLE"), Some(IsolationLevel::Serializable));
+            assert_eq!(
+                IsolationLevel::from_str("read uncommitted"),
+                Some(IsolationLevel::ReadUncommitted)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("READ UNCOMMITTED"),
+                Some(IsolationLevel::ReadUncommitted)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("Read Uncommitted"),
+                Some(IsolationLevel::ReadUncommitted)
+            );
+
+            assert_eq!(
+                IsolationLevel::from_str("read committed"),
+                Some(IsolationLevel::ReadCommitted)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("READ COMMITTED"),
+                Some(IsolationLevel::ReadCommitted)
+            );
+
+            assert_eq!(
+                IsolationLevel::from_str("repeatable read"),
+                Some(IsolationLevel::RepeatableRead)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("REPEATABLE READ"),
+                Some(IsolationLevel::RepeatableRead)
+            );
+
+            assert_eq!(
+                IsolationLevel::from_str("serializable"),
+                Some(IsolationLevel::Serializable)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("SERIALIZABLE"),
+                Some(IsolationLevel::Serializable)
+            );
         }
 
         #[test]
@@ -822,7 +857,12 @@ mod tests {
     mod tuple_visibility_tests {
         use super::*;
 
-        fn create_tuple_meta(creator_txn_id: TxnId, commit_timestamp: Timestamp, deleted: bool, committed: bool) -> TupleMeta {
+        fn create_tuple_meta(
+            creator_txn_id: TxnId,
+            commit_timestamp: Timestamp,
+            deleted: bool,
+            committed: bool,
+        ) -> TupleMeta {
             let mut meta = TupleMeta::new(creator_txn_id);
             // A tuple is considered committed if its commit_timestamp != Timestamp::MAX
             // So for committed=true, we set the specified commit_timestamp
@@ -838,19 +878,19 @@ mod tests {
         fn test_read_uncommitted_visibility() {
             // Read uncommitted should see all non-deleted tuples regardless of commit status
             let txn = Transaction::new(1, IsolationLevel::ReadUncommitted);
-            
+
             // Non-deleted, uncommitted tuple
             let meta1 = create_tuple_meta(2, 0, false, false);
             assert!(txn.is_tuple_visible(&meta1));
-            
+
             // Non-deleted, committed tuple
             let meta2 = create_tuple_meta(2, 100, false, true);
             assert!(txn.is_tuple_visible(&meta2));
-            
+
             // Deleted, uncommitted tuple
             let meta3 = create_tuple_meta(2, 0, true, false);
             assert!(!txn.is_tuple_visible(&meta3));
-            
+
             // Deleted, committed tuple
             let meta4 = create_tuple_meta(2, 100, true, true);
             assert!(!txn.is_tuple_visible(&meta4));
@@ -861,19 +901,19 @@ mod tests {
             // Read committed should see committed non-deleted tuples and own uncommitted tuples
             let txn_id = 1;
             let txn = Transaction::new(txn_id, IsolationLevel::ReadCommitted);
-            
+
             // Own non-deleted, uncommitted tuple
             let meta1 = create_tuple_meta(txn_id, 0, false, false);
             assert!(txn.is_tuple_visible(&meta1));
-            
+
             // Other's non-deleted, uncommitted tuple
             let meta2 = create_tuple_meta(2, 0, false, false);
             assert!(!txn.is_tuple_visible(&meta2));
-            
+
             // Other's non-deleted, committed tuple
             let meta3 = create_tuple_meta(2, 100, false, true);
             assert!(txn.is_tuple_visible(&meta3));
-            
+
             // Own deleted tuple
             let meta4 = create_tuple_meta(txn_id, 0, true, false);
             assert!(!txn.is_tuple_visible(&meta4));
@@ -884,23 +924,23 @@ mod tests {
             // Repeatable read should see committed non-deleted tuples with commit_ts <= read_ts
             let txn = Transaction::new(1, IsolationLevel::RepeatableRead);
             txn.set_read_ts(150);
-            
+
             // Uncommitted tuple (shouldn't be visible)
             let meta1 = create_tuple_meta(2, 0, false, false);
             assert!(!txn.is_tuple_visible(&meta1));
-            
+
             // Committed tuple with commit_ts < read_ts
             let meta2 = create_tuple_meta(2, 100, false, true);
             assert!(txn.is_tuple_visible(&meta2));
-            
+
             // Committed tuple with commit_ts = read_ts
             let meta3 = create_tuple_meta(2, 150, false, true);
             assert!(txn.is_tuple_visible(&meta3));
-            
+
             // Committed tuple with commit_ts > read_ts
             let meta4 = create_tuple_meta(2, 200, false, true);
             assert!(!txn.is_tuple_visible(&meta4));
-            
+
             // Deleted committed tuple
             let meta5 = create_tuple_meta(2, 100, true, true);
             assert!(!txn.is_tuple_visible(&meta5));
@@ -911,17 +951,17 @@ mod tests {
             // Serializable should behave like repeatable read for visibility
             let txn = Transaction::new(1, IsolationLevel::Serializable);
             txn.set_read_ts(150);
-            
+
             // Same tests as repeatable read
             let meta1 = create_tuple_meta(2, 0, false, false);
             assert!(!txn.is_tuple_visible(&meta1));
-            
+
             let meta2 = create_tuple_meta(2, 100, false, true);
             assert!(txn.is_tuple_visible(&meta2));
-            
+
             let meta3 = create_tuple_meta(2, 150, false, true);
             assert!(txn.is_tuple_visible(&meta3));
-            
+
             let meta4 = create_tuple_meta(2, 200, false, true);
             assert!(!txn.is_tuple_visible(&meta4));
         }
@@ -936,7 +976,7 @@ mod tests {
             let txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
             let thread_count = 5;
             let mut handles = vec![];
-            
+
             for i in 0..thread_count {
                 let txn_clone = Arc::clone(&txn);
                 let handle = thread::spawn(move || {
@@ -948,24 +988,28 @@ mod tests {
                 });
                 handles.push(handle);
             }
-            
+
             // Wait for all threads to complete
             for handle in handles {
                 handle.join().unwrap();
             }
-            
+
             // Verify results
             let write_set = txn.get_write_set();
-            
+
             // Should have thread_count * 10 entries
             assert_eq!(write_set.len(), thread_count * 10);
-            
+
             // Verify each expected entry exists
             for i in 0..thread_count {
                 for j in 0..10 {
                     let rid = RID::new(i as u64, j as u32);
-                    assert!(write_set.contains(&(1, rid)), 
-                            "Missing write record for table 1, rid({},{})", i, j);
+                    assert!(
+                        write_set.contains(&(1, rid)),
+                        "Missing write record for table 1, rid({},{})",
+                        i,
+                        j
+                    );
                 }
             }
         }
@@ -976,11 +1020,11 @@ mod tests {
             let txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
             let thread_count = 5;
             let mut handles = vec![];
-            
+
             for i in 0..thread_count {
                 let txn_clone = Arc::clone(&txn);
                 let table_id = (i % 3) as u32; // Use 3 different tables
-                
+
                 let handle = thread::spawn(move || {
                     // Each thread adds different predicates to assigned tables
                     for j in 0..5 {
@@ -993,29 +1037,33 @@ mod tests {
                 });
                 handles.push(handle);
             }
-            
+
             // Wait for all threads to complete
             for handle in handles {
                 handle.join().unwrap();
             }
-            
+
             // Verify results
             let scan_predicates = txn.get_scan_predicates();
-            
+
             // Should have entries for 3 tables
             assert_eq!(scan_predicates.len(), 3);
-            
+
             // Count predicates per table
             let mut total_predicates = 0;
             for table_id in 0..3 {
                 let predicates = scan_predicates.get(&(table_id as u32)).unwrap();
                 let expected_count = (thread_count + 2) / 3 * 5; // Ceiling of (thread_count/3) * 5
-                assert!(predicates.len() <= expected_count, 
-                        "Table {} has {} predicates, expected at most {}", 
-                        table_id, predicates.len(), expected_count);
+                assert!(
+                    predicates.len() <= expected_count,
+                    "Table {} has {} predicates, expected at most {}",
+                    table_id,
+                    predicates.len(),
+                    expected_count
+                );
                 total_predicates += predicates.len();
             }
-            
+
             // Total number of predicates should be thread_count * 5
             assert_eq!(total_predicates, thread_count * 5);
         }
@@ -1028,14 +1076,14 @@ mod tests {
         fn test_empty_undo_logs() {
             // Test behavior with empty undo logs
             let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
-            
+
             // Initially empty
             assert_eq!(txn.get_undo_log_num(), 0);
-            
+
             // Clearing an empty log
             let cleared = txn.clear_undo_log();
             assert_eq!(cleared, 0);
-            
+
             // Try to append and then clear
             let tuple = create_test_tuple();
             let undo_log = UndoLog::new(
@@ -1043,12 +1091,12 @@ mod tests {
                 vec![true, false],
                 Arc::new(tuple),
                 100,
-                UndoLink::new(INVALID_TXN_ID, 0)
+                UndoLink::new(INVALID_TXN_ID, 0),
             );
             txn.append_undo_log(Arc::new(undo_log));
-            
+
             assert_eq!(txn.get_undo_log_num(), 1);
-            
+
             let cleared = txn.clear_undo_log();
             assert_eq!(cleared, 1);
             assert_eq!(txn.get_undo_log_num(), 0);
@@ -1059,12 +1107,12 @@ mod tests {
             // Test with minimum transaction ID
             let min_txn = Transaction::new(TXN_START_ID, IsolationLevel::ReadCommitted);
             assert_eq!(min_txn.txn_id_human_readable(), 0);
-            
+
             // Test with maximum transaction ID
             let max_txn_id = u64::MAX;
             let max_txn = Transaction::new(max_txn_id, IsolationLevel::ReadCommitted);
             assert_eq!(max_txn.txn_id_human_readable(), max_txn_id ^ TXN_START_ID);
-            
+
             // Test with invalid transaction ID
             let invalid_txn = Transaction::new(INVALID_TXN_ID, IsolationLevel::ReadCommitted);
             assert_eq!(invalid_txn.get_transaction_id(), INVALID_TXN_ID);
@@ -1075,18 +1123,18 @@ mod tests {
             // Test undo log with empty modified fields
             let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
             let tuple = create_test_tuple();
-            
+
             let undo_log = UndoLog::new(
                 false,
                 vec![], // Empty modified fields
                 Arc::new(tuple),
                 100,
-                UndoLink::new(INVALID_TXN_ID, 0)
+                UndoLink::new(INVALID_TXN_ID, 0),
             );
-            
+
             let link = txn.append_undo_log(Arc::new(undo_log));
             let retrieved_log = txn.get_undo_log(link.prev_log_idx);
-            
+
             assert_eq!(retrieved_log.modified_fields.len(), 0);
         }
     }
@@ -1098,36 +1146,36 @@ mod tests {
         fn test_all_state_transitions() {
             // Test all valid state transitions
             let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
-            
+
             // Initial state is Running
             assert_eq!(txn.get_state(), TransactionState::Running);
-            
+
             // Running -> Tainted
             txn.set_state(TransactionState::Tainted);
             assert_eq!(txn.get_state(), TransactionState::Tainted);
-            
+
             // Tainted -> Aborted
             txn.set_state(TransactionState::Aborted);
             assert_eq!(txn.get_state(), TransactionState::Aborted);
-            
+
             // Create a new transaction
             let txn2 = Transaction::new(2, IsolationLevel::ReadCommitted);
-            
+
             // Running -> Committed
             txn2.set_state(TransactionState::Committed);
             assert_eq!(txn2.get_state(), TransactionState::Committed);
-            
+
             // Create a new transaction for growing/shrinking phase tests
             let txn3 = Transaction::new(3, IsolationLevel::Serializable);
-            
+
             // Running -> Growing
             txn3.set_state(TransactionState::Growing);
             assert_eq!(txn3.get_state(), TransactionState::Growing);
-            
+
             // Growing -> Shrinking
             txn3.set_state(TransactionState::Shrinking);
             assert_eq!(txn3.get_state(), TransactionState::Shrinking);
-            
+
             // Shrinking -> Committed
             txn3.set_state(TransactionState::Committed);
             assert_eq!(txn3.get_state(), TransactionState::Committed);
@@ -1138,7 +1186,7 @@ mod tests {
             // Test the set_tainted() helper method
             let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
             assert_eq!(txn.get_state(), TransactionState::Running);
-            
+
             // Use the helper method
             txn.set_tainted();
             assert_eq!(txn.get_state(), TransactionState::Tainted);
@@ -1153,7 +1201,6 @@ mod tests {
             assert_eq!(TransactionState::Shrinking.to_string(), "SHRINKING");
             assert_eq!(TransactionState::Growing.to_string(), "GROWING");
         }
-
     }
 
     mod performance_tests {
@@ -1169,37 +1216,43 @@ mod tests {
                 Column::new("id", TypeId::Integer),
                 Column::new("value", TypeId::Integer),
             ]);
-            
+
             // Measure time to add 10,000 undo logs
             let start = Instant::now();
             let num_logs = 10_000;
-            
+
             for i in 0..num_logs {
                 // Create a new tuple for each iteration
                 let tuple = Tuple::new(
-                    &[Value::new(i32::try_from(i).unwrap_or(0)), Value::new(i32::try_from(i*10).unwrap_or(0))],
+                    &[
+                        Value::new(i32::try_from(i).unwrap_or(0)),
+                        Value::new(i32::try_from(i * 10).unwrap_or(0)),
+                    ],
                     &schema,
-                    RID::new(0, 0)
+                    RID::new(0, 0),
                 );
-                
+
                 let undo_log = UndoLog::new(
                     false,
                     vec![true, false],
                     Arc::new(tuple),
                     i as TimeStampOidT,
-                    UndoLink::new(INVALID_TXN_ID, 0)
+                    UndoLink::new(INVALID_TXN_ID, 0),
                 );
                 txn.append_undo_log(Arc::new(undo_log));
             }
-            
+
             let append_duration = start.elapsed();
-            println!("Time to append {} undo logs: {:?}", num_logs, append_duration);
-            
+            println!(
+                "Time to append {} undo logs: {:?}",
+                num_logs, append_duration
+            );
+
             // Measure time to clear logs
             let start = Instant::now();
             let cleared = txn.clear_undo_log();
             let clear_duration = start.elapsed();
-            
+
             assert_eq!(cleared, num_logs);
             println!("Time to clear {} undo logs: {:?}", num_logs, clear_duration);
         }
@@ -1209,28 +1262,34 @@ mod tests {
         fn test_write_set_performance() {
             // Test performance with large numbers of write operations
             let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
-            
+
             // Measure time to add 10,000 write operations across 10 tables
             let start = Instant::now();
             let num_operations = 10_000;
             let num_tables = 10;
-            
+
             for i in 0..num_operations {
                 let table_id = (i % num_tables) as TableOidT + 1;
                 let rid = RID::new(table_id, i as u32);
                 txn.append_write_set(table_id, rid);
             }
-            
+
             let append_duration = start.elapsed();
-            println!("Time to append {} write operations: {:?}", num_operations, append_duration);
-            
+            println!(
+                "Time to append {} write operations: {:?}",
+                num_operations, append_duration
+            );
+
             // Measure time to retrieve write set
             let start = Instant::now();
             let write_set = txn.get_write_set();
             let retrieve_duration = start.elapsed();
-            
+
             assert_eq!(write_set.len(), num_operations);
-            println!("Time to retrieve {} write operations: {:?}", num_operations, retrieve_duration);
+            println!(
+                "Time to retrieve {} write operations: {:?}",
+                num_operations, retrieve_duration
+            );
         }
 
         #[test]
@@ -1239,7 +1298,7 @@ mod tests {
             // Compare performance of different isolation levels for tuple visibility checks
             let num_checks = 100_000;
             let tuple_meta = TupleMeta::new(0); // Use default meta
-            
+
             // Test ReadUncommitted
             let txn1 = Transaction::new(1, IsolationLevel::ReadUncommitted);
             let start = Instant::now();
@@ -1247,7 +1306,7 @@ mod tests {
                 let _ = txn1.is_tuple_visible(&tuple_meta);
             }
             let ru_duration = start.elapsed();
-            
+
             // Test ReadCommitted
             let txn2 = Transaction::new(2, IsolationLevel::ReadCommitted);
             let start = Instant::now();
@@ -1255,7 +1314,7 @@ mod tests {
                 let _ = txn2.is_tuple_visible(&tuple_meta);
             }
             let rc_duration = start.elapsed();
-            
+
             // Test RepeatableRead
             let txn3 = Transaction::new(3, IsolationLevel::RepeatableRead);
             txn3.set_read_ts(100); // Set a read timestamp
@@ -1264,7 +1323,7 @@ mod tests {
                 let _ = txn3.is_tuple_visible(&tuple_meta);
             }
             let rr_duration = start.elapsed();
-            
+
             // Test Serializable
             let txn4 = Transaction::new(4, IsolationLevel::Serializable);
             txn4.set_read_ts(100); // Set a read timestamp
@@ -1273,7 +1332,7 @@ mod tests {
                 let _ = txn4.is_tuple_visible(&tuple_meta);
             }
             let ser_duration = start.elapsed();
-            
+
             println!("Visibility check performance for {} checks:", num_checks);
             println!("- READ_UNCOMMITTED: {:?}", ru_duration);
             println!("- READ_COMMITTED: {:?}", rc_duration);
