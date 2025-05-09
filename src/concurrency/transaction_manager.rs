@@ -13,7 +13,6 @@ use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::catalog::schema::Schema;
-use crate::types_db::types::Type;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1220,7 +1219,8 @@ mod tests {
     }
 
     mod concurrency_tests {
-        use super::*;
+        use crate::types_db::types::Type;
+use super::*;
 
         #[test]
         fn test_concurrent_transactions() {
@@ -1940,7 +1940,8 @@ mod tests {
     }
 
     mod undo_log_tests {
-        use super::*;
+        use crate::types_db::types::Type;
+use super::*;
 
         #[test]
         fn test_undo_log_creation() {

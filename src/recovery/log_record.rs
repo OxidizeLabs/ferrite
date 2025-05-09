@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
@@ -47,7 +48,7 @@ pub enum LogRecordType {
 #[derive(Debug)]
 pub struct LogRecord {
     size: i32,
-    lsn: Lsn,
+    lsn: AtomicU64,  // Changed from Lsn to AtomicU64
     txn_id: TxnId,
     prev_lsn: Lsn,
     log_record_type: LogRecordType,
@@ -101,6 +102,29 @@ where
     Ok(result)
 }
 
+// Helper for serializing AtomicU64
+fn serialize_atomic_u64<S>(
+    atomic: &AtomicU64,
+    serializer: S
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let value = atomic.load(Ordering::SeqCst);
+    serializer.serialize_u64(value)
+}
+
+// Helper for deserializing AtomicU64
+fn deserialize_atomic_u64<'de, D>(
+    deserializer: D
+) -> Result<AtomicU64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    Ok(AtomicU64::new(value))
+}
+
 // Custom serialization implementation for LogRecord
 impl Serialize for LogRecord {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -111,7 +135,8 @@ impl Serialize for LogRecord {
         #[derive(Serialize)]
         struct SerializableLogRecord<'a> {
             size: i32,
-            lsn: Lsn,
+            #[serde(serialize_with = "serialize_atomic_u64")]
+            lsn: &'a AtomicU64,
             txn_id: TxnId,
             prev_lsn: Lsn,
             log_record_type: LogRecordType,
@@ -132,7 +157,7 @@ impl Serialize for LogRecord {
 
         let serializable = SerializableLogRecord {
             size: self.size,
-            lsn: self.lsn,
+            lsn: &self.lsn,
             txn_id: self.txn_id,
             prev_lsn: self.prev_lsn,
             log_record_type: self.log_record_type,
@@ -161,7 +186,8 @@ impl<'de> Deserialize<'de> for LogRecord {
         #[derive(Deserialize)]
         struct DeserializableLogRecord {
             size: i32,
-            lsn: Lsn,
+            #[serde(deserialize_with = "deserialize_atomic_u64")]
+            lsn: AtomicU64,
             txn_id: TxnId,
             prev_lsn: Lsn,
             log_record_type: LogRecordType,
@@ -220,7 +246,7 @@ impl LogRecord {
     ) -> Self {
         Self {
             size: Self::HEADER_SIZE as i32,
-            lsn: INVALID_LSN,
+            lsn: AtomicU64::new(INVALID_LSN),
             txn_id,
             prev_lsn,
             log_record_type,
@@ -261,7 +287,7 @@ impl LogRecord {
         if log_record_type == LogRecordType::Insert {
             Self {
                 size,
-                lsn: INVALID_LSN,
+                lsn: AtomicU64::new(INVALID_LSN),
                 txn_id,
                 prev_lsn,
                 log_record_type,
@@ -283,7 +309,7 @@ impl LogRecord {
             );
             Self {
                 size,
-                lsn: INVALID_LSN,
+                lsn: AtomicU64::new(INVALID_LSN),
                 txn_id,
                 prev_lsn,
                 log_record_type,
@@ -327,7 +353,7 @@ impl LogRecord {
             + 2 * size_of::<i32>() as i32;
         Self {
             size,
-            lsn: INVALID_LSN,
+            lsn: AtomicU64::new(INVALID_LSN),
             txn_id,
             prev_lsn,
             log_record_type,
@@ -364,7 +390,7 @@ impl LogRecord {
         let size = Self::HEADER_SIZE as i32 + 2 * size_of::<PageId>() as i32;
         Self {
             size,
-            lsn: INVALID_LSN,
+            lsn: AtomicU64::new(INVALID_LSN),
             txn_id,
             prev_lsn,
             log_record_type,
@@ -432,7 +458,13 @@ impl LogRecord {
 
     /// Returns the log sequence number (LSN).
     pub fn get_lsn(&self) -> Lsn {
-        self.lsn
+        self.lsn.load(Ordering::SeqCst)
+    }
+
+    /// Sets the log sequence number (LSN).
+    /// Now thread-safe due to interior mutability.
+    pub fn set_lsn(&self, lsn: Lsn) {
+        self.lsn.store(lsn, Ordering::SeqCst);
     }
 
     /// Returns the transaction ID.
@@ -454,7 +486,7 @@ impl LogRecord {
     pub fn to_string(&self) -> String {
         format!(
             "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size, self.lsn, self.txn_id, self.prev_lsn, self.log_record_type as i32,
+            self.size, self.get_lsn(), self.txn_id, self.prev_lsn, self.log_record_type as i32,
         )
     }
 

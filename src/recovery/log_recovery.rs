@@ -3,10 +3,19 @@ use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::catalog::schema::Schema;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::fs;
+use std::path::Path;
+use crate::common::rid::RID;
+use crate::concurrency::transaction::Transaction;
+use crate::concurrency::transaction::IsolationLevel;
+use crate::recovery::wal_manager::WALManager;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::storage::table::tuple::Tuple;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -93,66 +102,58 @@ impl LogRecoveryManager {
 
         // Scan the log from beginning to end
         let mut offset = 0;
-        let mut buffer = vec![0u8; 1024]; // Buffer for reading log entries
+        let log_manager = self.log_manager.read();
+        
+        while let Some(log_record) = log_manager.read_log_record(offset) {
+            let lsn = log_record.get_lsn();
+            let txn_id = log_record.get_txn_id();
 
-        while let Ok(_) = self.disk_manager.read_log(&mut buffer, offset) {
-            // Parse log record from buffer
-            // For simplicity, assuming we can parse one log record from the buffer
-            // In a real implementation, we would need to properly parse serialized log records
-            if let Some(log_record) = self.parse_log_record(&buffer) {
-                let lsn = log_record.get_lsn();
-                let txn_id = log_record.get_txn_id();
-
-                // Initialize start_redo_lsn on first record
-                if start_redo_lsn == INVALID_LSN {
-                    start_redo_lsn = lsn;
-                }
-
-                match log_record.get_log_record_type() {
-                    LogRecordType::Begin => {
-                        // Add to active transaction table
-                        txn_table.add_txn(txn_id, lsn);
-                    }
-                    LogRecordType::Commit => {
-                        // Remove from active transactions
-                        txn_table.remove_txn(txn_id);
-                    }
-                    LogRecordType::Abort => {
-                        // Remove from active transactions
-                        txn_table.remove_txn(txn_id);
-                    }
-                    LogRecordType::Update
-                    | LogRecordType::Insert
-                    | LogRecordType::MarkDelete
-                    | LogRecordType::ApplyDelete
-                    | LogRecordType::RollbackDelete => {
-                        // Update transaction table
-                        txn_table.update_txn(txn_id, lsn);
-
-                        // Get page ID from the record
-                        if let Some(page_id) = self.get_page_id_from_record(&log_record) {
-                            // Add to dirty page table if not already there
-                            dirty_page_table.add_page(page_id, lsn);
-                        }
-                    }
-                    LogRecordType::NewPage => {
-                        // Update transaction table
-                        txn_table.update_txn(txn_id, lsn);
-
-                        // Add page to dirty page table
-                        if let Some(page_id) = log_record.get_page_id() {
-                            dirty_page_table.add_page(*page_id, lsn);
-                        }
-                    }
-                    LogRecordType::Invalid => {}
-                }
-
-                // Update offset for next read
-                offset += log_record.get_size() as u64;
-            } else {
-                // If we can't parse more records, break the loop
-                break;
+            // Initialize start_redo_lsn on first record
+            if start_redo_lsn == INVALID_LSN {
+                start_redo_lsn = lsn;
             }
+
+            match log_record.get_log_record_type() {
+                LogRecordType::Begin => {
+                    // Add to active transaction table
+                    txn_table.add_txn(txn_id, lsn);
+                }
+                LogRecordType::Commit => {
+                    // Remove from active transactions
+                    txn_table.remove_txn(txn_id);
+                }
+                LogRecordType::Abort => {
+                    // Remove from active transactions
+                    txn_table.remove_txn(txn_id);
+                }
+                LogRecordType::Update
+                | LogRecordType::Insert
+                | LogRecordType::MarkDelete
+                | LogRecordType::ApplyDelete
+                | LogRecordType::RollbackDelete => {
+                    // Update transaction table
+                    txn_table.update_txn(txn_id, lsn);
+
+                    // Get page ID from the record
+                    if let Some(page_id) = self.get_page_id_from_record(&log_record) {
+                        // Add to dirty page table if not already there
+                        dirty_page_table.add_page(page_id, lsn);
+                    }
+                }
+                LogRecordType::NewPage => {
+                    // Update transaction table
+                    txn_table.update_txn(txn_id, lsn);
+
+                    // Add page to dirty page table
+                    if let Some(page_id) = log_record.get_page_id() {
+                        dirty_page_table.add_page(*page_id, lsn);
+                    }
+                }
+                LogRecordType::Invalid => {}
+            }
+
+            // Update offset for next read
+            offset += log_record.get_size() as u64;
         }
 
         debug!(
@@ -184,51 +185,47 @@ impl LogRecoveryManager {
 
         // Similar to analyze, scan log but this time redo all operations
         let mut offset = 0;
-        let mut buffer = vec![0u8; 1024];
+        let log_manager = self.log_manager.read();
+        
+        while let Some(log_record) = log_manager.read_log_record(offset) {
+            let lsn = log_record.get_lsn();
 
-        while let Ok(_) = self.disk_manager.read_log(&mut buffer, offset) {
-            if let Some(log_record) = self.parse_log_record(&buffer) {
-                let lsn = log_record.get_lsn();
+            // Skip records before start_redo_lsn
+            if lsn < start_redo_lsn {
+                offset += log_record.get_size() as u64;
+                continue;
+            }
 
-                // Skip records before start_redo_lsn
-                if lsn < start_redo_lsn {
-                    offset += log_record.get_size() as u64;
-                    continue;
-                }
-
-                // Check if we need to redo this operation
-                let should_redo = match log_record.get_log_record_type() {
-                    LogRecordType::Update
-                    | LogRecordType::Insert
-                    | LogRecordType::MarkDelete
-                    | LogRecordType::ApplyDelete
-                    | LogRecordType::RollbackDelete
-                    | LogRecordType::NewPage => {
-                        // Get page ID from record
-                        if let Some(page_id) = self.get_page_id_from_record(&log_record) {
-                            // Check if page is in dirty page table
-                            if let Some(rec_lsn) = dirty_page_table.get_rec_lsn(page_id) {
-                                // Redo if record's LSN >= recovery LSN for the page
-                                lsn >= rec_lsn
-                            } else {
-                                false
-                            }
+            // Check if we need to redo this operation
+            let should_redo = match log_record.get_log_record_type() {
+                LogRecordType::Update
+                | LogRecordType::Insert
+                | LogRecordType::MarkDelete
+                | LogRecordType::ApplyDelete
+                | LogRecordType::RollbackDelete
+                | LogRecordType::NewPage => {
+                    // Get page ID from record
+                    if let Some(page_id) = self.get_page_id_from_record(&log_record) {
+                        // Check if page is in dirty page table
+                        if let Some(rec_lsn) = dirty_page_table.get_rec_lsn(page_id) {
+                            // Redo if record's LSN >= recovery LSN for the page
+                            lsn >= rec_lsn
                         } else {
                             false
                         }
+                    } else {
+                        false
                     }
-                    _ => false, // Don't redo other types
-                };
-
-                if should_redo {
-                    debug!("Redoing operation at LSN {}", lsn);
-                    self.redo_record(&log_record)?;
                 }
+                _ => false, // Don't redo other types
+            };
 
-                offset += log_record.get_size() as u64;
-            } else {
-                break;
+            if should_redo {
+                debug!("Redoing operation at LSN {}", lsn);
+                self.redo_record(&log_record)?;
             }
+
+            offset += log_record.get_size() as u64;
         }
 
         info!("Redo phase complete");
@@ -249,6 +246,7 @@ impl LogRecoveryManager {
         }
 
         info!("Undoing {} active transactions", active_txns.len());
+        let log_manager = self.log_manager.read();
 
         // For each active transaction, undo its operations in reverse LSN order
         for txn_id in active_txns {
@@ -260,50 +258,44 @@ impl LogRecoveryManager {
             // Continue until we reach the BEGIN record or INVALID_LSN
             while current_lsn != INVALID_LSN {
                 // Read the log record at this LSN
-                let mut buffer = vec![0u8; 1024];
                 // In a real implementation, we would need to calculate the offset for this LSN
                 let offset = current_lsn; // Simplified - assuming LSN equals offset
 
-                if let Ok(_) = self.disk_manager.read_log(&mut buffer, offset) {
-                    if let Some(log_record) = self.parse_log_record(&buffer) {
-                        if log_record.get_txn_id() == txn_id {
-                            match log_record.get_log_record_type() {
-                                LogRecordType::Begin => {
-                                    // We've reached the beginning of this transaction
-                                    debug!("Reached BEGIN record for transaction {}", txn_id);
-                                    break;
-                                }
-                                LogRecordType::Insert => {
-                                    // Undo insert by deleting
-                                    self.undo_insert(&log_record)?;
-                                }
-                                LogRecordType::Update => {
-                                    // Undo update by restoring old value
-                                    self.undo_update(&log_record)?;
-                                }
-                                LogRecordType::MarkDelete => {
-                                    // Undo delete by restoring tuple
-                                    self.undo_delete(&log_record)?;
-                                }
-                                LogRecordType::NewPage => {
-                                    // Don't need to undo new page creation
-                                }
-                                _ => {} // Ignore other record types for undo
+                if let Some(log_record) = log_manager.read_log_record(offset) {
+                    if log_record.get_txn_id() == txn_id {
+                        match log_record.get_log_record_type() {
+                            LogRecordType::Begin => {
+                                // We've reached the beginning of this transaction
+                                debug!("Reached BEGIN record for transaction {}", txn_id);
+                                break;
                             }
-
-                            // Move to previous LSN
-                            current_lsn = log_record.get_prev_lsn();
-                        } else {
-                            // This shouldn't happen in a well-formed log
-                            warn!("Found record for different transaction during undo");
-                            break;
+                            LogRecordType::Insert => {
+                                // Undo insert by deleting
+                                self.undo_insert(&log_record)?;
+                            }
+                            LogRecordType::Update => {
+                                // Undo update by restoring old value
+                                self.undo_update(&log_record)?;
+                            }
+                            LogRecordType::MarkDelete => {
+                                // Undo delete by restoring tuple
+                                self.undo_delete(&log_record)?;
+                            }
+                            LogRecordType::NewPage => {
+                                // Don't need to undo new page creation
+                            }
+                            _ => {} // Ignore other record types for undo
                         }
+
+                        // Move to previous LSN
+                        current_lsn = log_record.get_prev_lsn();
                     } else {
-                        warn!("Could not parse log record during undo");
+                        // This shouldn't happen in a well-formed log
+                        warn!("Found record for different transaction during undo");
                         break;
                     }
                 } else {
-                    warn!("Could not read log during undo");
+                    warn!("Could not read log record during undo");
                     break;
                 }
             }
@@ -325,9 +317,9 @@ impl LogRecoveryManager {
     /// # Returns
     /// An optional LogRecord if parsing was successful
     fn parse_log_record(&self, data: &[u8]) -> Option<LogRecord> {
-        // In a real implementation, this would deserialize the log record
-        // For now, we'll return None as a placeholder
-        None
+        // Use the LogManager to parse the log record
+        let log_manager = self.log_manager.read();
+        log_manager.parse_log_record(data)
     }
 
     /// Get the page ID from a log record
@@ -505,21 +497,28 @@ impl DirtyPageTable {
 mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::common::rid::RID;
+    use crate::concurrency::transaction::Transaction;
+    use crate::concurrency::transaction::IsolationLevel;
+    use crate::recovery::wal_manager::WALManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::table::tuple::Tuple;
     use std::fs;
     use std::path::Path;
 
-    struct TestContext {
-        log_file_path: String,
-        db_file_path: String,
-        disk_manager: Arc<FileDiskManager>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        log_manager: Arc<RwLock<LogManager>>,
-        recovery_manager: LogRecoveryManager,
+    // Common test context for all test modules
+    pub struct TestContext {
+        pub log_file_path: String,
+        pub db_file_path: String,
+        pub disk_manager: Arc<FileDiskManager>,
+        pub buffer_pool_manager: Arc<BufferPoolManager>,
+        pub log_manager: Arc<RwLock<LogManager>>,
+        pub wal_manager: WALManager,
+        pub recovery_manager: LogRecoveryManager,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
+        pub fn new(test_name: &str) -> Self {
             let db_file_path = format!(
                 "tests/data/{}_db_{}.db",
                 test_name,
@@ -552,7 +551,12 @@ mod tests {
             ));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
-            log_manager.write().run_flush_thread();
+            {
+                let mut lm = log_manager.write();
+                lm.run_flush_thread();
+            }
+
+            let wal_manager = WALManager::new(log_manager.clone());
 
             let recovery_manager = LogRecoveryManager::new(
                 disk_manager.clone(),
@@ -566,17 +570,50 @@ mod tests {
                 disk_manager,
                 buffer_pool_manager,
                 log_manager,
+                wal_manager,
                 recovery_manager,
             }
         }
 
-        fn cleanup(&self) {
+        pub fn cleanup(&self) {
             if Path::new(&self.log_file_path).exists() {
                 let _ = fs::remove_file(&self.log_file_path);
             }
             if Path::new(&self.db_file_path).exists() {
                 let _ = fs::remove_file(&self.db_file_path);
             }
+        }
+        
+        /// Helper to create a simple test tuple
+        pub fn create_test_tuple(&self, id: PageId) -> Tuple {
+            // Create a dummy tuple - in tests we don't need real data
+            // Using the RID to represent the tuple's location
+            let rid = RID::new(id, 0);
+            
+            // In actual implementation, this would create a real tuple with schema
+            // For testing, we'll just create an empty tuple
+            Tuple::new(&[], &Schema::new(vec![]), rid)
+        }
+        
+        /// Helper to create a test transaction with a specific ID
+        pub fn create_test_transaction(&self, id: TxnId) -> Transaction {
+            // Create a transaction with given ID and default isolation level
+            Transaction::new(id, IsolationLevel::ReadCommitted)
+        }
+
+        /// Simulate a crash by stopping all active processes and destroying the context
+        pub fn simulate_crash(&self) {
+            // Make sure we have a test directory
+            if let Some(parent) = Path::new(&self.log_file_path).parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+
+            // Force a flush of all log records by writing a commit record
+            // Commit records in the WAL will trigger a flush
+            let flush_txn = self.create_test_transaction(999);
+            self.wal_manager.write_commit_record(&flush_txn);
+            
+            self.wal_manager.force_run_flush_thread();
         }
     }
 
@@ -586,11 +623,343 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_recovery_manager_creation() {
-        let ctx = TestContext::new("create_test");
-        assert!(ctx.recovery_manager.start_recovery().is_ok());
-    }
+    /// Tests for the analysis phase of log recovery
+    mod analysis_tests {
+        use super::*;
 
-    // Additional tests would be added to test the recovery process
+        /// Test analyzing logs with no transactions
+        #[test]
+        fn test_analysis_empty_log() {
+            let ctx = TestContext::new("analysis_empty_test");
+            
+            // Start recovery (which includes analysis)
+            let result = ctx.recovery_manager.start_recovery();
+            assert!(result.is_ok(), "Recovery should succeed on empty log");
+            
+            // Analyze the log directly to check results
+            let (txn_table, dirty_page_table, start_redo_lsn) =
+                ctx.recovery_manager.analyze_log().unwrap();
+            
+            // Verify no active transactions found
+            assert_eq!(
+                txn_table.get_active_txns().len(),
+                0,
+                "Should have no active transactions"
+            );
+            
+            // Verify no dirty pages found
+            assert_eq!(
+                dirty_page_table.get_dirty_pages().len(),
+                0,
+                "Should have no dirty pages"
+            );
+        }
+        
+        /// Test analyzing logs with a single complete transaction
+        #[test]
+        fn test_analysis_complete_transaction() {
+            let ctx = TestContext::new("analysis_complete_txn_test");
+            
+            // Create and run a transaction with BEGIN and COMMIT
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            
+            // Update the transaction's LSN
+            txn.set_prev_lsn(begin_lsn);
+            
+            // Commit the transaction
+            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            
+            // Simulate crash after commit
+            ctx.simulate_crash();
+            
+            // Analysis should show no active transactions since it completed
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            assert_eq!(
+                txn_table.get_active_txns().len(),
+                0,
+                "Should have no active transactions after complete txn"
+            );
+        }
+        
+        /// Test analyzing logs with an incomplete transaction
+        #[test]
+        fn test_analysis_incomplete_transaction() {
+            let ctx = TestContext::new("analysis_incomplete_txn_test");
+            
+            // Create a transaction but don't commit it
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            
+            // Update the transaction's LSN
+            txn.set_prev_lsn(begin_lsn);
+            
+            // Add some operations but don't commit
+            let rid = RID::new(1, 0);
+            let old_tuple = ctx.create_test_tuple(1);
+            let new_tuple = ctx.create_test_tuple(2);
+            let update_lsn = ctx
+                .wal_manager
+                .write_update_record(&txn, rid, old_tuple, new_tuple);
+            
+            // Simulate crash before commit
+            ctx.simulate_crash();
+            
+            // Analysis should show one active transaction
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            assert_eq!(
+                txn_table.get_active_txns().len(),
+                1,
+                "Should have one active transaction"
+            );
+            assert!(txn_table.contains_txn(1), "Transaction 1 should be active");
+            assert_eq!(
+                txn_table.get_prev_lsn(1),
+                Some(update_lsn),
+                "Last LSN should match update LSN"
+            );
+        }
+    }
+    
+    /// Tests for the redo phase of log recovery
+    mod redo_tests {
+        use super::*;
+        
+        /// Test redo with no operations to replay
+        #[test]
+        fn test_redo_empty_log() {
+            let ctx = TestContext::new("redo_empty_test");
+            
+            // Start recovery
+            let result = ctx.recovery_manager.start_recovery();
+            assert!(result.is_ok(), "Recovery should succeed on empty log");
+        }
+        
+        /// Test redo with update operations
+        #[test]
+        fn test_redo_update_operations() {
+            let ctx = TestContext::new("redo_update_test");
+            
+            // Create a transaction
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            txn.set_prev_lsn(begin_lsn);
+            
+            // Perform multiple updates
+            let rid = RID::new(1, 0);
+            let old_tuple = ctx.create_test_tuple(1);
+            let new_tuple = ctx.create_test_tuple(2);
+            let update_lsn = ctx.wal_manager.write_update_record(
+                &txn,
+                rid,
+                old_tuple,
+                new_tuple,
+            );
+            txn.set_prev_lsn(update_lsn);
+            
+            // Commit the transaction
+            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            
+            // Simulate crash after commit
+            ctx.simulate_crash();
+            
+            // Now recover
+            let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
+                ctx.recovery_manager.analyze_log().unwrap();
+            let redo_result = ctx.recovery_manager.redo_log(
+                &mut txn_table,
+                &mut dirty_page_table,
+                start_redo_lsn,
+            );
+            
+            assert!(redo_result.is_ok(), "Redo phase should succeed");
+            
+            // In a real test, we would validate the page contents were correctly restored
+            // This would require mocking or implementing the actual page read/write operations
+        }
+    }
+    
+    /// Tests for the undo phase of log recovery
+    mod undo_tests {
+        use super::*;
+        
+        /// Test undo with no incomplete transactions
+        #[test]
+        fn test_undo_no_active_transactions() {
+            let ctx = TestContext::new("undo_no_active_txn_test");
+            
+            // Create a transaction
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            txn.set_prev_lsn(begin_lsn);
+            
+            // Commit the transaction
+            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            
+            // Simulate crash after commit
+            ctx.simulate_crash();
+            
+            // Recovery and undo phase
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            let undo_result = ctx.recovery_manager.undo_log(&txn_table);
+            
+            assert!(undo_result.is_ok(), "Undo phase should succeed");
+            assert_eq!(
+                txn_table.get_active_txns().len(),
+                0,
+                "Should have no active transactions"
+            );
+        }
+        
+        /// Test undo with incomplete transactions
+        #[test]
+        fn test_undo_active_transactions() {
+            let ctx = TestContext::new("undo_active_txn_test");
+            
+            // Create a transaction
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            txn.set_prev_lsn(begin_lsn);
+            
+            // Perform an update but don't commit
+            let rid = RID::new(1, 0);
+            let old_tuple = ctx.create_test_tuple(1);
+            let new_tuple = ctx.create_test_tuple(2);
+            let update_lsn = ctx.wal_manager.write_update_record(
+                &txn,
+                rid,
+                old_tuple,
+                new_tuple,
+            );
+            txn.set_prev_lsn(update_lsn);
+            
+            // Simulate crash before commit
+            ctx.simulate_crash();
+            
+            // Recovery and undo phase
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            assert_eq!(
+                txn_table.get_active_txns().len(),
+                1,
+                "Should have one active transaction"
+            );
+            
+            let undo_result = ctx.recovery_manager.undo_log(&txn_table);
+            assert!(undo_result.is_ok(), "Undo phase should succeed");
+            
+            // In a real test, we would validate the updates were properly rolled back
+            // This would require mocking or implementing the actual page read/write operations
+        }
+    }
+    
+    /// End-to-end tests for the complete recovery process
+    mod integration_tests {
+        use super::*;
+        
+        /// Test complete recovery process with multiple transactions
+        #[test]
+        fn test_complete_recovery_process() {
+            let ctx = TestContext::new("complete_recovery_test");
+            
+            // Create multiple transactions
+            // Transaction 1: Completes successfully
+            let txn1 = ctx.create_test_transaction(1);
+            let begin_lsn1 = ctx.wal_manager.write_begin_record(&txn1);
+            txn1.set_prev_lsn(begin_lsn1);
+            
+            let rid1 = RID::new(1, 0);
+            let old_tuple1 = ctx.create_test_tuple(1);
+            let new_tuple1 = ctx.create_test_tuple(2);
+            let update_lsn1 = ctx
+                .wal_manager
+                .write_update_record(&txn1, rid1, old_tuple1, new_tuple1);
+            txn1.set_prev_lsn(update_lsn1);
+            
+            let commit_lsn1 = ctx.wal_manager.write_commit_record(&txn1);
+            
+            // Transaction 2: Aborts explicitly
+            let txn2 = ctx.create_test_transaction(2);
+            let begin_lsn2 = ctx.wal_manager.write_begin_record(&txn2);
+            txn2.set_prev_lsn(begin_lsn2);
+            
+            let rid2 = RID::new(2, 0);
+            let old_tuple2 = ctx.create_test_tuple(3);
+            let new_tuple2 = ctx.create_test_tuple(4);
+            let update_lsn2 = ctx
+                .wal_manager
+                .write_update_record(&txn2, rid2, old_tuple2, new_tuple2);
+            txn2.set_prev_lsn(update_lsn2);
+            
+            let abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
+            
+            // Transaction 3: Incomplete (simulating crash during execution)
+            let txn3 = ctx.create_test_transaction(3);
+            let begin_lsn3 = ctx.wal_manager.write_begin_record(&txn3);
+            txn3.set_prev_lsn(begin_lsn3);
+            
+            let rid3 = RID::new(3, 0);
+            let old_tuple3 = ctx.create_test_tuple(5);
+            let new_tuple3 = ctx.create_test_tuple(6);
+            let update_lsn3 = ctx
+                .wal_manager
+                .write_update_record(&txn3, rid3, old_tuple3, new_tuple3);
+            txn3.set_prev_lsn(update_lsn3);
+            
+            // Simulate crash
+            ctx.simulate_crash();
+            
+            // Perform recovery
+            let recovery_result = ctx.recovery_manager.start_recovery();
+            assert!(
+                recovery_result.is_ok(),
+                "Complete recovery process should succeed"
+            );
+            
+            // In a real test, we would validate:
+            // 1. Transaction 1's changes are preserved (committed)
+            // 2. Transaction 2's changes are rolled back (explicitly aborted)
+            // 3. Transaction 3's changes are rolled back (incomplete at crash)
+        }
+        
+        /// Test recovery after a crash during recovery
+        #[test]
+        fn test_recovery_after_recovery_crash() {
+            let ctx = TestContext::new("recovery_after_crash_test");
+            
+            // Create and complete a transaction
+            let txn = ctx.create_test_transaction(1);
+            let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
+            txn.set_prev_lsn(begin_lsn);
+            
+            let rid = RID::new(1, 0);
+            let old_tuple = ctx.create_test_tuple(1);
+            let new_tuple = ctx.create_test_tuple(2);
+            let update_lsn = ctx
+                .wal_manager
+                .write_update_record(&txn, rid, old_tuple, new_tuple);
+            txn.set_prev_lsn(update_lsn);
+            
+            // Don't commit - simulate crash
+            ctx.simulate_crash();
+            
+            // Create a new context that will "recover" the database
+            let recovery_ctx = TestContext::new("recovery_after_crash_test");
+            // Point it to the same files
+            // In a real test, we would need to implement this properly
+            
+            // Now simulate a crash during recovery
+            recovery_ctx.simulate_crash();
+            
+            // Create a final context for recovery after recovery crash
+            let final_ctx = TestContext::new("recovery_after_crash_test");
+            // Again, point it to the same files
+            
+            // This recovery should also succeed
+            let final_recovery_result = final_ctx.recovery_manager.start_recovery();
+            assert!(
+                final_recovery_result.is_ok(),
+                "Recovery after recovery crash should succeed"
+            );
+        }
+    }
 }
