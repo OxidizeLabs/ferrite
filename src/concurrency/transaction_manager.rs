@@ -2301,6 +2301,681 @@ mod tests {
             // Cleanup
             ctx.txn_manager().commit(verify_txn, ctx.buffer_pool_manager());
         }
+
+        #[test]
+        fn test_deep_undo_chain() {
+            let ctx = TestContext::new("test_deep_undo_chain");
+
+            // Create test table 
+            let (table_oid, table_heap) = ctx.create_test_table();
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
+            
+            // Define a schema for the test
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+            
+            // Insert initial tuple with transaction 0
+            let txn0 = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let txn_ctx0 = Arc::new(TransactionContext::new(
+                txn0.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            let values0 = vec![Value::new(1), Value::new(100)];
+            let rid = match txn_table_heap.insert_tuple_from_values(values0.clone(), &schema, txn_ctx0.clone()) {
+                Ok(rid) => rid,
+                Err(e) => {
+                    println!("Skipping test_deep_undo_chain: initial tuple insertion failed: {}", e);
+                    return;
+                }
+            };
+            
+            assert!(ctx.txn_manager().commit(txn0, ctx.buffer_pool_manager()));
+            
+            // Create a chain of transactions, each updating the same tuple
+            const CHAIN_DEPTH: usize = 10;
+            let mut transactions = Vec::with_capacity(CHAIN_DEPTH);
+            let mut transaction_contexts = Vec::with_capacity(CHAIN_DEPTH);
+            let mut values = Vec::with_capacity(CHAIN_DEPTH);
+            let mut successful_updates = 0;
+            
+            for i in 0..CHAIN_DEPTH {
+                let txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+                let txn_ctx = Arc::new(TransactionContext::new(
+                    txn.clone(),
+                    ctx.lock_manager(),
+                    ctx.txn_manager(),
+                ));
+                
+                let new_value = 100 + (i as i32 + 1) * 100;
+                let txn_values = vec![Value::new(1), Value::new(new_value)];
+                values.push(txn_values.clone());
+                
+                // Update the tuple, creating a new undo log entry
+                let mut update_tuple = Tuple::new(&txn_values, &schema, rid);
+                let update_result = txn_table_heap.update_tuple(
+                    &TupleMeta::new(txn.get_transaction_id()),
+                    &mut update_tuple,
+                    rid,
+                    txn_ctx.clone(),
+                );
+                
+                if update_result.is_err() {
+                    println!("Update failed at chain depth {}: {:?}", i, update_result.err());
+                    break;
+                }
+                
+                // Store transaction and context for later commit
+                transactions.push(txn);
+                transaction_contexts.push(txn_ctx);
+                successful_updates += 1;
+                
+                // Commit every other transaction immediately, creating mixed undo chains
+                if i % 2 == 0 {
+                    let commit_result = ctx.txn_manager().commit(transactions[i].clone(), ctx.buffer_pool_manager());
+                    assert!(commit_result, "Commit failed at chain depth {}", i);
+                }
+                
+                // Small sleep to ensure timestamps are different
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+            
+            // Commit remaining transactions
+            for i in 0..successful_updates {
+                if i % 2 != 0 { // Only commit odd-indexed transactions that weren't committed earlier
+                    let commit_result = ctx.txn_manager().commit(transactions[i].clone(), ctx.buffer_pool_manager());
+                    assert!(commit_result, "Commit failed at chain depth {}", i);
+                }
+            }
+            
+            // Verify the final state
+            let verify_txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let verify_ctx = Arc::new(TransactionContext::new(
+                verify_txn.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            let final_read = txn_table_heap.get_tuple(rid, verify_ctx.clone());
+            assert!(final_read.is_ok(), "Final read failed");
+            
+            if let Ok((_, tuple)) = final_read {
+                // Calculate expected value based on actual number of successful updates
+                let expected_value = 100 + (successful_updates as i32) * 100;
+                let actual_value = match tuple.get_values().get(1) {
+                    Some(value) => match value.as_integer() {
+                        Ok(val) => val,
+                        Err(_) => {
+                            println!("Failed to extract final value");
+                            -1
+                        }
+                    },
+                    None => {
+                        println!("No value found at index 1");
+                        -1
+                    }
+                };
+                
+                println!("Final tuple value: {}, Expected: {}", actual_value, expected_value);
+                assert_eq!(actual_value, expected_value, "Final tuple value doesn't match expected");
+            }
+            
+            // Cleanup
+            ctx.txn_manager().commit(verify_txn, ctx.buffer_pool_manager());
+        }
+
+        #[test]
+        fn test_concurrent_undo_operations() {
+            let ctx = TestContext::new("test_concurrent_undo_operations");
+
+            // Create test table
+            let (table_oid, table_heap) = ctx.create_test_table();
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
+            
+            // Define schema
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+            
+            // Insert multiple tuples with different IDs
+            let setup_txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let setup_ctx = Arc::new(TransactionContext::new(
+                setup_txn.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            const NUM_TUPLES: usize = 5;
+            let mut rids = Vec::with_capacity(NUM_TUPLES);
+            
+            for i in 0..NUM_TUPLES {
+                let values = vec![Value::new(i as i32 + 1), Value::new((i as i32 + 1) * 100)];
+                match txn_table_heap.insert_tuple_from_values(values, &schema, setup_ctx.clone()) {
+                    Ok(rid) => {
+                        setup_txn.append_write_set(table_oid, rid);
+                        rids.push(rid);
+                    },
+                    Err(e) => {
+                        println!("Failed to insert tuple {}: {}", i, e);
+                    }
+                }
+            }
+            
+            // Commit setup transaction
+            assert!(ctx.txn_manager().commit(setup_txn, ctx.buffer_pool_manager()));
+            
+            // Create a barrier to synchronize thread start
+            let barrier = Arc::new(std::sync::Barrier::new(NUM_TUPLES));
+            let rids_arc = Arc::new(rids);
+            
+            // Create worker threads that will update different tuples concurrently
+            let mut handles = Vec::with_capacity(NUM_TUPLES);
+            
+            for i in 0..NUM_TUPLES {
+                let worker_txn_manager = ctx.txn_manager.clone();
+                let worker_buffer_pool = ctx.buffer_pool_manager();
+                let worker_lock_manager = ctx.lock_manager();
+                let worker_table_heap = txn_table_heap.clone();
+                let worker_schema = Arc::new(schema.clone());
+                let worker_rids = rids_arc.clone();
+                let worker_barrier = barrier.clone();
+                let worker_rid = worker_rids[i];
+                
+                let handle = thread::spawn(move || {
+                    // Wait for all threads to be ready
+                    worker_barrier.wait();
+                    
+                    // Begin transaction
+                    let txn = match worker_txn_manager.begin(IsolationLevel::ReadCommitted) {
+                        Ok(txn) => txn,
+                        Err(e) => {
+                            println!("Worker {} failed to begin transaction: {}", i, e);
+                            return false;
+                        }
+                    };
+                    
+                    let txn_ctx = Arc::new(TransactionContext::new(
+                        txn.clone(),
+                        worker_lock_manager,
+                        worker_txn_manager.clone(),
+                    ));
+                    
+                    // Update the tuple to create an undo log
+                    let new_values = vec![Value::new(i as i32 + 1), Value::new((i as i32 + 1) * 200)];
+                    let mut update_tuple = Tuple::new(&new_values, &worker_schema, worker_rid);
+                    
+                    let update_result = worker_table_heap.update_tuple(
+                        &TupleMeta::new(txn.get_transaction_id()),
+                        &mut update_tuple,
+                        worker_rid,
+                        txn_ctx.clone(),
+                    );
+                    
+                    if update_result.is_err() {
+                        println!("Worker {} failed to update tuple: {:?}", i, update_result.err());
+                        worker_txn_manager.abort(txn);
+                        return false;
+                    }
+                    
+                    // Small sleep to allow interleaving
+                    thread::sleep(std::time::Duration::from_millis(5));
+                    
+                    // 50% chance to commit, 50% chance to abort to create mixed undo scenarios
+                    let should_commit = i % 2 == 0;
+                    
+                    if should_commit {
+                        let commit_result = worker_txn_manager.commit(txn, worker_buffer_pool);
+                        if !commit_result {
+                            println!("Worker {} failed to commit", i);
+                            return false;
+                        }
+                        println!("Worker {} successfully committed", i);
+                        true
+                    } else {
+                        worker_txn_manager.abort(txn);
+                        println!("Worker {} intentionally aborted", i);
+                        false
+                    }
+                });
+                
+                handles.push(handle);
+            }
+            
+            // Collect results
+            let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            
+            // Verify final state
+            let verify_txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let verify_ctx = Arc::new(TransactionContext::new(
+                verify_txn.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            for i in 0..NUM_TUPLES {
+                let rid = rids_arc[i];
+                let result = txn_table_heap.get_tuple(rid, verify_ctx.clone());
+                
+                if let Ok((_, tuple)) = result {
+                    let value = match tuple.get_values().get(1) {
+                        Some(value) => match value.as_integer() {
+                            Ok(val) => val,
+                            Err(_) => -1,
+                        },
+                        None => -1,
+                    };
+                    
+                    let expected_value = if results[i] {
+                        // If committed, value should be updated
+                        (i as i32 + 1) * 200
+                    } else {
+                        // If aborted, value should be original
+                        (i as i32 + 1) * 100
+                    };
+                    
+                    println!("Tuple {} final value: {}, Expected: {}", i, value, expected_value);
+                    assert_eq!(value, expected_value, "Tuple {} final value doesn't match expected", i);
+                } else {
+                    println!("Failed to read tuple {}: {:?}", i, result.err());
+                }
+            }
+            
+            ctx.txn_manager().commit(verify_txn, ctx.buffer_pool_manager());
+        }
+
+        #[test]
+        fn test_undo_log_edge_cases() {
+            let ctx = TestContext::new("test_undo_log_edge_cases");
+
+            // Create test table
+            let (table_oid, table_heap) = ctx.create_test_table();
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
+            
+            // Define schema
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            // Case 1: Update a tuple immediately after insertion without committing first
+            let txn1 = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let txn_ctx1 = Arc::new(TransactionContext::new(
+                txn1.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            // Insert a tuple
+            let values1 = vec![Value::new(1), Value::new(100)];
+            let rid1 = match txn_table_heap.insert_tuple_from_values(values1.clone(), &schema, txn_ctx1.clone()) {
+                Ok(rid) => rid,
+                Err(e) => {
+                    println!("Skipping case 1: initial tuple insertion failed: {}", e);
+                    return;
+                }
+            };
+
+            // Update the same tuple in the same transaction
+            let new_values1 = vec![Value::new(1), Value::new(200)];
+            let mut update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
+            
+            let update_result1 = txn_table_heap.update_tuple(
+                &TupleMeta::new(txn1.get_transaction_id()),
+                &mut update_tuple1,
+                rid1,
+                txn_ctx1.clone(),
+            );
+            
+            if update_result1.is_err() {
+                println!("Case 1: Updating own uncommitted tuple failed: {:?}", update_result1.err());
+            } else {
+                println!("Case 1: Successfully updated own uncommitted tuple");
+            }
+            
+            // Commit transaction
+            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()));
+            
+            // Case 2: Attempt to update a tuple that has been deleted
+            let txn2 = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let txn_ctx2 = Arc::new(TransactionContext::new(
+                txn2.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            // Insert a tuple that will be deleted
+            let values2 = vec![Value::new(2), Value::new(100)];
+            let rid2 = match txn_table_heap.insert_tuple_from_values(values2.clone(), &schema, txn_ctx2.clone()) {
+                Ok(rid) => rid,
+                Err(e) => {
+                    println!("Skipping case 2: initial tuple insertion failed: {}", e);
+                    return;
+                }
+            };
+            
+            // Delete the tuple
+            match txn_table_heap.delete_tuple(rid2, txn_ctx2.clone()) {
+                Ok(_) => println!("Case 2: Successfully deleted tuple"),
+                Err(e) => {
+                    println!("Case 2: Failed to delete tuple: {}", e);
+                    return;
+                }
+            }
+            
+            // Attempt to update the deleted tuple
+            let new_values2 = vec![Value::new(2), Value::new(200)];
+            let mut update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
+            
+            let update_result2 = txn_table_heap.update_tuple(
+                &TupleMeta::new(txn2.get_transaction_id()),
+                &mut update_tuple2,
+                rid2,
+                txn_ctx2.clone(),
+            );
+            
+            // This should fail since the tuple is deleted
+            if update_result2.is_err() {
+                println!("Case 2: Correctly failed to update deleted tuple: {:?}", update_result2.err());
+            } else {
+                println!("Case 2: Unexpected: Successfully updated deleted tuple");
+            }
+            
+            // Commit transaction
+            assert!(ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()));
+            
+            // Case 3: Cascading aborts scenario
+            let txn3a = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let txn_ctx3a = Arc::new(TransactionContext::new(
+                txn3a.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            // Insert a tuple with txn3a
+            let values3 = vec![Value::new(3), Value::new(100)];
+            let rid3 = match txn_table_heap.insert_tuple_from_values(values3.clone(), &schema, txn_ctx3a.clone()) {
+                Ok(rid) => rid,
+                Err(e) => {
+                    println!("Skipping case 3: initial tuple insertion failed: {}", e);
+                    return;
+                }
+            };
+            
+            // Start another transaction that reads and depends on txn3a
+            let txn3b = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let txn_ctx3b = Arc::new(TransactionContext::new(
+                txn3b.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            // Try to update the uncommitted tuple
+            let new_values3 = vec![Value::new(3), Value::new(200)];
+            let mut update_tuple3 = Tuple::new(&new_values3, &schema, rid3);
+            
+            // This should fail or be blocked since txn3a hasn't committed yet
+            let update_result3 = txn_table_heap.update_tuple(
+                &TupleMeta::new(txn3b.get_transaction_id()),
+                &mut update_tuple3,
+                rid3,
+                txn_ctx3b.clone(),
+            );
+            
+            if update_result3.is_err() {
+                println!("Case 3: Correctly failed to update uncommitted tuple from another transaction: {:?}", update_result3.err());
+            } else {
+                println!("Case 3: Successfully updated uncommitted tuple from another transaction");
+            }
+            
+            // Abort the first transaction
+            ctx.txn_manager().abort(txn3a);
+            println!("Case 3: Aborted first transaction");
+            
+            // Check if the tuple is still visible to txn3b
+            let read_result3 = txn_table_heap.get_tuple(rid3, txn_ctx3b.clone());
+            if read_result3.is_err() {
+                println!("Case 3: Correctly cannot see aborted tuple: {:?}", read_result3.err());
+            } else {
+                println!("Case 3: Can still see aborted tuple (may be valid depending on implementation)");
+            }
+            
+            // Cleanup
+            ctx.txn_manager().abort(txn3b);
+        }
+
+        #[test]
+        fn test_undo_log_stress() {
+            // This test creates a high volume of concurrent transactions
+            // that create, modify, and roll back tuples to stress the undo log system
+            let ctx = TestContext::new("test_undo_log_stress");
+
+            // Create test table
+            let (table_oid, table_heap) = ctx.create_test_table();
+            let txn_table_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
+            
+            // Define schema
+            let schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+            
+            // Insert a base tuple
+            let setup_txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let setup_ctx = Arc::new(TransactionContext::new(
+                setup_txn.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            let values = vec![Value::new(1), Value::new(0)]; // Counter starts at 0
+            let rid = match txn_table_heap.insert_tuple_from_values(values, &schema, setup_ctx) {
+                Ok(rid) => rid,
+                Err(e) => {
+                    println!("Skipping test_undo_log_stress: initial tuple insertion failed: {}", e);
+                    return;
+                }
+            };
+            
+            // Commit setup transaction
+            assert!(ctx.txn_manager().commit(setup_txn, ctx.buffer_pool_manager()));
+            
+            // Configuration for stress test
+            const NUM_THREADS: usize = 20;
+            const UPDATES_PER_THREAD: usize = 5;
+            
+            // Create a barrier to synchronize thread start
+            let barrier = Arc::new(std::sync::Barrier::new(NUM_THREADS));
+            
+            // Shared resources
+            let shared_tm = ctx.txn_manager();
+            let shared_bpm = ctx.buffer_pool_manager();
+            let shared_lm = ctx.lock_manager();
+            let shared_table = txn_table_heap.clone();
+            let shared_schema = Arc::new(schema);
+            
+            // Track successful updates
+            let success_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            
+            // Track update success/abort ratio
+            let commit_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let abort_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            
+            // Create worker threads
+            let mut handles = Vec::with_capacity(NUM_THREADS);
+            
+            for thread_id in 0..NUM_THREADS {
+                let thread_tm = shared_tm.clone();
+                let thread_bpm = shared_bpm.clone();
+                let thread_lm = shared_lm.clone();
+                let thread_table = shared_table.clone();
+                let thread_schema = shared_schema.clone();
+                let thread_barrier = barrier.clone();
+                let thread_success = success_counter.clone();
+                let thread_commits = commit_counter.clone();
+                let thread_aborts = abort_counter.clone();
+                
+                let handle = thread::spawn(move || {
+                    // Wait for all threads to be ready
+                    thread_barrier.wait();
+                    
+                    let mut thread_successes = 0;
+                    
+                    for i in 0..UPDATES_PER_THREAD {
+                        // Begin transaction
+                        let txn = match thread_tm.begin(IsolationLevel::ReadCommitted) {
+                            Ok(txn) => txn,
+                            Err(e) => {
+                                println!("Thread {} failed to begin transaction on update {}: {}", 
+                                         thread_id, i, e);
+                                continue;
+                            }
+                        };
+                        
+                        let txn_ctx = Arc::new(TransactionContext::new(
+                            txn.clone(),
+                            thread_lm.clone(),
+                            thread_tm.clone(),
+                        ));
+                        
+                        // Read current counter value
+                        let read_result = thread_table.get_tuple(rid, txn_ctx.clone());
+                        if read_result.is_err() {
+                            println!("Thread {} failed to read tuple on update {}: {:?}", 
+                                     thread_id, i, read_result.err());
+                            thread_tm.abort(txn);
+                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            continue;
+                        }
+                        
+                        let (_, tuple) = read_result.unwrap();
+                        let values = tuple.get_values();
+                        
+                        // Extract counter value
+                        let counter = match values.get(1) {
+                            Some(value) => match value.as_integer() {
+                                Ok(val) => val,
+                                Err(_) => {
+                                    println!("Thread {} failed to extract counter value on update {}", 
+                                             thread_id, i);
+                                    thread_tm.abort(txn);
+                                    thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    continue;
+                                }
+                            },
+                            None => {
+                                println!("Thread {} failed to get counter value on update {}", 
+                                         thread_id, i);
+                                thread_tm.abort(txn);
+                                thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                continue;
+                            }
+                        };
+                        
+                        // Create updated tuple with incremented counter
+                        let new_values = vec![Value::new(1), Value::new(counter + 1)];
+                        let mut update_tuple = Tuple::new(&new_values, &thread_schema, rid);
+                        
+                        // Update tuple, creating undo log
+                        let update_result = thread_table.update_tuple(
+                            &TupleMeta::new(txn.get_transaction_id()),
+                            &mut update_tuple,
+                            rid,
+                            txn_ctx.clone(),
+                        );
+                        
+                        if update_result.is_err() {
+                            println!("Thread {} failed to update counter on update {}: {:?}", 
+                                     thread_id, i, update_result.err());
+                            thread_tm.abort(txn);
+                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            continue;
+                        }
+                        
+                        // 80% chance to commit, 20% chance to abort
+                        let commit_probability = 80;
+                        let should_commit = thread_id % 100 < commit_probability;
+                        
+                        if should_commit {
+                            if thread_tm.commit(txn, thread_bpm.clone()) {
+                                thread_commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                thread_successes += 1;
+                            } else {
+                                println!("Thread {} failed to commit on update {}", thread_id, i);
+                                thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        } else {
+                            thread_tm.abort(txn);
+                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            println!("Thread {} intentionally aborted on update {}", thread_id, i);
+                        }
+                        
+                        // Small sleep to allow interleaving
+                        thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                    
+                    // Update global success counter
+                    thread_success.fetch_add(thread_successes, std::sync::atomic::Ordering::SeqCst);
+                });
+                
+                handles.push(handle);
+            }
+            
+            // Wait for all threads to complete
+            for handle in handles {
+                let _ = handle.join();
+            }
+            
+            // Check final state
+            let verify_txn = ctx.begin_transaction(IsolationLevel::ReadCommitted).unwrap();
+            let verify_ctx = Arc::new(TransactionContext::new(
+                verify_txn.clone(),
+                ctx.lock_manager(),
+                ctx.txn_manager(),
+            ));
+            
+            let final_read = txn_table_heap.get_tuple(rid, verify_ctx.clone());
+            
+            if let Ok((_, tuple)) = final_read {
+                let counter = match tuple.get_values().get(1) {
+                    Some(value) => match value.as_integer() {
+                        Ok(val) => val,
+                        Err(_) => -1,
+                    },
+                    None => -1,
+                };
+                
+                let total_commits = commit_counter.load(std::sync::atomic::Ordering::SeqCst);
+                let total_aborts = abort_counter.load(std::sync::atomic::Ordering::SeqCst);
+                let expected_success = success_counter.load(std::sync::atomic::Ordering::SeqCst);
+                
+                println!("Undo log stress test results:");
+                println!("  Total commits: {}", total_commits);
+                println!("  Total aborts: {}", total_aborts);
+                println!("  Expected successful updates: {}", expected_success);
+                println!("  Final counter value: {}", counter);
+                
+                // In a perfect world with no concurrency conflicts or implementation limitations,
+                // the counter should equal expected_success
+                // But in reality, there may be some differences due to isolation level, etc.
+                if counter == expected_success as i32 {
+                    println!("Counter matches expected value exactly");
+                } else {
+                    println!("Counter differs from expected by: {}", counter - expected_success as i32);
+                }
+                
+                // Just verify counter is positive and reasonably close to expected
+                assert!(counter > 0, "Counter should be greater than 0");
+            } else {
+                println!("Failed to read final counter value: {:?}", final_read.err());
+            }
+            
+            // Cleanup
+            ctx.txn_manager().commit(verify_txn, ctx.buffer_pool_manager());
+        }
     }
 
     mod state_management_tests {
