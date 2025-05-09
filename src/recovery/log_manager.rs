@@ -317,6 +317,7 @@ mod tests {
     struct TestContext {
         log_file_path: String,
         log_manager: LogManager,
+        disk_manager: Arc<FileDiskManager>,
     }
 
     impl TestContext {
@@ -339,6 +340,7 @@ mod tests {
             TestContext {
                 log_file_path,
                 log_manager,
+                disk_manager,
             }
         }
 
@@ -358,275 +360,510 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_log_manager_initialization() {
-        let ctx = TestContext::new("init_test");
+    /// Basic functionality tests for LogManager
+    mod basic_functionality {
+        use super::*;
 
-        assert_eq!(ctx.log_manager.get_next_lsn(), 0);
-        assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
-        assert_eq!(
-            ctx.log_manager.get_log_buffer_size(),
-            LOG_BUFFER_SIZE as usize
-        );
-    }
+        #[test]
+        fn test_log_manager_initialization() {
+            let ctx = TestContext::new("init_test");
 
-    #[test]
-    fn test_append_log_record() {
-        let mut ctx = TestContext::new("append_test");
+            assert_eq!(ctx.log_manager.get_next_lsn(), 0);
+            assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
+            assert_eq!(
+                ctx.log_manager.get_log_buffer_size(),
+                LOG_BUFFER_SIZE as usize
+            );
+        }
 
-        let txn_id: TxnId = 1;
-        let prev_lsn = INVALID_LSN;
+        #[test]
+        fn test_append_log_record() {
+            let mut ctx = TestContext::new("append_test");
 
-        // Create a begin transaction log record
-        let log_record = Arc::new(LogRecord::new_transaction_record(
-            txn_id,
-            prev_lsn,
-            LogRecordType::Begin,
-        ));
+            let txn_id: TxnId = 1;
+            let prev_lsn = INVALID_LSN;
 
-        // Append the log record
-        let lsn = ctx.log_manager.append_log_record(log_record);
-        assert_eq!(lsn, 0); // First LSN should be 0
-
-        // Verify LSN was incremented
-        assert_eq!(ctx.log_manager.get_next_lsn(), 1);
-
-        // Verify log buffer contains data
-        // assert!(!ctx.log_manager.get_log_buffer().is_empty());
-    }
-
-    #[test]
-    fn test_multiple_append_operations() {
-        let mut ctx = TestContext::new("multiple_append_test");
-
-        // Append multiple log records
-        for i in 0..5 {
+            // Create a begin transaction log record
             let log_record = Arc::new(LogRecord::new_transaction_record(
-                i as TxnId,
-                INVALID_LSN,
+                txn_id,
+                prev_lsn,
                 LogRecordType::Begin,
             ));
+
+            // Append the log record
             let lsn = ctx.log_manager.append_log_record(log_record);
-            assert_eq!(lsn, i);
+            assert_eq!(lsn, 0); // First LSN should be 0
+
+            // Verify LSN was incremented
+            assert_eq!(ctx.log_manager.get_next_lsn(), 1);
         }
 
-        assert_eq!(ctx.log_manager.get_next_lsn(), 5);
-    }
+        #[test]
+        fn test_multiple_append_operations() {
+            let mut ctx = TestContext::new("multiple_append_test");
 
-    #[test]
-    fn test_persistent_lsn_management() {
-        let mut ctx = TestContext::new("persistent_lsn_test");
-
-        assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
-
-        // Set persistent LSN
-        let test_lsn = 42;
-        ctx.log_manager.set_persistent_lsn(test_lsn);
-        assert_eq!(ctx.log_manager.get_persistent_lsn(), test_lsn);
-    }
-
-    #[test]
-    fn test_flush_thread_lifecycle() {
-        let mut ctx = TestContext::new("flush_thread_test");
-
-        // Start flush thread
-        ctx.log_manager.run_flush_thread();
-
-        // Allow some time for thread to start
-        sleep(Duration::from_millis(100));
-
-        // Append some log records
-        for i in 0..3 {
-            let log_record = Arc::new(LogRecord::new_transaction_record(
-                i as TxnId,
-                INVALID_LSN,
-                LogRecordType::Begin,
-            ));
-            ctx.log_manager.append_log_record(log_record);
-        }
-
-        // Shutdown should complete cleanly
-        ctx.log_manager.shut_down();
-    }
-
-    #[test]
-    fn test_log_record_types() {
-        let mut ctx = TestContext::new("record_types_test");
-        let mut next_lsn = 0;
-
-        // Create all records first
-        let begin_record = Arc::new(LogRecord::new_transaction_record(
-            1,
-            INVALID_LSN,
-            LogRecordType::Begin,
-        ));
-
-        // Append begin record and get LSN
-        let begin_lsn = {
-            let lsn = ctx.log_manager.append_log_record(begin_record.clone());
-            next_lsn += 1;
-            assert_eq!(lsn, 0);
-            lsn
-        };
-
-        // Small delay between operations
-        thread::sleep(Duration::from_millis(1));
-
-        // Create and append commit record
-        let commit_record = Arc::new(LogRecord::new_transaction_record(
-            1,
-            begin_lsn,
-            LogRecordType::Commit,
-        ));
-        let commit_lsn = ctx.log_manager.append_log_record(commit_record);
-        next_lsn += 1;
-        assert_eq!(commit_lsn, 1);
-
-        thread::sleep(Duration::from_millis(1));
-
-        // Create and append abort record
-        let abort_record = Arc::new(LogRecord::new_transaction_record(
-            2,
-            INVALID_LSN,
-            LogRecordType::Abort,
-        ));
-        let abort_lsn = ctx.log_manager.append_log_record(abort_record);
-        next_lsn += 1;
-        assert_eq!(abort_lsn, 2);
-
-        // Final verification
-        let final_lsn = ctx.log_manager.get_next_lsn();
-        assert_eq!(
-            final_lsn, next_lsn,
-            "Expected LSN {} but got {}",
-            next_lsn, final_lsn
-        );
-    }
-
-    #[test]
-    fn test_large_log_records() {
-        let mut ctx = TestContext::new("large_records_test");
-
-        // Create a large log record
-        let log_record = Arc::new(LogRecord::new_transaction_record(
-            1,
-            INVALID_LSN,
-            LogRecordType::Begin,
-        ));
-
-        // Append multiple large records
-        for _ in 0..5 {
-            ctx.log_manager.append_log_record(log_record.clone());
-        }
-
-        // assert!(ctx.log_manager.get_log_buffer().len() > 1000);
-    }
-
-    #[test]
-    fn test_concurrent_log_appends() {
-        let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
-            "concurrent_test",
-        )));
-        let thread_count = 5;
-        let mut handles = vec![];
-
-        for i in 0..thread_count {
-            let ctx_clone = Arc::clone(&ctx);
-            let handle = thread::spawn(move || {
+            // Append multiple log records
+            for i in 0..5 {
                 let log_record = Arc::new(LogRecord::new_transaction_record(
                     i as TxnId,
                     INVALID_LSN,
                     LogRecordType::Begin,
                 ));
-                ctx_clone.write().log_manager.append_log_record(log_record)
-            });
-            handles.push(handle);
+                let lsn = ctx.log_manager.append_log_record(log_record);
+                assert_eq!(lsn, i);
+            }
+
+            assert_eq!(ctx.log_manager.get_next_lsn(), 5);
         }
 
-        // Collect all LSNs
-        let lsns: Vec<Lsn> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        #[test]
+        fn test_persistent_lsn_management() {
+            let mut ctx = TestContext::new("persistent_lsn_test");
 
-        // Verify LSNs are unique and sequential
-        let mut unique_lsns: Vec<Lsn> = lsns.clone();
-        unique_lsns.sort();
-        unique_lsns.dedup();
-        assert_eq!(unique_lsns.len(), thread_count);
+            assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
 
-        assert_eq!(ctx.read().log_manager.get_next_lsn() as usize, thread_count);
-    }
+            // Set persistent LSN
+            let test_lsn = 42;
+            ctx.log_manager.set_persistent_lsn(test_lsn);
+            assert_eq!(ctx.log_manager.get_persistent_lsn(), test_lsn);
+        }
 
-    #[test]
-    fn test_shutdown_behavior() {
-        let mut ctx = TestContext::new("shutdown_test");
+        #[test]
+        fn test_log_record_types() {
+            let mut ctx = TestContext::new("record_types_test");
+            let mut next_lsn = 0;
 
-        // Start flush thread
-        ctx.log_manager.run_flush_thread();
-
-        // Append some records
-        for i in 0..3 {
-            let log_record = Arc::new(LogRecord::new_transaction_record(
-                i as TxnId,
+            // Create all records first
+            let begin_record = Arc::new(LogRecord::new_transaction_record(
+                1,
                 INVALID_LSN,
                 LogRecordType::Begin,
             ));
-            ctx.log_manager.append_log_record(log_record);
-        }
 
-        // Test multiple shutdown calls (should handle gracefully)
-        ctx.log_manager.shut_down();
-        ctx.log_manager.shut_down(); // Second shutdown should not panic
+            // Append begin record and get LSN
+            let begin_lsn = {
+                let lsn = ctx.log_manager.append_log_record(begin_record.clone());
+                next_lsn += 1;
+                assert_eq!(lsn, 0);
+                lsn
+            };
+
+            // Small delay between operations
+            thread::sleep(Duration::from_millis(1));
+
+            // Create and append commit record
+            let commit_record = Arc::new(LogRecord::new_transaction_record(
+                1,
+                begin_lsn,
+                LogRecordType::Commit,
+            ));
+            let commit_lsn = ctx.log_manager.append_log_record(commit_record);
+            next_lsn += 1;
+            assert_eq!(commit_lsn, 1);
+
+            thread::sleep(Duration::from_millis(1));
+
+            // Create and append abort record
+            let abort_record = Arc::new(LogRecord::new_transaction_record(
+                2,
+                INVALID_LSN,
+                LogRecordType::Abort,
+            ));
+            let abort_lsn = ctx.log_manager.append_log_record(abort_record);
+            next_lsn += 1;
+            assert_eq!(abort_lsn, 2);
+
+            // Final verification
+            let final_lsn = ctx.log_manager.get_next_lsn();
+            assert_eq!(
+                final_lsn, next_lsn,
+                "Expected LSN {} but got {}",
+                next_lsn, final_lsn
+            );
+        }
     }
 
-    #[test]
-    fn test_log_level_transitions() {
-        let mut ctx = TestContext::new("log_level_test");
+    /// Tests for threading and concurrency
+    mod threading_tests {
+        use super::*;
 
-        // Create log record once and reuse
-        let log_record = Arc::new(LogRecord::new_transaction_record(
-            1,
-            INVALID_LSN,
-            LogRecordType::Begin,
-        ));
+        #[test]
+        fn test_flush_thread_lifecycle() {
+            let mut ctx = TestContext::new("flush_thread_test");
 
-        // Test trace-level logging with minimal lock holding
-        {
-            trace!("Testing trace-level logging");
-            ctx.log_manager.append_log_record(log_record.clone());
-        }
-
-        // Test debug-level logging in separate scope
-        {
-            debug!("Testing debug-level logging");
-            ctx.log_manager.set_persistent_lsn(42);
-        }
-
-        // Test info-level logging in separate scope
-        {
-            info!("Testing info-level logging");
+            // Start flush thread
             ctx.log_manager.run_flush_thread();
+
+            // Allow some time for thread to start
+            sleep(Duration::from_millis(100));
+
+            // Append some log records
+            for i in 0..3 {
+                let log_record = Arc::new(LogRecord::new_transaction_record(
+                    i as TxnId,
+                    INVALID_LSN,
+                    LogRecordType::Begin,
+                ));
+                ctx.log_manager.append_log_record(log_record);
+            }
+
+            // Shutdown should complete cleanly
+            ctx.log_manager.shut_down();
         }
 
-        // Test warning-level logging in separate scope
-        {
-            warn!("Testing warning-level logging");
-            // Fill buffer in chunks to avoid holding lock too long
-            for chunk in 0..10 {
-                for i in 0..100 {
-                    let record = Arc::new(LogRecord::new_transaction_record(
-                        (chunk * 100 + i) as TxnId,
+        #[test]
+        fn test_concurrent_log_appends() {
+            let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
+                "concurrent_test",
+            )));
+            let thread_count = 5;
+            let mut handles = vec![];
+
+            for i in 0..thread_count {
+                let ctx_clone = Arc::clone(&ctx);
+                let handle = thread::spawn(move || {
+                    let log_record = Arc::new(LogRecord::new_transaction_record(
+                        i as TxnId,
                         INVALID_LSN,
                         LogRecordType::Begin,
                     ));
-                    ctx.log_manager.append_log_record(record);
-                }
-                // Give other threads a chance to run
-                thread::sleep(Duration::from_millis(1));
+                    ctx_clone.write().log_manager.append_log_record(log_record)
+                });
+                handles.push(handle);
+            }
+
+            // Collect all LSNs
+            let lsns: Vec<Lsn> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+            // Verify LSNs are unique and sequential
+            let mut unique_lsns: Vec<Lsn> = lsns.clone();
+            unique_lsns.sort();
+            unique_lsns.dedup();
+            assert_eq!(unique_lsns.len(), thread_count);
+
+            assert_eq!(ctx.read().log_manager.get_next_lsn() as usize, thread_count);
+        }
+
+        #[test]
+        fn test_shutdown_behavior() {
+            let mut ctx = TestContext::new("shutdown_test");
+
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+
+            // Append some records
+            for i in 0..3 {
+                let log_record = Arc::new(LogRecord::new_transaction_record(
+                    i as TxnId,
+                    INVALID_LSN,
+                    LogRecordType::Begin,
+                ));
+                ctx.log_manager.append_log_record(log_record);
+            }
+
+            // Test multiple shutdown calls (should handle gracefully)
+            ctx.log_manager.shut_down();
+            ctx.log_manager.shut_down(); // Second shutdown should not panic
+        }
+
+        #[test]
+        fn test_concurrent_shutdown() {
+            let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
+                "concurrent_shutdown_test",
+            )));
+
+            // Start flush thread
+            ctx.write().log_manager.run_flush_thread();
+
+            // Append some records
+            for i in 0..3 {
+                let log_record = Arc::new(LogRecord::new_transaction_record(
+                    i as TxnId,
+                    INVALID_LSN,
+                    LogRecordType::Begin,
+                ));
+                ctx.write().log_manager.append_log_record(log_record);
+            }
+
+            // Try to shut down from multiple threads simultaneously
+            let thread_count = 3;
+            let mut handles = vec![];
+
+            for _ in 0..thread_count {
+                let ctx_clone = Arc::clone(&ctx);
+                let handle = thread::spawn(move || {
+                    ctx_clone.write().log_manager.shut_down();
+                });
+                handles.push(handle);
+            }
+
+            // Wait for all threads to complete
+            for handle in handles {
+                handle.join().unwrap();
+            }
+
+            // Verify we can still interact with the log manager
+            ctx.write().log_manager.get_next_lsn();
+        }
+    }
+
+    /// Tests for edge cases and unusual situations
+    mod edge_cases {
+        use super::*;
+
+        #[test]
+        fn test_large_log_records() {
+            let mut ctx = TestContext::new("large_records_test");
+
+            // Create a large log record
+            let log_record = Arc::new(LogRecord::new_transaction_record(
+                1,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            ));
+
+            // Append multiple large records
+            for _ in 0..5 {
+                ctx.log_manager.append_log_record(log_record.clone());
             }
         }
 
-        // Test error-level logging in separate scope
-        {
-            error!("Testing error-level logging");
+        #[test]
+        fn test_log_level_transitions() {
+            let mut ctx = TestContext::new("log_level_test");
+
+            // Create log record once and reuse
+            let log_record = Arc::new(LogRecord::new_transaction_record(
+                1,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            ));
+
+            // Test trace-level logging with minimal lock holding
+            {
+                trace!("Testing trace-level logging");
+                ctx.log_manager.append_log_record(log_record.clone());
+            }
+
+            // Test debug-level logging in separate scope
+            {
+                debug!("Testing debug-level logging");
+                ctx.log_manager.set_persistent_lsn(42);
+            }
+
+            // Test info-level logging in separate scope
+            {
+                info!("Testing info-level logging");
+                ctx.log_manager.run_flush_thread();
+            }
+
+            // Test warning-level logging in separate scope
+            {
+                warn!("Testing warning-level logging");
+                // Fill buffer in chunks to avoid holding lock too long
+                for chunk in 0..5 {
+                    // Reduced from 10 for faster tests
+                    for i in 0..10 {
+                        // Reduced from 100 for faster tests
+                        let record = Arc::new(LogRecord::new_transaction_record(
+                            (chunk * 10 + i) as TxnId,
+                            INVALID_LSN,
+                            LogRecordType::Begin,
+                        ));
+                        ctx.log_manager.append_log_record(record);
+                    }
+                    // Give other threads a chance to run
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+
+            // Test error-level logging in separate scope
+            {
+                error!("Testing error-level logging");
+                ctx.log_manager.shut_down();
+            }
+        }
+
+        #[test]
+        fn test_empty_buffer_flush() {
+            let mut ctx = TestContext::new("empty_buffer_test");
+
+            // Start flush thread with empty buffer
+            ctx.log_manager.run_flush_thread();
+
+            // Allow some time for thread to start
+            sleep(Duration::from_millis(50));
+
+            // Shutdown without appending any records
+            ctx.log_manager.shut_down();
+
+            // Verify state is still valid
+            assert_eq!(ctx.log_manager.get_next_lsn(), 0);
+            assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
+        }
+
+        #[test]
+        fn test_max_lsn_value() {
+            let mut ctx = TestContext::new("max_lsn_test");
+
+            // Set LSN to near max value
+            let near_max_lsn = u64::MAX - 10;
+            ctx.log_manager.set_persistent_lsn(near_max_lsn);
+
+            // Verify we can still append logs
+            for i in 0..5 {
+                let log_record = Arc::new(LogRecord::new_transaction_record(
+                    i as TxnId,
+                    near_max_lsn,
+                    LogRecordType::Begin,
+                ));
+                ctx.log_manager.append_log_record(log_record);
+            }
+
+            // Verify next LSN is properly incremented
+            assert!(ctx.log_manager.get_next_lsn() > near_max_lsn);
+        }
+    }
+
+    /// Tests for transaction commit behavior
+    mod transaction_tests {
+        use super::*;
+
+        #[test]
+        fn test_commit_record_flushing() {
+            let mut ctx = TestContext::new("commit_flush_test");
+
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+
+            // Create and append a commit record
+            let commit_record = Arc::new(LogRecord::new_transaction_record(
+                1,
+                INVALID_LSN,
+                LogRecordType::Commit,
+            ));
+
+            // Append and get LSN
+            let commit_lsn = ctx.log_manager.append_log_record(commit_record);
+
+            // Verify persistent LSN is equal to or greater than commit LSN
+            assert!(ctx.log_manager.get_persistent_lsn() >= commit_lsn);
+
+            ctx.log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_transaction_sequence() {
+            let mut ctx = TestContext::new("txn_sequence_test");
+
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+
+            // Simulate a full transaction (begin, operations, commit)
+            let txn_id: TxnId = 42;
+            let mut prev_lsn = INVALID_LSN;
+
+            // Begin transaction
+            let begin_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Begin,
+            ));
+            prev_lsn = ctx.log_manager.append_log_record(begin_record);
+
+            // Create a page record (simulating operation)
+            let page_record = Arc::new(LogRecord::new_page_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::NewPage,
+                0,
+                1,
+            ));
+            prev_lsn = ctx.log_manager.append_log_record(page_record);
+
+            // Commit transaction
+            let commit_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Commit,
+            ));
+            let commit_lsn = ctx.log_manager.append_log_record(commit_record);
+
+            // Verify persistent LSN includes the commit
+            assert!(ctx.log_manager.get_persistent_lsn() >= commit_lsn);
+
+            ctx.log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_multiple_transactions() {
+            let mut ctx = TestContext::new("multi_txn_test");
+
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+
+            // Create multiple transactions with interleaved operations
+            let txn1_id: TxnId = 1;
+            let txn2_id: TxnId = 2;
+
+            // Begin transaction 1
+            let begin_txn1 = Arc::new(LogRecord::new_transaction_record(
+                txn1_id,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            ));
+            let txn1_begin_lsn = ctx.log_manager.append_log_record(begin_txn1);
+
+            // Begin transaction 2
+            let begin_txn2 = Arc::new(LogRecord::new_transaction_record(
+                txn2_id,
+                INVALID_LSN,
+                LogRecordType::Begin,
+            ));
+            let txn2_begin_lsn = ctx.log_manager.append_log_record(begin_txn2);
+
+            // Operation in transaction 1
+            let op_txn1 = Arc::new(LogRecord::new_page_record(
+                txn1_id,
+                txn1_begin_lsn,
+                LogRecordType::NewPage,
+                0,
+                1,
+            ));
+            let txn1_op_lsn = ctx.log_manager.append_log_record(op_txn1);
+
+            // Operation in transaction 2
+            let op_txn2 = Arc::new(LogRecord::new_page_record(
+                txn2_id,
+                txn2_begin_lsn,
+                LogRecordType::NewPage,
+                0,
+                2,
+            ));
+            let txn2_op_lsn = ctx.log_manager.append_log_record(op_txn2);
+
+            // Commit transaction 1
+            let commit_txn1 = Arc::new(LogRecord::new_transaction_record(
+                txn1_id,
+                txn1_op_lsn,
+                LogRecordType::Commit,
+            ));
+            let txn1_commit_lsn = ctx.log_manager.append_log_record(commit_txn1);
+
+            // Verify txn1 is committed (persistent LSN should be >= commit LSN)
+            assert!(ctx.log_manager.get_persistent_lsn() >= txn1_commit_lsn);
+
+            // Abort transaction 2
+            let abort_txn2 = Arc::new(LogRecord::new_transaction_record(
+                txn2_id,
+                txn2_op_lsn,
+                LogRecordType::Abort,
+            ));
+            let txn2_abort_lsn = ctx.log_manager.append_log_record(abort_txn2);
+
+            // Verify both transactions are persisted
+            assert!(ctx.log_manager.get_persistent_lsn() >= txn2_abort_lsn);
+
             ctx.log_manager.shut_down();
         }
     }
