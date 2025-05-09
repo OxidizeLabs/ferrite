@@ -120,4 +120,4 @@ impl Type for JSONType {
     }
 }
 
-pub static JSON_TYPE_INSTANCE: JSONType = JSONType; 
+pub static JSON_TYPE_INSTANCE: JSONType = JSONType;

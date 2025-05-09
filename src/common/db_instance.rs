@@ -697,7 +697,7 @@ impl DBInstance {
                     return Ok(DatabaseResponse::Error(format!(
                         "Prepared statement {} not found",
                         stmt_id
-                    )))
+                    )));
                 }
             }
         };

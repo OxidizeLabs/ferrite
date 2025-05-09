@@ -1,7 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};

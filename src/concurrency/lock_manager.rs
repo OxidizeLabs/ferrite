@@ -1196,31 +1196,41 @@ mod tests {
             // Test READ UNCOMMITTED
             let txn_ru = Arc::new(Transaction::new(1, IsolationLevel::ReadUncommitted));
             txn_ru.set_state(TransactionState::Growing);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn_ru, LockMode::Exclusive)
-                .is_ok());
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn_ru, LockMode::Shared)
-                .is_err());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn_ru, LockMode::Exclusive)
+                    .is_ok()
+            );
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn_ru, LockMode::Shared)
+                    .is_err()
+            );
 
             // Test READ COMMITTED
             let txn_rc = Arc::new(Transaction::new(2, IsolationLevel::ReadCommitted));
             txn_rc.set_state(TransactionState::Growing);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn_rc, LockMode::Exclusive)
-                .is_ok());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn_rc, LockMode::Exclusive)
+                    .is_ok()
+            );
             txn_rc.set_state(TransactionState::Shrinking);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn_rc, LockMode::Shared)
-                .is_ok());
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn_rc, LockMode::Exclusive)
-                .is_err());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn_rc, LockMode::Shared)
+                    .is_ok()
+            );
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn_rc, LockMode::Exclusive)
+                    .is_err()
+            );
         }
 
         #[test]
@@ -1232,22 +1242,28 @@ mod tests {
 
             // Test different states
             txn.set_state(TransactionState::Growing);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn, LockMode::Exclusive)
-                .is_ok());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn, LockMode::Exclusive)
+                    .is_ok()
+            );
 
             txn.set_state(TransactionState::Shrinking);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn, LockMode::Exclusive)
-                .is_err());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn, LockMode::Exclusive)
+                    .is_err()
+            );
 
             txn.set_state(TransactionState::Aborted);
-            assert!(lock_manager
-                .lock_validator
-                .validate_lock_request(&txn, LockMode::Shared)
-                .is_err());
+            assert!(
+                lock_manager
+                    .lock_validator
+                    .validate_lock_request(&txn, LockMode::Shared)
+                    .is_err()
+            );
         }
     }
 
@@ -1259,14 +1275,18 @@ mod tests {
             let ctx = TestContext::new();
             let lock_manager = ctx.lock_manager();
 
-            assert!(lock_manager
-                .lock_state_manager
-                .grant_table_lock(1, LockMode::Shared, 1));
+            assert!(
+                lock_manager
+                    .lock_state_manager
+                    .grant_table_lock(1, LockMode::Shared, 1)
+            );
             assert!(lock_manager.lock_state_manager.has_table_lock(1, 1));
-            assert!(lock_manager
-                .lock_state_manager
-                .release_table_lock(1, 1)
-                .is_ok());
+            assert!(
+                lock_manager
+                    .lock_state_manager
+                    .release_table_lock(1, 1)
+                    .is_ok()
+            );
             assert!(!lock_manager.lock_state_manager.has_table_lock(1, 1));
         }
 
@@ -1275,12 +1295,16 @@ mod tests {
             let ctx = TestContext::new();
             let lock_manager = ctx.lock_manager();
 
-            assert!(lock_manager
-                .lock_state_manager
-                .grant_table_lock(1, LockMode::Shared, 1));
-            assert!(!lock_manager
-                .lock_state_manager
-                .grant_table_lock(2, LockMode::Exclusive, 1));
+            assert!(
+                lock_manager
+                    .lock_state_manager
+                    .grant_table_lock(1, LockMode::Shared, 1)
+            );
+            assert!(
+                !lock_manager
+                    .lock_state_manager
+                    .grant_table_lock(2, LockMode::Exclusive, 1)
+            );
         }
 
         #[test]
@@ -1293,9 +1317,11 @@ mod tests {
                 LockMode::IntentionShared,
                 1
             ));
-            assert!(lock_manager
-                .lock_state_manager
-                .grant_table_lock(1, LockMode::Shared, 1));
+            assert!(
+                lock_manager
+                    .lock_state_manager
+                    .grant_table_lock(1, LockMode::Shared, 1)
+            );
         }
     }
 
@@ -1343,15 +1369,21 @@ mod tests {
             txn.set_state(TransactionState::Growing);
 
             // Test lock acquisition sequence
-            assert!(lock_manager
-                .lock_table(txn.clone(), LockMode::IntentionShared, 1)
-                .unwrap());
-            assert!(lock_manager
-                .lock_table(txn.clone(), LockMode::Shared, 1)
-                .unwrap());
-            assert!(lock_manager
-                .lock_table(txn.clone(), LockMode::Exclusive, 2)
-                .unwrap());
+            assert!(
+                lock_manager
+                    .lock_table(txn.clone(), LockMode::IntentionShared, 1)
+                    .unwrap()
+            );
+            assert!(
+                lock_manager
+                    .lock_table(txn.clone(), LockMode::Shared, 1)
+                    .unwrap()
+            );
+            assert!(
+                lock_manager
+                    .lock_table(txn.clone(), LockMode::Exclusive, 2)
+                    .unwrap()
+            );
 
             // Verify final state
             let debug_state = lock_manager.debug_state();

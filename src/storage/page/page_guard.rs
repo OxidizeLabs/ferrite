@@ -60,9 +60,7 @@ impl<P: PageTrait + ?Sized> PageGuard<P> {
         let pin_count = self.page.read().get_pin_count();
         trace!(
             "Unpinning page {} with pin count {}, dirty: {}",
-            self.page_id,
-            pin_count,
-            is_dirty
+            self.page_id, pin_count, is_dirty
         );
 
         // Decrement pin count
@@ -89,9 +87,7 @@ impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
 
         trace!(
             "Dropping page {} with pin count {}, dirty: {}",
-            self.page_id,
-            initial_pin_count,
-            was_dirty
+            self.page_id, initial_pin_count, was_dirty
         );
 
         // If pin count reaches zero, mark page as dirty to ensure it's written back

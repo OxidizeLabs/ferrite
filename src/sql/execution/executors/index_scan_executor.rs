@@ -939,11 +939,9 @@ mod index_scan_executor_tests {
 
                 if id == 3 || id == 7 {
                     // Create a new TupleMeta with deleted flag set to true
-                    let new_meta = Arc::new(TupleMeta::new_with_delete(
-                        meta.get_creator_txn_id(),
-                        true
-                    ));
-                    
+                    let new_meta =
+                        Arc::new(TupleMeta::new_with_delete(meta.get_creator_txn_id(), true));
+
                     let _ = table_heap.update_tuple(
                         &new_meta,
                         &mut tuple,

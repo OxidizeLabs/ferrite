@@ -7,10 +7,10 @@ use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
 use bincode;
 use log;
+use parking_lot::{RwLock, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use parking_lot::{RwLock, RwLockWriteGuard};
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Copy, Serialize, Deserialize)]
@@ -81,7 +81,11 @@ impl TupleMeta {
     pub fn is_visible_to(&self, txn_id: TxnId, watermark: &Watermark) -> bool {
         log::debug!(
             "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, watermark={}",
-            self.creator_txn_id, txn_id, self.commit_timestamp, self.deleted, watermark.get_watermark()
+            self.creator_txn_id,
+            txn_id,
+            self.commit_timestamp,
+            self.deleted,
+            watermark.get_watermark()
         );
 
         // If this tuple was created by the current transaction, it's visible
@@ -169,11 +173,11 @@ impl PartialEq for Tuple {
         if self.rid != other.rid {
             return false;
         }
-        
+
         // Compare the contents of values by acquiring read locks
         let self_values = self.values.read();
         let other_values = other.values.read();
-        
+
         // Compare the contents of the vectors
         *self_values == *other_values
     }
@@ -208,8 +212,8 @@ impl Tuple {
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
         // Use the Serialize trait implementation directly
-        let serialized = bincode::serialize(self)
-            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
+        let serialized =
+            bincode::serialize(self).map_err(|e| TupleError::SerializationError(e.to_string()))?;
 
         if storage.len() < serialized.len() {
             return Err(TupleError::BufferTooSmall);
@@ -226,8 +230,7 @@ impl Tuple {
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
         // Use the Deserialize trait implementation directly
-        bincode::deserialize(storage)
-            .map_err(|e| TupleError::DeserializationError(e.to_string()))
+        bincode::deserialize(storage).map_err(|e| TupleError::DeserializationError(e.to_string()))
     }
 
     /// Returns the RID of the tuple.
@@ -466,20 +469,20 @@ mod tests {
     #[test]
     fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let (tuple, _) = create_sample_tuple();
-        
+
         // Directly use bincode with the Serialize trait
         let serialized = bincode::serialize(&tuple)?;
-        
+
         // Directly use bincode with the Deserialize trait
         let deserialized: Tuple = bincode::deserialize(&serialized)?;
-        
+
         // Verify the deserialized tuple matches the original
         assert_eq!(deserialized.get_rid(), tuple.get_rid());
         assert_eq!(deserialized.get_value(0), tuple.get_value(0));
         assert_eq!(deserialized.get_value(1), tuple.get_value(1));
         assert_eq!(deserialized.get_value(2), tuple.get_value(2));
         assert_eq!(deserialized.get_value(3), tuple.get_value(3));
-        
+
         Ok(())
     }
 

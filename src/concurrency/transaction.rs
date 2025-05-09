@@ -677,7 +677,7 @@ mod tests {
             let mut watermark = Watermark::new();
 
             // Initial watermark state
-            let initial_ts = watermark.get_watermark();
+            let _initial_ts = watermark.get_watermark();
 
             // Begin transaction
             txn.begin(&mut watermark);

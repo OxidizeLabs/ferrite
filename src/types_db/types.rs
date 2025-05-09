@@ -55,7 +55,11 @@ pub trait Type {
                     | TypeId::VarChar
             ),
             TypeId::Timestamp => type_id == TypeId::VarChar || type_id == TypeId::Timestamp,
-            TypeId::Date => type_id == TypeId::VarChar || type_id == TypeId::Date || type_id == TypeId::Timestamp,
+            TypeId::Date => {
+                type_id == TypeId::VarChar
+                    || type_id == TypeId::Date
+                    || type_id == TypeId::Timestamp
+            }
             TypeId::Time => type_id == TypeId::VarChar || type_id == TypeId::Time,
             TypeId::Interval => type_id == TypeId::VarChar || type_id == TypeId::Interval,
             TypeId::VarChar => matches!(
@@ -96,7 +100,9 @@ pub trait Type {
             TypeId::UUID => type_id == TypeId::UUID || type_id == TypeId::VarChar,
             TypeId::Vector => type_id == TypeId::Vector,
             TypeId::Array => type_id == TypeId::Array,
-            TypeId::Enum => type_id == TypeId::Enum || type_id == TypeId::Integer || type_id == TypeId::VarChar,
+            TypeId::Enum => {
+                type_id == TypeId::Enum || type_id == TypeId::Integer || type_id == TypeId::VarChar
+            }
             TypeId::Point => type_id == TypeId::Point,
             TypeId::Struct => type_id == TypeId::Struct,
         }
@@ -115,7 +121,7 @@ pub trait Type {
             TypeId::Float => Value::from(f32::MIN),
             TypeId::Timestamp => Value::from(0_u64),
             TypeId::Date => Value::from(i32::MIN), // Minimum date value (days from epoch)
-            TypeId::Time => Value::from(0), // Minimum time value (seconds from midnight)
+            TypeId::Time => Value::from(0),        // Minimum time value (seconds from midnight)
             TypeId::Interval => Value::from(i64::MIN), // Minimum interval (seconds)
             TypeId::VarChar => Value::from(""),
             TypeId::Char => Value::from(""),
@@ -144,7 +150,7 @@ pub trait Type {
             TypeId::Float => Value::from(f32::MAX),
             TypeId::Timestamp => Value::from(u64::MAX),
             TypeId::Date => Value::from(i32::MAX), // Maximum date value (days from epoch)
-            TypeId::Time => Value::from(86399), // Maximum time value (23:59:59 in seconds)
+            TypeId::Time => Value::from(86399),    // Maximum time value (23:59:59 in seconds)
             TypeId::Interval => Value::from(i64::MAX), // Maximum interval (seconds)
             TypeId::VarChar => Value::from(""),
             TypeId::Char => Value::from(""),
@@ -231,7 +237,8 @@ pub trait Type {
         if !self.is_coercible_from(type_id) {
             return Value::new(Val::Null);
         }
-        val.cast_to(self.get_type_id()).unwrap_or_else(|_| val.clone_optimized())
+        val.cast_to(self.get_type_id())
+            .unwrap_or_else(|_| val.clone_optimized())
     }
     fn get_data(&self, _val: &Value) -> &[u8] {
         &[]
@@ -306,7 +313,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::UUID => 16,
         TypeId::Vector | TypeId::Array => size_of::<Arc<Vec<Value>>>() as u64,
         TypeId::Char => 0,
-        TypeId::Enum => 4, // ID size, the string is variable
+        TypeId::Enum => 4,   // ID size, the string is variable
         TypeId::Point => 16, // Two f64 values
         TypeId::Struct => 8, // Pointer size for struct
     }

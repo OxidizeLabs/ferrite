@@ -139,7 +139,7 @@ impl AggregationExecutor {
                             return Err(format!(
                                 "Unsupported aggregate type: {:?}",
                                 agg.get_agg_type()
-                            ))
+                            ));
                         }
                     }
                 }
@@ -258,7 +258,11 @@ impl AbstractExecutor for AggregationExecutor {
             debug!("Creating tuple with values: {:?}", values);
             debug!("Output schema: {:?}", self.output_schema);
 
-            let tuple = Arc::new(Tuple::new(&values, &self.output_schema.clone(), RID::new(0, 0)));
+            let tuple = Arc::new(Tuple::new(
+                &values,
+                &self.output_schema.clone(),
+                RID::new(0, 0),
+            ));
             Some((tuple, RID::new(0, 0)))
         } else {
             None

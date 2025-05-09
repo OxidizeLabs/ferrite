@@ -100,17 +100,17 @@ impl Type for StructType {
         if val.is_struct() {
             if let Some(struct_data) = &val.struct_data {
                 let mut result = String::from("{");
-                
+
                 let field_names = val.get_struct_field_names();
                 let field_values = val.get_struct_values();
-                
+
                 for (i, (name, value)) in field_names.iter().zip(field_values.iter()).enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
                     result.push_str(&format!("{}: {}", name, value));
                 }
-                
+
                 result.push('}');
                 return result;
             }

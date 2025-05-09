@@ -47,29 +47,29 @@ impl LogicalPlanBuilder {
             } => {
                 return Err(
                     "Set operations (UNION, INTERSECT, etc.) are not yet supported".to_string(),
-                )
+                );
             }
             SetExpr::Insert(insert) => {
                 return Err(
                     "INSERT is not supported in this context. Use Statement::Insert instead."
                         .to_string(),
-                )
+                );
             }
             SetExpr::Table(table) => {
                 return Err(format!(
                     "Table expressions are not yet supported: {:?}",
                     table
-                ))
+                ));
             }
         };
 
         // Handle ORDER BY if present
         if let Some(order_by) = &query.order_by {
             let schema = current_plan.get_schema();
-            
+
             // Build sort expressions manually
             let mut sort_exprs = Vec::new();
-            
+
             // Access expressions based on the OrderByKind
             match &order_by.kind {
                 sqlparser::ast::OrderByKind::Expressions(order_by_exprs) => {
@@ -88,11 +88,11 @@ impl LogicalPlanBuilder {
 
             current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
         }
-        
+
         // Handle LIMIT if present
         if let Some(limit_clause) = &query.limit_clause {
             let schema = current_plan.get_schema();
-            
+
             // Extract the limit expression based on the LimitClause variant
             let limit_expr = match limit_clause {
                 sqlparser::ast::LimitClause::LimitOffset { limit, .. } => {
@@ -101,10 +101,10 @@ impl LogicalPlanBuilder {
                     } else {
                         return Err("LIMIT clause has no limit value".to_string());
                     }
-                },
+                }
                 sqlparser::ast::LimitClause::OffsetCommaLimit { limit, .. } => limit,
             };
-            
+
             // Process the limit expression
             if let sqlparser::ast::Expr::Value(value_with_span) = limit_expr {
                 if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
@@ -273,10 +273,8 @@ impl LogicalPlanBuilder {
             if let Some(having) = &select.having {
                 // Use the original schema for parsing the HAVING clause instead of the aggregate schema
                 // This ensures columns like 'age' can be found when used inside aggregate functions
-                let having_expr = self
-                    .expression_parser
-                    .parse_expression(having, &schema)?;
-                
+                let having_expr = self.expression_parser.parse_expression(having, &schema)?;
+
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone(),
                     String::new(), // table_name
@@ -459,8 +457,12 @@ impl LogicalPlanBuilder {
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
         // Extract the table name from the table field
         let table_name = match &insert.table {
-            TableObject::TableName(obj_name) => self.expression_parser.extract_table_name(obj_name)?,
-            TableObject::TableFunction(_) => return Err("Table functions are not supported in INSERT statements".to_string()),
+            TableObject::TableName(obj_name) => {
+                self.expression_parser.extract_table_name(obj_name)?
+            }
+            TableObject::TableFunction(_) => {
+                return Err("Table functions are not supported in INSERT statements".to_string());
+            }
         };
 
         // Get table info from catalog
@@ -879,7 +881,7 @@ impl LogicalPlanBuilder {
                     _ => {
                         return Err(
                             "Only ON constraints are supported for semi/anti joins".to_string()
-                        )
+                        );
                     }
                 },
                 // Simple synonym for Inner join
@@ -901,7 +903,9 @@ impl LogicalPlanBuilder {
                     JoinConstraint::On(expr) => self
                         .expression_parser
                         .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for RIGHT joins".to_string()),
+                    _ => {
+                        return Err("Only ON constraints are supported for RIGHT joins".to_string());
+                    }
                 },
                 // Simple synonym for LeftSemi join
                 JoinOperator::Semi(constraint) => match constraint {
@@ -919,21 +923,25 @@ impl LogicalPlanBuilder {
                 },
                 // APPLY joins require a table function on the right
                 JoinOperator::CrossApply => {
-                    return Err("CROSS APPLY joins are not yet supported".to_string())
-                },
+                    return Err("CROSS APPLY joins are not yet supported".to_string());
+                }
                 JoinOperator::OuterApply => {
-                    return Err("OUTER APPLY joins are not yet supported".to_string())
-                },
+                    return Err("OUTER APPLY joins are not yet supported".to_string());
+                }
                 // Time-series join variant
                 JoinOperator::AsOf { .. } => {
-                    return Err("AS OF joins are not yet supported".to_string())
-                },
+                    return Err("AS OF joins are not yet supported".to_string());
+                }
                 // MySQL-specific join
                 JoinOperator::StraightJoin(constraint) => match constraint {
                     JoinConstraint::On(expr) => self
                         .expression_parser
                         .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for STRAIGHT_JOIN".to_string()),
+                    _ => {
+                        return Err(
+                            "Only ON constraints are supported for STRAIGHT_JOIN".to_string()
+                        );
+                    }
                 },
             };
 

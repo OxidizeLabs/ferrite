@@ -19,13 +19,19 @@ CREATE TABLE posts (
 INSERT INTO users (id, username, email, created_at) VALUES
 (1, 'john_doe', 'john@example.com', TIMESTAMP '2023-01-01 10:00:00'),
 (2, 'jane_smith', 'jane@example.com', TIMESTAMP '2023-01-01 10:00:00'),
-(3, 'bob_wilson', 'bob@example.com', TIMESTAMP '2023-01-01 10:00:00');
+(3, 'bob_wilson', 'bob@example.com', TIMESTAMP '2023-01-01 10:00:00'),
+(4, 'billy_bob', 'billy@example.com', TIMESTAMP '2023-01-01 10:00:00');
 
 -- Insert sample data into posts
 INSERT INTO posts (id, user_id, title, content, published_at) VALUES
 (1, 1, 'First Post', 'This is my first post content', TIMESTAMP '2024-01-01 10:00:00'),
 (2, 1, 'Second Post', 'Another interesting post', TIMESTAMP '2024-01-02 15:30:00'),
 (3, 2, 'Hello World', 'Jane''s first blog post', TIMESTAMP '2024-01-03 09:15:00');
+
+CREATE INDEX users_idx ON users (id);
+CREATE INDEX posts_idx ON posts (id);
+
+INSERT INTO users (id, username, email, created_at) VALUES (4, 'billy_bob', 'billy@example.com', TIMESTAMP '2023-01-01 10:00:00');
 
 -- Sample SELECT queries
 -- Basic select

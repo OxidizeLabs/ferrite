@@ -128,4 +128,4 @@ impl Type for BinaryType {
     }
 }
 
-pub static BINARY_TYPE_INSTANCE: BinaryType = BinaryType; 
+pub static BINARY_TYPE_INSTANCE: BinaryType = BinaryType;

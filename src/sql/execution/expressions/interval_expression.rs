@@ -64,7 +64,7 @@ impl ExpressionOps for IntervalExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Invalid value type {:?} for interval",
                     value.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -260,10 +260,12 @@ mod tests {
         // Evaluate interval - should fail
         let result = interval.evaluate(&tuple, &schema);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid value type"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid value type")
+        );
     }
 
     #[test]

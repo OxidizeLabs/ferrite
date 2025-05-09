@@ -72,8 +72,8 @@ impl ExtendableHTableHeaderPage {
         // Number of bits to shift right to get the upper bits
         let shift_amount = 32 - capped_max_depth;
         debug!(
-        "Calculating directory index: hash={:#034b}, max_depth={}, capped_max_depth={}, shift_amount={}",
-        hash, self.global_depth, capped_max_depth, shift_amount
+            "Calculating directory index: hash={:#034b}, max_depth={}, capped_max_depth={}, shift_amount={}",
+            hash, self.global_depth, capped_max_depth, shift_amount
         );
 
         // Shift right to get the upper bits

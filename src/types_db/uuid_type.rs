@@ -120,4 +120,4 @@ impl Type for UUIDType {
     }
 }
 
-pub static UUID_TYPE_INSTANCE: UUIDType = UUIDType; 
+pub static UUID_TYPE_INSTANCE: UUIDType = UUIDType;

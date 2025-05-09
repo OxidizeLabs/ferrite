@@ -85,8 +85,7 @@ impl AbstractExecutor for SeqScanExecutor {
         let stop_rid = RID::new(u32::MAX as PageId, u32::MAX);
         trace!(
             "Creating table iterator with range: {:?} to {:?}",
-            start_rid,
-            stop_rid
+            start_rid, stop_rid
         );
 
         // Create new iterator with TransactionalTableHeap

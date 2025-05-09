@@ -75,7 +75,7 @@ impl ExpressionOps for SubstringExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "SUBSTRING requires string input, got {:?}",
                     string_val.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -95,7 +95,7 @@ impl ExpressionOps for SubstringExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "SUBSTRING FROM requires numeric input, got {:?}",
                     from_val.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -136,7 +136,7 @@ impl ExpressionOps for SubstringExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "SUBSTRING FOR requires numeric input, got {:?}",
                         for_val.get_type_id()
-                    )))
+                    )));
                 }
             };
 
@@ -180,7 +180,7 @@ impl ExpressionOps for SubstringExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "SUBSTRING requires string input, got {:?}",
                     string_val.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -202,7 +202,7 @@ impl ExpressionOps for SubstringExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "SUBSTRING FROM requires numeric input, got {:?}",
                     from_val.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -244,7 +244,7 @@ impl ExpressionOps for SubstringExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "SUBSTRING FOR requires numeric input, got {:?}",
                         for_val.get_type_id()
-                    )))
+                    )));
                 }
             };
 

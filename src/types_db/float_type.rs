@@ -118,10 +118,12 @@ impl Type for FloatType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Float(_) | Val::Decimal(_) | Val::Integer(_) | Val::TinyInt(_) 
-            | Val::SmallInt(_) | Val::BigInt(_) => {
-                Ok(Value::new(0.0f32))
-            }
+            Val::Float(_)
+            | Val::Decimal(_)
+            | Val::Integer(_)
+            | Val::TinyInt(_)
+            | Val::SmallInt(_)
+            | Val::BigInt(_) => Ok(Value::new(0.0f32)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Float by non-numeric type".to_string()),
         }
@@ -135,10 +137,12 @@ impl Type for FloatType {
             Val::TinyInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::SmallInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::BigInt(r) if *r == 0 => Err("Division by zero".to_string()),
-            Val::Float(_) | Val::Decimal(_) | Val::Integer(_) 
-            | Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) => {
-                Ok(Value::new(0.0f32))
-            }
+            Val::Float(_)
+            | Val::Decimal(_)
+            | Val::Integer(_)
+            | Val::TinyInt(_)
+            | Val::SmallInt(_)
+            | Val::BigInt(_) => Ok(Value::new(0.0f32)),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide Float by non-numeric type".to_string()),
         }
@@ -152,10 +156,12 @@ impl Type for FloatType {
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
             Val::SmallInt(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::Float(_) | Val::Decimal(_) | Val::Integer(_) 
-            | Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) => {
-                Value::new(0.0f32)
-            }
+            Val::Float(_)
+            | Val::Decimal(_)
+            | Val::Integer(_)
+            | Val::TinyInt(_)
+            | Val::SmallInt(_)
+            | Val::BigInt(_) => Value::new(0.0f32),
             _ => Value::new(Val::Null),
         }
     }
@@ -200,4 +206,4 @@ impl Type for FloatType {
     }
 }
 
-pub static FLOAT_TYPE_INSTANCE: FloatType = FloatType; 
+pub static FLOAT_TYPE_INSTANCE: FloatType = FloatType;

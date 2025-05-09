@@ -1,3 +1,4 @@
+use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
 use crate::common::config::INVALID_PAGE_ID;
@@ -10,7 +11,6 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::catalog::schema::Schema;
 use crate::types_db::value::Value;
 use log;
 use std::sync::Arc;
@@ -82,7 +82,9 @@ impl TransactionalTableHeap {
         let meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
 
         // Perform insert using the new internal method
-        let rid = self.table_heap.insert_tuple_from_values(values, schema, meta)?;
+        let rid = self
+            .table_heap
+            .insert_tuple_from_values(values, schema, meta)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -242,7 +244,10 @@ impl TransactionalTableHeap {
     ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         log::debug!(
             "Starting version chain traversal for RID {:?} - Latest version: creator_txn={}, commit_ts={}, txn_id={}",
-            rid, meta.get_creator_txn_id(), meta.get_commit_timestamp(), txn.get_transaction_id()
+            rid,
+            meta.get_creator_txn_id(),
+            meta.get_commit_timestamp(),
+            txn.get_transaction_id()
         );
 
         // First check if latest version is visible
@@ -516,26 +521,31 @@ mod tests {
 
         // Create transaction
         let txn_ctx = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
-        
+
         // Create schema
         let schema = TestContext::create_test_schema();
-        
+
         // Create values
         let values = vec![Value::new(1), Value::new(100)];
-        
+
         // Insert tuple directly from values
-        let rid = ctx.txn_heap
+        let rid = ctx
+            .txn_heap
             .insert_tuple_from_values(values.clone(), &schema, txn_ctx.clone())
             .expect("Insert from values failed");
-            
+
         // Verify the tuple was inserted correctly
-        let (meta, tuple) = ctx.txn_heap
+        let (meta, tuple) = ctx
+            .txn_heap
             .get_tuple(rid, txn_ctx.clone())
             .expect("Failed to get tuple");
-            
+
         assert_eq!(tuple.get_value(0), Value::new(1));
         assert_eq!(tuple.get_value(1), Value::new(100));
-        assert_eq!(meta.get_creator_txn_id(), txn_ctx.get_transaction().get_transaction_id());
+        assert_eq!(
+            meta.get_creator_txn_id(),
+            txn_ctx.get_transaction().get_transaction_id()
+        );
     }
 
     #[test]
@@ -548,12 +558,13 @@ mod tests {
 
         // Create schema
         let schema = TestContext::create_test_schema();
-        
+
         // Create values
         let values = vec![Value::new(1), Value::new(100)];
-        
+
         // Insert tuple directly from values
-        let rid = ctx.txn_heap
+        let rid = ctx
+            .txn_heap
             .insert_tuple_from_values(values.clone(), &schema, txn_ctx1.clone())
             .expect("Insert from values failed");
 
@@ -565,7 +576,8 @@ mod tests {
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
 
         // Get the tuple to update
-        let (meta, tuple) = ctx.txn_heap
+        let (meta, tuple) = ctx
+            .txn_heap
             .get_tuple(rid, txn_ctx2.clone())
             .expect("Failed to get tuple");
 
@@ -650,13 +662,14 @@ mod tests {
 
         // Create READ_UNCOMMITTED transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
-        
+
         // Create schema and values
         let schema = TestContext::create_test_schema();
         let values = vec![Value::new(1), Value::new(100)];
-        
+
         // Insert tuple using the values API
-        let rid = ctx.txn_heap
+        let rid = ctx
+            .txn_heap
             .insert_tuple_from_values(values, &schema, txn_ctx1.clone())
             .expect("Insert from values failed");
 

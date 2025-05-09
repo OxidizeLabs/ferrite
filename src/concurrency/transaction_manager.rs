@@ -183,7 +183,7 @@ impl TransactionManager {
             if let Some(undo_link) = self.get_undo_link(rid) {
                 let undo_log = self.get_undo_log(undo_link.clone());
                 // Create a new UndoLog with updated timestamp
-                let mut new_undo_log = UndoLog {
+                let new_undo_log = UndoLog {
                     is_deleted: undo_log.is_deleted,
                     modified_fields: undo_log.modified_fields.clone(),
                     tuple: undo_log.tuple.clone(),
@@ -261,7 +261,8 @@ impl TransactionManager {
                     meta.set_undo_log_idx(undo_link.prev_log_idx);
 
                     // Use a reference to the Arc<Tuple> without cloning
-                    if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid) {
+                    if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid)
+                    {
                         log::error!("Failed to rollback tuple: {}", e);
                     }
                 } else {
@@ -334,9 +335,9 @@ impl TransactionManager {
         check: Option<Box<dyn Fn(Option<UndoLink>) -> bool>>,
     ) -> bool {
         let mut version_info = self.state.version_info.write();
-        let page_info = version_info.entry(rid.get_page_id()).or_insert_with(|| {
-            Arc::new(PageVersionInfo::new())
-        });
+        let page_info = version_info
+            .entry(rid.get_page_id())
+            .or_insert_with(|| Arc::new(PageVersionInfo::new()));
 
         // If check function is provided, verify the update is valid
         if let Some(check_fn) = check {
@@ -641,9 +642,9 @@ mod tests {
                 Column::new("id", TypeId::Integer),
                 Column::new("value", TypeId::Integer),
             ]);
-            
+
             let mut tuple = Tuple::new(values, &schema, RID::new(0, 0));
-            
+
             table_heap
                 .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
                 .map_err(|e| e.to_string())
@@ -711,9 +712,11 @@ mod tests {
 
         // Create test table and insert tuple
         let (table_oid, table_heap) = ctx.create_test_table();
-        
+
         // Use the new helper method to insert tuple
-        let rid = ctx.insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)]).unwrap();
+        let rid = ctx
+            .insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)])
+            .unwrap();
 
         // Append to write set
         txn.append_write_set(table_oid, rid);
@@ -726,9 +729,10 @@ mod tests {
         ));
 
         // Commit transaction
-        assert!(ctx
-            .txn_manager()
-            .commit(txn.clone(), ctx.buffer_pool_manager()));
+        assert!(
+            ctx.txn_manager()
+                .commit(txn.clone(), ctx.buffer_pool_manager())
+        );
         assert_eq!(txn.get_state(), TransactionState::Committed);
 
         // Verify tuple with a new transaction using ReadCommitted isolation
@@ -749,7 +753,7 @@ mod tests {
 
         let (meta, committed_tuple) = result.unwrap();
         assert_eq!(meta.get_creator_txn_id(), txn_id);
-        
+
         // Check the values against what we inserted
         let expected_values = vec![Value::new(1), Value::new(100)];
         assert_eq!(committed_tuple.get_values(), expected_values.as_slice());
@@ -771,9 +775,11 @@ mod tests {
 
         // Create test table and insert tuple
         let (table_oid, table_heap) = ctx.create_test_table();
-        
+
         // Use the new helper method to insert tuple
-        let rid = ctx.insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)]).unwrap();
+        let rid = ctx
+            .insert_tuple_from_values(&table_heap, txn_id, &[Value::new(1), Value::new(100)])
+            .unwrap();
 
         txn.append_write_set(table_oid, rid);
 
@@ -842,13 +848,9 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
         ]);
-        
+
         let rid = txn_table_heap
-            .insert_tuple_from_values(
-                values,
-                &schema,
-                txn_ctx1
-            )
+            .insert_tuple_from_values(values, &schema, txn_ctx1)
             .unwrap();
 
         // Try to update with txn2 before txn1 commits - should fail
@@ -928,10 +930,11 @@ mod tests {
 
         // Verify all transactions are tracked by the manager
         for txn in txns {
-            assert!(ctx
-                .txn_manager()
-                .get_transaction(&txn.get_transaction_id())
-                .is_some());
+            assert!(
+                ctx.txn_manager()
+                    .get_transaction(&txn.get_transaction_id())
+                    .is_some()
+            );
         }
     }
 }

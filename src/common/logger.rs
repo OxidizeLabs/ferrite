@@ -26,8 +26,6 @@ pub fn initialize_logger() {
 mod tests {
     use super::*;
     use log::{debug, info};
-    use std::env;
-    use std::process::Command;
 
     #[test]
     fn test_logging_levels() {

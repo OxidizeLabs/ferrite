@@ -22,11 +22,11 @@ impl TypedStringExpression {
     pub fn new(data_type: String, value: String, return_type: Column) -> Self {
         // Strip quotes if present (handles 'value' format)
         let clean_value = if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
-            value[1..value.len()-1].to_string()
+            value[1..value.len() - 1].to_string()
         } else {
             value
         };
-        
+
         Self {
             data_type,
             value: clean_value,
@@ -98,7 +98,7 @@ impl TypedStringExpression {
                 TypeId::Timestamp,
             ));
         }
-        
+
         // If that fails, try parsing with the T separator format without timezone
         if timestamp_str.contains('T') {
             if let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
@@ -109,7 +109,7 @@ impl TypedStringExpression {
                 ));
             }
         }
-        
+
         // Finally try the default format
         let format = if timestamp_str.contains('.') {
             "%Y-%m-%d %H:%M:%S.%f"
@@ -143,7 +143,7 @@ impl ExpressionOps for TypedStringExpression {
             "TIMESTAMP" => {
                 // Use the improved parse_timestamp method directly
                 let result = self.parse_timestamp(&self.value)?;
-                
+
                 // If the return type is VarChar (for AT TIME ZONE), convert to string
                 if self.return_type.get_type() == TypeId::VarChar {
                     // Format the timestamp as RFC3339
@@ -249,21 +249,21 @@ impl ExpressionOps for TypedStringExpression {
                 if DateTime::parse_from_rfc3339(&self.value).is_ok() {
                     return Ok(());
                 }
-                
+
                 // Try with T separator
                 if self.value.contains('T') {
                     if NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok() {
                         return Ok(());
                     }
                 }
-                
+
                 // Try standard format
                 let format = if self.value.contains('.') {
                     "%Y-%m-%d %H:%M:%S.%f"
                 } else {
                     "%Y-%m-%d %H:%M:%S"
                 };
-                
+
                 if NaiveDateTime::parse_from_str(&self.value, format).is_err() {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "Invalid TIMESTAMP format: '{}'. Expected YYYY-MM-DD HH:MM:SS[.SSS], ISO8601, or RFC3339",

@@ -193,22 +193,29 @@ mod tests {
         assert!(wildcard.get_children().is_empty());
 
         // Should panic when trying to get child
-        assert!(std::panic::catch_unwind(|| {
-            wildcard.get_child_at(0);
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                wildcard.get_child_at(0);
+            })
+            .is_err()
+        );
 
         // Should panic when trying to clone with children
-        assert!(std::panic::catch_unwind(|| {
-            wildcard.clone_with_children(vec![Arc::new(Expression::Wildcard(wildcard.clone()))]);
-        })
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(|| {
+                wildcard
+                    .clone_with_children(vec![Arc::new(Expression::Wildcard(wildcard.clone()))]);
+            })
+            .is_err()
+        );
 
         // Should succeed when cloning with empty children vec
-        assert!(std::panic::catch_unwind(|| {
-            wildcard.clone_with_children(vec![]);
-        })
-        .is_ok());
+        assert!(
+            std::panic::catch_unwind(|| {
+                wildcard.clone_with_children(vec![]);
+            })
+            .is_ok()
+        );
     }
 
     #[test]

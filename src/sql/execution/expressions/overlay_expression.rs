@@ -62,7 +62,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY base expression must be a string, got {:?}",
                     base_str.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -72,7 +72,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY PLACING expression must be a string, got {:?}",
                     overlay_str.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -91,7 +91,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY FROM expression must be an integer, got {:?}",
                     from_pos.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -111,7 +111,7 @@ impl ExpressionOps for OverlayExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "OVERLAY FOR expression must be an integer, got {:?}",
                         len.get_type_id()
-                    )))
+                    )));
                 }
             },
             None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string
@@ -168,7 +168,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY base expression must be a string, got {:?}",
                     base_str.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -178,7 +178,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY PLACING expression must be a string, got {:?}",
                     overlay_str.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -197,7 +197,7 @@ impl ExpressionOps for OverlayExpression {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY FROM expression must be an integer, got {:?}",
                     from_pos.get_type_id()
-                )))
+                )));
             }
         };
 
@@ -217,7 +217,7 @@ impl ExpressionOps for OverlayExpression {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "OVERLAY FOR expression must be an integer, got {:?}",
                         len.get_type_id()
-                    )))
+                    )));
                 }
             },
             None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string

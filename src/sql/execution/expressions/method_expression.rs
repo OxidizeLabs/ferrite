@@ -81,7 +81,7 @@ impl ExpressionOps for MethodExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "First argument to value() must be a string path".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -90,7 +90,7 @@ impl ExpressionOps for MethodExpression {
                     _ => {
                         return Err(ExpressionError::InvalidOperation(
                             "Second argument to value() must be a string type".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -156,7 +156,7 @@ impl ExpressionOps for MethodExpression {
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Index for get() must be an integer".to_string(),
-                            ))
+                            ));
                         }
                     };
 
@@ -744,17 +744,9 @@ mod tests {
         let right_schema = Schema::new(vec![Column::new("right_str", TypeId::VarChar)]);
 
         // Create tuples
-        let left_tuple = Tuple::new(
-            &[Value::new("left value")],
-            &left_schema,
-            RID::new(1, 1),
-        );
+        let left_tuple = Tuple::new(&[Value::new("left value")], &left_schema, RID::new(1, 1));
 
-        let right_tuple = Tuple::new(
-            &[Value::new("right value")],
-            &right_schema,
-            RID::new(2, 1),
-        );
+        let right_tuple = Tuple::new(&[Value::new("right value")], &right_schema, RID::new(2, 1));
 
         // Create a column reference to the right relation
         let right_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(

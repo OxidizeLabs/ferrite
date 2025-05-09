@@ -170,7 +170,7 @@ impl ExpressionOps for CeilFloorExpression {
                                 return Err(ExpressionError::InvalidOperation(format!(
                                     "Unsupported DateTimeField: {:?}",
                                     field
-                                )))
+                                )));
                             }
                         };
 
@@ -248,7 +248,7 @@ impl ExpressionOps for CeilFloorExpression {
                 _ => {
                     return Err(ExpressionError::InvalidOperation(
                         "Scale parameter must be an integer type".to_string(),
-                    ))
+                    ));
                 }
             }
         }

@@ -23,4 +23,4 @@ impl ValueType for RID {
         let id = value.as_bigint()?;
         Ok(RID::from_i64(id))
     }
-} 
+}
