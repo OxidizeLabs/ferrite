@@ -65,4 +65,9 @@ impl WALManager {
         let mut log_manager = self.log_manager.write();
         log_manager.append_log_record(update_record)
     }
+    
+    pub fn force_run_flush_thread(&self) {
+        let mut log_manager_write_guard = self.log_manager.write();
+        log_manager_write_guard.run_flush_thread()
+    }
 }
