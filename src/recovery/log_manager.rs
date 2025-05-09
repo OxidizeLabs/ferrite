@@ -425,7 +425,7 @@ mod tests {
         use crossbeam_channel::bounded;
         use parking_lot::RwLock;
         use std::sync::atomic::{AtomicBool, AtomicU64};
-        
+
         // Helper to create test state
         fn create_test_state() -> Arc<LogManagerState> {
             let (sender, receiver) = bounded(10); // smaller channel for testing
@@ -820,8 +820,8 @@ mod tests {
 
     /// Tests for threading and concurrency
     mod threading_tests {
-        use crate::common::config::PageId;
         use super::*;
+        use crate::common::config::PageId;
 
         #[test]
         fn test_flush_thread_lifecycle() {

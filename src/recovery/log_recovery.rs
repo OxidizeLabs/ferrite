@@ -1,21 +1,21 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::catalog::schema::Schema;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
+use crate::common::rid::RID;
+use crate::concurrency::transaction::IsolationLevel;
+use crate::concurrency::transaction::Transaction;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
+use crate::recovery::wal_manager::WALManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::catalog::schema::Schema;
+use crate::storage::disk::disk_scheduler::DiskScheduler;
+use crate::storage::table::tuple::Tuple;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::fs;
 use std::path::Path;
-use crate::common::rid::RID;
-use crate::concurrency::transaction::Transaction;
-use crate::concurrency::transaction::IsolationLevel;
-use crate::recovery::wal_manager::WALManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::table::tuple::Tuple;
+use std::sync::Arc;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -498,8 +498,8 @@ mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::rid::RID;
-    use crate::concurrency::transaction::Transaction;
     use crate::concurrency::transaction::IsolationLevel;
+    use crate::concurrency::transaction::Transaction;
     use crate::recovery::wal_manager::WALManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::Tuple;
@@ -724,7 +724,7 @@ mod tests {
     /// Tests for the redo phase of log recovery
     mod redo_tests {
         use super::*;
-        
+
         /// Test redo with no operations to replay
         #[test]
         fn test_redo_empty_log() {
@@ -782,7 +782,7 @@ mod tests {
     /// Tests for the undo phase of log recovery
     mod undo_tests {
         use super::*;
-        
+
         /// Test undo with no incomplete transactions
         #[test]
         fn test_undo_no_active_transactions() {
@@ -855,7 +855,7 @@ mod tests {
     /// End-to-end tests for the complete recovery process
     mod integration_tests {
         use super::*;
-        
+
         /// Test complete recovery process with multiple transactions
         #[test]
         fn test_complete_recovery_process() {
