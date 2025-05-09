@@ -706,9 +706,10 @@ mod tests {
         fn test_max_lsn_value() {
             let mut ctx = TestContext::new("max_lsn_test");
 
-            // Set LSN to near max value
+            // Set next_lsn to near max value instead of just persistent_lsn
             let near_max_lsn = u64::MAX - 10;
-            ctx.log_manager.set_persistent_lsn(near_max_lsn);
+            ctx.log_manager.state.next_lsn.store(near_max_lsn, Ordering::SeqCst);
+            ctx.log_manager.set_persistent_lsn(near_max_lsn - 5);
 
             // Verify we can still append logs
             for i in 0..5 {
@@ -727,6 +728,7 @@ mod tests {
 
     /// Tests for transaction commit behavior
     mod transaction_tests {
+        use crate::common::config::PageId;
         use super::*;
 
         #[test]
@@ -776,8 +778,8 @@ mod tests {
                 txn_id,
                 prev_lsn,
                 LogRecordType::NewPage,
-                0,
-                1,
+                0u32 as PageId,
+                1u32 as PageId,
             ));
             prev_lsn = ctx.log_manager.append_log_record(page_record);
 
@@ -827,8 +829,8 @@ mod tests {
                 txn1_id,
                 txn1_begin_lsn,
                 LogRecordType::NewPage,
-                0,
-                1,
+                0u32 as PageId,
+                1u32 as PageId,
             ));
             let txn1_op_lsn = ctx.log_manager.append_log_record(op_txn1);
 
@@ -837,8 +839,8 @@ mod tests {
                 txn2_id,
                 txn2_begin_lsn,
                 LogRecordType::NewPage,
-                0,
-                2,
+                0u32 as PageId,
+                2u32 as PageId,
             ));
             let txn2_op_lsn = ctx.log_manager.append_log_record(op_txn2);
 
@@ -864,6 +866,279 @@ mod tests {
             // Verify both transactions are persisted
             assert!(ctx.log_manager.get_persistent_lsn() >= txn2_abort_lsn);
 
+            ctx.log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_concurrent_commit_transactions() {
+            let ctx = Arc::new(RwLock::new(TestContext::new(
+                "concurrent_commit_test",
+            )));
+            
+            // Start the flush thread
+            ctx.write().log_manager.run_flush_thread();
+            
+            // Create multiple threads, each running a transaction
+            let thread_count = 5;
+            let mut handles = vec![];
+            
+            for i in 0..thread_count {
+                let ctx_clone = Arc::clone(&ctx);
+                let handle = thread::spawn(move || {
+                    let txn_id = i as TxnId + 100;
+                    let mut prev_lsn = INVALID_LSN;
+                    
+                    // Begin transaction
+                    let begin_record = Arc::new(LogRecord::new_transaction_record(
+                        txn_id,
+                        prev_lsn,
+                        LogRecordType::Begin,
+                    ));
+                    prev_lsn = ctx_clone.write().log_manager.append_log_record(begin_record);
+                    
+                    // Perform some operations
+                    for j in 0..3 {
+                        let page_record = Arc::new(LogRecord::new_page_record(
+                            txn_id,
+                            prev_lsn,
+                            LogRecordType::NewPage,
+                            j as PageId,
+                            (j + 1) as PageId,
+                        ));
+                        prev_lsn = ctx_clone.write().log_manager.append_log_record(page_record);
+                    }
+                    
+                    // Commit transaction
+                    let commit_record = Arc::new(LogRecord::new_transaction_record(
+                        txn_id,
+                        prev_lsn,
+                        LogRecordType::Commit,
+                    ));
+                    let commit_lsn = ctx_clone.write().log_manager.append_log_record(commit_record);
+                    
+                    commit_lsn
+                });
+                handles.push(handle);
+            }
+            
+            // Collect all commit LSNs
+            let commit_lsns: Vec<Lsn> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            
+            // Verify all transactions were committed (persistent LSN >= max commit LSN)
+            let max_commit_lsn = *commit_lsns.iter().max().unwrap();
+            assert!(ctx.read().log_manager.get_persistent_lsn() >= max_commit_lsn);
+            
+            ctx.write().log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_rollback_transaction() {
+            let mut ctx = TestContext::new("rollback_test");
+            
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+            
+            // Simulate a transaction that gets rolled back
+            let txn_id: TxnId = 55;
+            let mut prev_lsn = INVALID_LSN;
+            
+            // Begin transaction
+            let begin_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Begin,
+            ));
+            prev_lsn = ctx.log_manager.append_log_record(begin_record);
+            
+            // Add some operations
+            for i in 0..3 {
+                let page_record = Arc::new(LogRecord::new_page_record(
+                    txn_id,
+                    prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (i * 10) as PageId,
+                ));
+                prev_lsn = ctx.log_manager.append_log_record(page_record);
+            }
+            
+            // Abort the transaction
+            let abort_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Abort,
+            ));
+            let abort_lsn = ctx.log_manager.append_log_record(abort_record);
+            
+            // Verify abort was persisted
+            assert!(ctx.log_manager.get_persistent_lsn() >= abort_lsn);
+            
+            ctx.log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_large_transaction() {
+            let mut ctx = TestContext::new("large_txn_test");
+            
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+            
+            let txn_id: TxnId = 77;
+            let mut prev_lsn = INVALID_LSN;
+            
+            // Begin transaction
+            let begin_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Begin,
+            ));
+            prev_lsn = ctx.log_manager.append_log_record(begin_record);
+            
+            // Add a large number of operations
+            let operation_count = 100;
+            for i in 0..operation_count {
+                let page_record = Arc::new(LogRecord::new_page_record(
+                    txn_id,
+                    prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (i + 1) as PageId,
+                ));
+                prev_lsn = ctx.log_manager.append_log_record(page_record);
+                
+                // Give the flush thread a chance to run
+                if i % 20 == 0 {
+                    sleep(Duration::from_millis(1));
+                }
+            }
+            
+            // Commit the large transaction
+            let commit_record = Arc::new(LogRecord::new_transaction_record(
+                txn_id,
+                prev_lsn,
+                LogRecordType::Commit,
+            ));
+            let commit_lsn = ctx.log_manager.append_log_record(commit_record);
+            
+            // Verify the entire transaction was persisted
+            assert!(ctx.log_manager.get_persistent_lsn() >= commit_lsn);
+            
+            ctx.log_manager.shut_down();
+        }
+
+        #[test]
+        fn test_interleaved_transaction_operations() {
+            let mut ctx = TestContext::new("interleaved_txn_test");
+            
+            // Start flush thread
+            ctx.log_manager.run_flush_thread();
+            
+            // Create three transactions
+            let txn1_id: TxnId = 10;
+            let txn2_id: TxnId = 20;
+            let txn3_id: TxnId = 30;
+            
+            let mut txn1_prev_lsn = INVALID_LSN;
+            let mut txn2_prev_lsn = INVALID_LSN;
+            let mut txn3_prev_lsn = INVALID_LSN;
+            
+            // Begin all three transactions
+            let begin_txn1 = Arc::new(LogRecord::new_transaction_record(
+                txn1_id,
+                txn1_prev_lsn,
+                LogRecordType::Begin,
+            ));
+            txn1_prev_lsn = ctx.log_manager.append_log_record(begin_txn1);
+            
+            let begin_txn2 = Arc::new(LogRecord::new_transaction_record(
+                txn2_id,
+                txn2_prev_lsn,
+                LogRecordType::Begin,
+            ));
+            txn2_prev_lsn = ctx.log_manager.append_log_record(begin_txn2);
+            
+            let begin_txn3 = Arc::new(LogRecord::new_transaction_record(
+                txn3_id,
+                txn3_prev_lsn,
+                LogRecordType::Begin,
+            ));
+            txn3_prev_lsn = ctx.log_manager.append_log_record(begin_txn3);
+            
+            // Interleave operations between transactions
+            for i in 0..5 {
+                // Transaction 1 operation
+                let op_txn1 = Arc::new(LogRecord::new_page_record(
+                    txn1_id,
+                    txn1_prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (100 + i) as PageId,
+                ));
+                txn1_prev_lsn = ctx.log_manager.append_log_record(op_txn1);
+                
+                // Transaction 2 operation
+                let op_txn2 = Arc::new(LogRecord::new_page_record(
+                    txn2_id,
+                    txn2_prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (200 + i) as PageId,
+                ));
+                txn2_prev_lsn = ctx.log_manager.append_log_record(op_txn2);
+                
+                // Transaction 3 operation
+                let op_txn3 = Arc::new(LogRecord::new_page_record(
+                    txn3_id,
+                    txn3_prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (300 + i) as PageId,
+                ));
+                txn3_prev_lsn = ctx.log_manager.append_log_record(op_txn3);
+            }
+            
+            // Commit transaction 1
+            let commit_txn1 = Arc::new(LogRecord::new_transaction_record(
+                txn1_id,
+                txn1_prev_lsn,
+                LogRecordType::Commit,
+            ));
+            let txn1_commit_lsn = ctx.log_manager.append_log_record(commit_txn1);
+            
+            // Abort transaction 2 
+            let abort_txn2 = Arc::new(LogRecord::new_transaction_record(
+                txn2_id,
+                txn2_prev_lsn,
+                LogRecordType::Abort,
+            ));
+            let txn2_abort_lsn = ctx.log_manager.append_log_record(abort_txn2);
+            
+            // More operations for transaction 3
+            for i in 5..8 {
+                let op_txn3 = Arc::new(LogRecord::new_page_record(
+                    txn3_id,
+                    txn3_prev_lsn,
+                    LogRecordType::NewPage,
+                    i as PageId,
+                    (300 + i) as PageId,
+                ));
+                txn3_prev_lsn = ctx.log_manager.append_log_record(op_txn3);
+            }
+            
+            // Commit transaction 3
+            let commit_txn3 = Arc::new(LogRecord::new_transaction_record(
+                txn3_id,
+                txn3_prev_lsn,
+                LogRecordType::Commit,
+            ));
+            let txn3_commit_lsn = ctx.log_manager.append_log_record(commit_txn3);
+            
+            // Verify all transaction records were persisted
+            let final_persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            assert!(final_persistent_lsn >= txn1_commit_lsn);
+            assert!(final_persistent_lsn >= txn2_abort_lsn);
+            assert!(final_persistent_lsn >= txn3_commit_lsn);
+            
             ctx.log_manager.shut_down();
         }
     }
