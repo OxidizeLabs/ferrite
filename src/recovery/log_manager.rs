@@ -1027,6 +1027,9 @@ mod tests {
                 ctx.log_manager.append_log_record(commit_record);
             }
             
+            // Add a small delay to ensure all commits are processed
+            sleep(Duration::from_millis(20));
+            
             // Check that persistent LSN has been updated
             let persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert!(persistent_lsn != INVALID_LSN, 
@@ -1041,6 +1044,23 @@ mod tests {
             
             // Start flush thread
             ctx.log_manager.run_flush_thread();
+            
+            // Initialize flush thread with a marker record and wait for it to be processed
+            let init_record = Arc::new(LogRecord::new_transaction_record(
+                999 as TxnId,
+                INVALID_LSN,
+                LogRecordType::Commit,
+            ));
+            let init_lsn = ctx.log_manager.append_log_record(init_record);
+            
+            // Wait for initial record to be flushed
+            sleep(Duration::from_millis(50));
+            
+            // Verify the flush thread is working
+            let initial_persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            assert!(initial_persistent_lsn >= init_lsn, 
+                "Flush thread initialization failed: persistent LSN {} not updated to {}", 
+                initial_persistent_lsn, init_lsn);
             
             // Track LSNs before and after each batch
             let mut batch_end_lsns = Vec::new();
@@ -1061,18 +1081,26 @@ mod tests {
                     last_batch_lsn = ctx.log_manager.append_log_record(log_record);
                 }
                 
+                // Add a commit record to force a flush
+                let commit_record = Arc::new(LogRecord::new_transaction_record(
+                    (batch * 100) as TxnId,  // Use the first txn_id from this batch
+                    last_batch_lsn,
+                    LogRecordType::Commit,
+                ));
+                last_batch_lsn = ctx.log_manager.append_log_record(commit_record);
+                
                 batch_end_lsns.push(last_batch_lsn);
                 
                 // Wait for flush to happen
-                sleep(Duration::from_millis(20));
+                sleep(Duration::from_millis(50));
                 
                 let end_persistent_lsn = ctx.log_manager.get_persistent_lsn();
                 
                 // Persistent LSN should have advanced
                 assert!(
-                    end_persistent_lsn >= start_persistent_lsn, 
-                    "Batch {}: Persistent LSN should advance from {} to {}",
-                    batch, start_persistent_lsn, end_persistent_lsn
+                    end_persistent_lsn >= last_batch_lsn, 
+                    "Batch {}: Persistent LSN should be at least {} but was {}",
+                    batch, last_batch_lsn, end_persistent_lsn
                 );
             }
             
