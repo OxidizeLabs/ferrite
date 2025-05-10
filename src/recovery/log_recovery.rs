@@ -7,6 +7,7 @@ use crate::concurrency::transaction::Transaction;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::recovery::wal_manager::WALManager;
+use crate::recovery::log_iterator::LogIterator;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::table::tuple::Tuple;
@@ -100,11 +101,11 @@ impl LogRecoveryManager {
         let mut dirty_page_table = DirtyPageTable::new();
         let mut start_redo_lsn = INVALID_LSN;
 
-        // Scan the log from beginning to end
-        let mut offset = 0;
-        let log_manager = self.log_manager.read();
+        // Create a log iterator to safely read through the log
+        let mut log_iterator = LogIterator::new(self.disk_manager.clone());
         
-        while let Some(log_record) = log_manager.read_log_record(offset) {
+        // Process each log record
+        while let Some(log_record) = log_iterator.next() {
             let lsn = log_record.get_lsn();
             let txn_id = log_record.get_txn_id();
 
@@ -151,9 +152,6 @@ impl LogRecoveryManager {
                 }
                 LogRecordType::Invalid => {}
             }
-
-            // Update offset for next read
-            offset += log_record.get_size() as u64;
         }
 
         debug!(
@@ -183,16 +181,15 @@ impl LogRecoveryManager {
             start_redo_lsn
         );
 
-        // Similar to analyze, scan log but this time redo all operations
-        let mut offset = 0;
-        let log_manager = self.log_manager.read();
+        // Create a log iterator to safely read through the log
+        let mut log_iterator = LogIterator::new(self.disk_manager.clone());
         
-        while let Some(log_record) = log_manager.read_log_record(offset) {
+        // Process each log record
+        while let Some(log_record) = log_iterator.next() {
             let lsn = log_record.get_lsn();
 
             // Skip records before start_redo_lsn
             if lsn < start_redo_lsn {
-                offset += log_record.get_size() as u64;
                 continue;
             }
 
@@ -224,8 +221,6 @@ impl LogRecoveryManager {
                 debug!("Redoing operation at LSN {}", lsn);
                 self.redo_record(&log_record)?;
             }
-
-            offset += log_record.get_size() as u64;
         }
 
         info!("Redo phase complete");
@@ -246,7 +241,6 @@ impl LogRecoveryManager {
         }
 
         info!("Undoing {} active transactions", active_txns.len());
-        let log_manager = self.log_manager.read();
 
         // For each active transaction, undo its operations in reverse LSN order
         for txn_id in active_txns {
@@ -255,47 +249,56 @@ impl LogRecoveryManager {
             // Start from the last LSN of this transaction
             let mut current_lsn = txn_table.get_prev_lsn(txn_id).unwrap_or(INVALID_LSN);
 
+            // Build a map of LSN to offset in the log file
+            // This requires a full scan of the log to build the LSN-to-offset mapping
+            let lsn_to_offset_map = self.build_lsn_offset_map()?;
+
             // Continue until we reach the BEGIN record or INVALID_LSN
             while current_lsn != INVALID_LSN {
-                // Read the log record at this LSN
-                // In a real implementation, we would need to calculate the offset for this LSN
-                let offset = current_lsn; // Simplified - assuming LSN equals offset
+                // Get the offset for this LSN
+                if let Some(offset) = lsn_to_offset_map.get(&current_lsn) {
+                    // Create a LogIterator at this specific offset
+                    let mut single_record_iterator = LogIterator::with_offset(self.disk_manager.clone(), *offset);
+                    
+                    if let Some(log_record) = single_record_iterator.next() {
+                        if log_record.get_txn_id() == txn_id {
+                            match log_record.get_log_record_type() {
+                                LogRecordType::Begin => {
+                                    // We've reached the beginning of this transaction
+                                    debug!("Reached BEGIN record for transaction {}", txn_id);
+                                    break;
+                                }
+                                LogRecordType::Insert => {
+                                    // Undo insert by deleting
+                                    self.undo_insert(&log_record)?;
+                                }
+                                LogRecordType::Update => {
+                                    // Undo update by restoring old value
+                                    self.undo_update(&log_record)?;
+                                }
+                                LogRecordType::MarkDelete => {
+                                    // Undo delete by restoring tuple
+                                    self.undo_delete(&log_record)?;
+                                }
+                                LogRecordType::NewPage => {
+                                    // Don't need to undo new page creation
+                                }
+                                _ => {} // Ignore other record types for undo
+                            }
 
-                if let Some(log_record) = log_manager.read_log_record(offset) {
-                    if log_record.get_txn_id() == txn_id {
-                        match log_record.get_log_record_type() {
-                            LogRecordType::Begin => {
-                                // We've reached the beginning of this transaction
-                                debug!("Reached BEGIN record for transaction {}", txn_id);
-                                break;
-                            }
-                            LogRecordType::Insert => {
-                                // Undo insert by deleting
-                                self.undo_insert(&log_record)?;
-                            }
-                            LogRecordType::Update => {
-                                // Undo update by restoring old value
-                                self.undo_update(&log_record)?;
-                            }
-                            LogRecordType::MarkDelete => {
-                                // Undo delete by restoring tuple
-                                self.undo_delete(&log_record)?;
-                            }
-                            LogRecordType::NewPage => {
-                                // Don't need to undo new page creation
-                            }
-                            _ => {} // Ignore other record types for undo
+                            // Move to previous LSN
+                            current_lsn = log_record.get_prev_lsn();
+                        } else {
+                            // This shouldn't happen in a well-formed log
+                            warn!("Found record for different transaction during undo");
+                            break;
                         }
-
-                        // Move to previous LSN
-                        current_lsn = log_record.get_prev_lsn();
                     } else {
-                        // This shouldn't happen in a well-formed log
-                        warn!("Found record for different transaction during undo");
+                        warn!("Could not read log record during undo");
                         break;
                     }
                 } else {
-                    warn!("Could not read log record during undo");
+                    warn!("Could not find offset for LSN {} during undo", current_lsn);
                     break;
                 }
             }
@@ -309,17 +312,28 @@ impl LogRecoveryManager {
         Ok(())
     }
 
-    /// Parse a log record from raw bytes
-    ///
-    /// # Parameters
-    /// - `data`: The raw log record data
+    /// Builds a map from LSN to file offset for efficient record lookup during undo
     ///
     /// # Returns
-    /// An optional LogRecord if parsing was successful
-    fn parse_log_record(&self, data: &[u8]) -> Option<LogRecord> {
-        // Use the LogManager to parse the log record
-        let log_manager = self.log_manager.read();
-        log_manager.parse_log_record(data)
+    /// A HashMap mapping LSN to file offset
+    fn build_lsn_offset_map(&self) -> Result<HashMap<Lsn, u64>, String> {
+        let mut map = HashMap::new();
+        let mut log_iterator = LogIterator::new(self.disk_manager.clone());
+        
+        // Track the current offset
+        let mut current_offset = 0;
+        
+        while let Some(log_record) = log_iterator.next() {
+            let lsn = log_record.get_lsn();
+            
+            // Store the offset for this LSN
+            map.insert(lsn, current_offset);
+            
+            // Update the offset for the next record
+            current_offset = log_iterator.get_offset();
+        }
+        
+        Ok(map)
     }
 
     /// Get the page ID from a log record
@@ -451,9 +465,9 @@ impl TxnTable {
     }
 
     fn update_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
-        if self.table.contains_key(&txn_id) {
-            self.table.insert(txn_id, lsn);
-        }
+        // Always update or add the transaction to the table
+        // This ensures transactions with only update records are still tracked
+        self.table.insert(txn_id, lsn);
     }
 
     fn remove_txn(&mut self, txn_id: TxnId) {
