@@ -58,69 +58,84 @@ impl LogIterator {
         }
 
         let mut buffer = vec![0u8; self.buffer_size];
-        match self.disk_manager.read_log(&mut buffer, self.current_offset) {
-            Ok(true) => {
-                // Check if the buffer contains an empty/all-zeros record
-                // which might indicate we've reached the end of valid data
-                if buffer.iter().all(|&b| b == 0) {
-                    debug!("Reached end of log file data at offset {}", self.current_offset);
+        
+        // Maximum number of attempts to find a valid record
+        let max_attempts = 100;
+        let mut attempts = 0;
+        
+        while attempts < max_attempts {
+            match self.disk_manager.read_log(&mut buffer, self.current_offset) {
+                Ok(true) => {
+                    // Check if the buffer contains an empty/all-zeros record
+                    // which might indicate we've reached the end of valid data
+                    if buffer.iter().all(|&b| b == 0) {
+                        debug!("Reached end of log file data at offset {}", self.current_offset);
+                        self.reached_eof = true;
+                        return None;
+                    }
+
+                    // Attempt to parse the log record
+                    match LogRecord::from_bytes(&buffer) {
+                        Ok(record) => {
+                            let record_size = record.get_size();
+                            
+                            // Additional validation for records to catch corrupted entries
+                            // that somehow pass the basic parsing
+                            if record_size <= 0 || record_size > 1_000_000 ||
+                               record.get_log_record_type() == LogRecordType::Invalid {
+                                warn!(
+                                    "Invalid record detected at offset {}: size={}, type={:?}, skipping",
+                                    self.current_offset, record_size, record.get_log_record_type()
+                                );
+                                self.current_offset += 1;
+                                attempts += 1;
+                                continue;
+                            }
+
+                            debug!(
+                                "Read valid log record: type={:?}, size={}, LSN={}, txn_id={}",
+                                record.get_log_record_type(),
+                                record_size,
+                                record.get_lsn(),
+                                record.get_txn_id()
+                            );
+
+                            // Advance to next record
+                            self.current_offset += record_size as u64;
+                            return Some(record);
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to parse log record at offset {}: {}",
+                                self.current_offset, e
+                            );
+                            
+                            // Skip forward by 1 byte and try again
+                            self.current_offset += 1;
+                            attempts += 1;
+                            
+                            // Continue to next attempt without returning
+                            continue;
+                        }
+                    }
+                }
+                Ok(false) | Err(_) => {
+                    // Error reading data or explicit EOF indication
+                    debug!("Reached EOF or error at offset {}", self.current_offset);
                     self.reached_eof = true;
                     return None;
                 }
-
-                // Attempt to parse the log record
-                match LogRecord::from_bytes(&buffer) {
-                    Ok(record) => {
-                        let record_size = record.get_size();
-                        
-                        // Validate record size to prevent integer overflow
-                        if record_size <= 0 || record_size > 1_000_000 {
-                            warn!(
-                                "Invalid record size {} at offset {}, stopping iteration",
-                                record_size, self.current_offset
-                            );
-                            self.reached_eof = true;
-                            return None;
-                        }
-
-                        debug!(
-                            "Read valid log record: type={:?}, size={}, LSN={}, txn_id={}",
-                            record.get_log_record_type(),
-                            record_size,
-                            record.get_lsn(),
-                            record.get_txn_id()
-                        );
-
-                        // Advance to next record
-                        self.current_offset += record_size as u64;
-                        Some(record)
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to parse log record at offset {}: {}",
-                            self.current_offset, e
-                        );
-                        // Attempt to recover by skipping this corrupted record
-                        // In a production environment, you might want to implement
-                        // more sophisticated recovery mechanisms
-                        self.current_offset += 4;  // Skip some bytes and try again
-                        if self.current_offset > self.buffer_size as u64 * 2 {
-                            // If we've skipped too far, assume end of valid data
-                            self.reached_eof = true;
-                            None
-                        } else {
-                            self.next()  // Recursively try the next position
-                        }
-                    }
-                }
-            }
-            Ok(false) | Err(_) => {
-                // Error reading data or explicit EOF indication
-                debug!("Reached EOF or error at offset {}", self.current_offset);
-                self.reached_eof = true;
-                None
             }
         }
+        
+        // If we've made too many attempts without finding a valid record,
+        // assume we've reached the end of valid data
+        warn!(
+            "Made {} unsuccessful attempts to parse log records starting at offset {}, giving up",
+            max_attempts, self.current_offset
+        );
+        self.reached_eof = true;
+        None
     }
 
     /// Resets the iterator to the beginning of the log file.
@@ -397,17 +412,21 @@ mod tests {
         // Read and verify the sequence
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
         
-        let first = iter.next().unwrap();
-        assert_eq!(first.get_txn_id(), 42);
-        assert_eq!(first.get_log_record_type(), LogRecordType::Begin);
+        // We should get exactly two valid records
+        let records = iter.collect();
+        assert_eq!(records.len(), 2, "Expected exactly 2 records, got {}", records.len());
         
-        let second = iter.next().unwrap();
-        assert_eq!(second.get_txn_id(), 42);
-        assert_eq!(second.get_log_record_type(), LogRecordType::Commit);
-        assert_eq!(second.get_prev_lsn(), begin_lsn);
+        // Verify the first record is BEGIN
+        assert_eq!(records[0].get_txn_id(), 42);
+        assert_eq!(records[0].get_log_record_type(), LogRecordType::Begin);
         
-        // No more records
-        assert!(iter.next().is_none());
+        // Verify the second record is COMMIT with proper prev_lsn
+        assert_eq!(records[1].get_txn_id(), 42);
+        assert_eq!(records[1].get_log_record_type(), LogRecordType::Commit);
+        assert_eq!(records[1].get_prev_lsn(), begin_lsn);
+        
+        // The iterator should be at the end now
+        assert!(iter.is_end(), "Iterator should be at the end");
     }
 
     #[test]
@@ -485,13 +504,14 @@ mod tests {
         assert!(read1.is_some());
         assert_eq!(read1.unwrap().get_txn_id(), 1);
         
-        // The corrupted data should be skipped (internally)
-        // And we should either reach EOF or get the second record
-        // depending on how the corruption recovery is implemented
+        // With our improved corruption recovery, we should be able to
+        // skip over the corrupted data and find the second record
         let read2 = iter.next();
+        assert!(read2.is_some());
+        assert_eq!(read2.unwrap().get_txn_id(), 2);
         
-        // In our implementation, we should reach EOF after corruption
-        assert!(read2.is_none());
+        // After reading all valid records, we should reach EOF
+        assert!(iter.next().is_none());
         assert!(iter.is_end());
     }
 } 
