@@ -488,10 +488,8 @@ mod tests {
 
             let meta = Arc::new(TupleMeta::new(0));
             for values in tuples {
-                let mut tuple = Tuple::new(&values, &schema.clone(), RID::new(0, 0));
-
                 table_heap
-                    .insert_tuple(meta.clone(), &mut tuple)
+                    .insert_tuple_from_values(values, &schema, meta.clone())
                     .map_err(|e| e.to_string())?;
             }
             Ok(())

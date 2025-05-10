@@ -234,15 +234,14 @@ mod tests {
         )
     }
 
-    fn create_test_tuple(schema: &Schema, id: i32, name: &str, age: i32) -> (TupleMeta, Tuple) {
+    fn create_test_values(schema: &Schema, id: i32, name: &str, age: i32) -> (TupleMeta, Vec<Value>) {
         let values = vec![
             Value::new(id),
             Value::new(name.to_string()),
             Value::new(age),
         ];
-        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         let meta = TupleMeta::new(0);
-        (meta, tuple)
+        (meta, values)
     }
 
     #[test]
@@ -271,9 +270,9 @@ mod tests {
         let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
-            let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
+            let (meta, values) = create_test_values(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(Arc::from(meta), &mut tuple)
+                .insert_tuple_from_values(values, &schema, Arc::from(meta))
                 .expect("Failed to insert tuple");
         }
 
@@ -396,9 +395,9 @@ mod tests {
         let test_data = vec![(1, "Alice", 25)];
 
         for (id, name, age) in test_data.iter() {
-            let (meta, mut tuple) = create_test_tuple(&schema, *id, name, *age);
+            let (meta, values) = create_test_values(&schema, *id, name, *age);
             table_heap_guard
-                .insert_tuple(Arc::from(meta), &mut tuple)
+                .insert_tuple_from_values(values, &schema, Arc::from(meta))
                 .expect("Failed to insert tuple");
         }
 

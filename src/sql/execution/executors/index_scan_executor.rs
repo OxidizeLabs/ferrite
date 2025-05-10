@@ -607,16 +607,11 @@ mod index_scan_executor_tests {
 
             // Insert test data
             for i in 1..=10 {
-                let mut tuple = Tuple::new(
-                    &vec![Value::new(i as i32), Value::new(i as i32 * 10)],
-                    &schema,
-                    RID::new(0, i),
-                );
-                let tuple_meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
+                let values =  vec![Value::new(i), Value::new(i * 10)];
 
                 // Insert using transactional table heap
                 let rid = txn_table_heap
-                    .insert_tuple(tuple_meta, &mut tuple, transaction_context.clone())
+                    .insert_tuple_from_values(values, &schema, transaction_context.clone())
                     .unwrap();
 
                 // Insert into index
@@ -649,12 +644,12 @@ mod index_scan_executor_tests {
         )))
     }
 
-    fn create_test_tuple(schema: &Schema, id: i32) -> Tuple {
+    fn create_test_values(schema: &Schema, id: i32) -> Vec<Value> {
         let values = vec![
             Value::new(id),      // id column
             Value::new(id * 10), // value column
         ];
-        Tuple::new(&values, &schema, RID::new(0, 0))
+        values
     }
 
     // Add this new struct for testing
@@ -923,10 +918,9 @@ mod index_scan_executor_tests {
 
             // Insert test data
             for i in 1..=10 {
-                let mut tuple = create_test_tuple(&schema, i);
-                let meta = Arc::new(TupleMeta::new(0));
+                let values = create_test_values(&schema, i);
                 table_heap
-                    .insert_tuple(meta, &mut tuple, transaction_context.clone())
+                    .insert_tuple_from_values(values, &schema, transaction_context.clone())
                     .unwrap();
             }
 

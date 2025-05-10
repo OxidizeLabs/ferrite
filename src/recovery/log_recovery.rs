@@ -519,6 +519,8 @@ mod tests {
     use crate::storage::table::tuple::Tuple;
     use std::fs;
     use std::path::Path;
+    use std::thread::sleep;
+    use std::time::Duration;
 
     // Common test context for all test modules
     pub struct TestContext {
@@ -628,6 +630,8 @@ mod tests {
             self.wal_manager.write_commit_record(&flush_txn);
             
             self.wal_manager.force_run_flush_thread();
+
+            sleep(Duration::from_millis(20));
         }
     }
 
@@ -639,6 +643,8 @@ mod tests {
 
     /// Tests for the analysis phase of log recovery
     mod analysis_tests {
+        use std::time::Duration;
+        use tokio::time::sleep;
         use super::*;
 
         /// Test analyzing logs with no transactions
@@ -718,6 +724,8 @@ mod tests {
             
             // Simulate crash before commit
             ctx.simulate_crash();
+            
+            // sleep(Duration::from_millis(10));
             
             // Analysis should show one active transaction
             let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();

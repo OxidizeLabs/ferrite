@@ -24,7 +24,7 @@ CREATE TABLE products (
 # Test basic insert
 statement ok
 INSERT INTO users (id, name, age, email, is_active, created_at) 
-VALUES (1, 'Alice', 25, 'alice@test.com', true, 1000);
+VALUES (1, 'Alice', 25, 'alice@test.com', true, TIMESTAMP 1000);
 
 # Verify insert
 query ITIT
