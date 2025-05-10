@@ -80,6 +80,7 @@ impl NestedIndexJoinExecutor {
         let mut joined_values = left_tuple.get_values().clone();
         joined_values.extend(right_tuple.get_values().clone());
 
+        // Create tuple with combined values and a placeholder RID
         Arc::new(Tuple::new(
             &joined_values,
             &self.get_output_schema(),
@@ -449,21 +450,14 @@ mod tests {
         debug!("Right table OID: {}", right_table_info.get_table_oidt());
 
         // Insert data into left table
-        let left_data = vec![(1, "A"), (2, "B"), (3, "C")];
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, value) in left_data {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(id), Value::new(value.to_string())],
-                &left_schema,
-                RID::new(0, 0),
-            );
-            let rid = left_table
-                .insert_tuple(left_tuple_meta.clone(), &mut tuple)
+        
+        // Insert each tuple separately with proper Value objects
+        for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
+            let values = vec![Value::new(id), Value::new(value)];
+            left_table
+                .insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone())
                 .expect("Failed to insert into left table");
-            debug!(
-                "Inserted into left table: id={}, value={} at RID={:?}",
-                id, value, rid
-            );
         }
 
         // Verify left table's first page ID
@@ -473,21 +467,14 @@ mod tests {
         );
 
         // Insert data into right table
-        let right_data = vec![(1, "X"), (2, "Y"), (4, "Z")];
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, data) in right_data {
-            let mut tuple = Tuple::new(
-                &vec![Value::new(id), Value::new(data.to_string())],
-                &right_schema,
-                RID::new(0, 0),
-            );
-            let rid = right_table
-                .insert_tuple(right_tuple_meta.clone(), &mut tuple)
+        
+        // Insert each tuple separately with proper Value objects
+        for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
+            let values = vec![Value::new(id), Value::new(data)];
+            right_table
+                .insert_tuple_from_values(values, &right_schema, right_tuple_meta.clone())
                 .expect("Failed to insert into right table");
-            debug!(
-                "Inserted into right table: id={}, data={} at RID={:?}",
-                id, data, rid
-            );
         }
 
         // Verify right table's first page ID

@@ -1303,10 +1303,9 @@ mod tests {
                 )),
                 Value::new(20 + i),
             ];
-            let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
-            let meta = TupleMeta::new(0);
+            let meta = Arc::new(TupleMeta::new(0));
 
-            match table_heap.insert_tuple(Arc::new(meta), &tuple) {
+            match table_heap.insert_tuple_from_values(values, &schema, meta) {
                 Ok(rid) => {
                     debug!("Inserted tuple {} with RID {:?}", i, rid);
                     page_ids.insert(rid.get_page_id());
@@ -1460,10 +1459,9 @@ mod tests {
                 Value::new(format!("name{}", i)),
                 Value::new(20 + i),
             ];
-            let mut tuple = Tuple::new(&values, &schema, RID::new(0, 0));
-            let meta = TupleMeta::new(0);
+            let meta = Arc::new(TupleMeta::new(0));
             let rid = table_heap
-                .insert_tuple(Arc::new(meta), &mut tuple)
+                .insert_tuple_from_values(values, &schema, meta)
                 .expect("Insert failed");
             rids.push(rid);
         }

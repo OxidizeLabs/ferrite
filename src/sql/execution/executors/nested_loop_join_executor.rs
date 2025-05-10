@@ -365,20 +365,18 @@ mod tests {
                 .unwrap();
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &users_schema, meta)
                     .unwrap();
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &posts_schema, meta)
                     .unwrap();
             }
         }
@@ -572,20 +570,18 @@ mod tests {
                 .unwrap();
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &users_schema, meta)
                     .unwrap();
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &posts_schema, meta)
                     .unwrap();
             }
         }
@@ -721,11 +717,10 @@ mod tests {
             ];
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &users_schema, meta)
                     .unwrap();
             }
         }
@@ -834,20 +829,18 @@ mod tests {
             ];
 
             for row in users_data {
-                let mut tuple = Tuple::new(&row, &users_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 users_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &users_schema, meta)
                     .unwrap();
             }
 
             for row in posts_data {
-                let mut tuple = Tuple::new(&row, &posts_schema, RID::new(0, 0));
                 let meta = Arc::new(TupleMeta::new(0));
                 posts_table
                     .get_table_heap()
-                    .insert_tuple(meta, &mut tuple)
+                    .insert_tuple_from_values(row, &posts_schema, meta)
                     .unwrap();
             }
         }
