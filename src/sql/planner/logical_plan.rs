@@ -158,6 +158,61 @@ pub enum LogicalPlanType {
         partitions: Vec<Arc<Expression>>,
         schema: Schema,
     },
+    StartTransaction {
+        isolation_level: Option<String>,
+        read_only: bool, 
+    },
+    Commit,
+    Rollback {
+        chain: bool,
+    },
+    Savepoint {
+        name: String,
+    },
+    ReleaseSavepoint {
+        name: String,
+    },
+    Drop {
+        object_type: String,  // "TABLE", "INDEX", etc.
+        if_exists: bool,
+        names: Vec<String>,
+        cascade: bool,
+    },
+    CreateSchema {
+        schema_name: String,
+        if_not_exists: bool,
+    },
+    CreateDatabase {
+        db_name: String,
+        if_not_exists: bool,
+    },
+    AlterTable {
+        table_name: String,
+        operation: String, // "ADD COLUMN", "DROP COLUMN", etc.
+    },
+    CreateView {
+        view_name: String,
+        schema: Schema,
+        if_not_exists: bool,
+    },
+    AlterView {
+        view_name: String,
+        operation: String,
+    },
+    ShowTables {
+        schema_name: Option<String>, 
+    },
+    ShowDatabases,
+    ShowColumns {
+        table_name: String,
+        schema_name: Option<String>,
+    },
+    Use {
+        db_name: String,
+    },
+    Explain {
+        plan: Box<LogicalPlan>, // The plan being explained
+    },
 }
 
 pub trait LogicalToPhysical {
@@ -472,6 +527,99 @@ impl LogicalPlan {
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
+            LogicalPlanType::StartTransaction { isolation_level, read_only } => {
+                result.push_str(&format!("{}→ StartTransaction\n", indent_str));
+                if let Some(level) = isolation_level {
+                    result.push_str(&format!("{}   Isolation Level: {}\n", indent_str, level));
+                }
+                if *read_only {
+                    result.push_str(&format!("{}   Read Only: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::Commit => {
+                result.push_str(&format!("{}→ Commit\n", indent_str));
+            }
+            LogicalPlanType::Rollback { chain } => {
+                result.push_str(&format!("{}→ Rollback\n", indent_str));
+                if *chain {
+                    result.push_str(&format!("{}   Chain: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::Savepoint { name } => {
+                result.push_str(&format!("{}→ Savepoint\n", indent_str));
+                result.push_str(&format!("{}   Name: {}\n", indent_str, name));
+            }
+            LogicalPlanType::ReleaseSavepoint { name } => {
+                result.push_str(&format!("{}→ ReleaseSavepoint\n", indent_str));
+                result.push_str(&format!("{}   Name: {}\n", indent_str, name));
+            }
+            LogicalPlanType::Drop { object_type, if_exists, names, cascade } => {
+                result.push_str(&format!("{}→ Drop {}\n", indent_str, object_type));
+                if *if_exists {
+                    result.push_str(&format!("{}   IF EXISTS: true\n", indent_str));
+                }
+                result.push_str(&format!("{}   Objects: [{}]\n", indent_str, names.join(", ")));
+                if *cascade {
+                    result.push_str(&format!("{}   CASCADE: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::CreateSchema { schema_name, if_not_exists } => {
+                result.push_str(&format!("{}→ CreateSchema\n", indent_str));
+                result.push_str(&format!("{}   Schema Name: {}\n", indent_str, schema_name));
+                if *if_not_exists {
+                    result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::CreateDatabase { db_name, if_not_exists } => {
+                result.push_str(&format!("{}→ CreateDatabase\n", indent_str));
+                result.push_str(&format!("{}   Database Name: {}\n", indent_str, db_name));
+                if *if_not_exists {
+                    result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::AlterTable { table_name, operation } => {
+                result.push_str(&format!("{}→ AlterTable\n", indent_str));
+                result.push_str(&format!("{}   Table Name: {}\n", indent_str, table_name));
+                result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
+            }
+            LogicalPlanType::CreateView { view_name, schema, if_not_exists } => {
+                result.push_str(&format!("{}→ CreateView\n", indent_str));
+                result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+                if *if_not_exists {
+                    result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
+                }
+            }
+            LogicalPlanType::AlterView { view_name, operation } => {
+                result.push_str(&format!("{}→ AlterView\n", indent_str));
+                result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
+                result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
+            }
+            LogicalPlanType::ShowTables { schema_name } => {
+                result.push_str(&format!("{}→ ShowTables\n", indent_str));
+                if let Some(name) = schema_name {
+                    result.push_str(&format!("{}   Schema: {}\n", indent_str, name));
+                }
+            }
+            LogicalPlanType::ShowDatabases => {
+                result.push_str(&format!("{}→ ShowDatabases\n", indent_str));
+            }
+            LogicalPlanType::ShowColumns { table_name, schema_name } => {
+                result.push_str(&format!("{}→ ShowColumns\n", indent_str));
+                result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
+                if let Some(name) = schema_name {
+                    result.push_str(&format!("{}   Schema: {}\n", indent_str, name));
+                }
+            }
+            LogicalPlanType::Use { db_name } => {
+                result.push_str(&format!("{}→ Use\n", indent_str));
+                result.push_str(&format!("{}   Database: {}\n", indent_str, db_name));
+            }
+            LogicalPlanType::Explain { plan } => {
+                result.push_str(&format!("{}→ Explain\n", indent_str));
+                // Add the inner plan with increased indentation
+                result.push_str(&plan.explain(depth + 1));
+            }
         }
 
         // Add children recursively
@@ -548,7 +696,7 @@ impl LogicalPlan {
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         // Get the input schema
-        let input_schema = input.get_schema();
+        let Some(input_schema) = input.get_schema() else { todo!() };
 
         // Calculate column mappings
         let mut column_mappings = Vec::with_capacity(expressions.len());
@@ -791,18 +939,54 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn get_schema(&self) -> Schema {
+    pub fn top_n_per_group(
+        k: usize,
+        sort_expressions: Vec<Arc<Expression>>,
+        groups: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::TopNPerGroup {
+                k,
+                sort_expressions,
+                groups,
+                schema,
+            },
+            vec![input],
+        ))
+    }
+
+    pub fn window(
+        group_by: Vec<Arc<Expression>>,
+        aggregates: Vec<Arc<Expression>>,
+        partitions: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Window {
+                group_by,
+                aggregates,
+                partitions,
+                schema,
+            },
+            vec![input],
+        ))
+    }
+
+    pub fn get_schema(&self) -> Option<Schema> {
         match &self.plan_type {
-            LogicalPlanType::CreateTable { schema, .. } => schema.clone(),
+            LogicalPlanType::CreateTable { schema, .. } => Some(schema.clone()),
             LogicalPlanType::CreateIndex { .. } => self.children[0].get_schema(),
-            LogicalPlanType::MockScan { schema, .. } => schema.clone(),
-            LogicalPlanType::TableScan { schema, .. } => schema.clone(),
-            LogicalPlanType::IndexScan { schema, .. } => schema.clone(),
-            LogicalPlanType::Projection { schema, .. } => (*schema).clone(),
-            LogicalPlanType::Insert { schema, .. } => schema.clone(),
-            LogicalPlanType::Values { schema, .. } => schema.clone(),
-            LogicalPlanType::Delete { schema, .. } => schema.clone(),
-            LogicalPlanType::Update { schema, .. } => schema.clone(),
+            LogicalPlanType::MockScan { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::TableScan { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::IndexScan { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Projection { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Insert { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Values { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Delete { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Update { schema, .. } => Some(schema.clone()),
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
                 right_schema,
@@ -810,21 +994,21 @@ impl LogicalPlan {
             } => {
                 // For nested loop joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
-                let left_child_schema = if !self.children.is_empty() {
+                let Some(left_child_schema) = (if !self.children.is_empty() {
                     self.children[0].get_schema()
                 } else {
-                    left_schema.clone()
-                };
+                    Some(left_schema.clone())
+                }) else { todo!() };
 
-                let right_child_schema = if self.children.len() > 1 {
+                let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
-                    right_schema.clone()
-                };
+                    Some(right_schema.clone())
+                }) else { todo!() };
 
                 // Extract table names/aliases from the schemas
-                let left_alias = extract_table_alias_from_schema(&left_child_schema);
-                let right_alias = extract_table_alias_from_schema(&right_child_schema);
+                let Some(left_alias) = extract_table_alias_from_schema(&left_child_schema) else { todo!() };
+                let Some(right_alias) = extract_table_alias_from_schema(&right_child_schema) else { todo!() };
 
                 debug!(
                     "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
@@ -844,7 +1028,7 @@ impl LogicalPlan {
                     merged_columns.push(col.clone());
                 }
 
-                Schema::new(merged_columns)
+                Some(Schema::new(merged_columns))
             }
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
@@ -853,17 +1037,17 @@ impl LogicalPlan {
             } => {
                 // For nested index joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
-                let left_child_schema = if !self.children.is_empty() {
+                let Some(left_child_schema) = (if !self.children.is_empty() {
                     self.children[0].get_schema()
                 } else {
-                    left_schema.clone()
-                };
+                    Some(left_schema.clone())
+                }) else { todo!() };
 
-                let right_child_schema = if self.children.len() > 1 {
+                let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
-                    right_schema.clone()
-                };
+                    Some(right_schema.clone())
+                }) else { todo!() };
 
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
@@ -887,7 +1071,7 @@ impl LogicalPlan {
                     merged_columns.push(col.clone());
                 }
 
-                Schema::new(merged_columns)
+                Some(Schema::new(merged_columns))
             }
             LogicalPlanType::HashJoin {
                 left_schema,
@@ -896,21 +1080,21 @@ impl LogicalPlan {
             } => {
                 // For hash joins, we need to preserve all table aliases
                 // Get the schemas from the children to ensure we have the most up-to-date schemas
-                let left_child_schema = if !self.children.is_empty() {
+                let Some(left_child_schema) = (if !self.children.is_empty() {
                     self.children[0].get_schema()
                 } else {
-                    left_schema.clone()
-                };
+                    Some(left_schema.clone())
+                }) else { todo!() };
 
-                let right_child_schema = if self.children.len() > 1 {
+                let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
-                    right_schema.clone()
-                };
+                    Some(right_schema.clone())
+                }) else { todo!() };
 
                 // Extract table names/aliases from the schemas
-                let left_alias = extract_table_alias_from_schema(&left_child_schema);
-                let right_alias = extract_table_alias_from_schema(&right_child_schema);
+                let left_alias = extract_table_alias_from_schema(&left_child_schema).unwrap();
+                let right_alias = extract_table_alias_from_schema(&right_child_schema).unwrap();
 
                 debug!(
                     "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
@@ -930,16 +1114,155 @@ impl LogicalPlan {
                     merged_columns.push(col.clone());
                 }
 
-                Schema::new(merged_columns)
+                Some(Schema::new(merged_columns))
             }
-            LogicalPlanType::Filter { output_schema, .. } => output_schema.clone(),
-            LogicalPlanType::Sort { schema, .. } => schema.clone(),
-            LogicalPlanType::Limit { schema, .. } => schema.clone(),
-            LogicalPlanType::TopN { schema, .. } => schema.clone(),
-            LogicalPlanType::Aggregate { schema, .. } => schema.clone(),
-            LogicalPlanType::TopNPerGroup { schema, .. } => schema.clone(),
-            LogicalPlanType::Window { schema, .. } => schema.clone(),
+            LogicalPlanType::Filter { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Sort { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Limit { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::TopN { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Window { schema, .. } => Some(schema.clone()),
+            _ => None
         }
+    }
+
+    // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
+    
+    pub fn start_transaction(isolation_level: Option<String>, read_only: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::StartTransaction {
+                isolation_level,
+                read_only,
+            },
+            vec![], // No children for transaction control statements
+        ))
+    }
+    
+    pub fn commit() -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Commit,
+            vec![], // No children
+        ))
+    }
+    
+    pub fn rollback(chain: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Rollback { chain },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn savepoint(name: String) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Savepoint { name },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn release_savepoint(name: String) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ReleaseSavepoint { name },
+            vec![], // No children
+        ))
+    }
+    
+    // ---------- PRIORITY 2: DDL OPERATIONS ----------
+    
+    pub fn drop(object_type: String, if_exists: bool, names: Vec<String>, cascade: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Drop {
+                object_type,
+                if_exists,
+                names,
+                cascade,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn create_schema(schema_name: String, if_not_exists: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::CreateSchema {
+                schema_name,
+                if_not_exists,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn create_database(db_name: String, if_not_exists: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::CreateDatabase {
+                db_name,
+                if_not_exists,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn alter_table(table_name: String, operation: String) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::AlterTable {
+                table_name,
+                operation,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn create_view(view_name: String, schema: Schema, if_not_exists: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::CreateView {
+                view_name,
+                schema,
+                if_not_exists,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn alter_view(view_name: String, operation: String) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::AlterView {
+                view_name,
+                operation,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    // ---------- PRIORITY 3: DATABASE INFORMATION ----------
+    
+    pub fn show_tables(schema_name: Option<String>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowTables { schema_name },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn show_databases() -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowDatabases,
+            vec![], // No children
+        ))
+    }
+    
+    pub fn show_columns(table_name: String, schema_name: Option<String>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowColumns {
+                table_name,
+                schema_name,
+            },
+            vec![], // No children
+        ))
+    }
+    
+    pub fn use_db(db_name: String) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Use { db_name },
+            vec![], // No children
+        ))
     }
 }
 
@@ -1416,6 +1739,139 @@ impl<'a> PlanConverter<'a> {
                     child_plans,
                 )))
             }
+
+            LogicalPlanType::StartTransaction { isolation_level, read_only } => {
+                // Create a dummy plan that will perform start transaction
+                Ok(PlanNode::CommandResult(format!(
+                    "START TRANSACTION{}{}",
+                    if let Some(level) = isolation_level {
+                        format!(" ISOLATION LEVEL {}", level)
+                    } else {
+                        String::new()
+                    },
+                    if *read_only { " READ ONLY" } else { "" }
+                )))
+            }
+            
+            LogicalPlanType::Commit => {
+                // Create a dummy plan that will perform commit
+                Ok(PlanNode::CommandResult("COMMIT".to_string()))
+            }
+            
+            LogicalPlanType::Rollback { chain } => {
+                // Create a dummy plan that will perform rollback
+                Ok(PlanNode::CommandResult(format!(
+                    "ROLLBACK{}",
+                    if *chain { " AND CHAIN" } else { "" }
+                )))
+            }
+            
+            LogicalPlanType::Savepoint { name } => {
+                // Create a dummy plan that will create savepoint
+                Ok(PlanNode::CommandResult(format!("SAVEPOINT {}", name)))
+            }
+            
+            LogicalPlanType::ReleaseSavepoint { name } => {
+                // Create a dummy plan that will release savepoint
+                Ok(PlanNode::CommandResult(format!("RELEASE SAVEPOINT {}", name)))
+            }
+            
+            LogicalPlanType::Drop { object_type, if_exists, names, cascade } => {
+                // Create a dummy plan that will perform drop operation
+                Ok(PlanNode::CommandResult(format!(
+                    "DROP {} {}{}{}",
+                    object_type,
+                    if *if_exists { "IF EXISTS " } else { "" },
+                    names.join(", "),
+                    if *cascade { " CASCADE" } else { "" }
+                )))
+            }
+            
+            LogicalPlanType::CreateSchema { schema_name, if_not_exists } => {
+                // Create a dummy plan that will create schema
+                Ok(PlanNode::CommandResult(format!(
+                    "CREATE SCHEMA {}{}", 
+                    if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    schema_name
+                )))
+            }
+            
+            LogicalPlanType::CreateDatabase { db_name, if_not_exists } => {
+                // Create a dummy plan that will create database
+                Ok(PlanNode::CommandResult(format!(
+                    "CREATE DATABASE {}{}", 
+                    if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    db_name
+                )))
+            }
+            
+            LogicalPlanType::AlterTable { table_name, operation } => {
+                // Create a dummy plan that will alter table
+                Ok(PlanNode::CommandResult(format!(
+                    "ALTER TABLE {} {}", 
+                    table_name, 
+                    operation
+                )))
+            }
+            
+            LogicalPlanType::CreateView { view_name, schema: _, if_not_exists } => {
+                // Create a dummy plan that will create view
+                Ok(PlanNode::CommandResult(format!(
+                    "CREATE VIEW {}{}", 
+                    if *if_not_exists { "IF NOT EXISTS " } else { "" },
+                    view_name
+                )))
+            }
+            
+            LogicalPlanType::AlterView { view_name, operation } => {
+                // Create a dummy plan that will alter view
+                Ok(PlanNode::CommandResult(format!(
+                    "ALTER VIEW {} {}", 
+                    view_name, 
+                    operation
+                )))
+            }
+            
+            LogicalPlanType::ShowTables { schema_name } => {
+                // Create a dummy plan that will show tables
+                Ok(PlanNode::CommandResult(format!(
+                    "SHOW TABLES{}", 
+                    if let Some(name) = schema_name {
+                        format!(" FROM {}", name)
+                    } else {
+                        String::new()
+                    }
+                )))
+            }
+            
+            LogicalPlanType::ShowDatabases => {
+                // Create a dummy plan that will show databases
+                Ok(PlanNode::CommandResult("SHOW DATABASES".to_string()))
+            }
+            
+            LogicalPlanType::ShowColumns { table_name, schema_name } => {
+                // Create a dummy plan that will show columns
+                Ok(PlanNode::CommandResult(format!(
+                    "SHOW COLUMNS FROM {}{}", 
+                    table_name,
+                    if let Some(name) = schema_name {
+                        format!(" FROM {}", name)
+                    } else {
+                        String::new()
+                    }
+                )))
+            }
+            
+            LogicalPlanType::Use { db_name } => {
+                // Create a dummy plan that will use database
+                Ok(PlanNode::CommandResult(format!("USE {}", db_name)))
+            }
+            
+            LogicalPlanType::Explain { plan } => {
+                // Create a recursive explain plan
+                let inner_plan = plan.to_physical_plan()?;
+                Ok(PlanNode::Explain(Box::new(inner_plan)))
+            }
         }
     }
 }
@@ -1540,25 +1996,6 @@ fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
     }
 
     None
-}
-
-// Add these helper methods for Expression
-impl Expression {
-    pub fn column_ref(name: &str, type_id: TypeId) -> Self {
-        Self::ColumnRef(ColumnRefExpression::new(
-            0,
-            0,
-            Column::new(name, type_id),
-            vec![],
-        ))
-    }
-
-    pub fn binary_op(left: Self, op: BinaryOperator, right: Self) -> Self {
-        let left_arc = Arc::new(left);
-        let right_arc = Arc::new(right);
-        let children = vec![left_arc.clone(), right_arc.clone()];
-        Self::BinaryOp(BinaryOpExpression::new(left_arc, right_arc, op, children).unwrap())
-    }
 }
 
 #[cfg(test)]
@@ -1812,7 +2249,7 @@ mod tests {
 
         let plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
         let result_schema = plan.get_schema();
-        assert_eq!(schema, result_schema);
+        assert_eq!(schema, result_schema.unwrap());
     }
 
     #[test]

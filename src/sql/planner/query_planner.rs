@@ -47,6 +47,8 @@ impl QueryPlanner {
                 returning: _,
                 or: _,
             } => self.plan_builder.build_update_plan(stmt),
+            Statement::Delete(_) => self.plan_builder.build_delete_plan(stmt),
+            Statement::Explain { .. } => self.plan_builder.build_explain_plan(stmt),
             _ => Err(format!("Unsupported statement type: {:?}", stmt)),
         }
     }
