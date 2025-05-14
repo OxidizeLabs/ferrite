@@ -14,6 +14,7 @@ pub mod nested_loop_join_plan;
 pub mod projection_plan;
 pub mod seq_scan_plan;
 pub mod sort_plan;
+pub mod start_transaction_plan;
 pub mod table_scan_plan;
 pub mod topn_per_group_plan;
 pub mod topn_plan;

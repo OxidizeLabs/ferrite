@@ -37,6 +37,7 @@ use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::sql::execution::plans::sort_plan::SortNode;
+use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
 use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::sql::execution::plans::topn_plan::TopNNode;
@@ -72,6 +73,8 @@ pub enum PlanType {
     CreateTable,
     CreateIndex,
     TableScan,
+    Transaction,
+    Explain,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,6 +100,7 @@ pub enum PlanNode {
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
     CreateIndex(CreateIndexPlanNode),
+    StartTransaction(StartTransactionPlanNode),
     Empty,
     CommandResult(String),
     Explain(Box<PlanNode>)
@@ -157,6 +161,7 @@ impl PlanNode {
             PlanNode::Window(node) => node,
             PlanNode::CreateTable(node) => node,
             PlanNode::CreateIndex(node) => node,
+            PlanNode::StartTransaction(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
@@ -510,6 +515,15 @@ impl PlanNode {
                         .join("\n"),
                 );
             },
+            PlanNode::StartTransaction(node) => {
+                result.push_str(&format!("{}→ StartTransaction\n", indent));
+                if let Some(level) = node.get_isolation_level() {
+                    result.push_str(&format!("{}   Isolation Level: {}\n", indent, level));
+                }
+                if node.is_read_only() {
+                    result.push_str(&format!("{}   Read Only: true\n", indent));
+                }
+            },
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!()
         }
         result
@@ -693,6 +707,20 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
+            PlanNode::StartTransaction(_) => {
+                // For transaction operations, simply return a CommandResult
+                Ok(Box::new(MockExecutor::new(
+                    context,
+                    Arc::new(MockScanNode::new(
+                        Schema::new(vec![]),
+                        "START TRANSACTION".to_string(),
+                        vec![],
+                    )),
+                    0,
+                    vec![],
+                    Schema::new(vec![]),
+                )))
+            },
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
     }

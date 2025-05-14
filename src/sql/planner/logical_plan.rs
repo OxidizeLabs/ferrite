@@ -2679,4 +2679,376 @@ mod tests {
             _ => panic!("Expected TopN plan"),
         }
     }
+
+    #[test]
+    fn test_top_n_per_group_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("category", TypeId::VarChar),
+            Column::new("sales", TypeId::Integer),
+        ]);
+
+        // Sort by sales column
+        let sort_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            2,
+            Column::new("sales", TypeId::Integer),
+            vec![],
+        )));
+
+        // Group by category column
+        let group_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            Column::new("category", TypeId::VarChar),
+            vec![],
+        )));
+
+        let sort_expressions = vec![sort_expr.clone()];
+        let groups = vec![group_expr.clone()];
+        let scan_plan = LogicalPlan::table_scan("products".to_string(), schema.clone(), 1);
+
+        let top_n_per_group_plan = LogicalPlan::top_n_per_group(
+            3,
+            sort_expressions.clone(),
+            groups.clone(),
+            schema.clone(),
+            scan_plan,
+        );
+
+        match top_n_per_group_plan.plan_type {
+            LogicalPlanType::TopNPerGroup {
+                k,
+                sort_expressions: se,
+                groups: g,
+                schema: s,
+            } => {
+                assert_eq!(k, 3);
+                assert_eq!(sort_expressions, se);
+                assert_eq!(groups, g);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected TopNPerGroup plan"),
+        }
+    }
+
+    #[test]
+    fn test_window_plan() {
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("department", TypeId::VarChar),
+            Column::new("salary", TypeId::Integer),
+        ]);
+
+        // Create window function expressions
+        let salary_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            2,
+            Column::new("salary", TypeId::Integer),
+            vec![],
+        )));
+
+        // Partition by department
+        let dept_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            Column::new("department", TypeId::VarChar),
+            vec![],
+        )));
+
+        let aggregates = vec![Arc::new(Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Avg,
+            vec![salary_col.clone()],
+            Column::new("avg_salary", TypeId::Decimal),
+            "AVG".to_string(),
+        )))];
+
+        let group_by = Vec::new(); // No group by
+        let partitions = vec![dept_col.clone()]; // Partition by department
+        let scan_plan = LogicalPlan::table_scan("employees".to_string(), schema.clone(), 1);
+
+        let window_plan = LogicalPlan::window(
+            group_by.clone(),
+            aggregates.clone(),
+            partitions.clone(),
+            schema.clone(),
+            scan_plan,
+        );
+
+        match window_plan.plan_type {
+            LogicalPlanType::Window {
+                group_by: g,
+                aggregates: a,
+                partitions: p,
+                schema: s,
+            } => {
+                assert_eq!(group_by, g);
+                assert_eq!(aggregates, a);
+                assert_eq!(partitions, p);
+                assert_eq!(schema, s);
+            }
+            _ => panic!("Expected Window plan"),
+        }
+    }
+
+    #[test]
+    fn test_explain_plan() {
+        // Create a simple scan plan to explain
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        
+        // First, create a scan plan
+        let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+        
+        // Then create an explain logical plan that wraps the scan plan
+        // This calls the static explain constructor method, not the instance method
+        let explain_plan = LogicalPlan {
+            plan_type: LogicalPlanType::Explain {
+                plan: Box::new(*scan_plan),
+            },
+            children: vec![],
+        };
+        
+        // Validate the plan structure
+        match &explain_plan.plan_type {
+            LogicalPlanType::Explain { plan } => {
+                // Check that the inner plan is our scan plan
+                match &plan.plan_type {
+                    LogicalPlanType::TableScan { table_name, .. } => {
+                        assert_eq!(table_name, "users");
+                    }
+                    _ => panic!("Expected TableScan as inner plan"),
+                }
+            }
+            _ => panic!("Expected Explain plan"),
+        }
+    }
+
+    #[test]
+    fn test_start_transaction_plan() {
+        let isolation_level = Some("SERIALIZABLE".to_string());
+        let read_only = true;
+        
+        let plan = LogicalPlan::start_transaction(isolation_level.clone(), read_only);
+        
+        match &plan.plan_type {
+            LogicalPlanType::StartTransaction { isolation_level: level, read_only: ro } => {
+                assert_eq!(isolation_level, *level);
+                assert_eq!(read_only, *ro);
+            }
+            _ => panic!("Expected StartTransaction plan"),
+        }
+    }
+
+    #[test]
+    fn test_commit_plan() {
+        let plan = LogicalPlan::commit();
+        
+        match plan.plan_type {
+            LogicalPlanType::Commit => {
+                // Successfully created a Commit plan
+            }
+            _ => panic!("Expected Commit plan"),
+        }
+    }
+
+    #[test]
+    fn test_rollback_plan() {
+        let chain = true;
+        let plan = LogicalPlan::rollback(chain);
+        
+        match &plan.plan_type {
+            LogicalPlanType::Rollback { chain: c } => {
+                assert_eq!(chain, *c);
+            }
+            _ => panic!("Expected Rollback plan"),
+        }
+    }
+
+    #[test]
+    fn test_savepoint_plan() {
+        let name = "SAVEPOINT1".to_string();
+        let plan = LogicalPlan::savepoint(name.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::Savepoint { name: n } => {
+                assert_eq!(name, *n);
+            }
+            _ => panic!("Expected Savepoint plan"),
+        }
+    }
+
+    #[test]
+    fn test_release_savepoint_plan() {
+        let name = "SAVEPOINT1".to_string();
+        let plan = LogicalPlan::release_savepoint(name.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::ReleaseSavepoint { name: n } => {
+                assert_eq!(name, *n);
+            }
+            _ => panic!("Expected ReleaseSavepoint plan"),
+        }
+    }
+
+    #[test]
+    fn test_drop_plan() {
+        let object_type = "TABLE".to_string();
+        let if_exists = true;
+        let names = vec!["users".to_string(), "orders".to_string()];
+        let cascade = true;
+        
+        let plan = LogicalPlan::drop(object_type.clone(), if_exists, names.clone(), cascade);
+        
+        match &plan.plan_type {
+            LogicalPlanType::Drop { object_type: ot, if_exists: ie, names: n, cascade: c } => {
+                assert_eq!(object_type, *ot);
+                assert_eq!(if_exists, *ie);
+                assert_eq!(names, *n);
+                assert_eq!(cascade, *c);
+            }
+            _ => panic!("Expected Drop plan"),
+        }
+    }
+
+    #[test]
+    fn test_create_schema_plan() {
+        let schema_name = "test_schema".to_string();
+        let if_not_exists = true;
+        
+        let plan = LogicalPlan::create_schema(schema_name.clone(), if_not_exists);
+        
+        match &plan.plan_type {
+            LogicalPlanType::CreateSchema { schema_name: sn, if_not_exists: ine } => {
+                assert_eq!(schema_name, *sn);
+                assert_eq!(if_not_exists, *ine);
+            }
+            _ => panic!("Expected CreateSchema plan"),
+        }
+    }
+
+    #[test]
+    fn test_create_database_plan() {
+        let db_name = "test_db".to_string();
+        let if_not_exists = true;
+        
+        let plan = LogicalPlan::create_database(db_name.clone(), if_not_exists);
+        
+        match &plan.plan_type {
+            LogicalPlanType::CreateDatabase { db_name: dn, if_not_exists: ine } => {
+                assert_eq!(db_name, *dn);
+                assert_eq!(if_not_exists, *ine);
+            }
+            _ => panic!("Expected CreateDatabase plan"),
+        }
+    }
+
+    #[test]
+    fn test_alter_table_plan() {
+        let table_name = "users".to_string();
+        let operation = "ADD COLUMN email VARCHAR".to_string();
+        
+        let plan = LogicalPlan::alter_table(table_name.clone(), operation.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::AlterTable { table_name: tn, operation: op } => {
+                assert_eq!(table_name, *tn);
+                assert_eq!(operation, *op);
+            }
+            _ => panic!("Expected AlterTable plan"),
+        }
+    }
+
+    #[test]
+    fn test_create_view_plan() {
+        let view_name = "active_users".to_string();
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let if_not_exists = true;
+        
+        let plan = LogicalPlan::create_view(view_name.clone(), schema.clone(), if_not_exists);
+        
+        match &plan.plan_type {
+            LogicalPlanType::CreateView { view_name: vn, schema: s, if_not_exists: ine } => {
+                assert_eq!(view_name, *vn);
+                assert_eq!(schema, *s);
+                assert_eq!(if_not_exists, *ine);
+            }
+            _ => panic!("Expected CreateView plan"),
+        }
+    }
+
+    #[test]
+    fn test_alter_view_plan() {
+        let view_name = "active_users".to_string();
+        let operation = "RENAME TO recent_users".to_string();
+        
+        let plan = LogicalPlan::alter_view(view_name.clone(), operation.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::AlterView { view_name: vn, operation: op } => {
+                assert_eq!(view_name, *vn);
+                assert_eq!(operation, *op);
+            }
+            _ => panic!("Expected AlterView plan"),
+        }
+    }
+
+    #[test]
+    fn test_show_tables_plan() {
+        let schema_name = Some("public".to_string());
+        let plan = LogicalPlan::show_tables(schema_name.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::ShowTables { schema_name: sn } => {
+                assert_eq!(schema_name, *sn);
+            }
+            _ => panic!("Expected ShowTables plan"),
+        }
+    }
+
+    #[test]
+    fn test_show_databases_plan() {
+        let plan = LogicalPlan::show_databases();
+        
+        match plan.plan_type {
+            LogicalPlanType::ShowDatabases => {
+                // Successfully created a ShowDatabases plan
+            }
+            _ => panic!("Expected ShowDatabases plan"),
+        }
+    }
+
+    #[test]
+    fn test_show_columns_plan() {
+        let table_name = "users".to_string();
+        let schema_name = Some("public".to_string());
+        
+        let plan = LogicalPlan::show_columns(table_name.clone(), schema_name.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::ShowColumns { table_name: tn, schema_name: sn } => {
+                assert_eq!(table_name, *tn);
+                assert_eq!(schema_name, *sn);
+            }
+            _ => panic!("Expected ShowColumns plan"),
+        }
+    }
+
+    #[test]
+    fn test_use_db_plan() {
+        let db_name = "test_db".to_string();
+        let plan = LogicalPlan::use_db(db_name.clone());
+        
+        match &plan.plan_type {
+            LogicalPlanType::Use { db_name: dn } => {
+                assert_eq!(db_name, *dn);
+            }
+            _ => panic!("Expected Use plan"),
+        }
+    }
 }
