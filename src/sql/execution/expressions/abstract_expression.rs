@@ -55,9 +55,11 @@ use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
+use sqlparser::ast::BinaryOperator;
+use crate::types_db::type_id::TypeId;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
+pub enum  Expression {
     Case(CaseExpression),
     Cast(CastExpression),
     Constant(ConstantExpression),
@@ -123,6 +125,24 @@ pub trait ExpressionOps {
     fn get_return_type(&self) -> &Column;
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression>;
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError>;
+}
+
+impl Expression {
+    pub fn column_ref(name: &str, type_id: TypeId) -> Self {
+        Self::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            Column::new(name, type_id),
+            vec![],
+        ))
+    }
+
+    pub fn binary_op(left: Self, op: BinaryOperator, right: Self) -> Self {
+        let left_arc = Arc::new(left);
+        let right_arc = Arc::new(right);
+        let children = vec![left_arc.clone(), right_arc.clone()];
+        Self::BinaryOp(BinaryOpExpression::new(left_arc, right_arc, op, children).unwrap())
+    }
 }
 
 impl ExpressionOps for Expression {

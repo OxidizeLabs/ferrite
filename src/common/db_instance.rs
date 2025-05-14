@@ -898,6 +898,14 @@ mod tests {
                     &mut writer,
                 )
                 .unwrap();
+
+            db_instance
+                .execute_sql(
+                    "INSERT INTO TABLE test VALUES (0, 'abc');",
+                    IsolationLevel::ReadCommitted,
+                    &mut writer,
+                )
+                .unwrap();
         }
 
         // Second session - open existing DB (should trigger recovery)

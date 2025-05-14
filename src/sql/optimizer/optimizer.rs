@@ -424,7 +424,7 @@ impl Optimizer {
             Ok(child)
         } else {
             // Calculate column mappings
-            let input_schema = child.get_schema();
+            let input_schema = child.get_schema().unwrap();
             let mut column_mappings = Vec::with_capacity(expressions.len());
 
             for expr in &expressions {

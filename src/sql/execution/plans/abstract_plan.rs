@@ -98,6 +98,8 @@ pub enum PlanNode {
     CreateTable(CreateTablePlanNode),
     CreateIndex(CreateIndexPlanNode),
     Empty,
+    CommandResult(String),
+    Explain(Box<PlanNode>)
 }
 
 pub trait AbstractPlanNode: Display {
@@ -156,6 +158,7 @@ impl PlanNode {
             PlanNode::CreateTable(node) => node,
             PlanNode::CreateIndex(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
+            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
     }
 
@@ -506,7 +509,8 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
+            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!()
         }
         result
     }
@@ -689,6 +693,7 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
+            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
     }
 }
