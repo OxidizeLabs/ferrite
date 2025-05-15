@@ -65,7 +65,9 @@ impl LogicalPlanBuilder {
 
         // Handle ORDER BY if present
         if let Some(order_by) = &query.order_by {
-            let Some(schema) = current_plan.get_schema() else { todo!() };
+            let Some(schema) = current_plan.get_schema() else {
+                todo!()
+            };
 
             // Build sort expressions manually
             let mut sort_exprs = Vec::new();
@@ -91,7 +93,9 @@ impl LogicalPlanBuilder {
 
         // Handle LIMIT if present
         if let Some(limit_clause) = &query.limit_clause {
-            let Some(schema) = current_plan.get_schema() else { todo!() };
+            let Some(schema) = current_plan.get_schema() else {
+                todo!()
+            };
 
             // Extract the limit expression based on the LimitClause variant
             let limit_expr = match limit_clause {
@@ -123,7 +127,9 @@ impl LogicalPlanBuilder {
 
         // Handle FETCH if present (similar to LIMIT)
         if let Some(fetch) = &query.fetch {
-            let Some(schema) = current_plan.get_schema() else { todo!() };
+            let Some(schema) = current_plan.get_schema() else {
+                todo!()
+            };
             // In sqlparser 0.56.0, fetch.quantity is an Option<Expr>
             if let Some(quantity_expr) = &fetch.quantity {
                 if let Expr::Value(value_with_span) = quantity_expr {
@@ -165,7 +171,9 @@ impl LogicalPlanBuilder {
         // Process WHERE clause if it exists
         if let Some(where_clause) = &select.selection {
             debug!("Processing WHERE clause");
-            let Some(parsing_schema) = current_plan.get_schema().clone() else { todo!() };
+            let Some(parsing_schema) = current_plan.get_schema().clone() else {
+                todo!()
+            };
             debug!("Schema has {} columns", parsing_schema.get_column_count());
             let filter_expr = self
                 .expression_parser
@@ -184,7 +192,9 @@ impl LogicalPlanBuilder {
             GroupByExpr::All(_) => true,
             GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
         };
-        let Some(schema) = current_plan.get_schema() else { todo!() };
+        let Some(schema) = current_plan.get_schema() else {
+            todo!()
+        };
 
         // Parse all expressions in the projection to identify aggregates
         let mut has_aggregates = false;
@@ -310,7 +320,9 @@ impl LogicalPlanBuilder {
 
         // Apply SORT BY if it exists (Hive-specific)
         if !select.sort_by.is_empty() {
-            let Some(schema) = current_plan.get_schema() else { todo!() };
+            let Some(schema) = current_plan.get_schema() else {
+                todo!()
+            };
             let sort_exprs = select
                 .sort_by
                 .iter()
@@ -1079,64 +1091,119 @@ impl LogicalPlanBuilder {
     }
 
     // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
-    
-    pub fn build_start_transaction_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement start transaction plan
-        Err("StartTransaction not yet implemented".to_string())
+
+    pub fn build_start_transaction_plan(
+        &self,
+        modes: &Vec<TransactionMode>,
+        begin: &bool,
+        transaction: &Option<BeginTransactionKind>,
+        modifier: &Option<TransactionModifier>,
+        statements: &Vec<Statement>,
+        exception_statements: &Option<Vec<Statement>>,
+        has_end_keyword: &bool,
+    ) -> Result<Box<LogicalPlan>, String> {
+        // Initialize default transaction properties
+        let mut access_mode = TransactionAccessMode::ReadWrite;
+        let mut isolation_level = TransactionIsolationLevel::ReadCommitted;
+
+        // Parse transaction modes
+        for mode in modes {
+            match mode {
+                TransactionMode::AccessMode(am) => access_mode = *am,
+                TransactionMode::IsolationLevel(il) => isolation_level = *il,
+            }
+        }
+
+        // Log the transaction modes
+        debug!("Transaction Access Mode: {:?}, Isolation Level: {:?}", access_mode, isolation_level);
+
+        // Handle transaction modifiers
+        let transaction_modifier = modifier.clone();
+
+        // Determine if the transaction is read-only based on the access mode
+        let read_only = matches!(access_mode, TransactionAccessMode::ReadOnly);
+
+        // Determine the transaction kind
+        let transaction_kind = match transaction {
+            Some(BeginTransactionKind::Transaction) => "TRANSACTION",
+            Some(BeginTransactionKind::Work) => "WORK",
+            None => "",
+        };
+
+        // Determine if the transaction should begin
+        let begin_keyword = if *begin { "BEGIN" } else { "" };
+
+        // Create the logical plan for starting a transaction
+        let transaction_plan = LogicalPlan::start_transaction(
+            Some(isolation_level.to_string()),
+            read_only,
+            transaction_modifier,
+            statements.clone(),
+            exception_statements.clone(),
+            *has_end_keyword,
+        );
+
+        // Log the transaction initiation
+        debug!("Starting transaction: {} {}", begin_keyword, transaction_kind);
+
+        Ok(transaction_plan)
     }
-    
+
     pub fn build_commit_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement commit plan
         Err("Commit not yet implemented".to_string())
     }
-    
+
     pub fn build_rollback_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement rollback plan
         Err("Rollback not yet implemented".to_string())
     }
-    
+
     pub fn build_savepoint_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement savepoint plan
         Err("Savepoint not yet implemented".to_string())
     }
-    
-    pub fn build_release_savepoint_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+
+    pub fn build_release_savepoint_plan(
+        &self,
+        stmt: &Statement,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement release savepoint plan
         Err("ReleaseSavepoint not yet implemented".to_string())
     }
-    
+
     // ---------- PRIORITY 2: DDL OPERATIONS ----------
-    
+
     pub fn build_drop_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement drop plan
         Err("Drop not yet implemented".to_string())
     }
-    
+
     pub fn build_create_schema_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create schema plan
         Err("CreateSchema not yet implemented".to_string())
     }
-    
+
     pub fn build_create_database_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create database plan
         Err("CreateDatabase not yet implemented".to_string())
     }
-    
+
     pub fn build_alter_table_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter table plan
         Err("AlterTable not yet implemented".to_string())
     }
-    
+
     pub fn build_create_view_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create view plan
         Err("CreateView not yet implemented".to_string())
     }
-    
+
     pub fn build_alter_view_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter view plan
         Err("AlterView not yet implemented".to_string())
     }
-    
+
     pub fn build_delete_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         if let Statement::Delete(delete) = stmt {
             // Get table info
@@ -1148,17 +1215,17 @@ impl LogicalPlanBuilder {
                     if tables.len() > 1 {
                         return Err("DELETE from multiple tables not supported".to_string());
                     }
-                    
+
                     let table = &tables[0];
                     if !table.joins.is_empty() {
                         return Err("DELETE with JOIN not supported".to_string());
                     }
-                    
+
                     match &table.relation {
                         TableFactor::Table { name, .. } => name.to_string(),
                         _ => return Err("Only simple table deletes supported".to_string()),
                     }
-                },
+                }
                 FromTable::WithoutKeyword(tables) => {
                     if tables.is_empty() {
                         return Err("No table specified in DELETE statement".to_string());
@@ -1166,32 +1233,33 @@ impl LogicalPlanBuilder {
                     if tables.len() > 1 {
                         return Err("DELETE from multiple tables not supported".to_string());
                     }
-                    
+
                     let table = &tables[0];
                     if !table.joins.is_empty() {
                         return Err("DELETE with JOIN not supported".to_string());
                     }
-                    
+
                     match &table.relation {
                         TableFactor::Table { name, .. } => name.to_string(),
                         _ => return Err("Only simple table deletes supported".to_string()),
                     }
                 }
             };
-            
+
             // Get schema from catalog
             let binding = self.expression_parser.catalog();
             let catalog_guard = binding.read();
             let table_info = catalog_guard
                 .get_table(&table_name)
                 .ok_or_else(|| format!("Table '{}' not found", table_name))?;
-                
+
             let schema = table_info.get_table_schema();
             let table_oid = table_info.get_table_oidt();
-            
+
             // Create base table scan
-            let mut current_plan = LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
-            
+            let mut current_plan =
+                LogicalPlan::table_scan(table_name.clone(), schema.clone(), table_oid);
+
             // Add filter if WHERE clause exists
             if let Some(where_clause) = &delete.selection {
                 let predicate = Arc::new(
@@ -1206,42 +1274,47 @@ impl LogicalPlanBuilder {
                     current_plan,
                 );
             }
-            
+
             // Create delete plan node
-            Ok(LogicalPlan::delete(table_name, schema, table_oid, current_plan))
+            Ok(LogicalPlan::delete(
+                table_name,
+                schema,
+                table_oid,
+                current_plan,
+            ))
         } else {
             Err("Expected Delete statement".to_string())
         }
     }
-    
+
     // ---------- DATABASE INFORMATION ----------
-    
+
     pub fn build_show_tables_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show tables plan
         Err("ShowTables not yet implemented".to_string())
     }
-    
+
     pub fn build_show_databases_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show databases plan
         Err("ShowDatabases not yet implemented".to_string())
     }
-    
+
     pub fn build_show_columns_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show columns plan
         Err("ShowColumns not yet implemented".to_string())
     }
-    
+
     pub fn build_use_plan(&self, stmt: &Use) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement use plan
         Err("Use not yet implemented".to_string())
     }
-    
+
     // Add a helper method that directly creates the explain logical plan
     fn create_explain_plan(&self, inner_plan: &LogicalPlan) -> Box<LogicalPlan> {
         let schema = Schema::new(vec![]);
         // Create the Explain plan node using the static constructor
         Box::new(LogicalPlan::new(
-            LogicalPlanType::Explain { 
+            LogicalPlanType::Explain {
                 plan: Box::new(inner_plan.clone()),
             },
             vec![], // No children
@@ -1252,17 +1325,19 @@ impl LogicalPlanBuilder {
         if let Statement::Explain { statement, .. } = explain {
             let inner_plan = match statement.as_ref() {
                 Statement::Query(query) => self.build_query_plan(query)?,
-                Statement::Insert { .. } => return Err("EXPLAIN INSERT not yet supported".to_string()),
+                Statement::Insert { .. } => {
+                    return Err("EXPLAIN INSERT not yet supported".to_string());
+                }
                 _ => return Err(format!("EXPLAIN for this statement type not yet supported")),
             };
-            
+
             // Use the helper method to create the explain plan
             Ok(self.create_explain_plan(&inner_plan))
         } else {
             Err("Expected EXPLAIN statement".to_string())
         }
     }
-    
+
     pub fn build_explain_table_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement explain table plan
         Err("ExplainTable not yet implemented".to_string())
