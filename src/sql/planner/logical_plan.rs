@@ -39,6 +39,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ptr;
 use std::sync::Arc;
 use std::thread_local;
+use crate::concurrency::transaction::IsolationLevel;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
@@ -159,7 +160,7 @@ pub enum LogicalPlanType {
         schema: Schema,
     },
     StartTransaction {
-        isolation_level: Option<String>,
+        isolation_level: Option<IsolationLevel>,
         read_only: bool,
         transaction_modifier: Option<TransactionModifier>,
         statements: Vec<Statement>,
@@ -1143,7 +1144,7 @@ impl LogicalPlan {
 
     // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
     
-    pub fn start_transaction(isolation_level: Option<String>, read_only: bool, transaction_modifier: Option<TransactionModifier>, statements: Vec<Statement>, exception_statements: Option<Vec<Statement>>, has_end_keyword: bool) -> Box<Self> {
+    pub fn start_transaction(isolation_level: Option<IsolationLevel>, read_only: bool, transaction_modifier: Option<TransactionModifier>, statements: Vec<Statement>, exception_statements: Option<Vec<Statement>>, has_end_keyword: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::StartTransaction {
                 isolation_level,
@@ -2846,7 +2847,7 @@ mod tests {
 
     #[test]
     fn test_start_transaction_plan() {
-        let isolation_level = Some("SERIALIZABLE".to_string());
+        let isolation_level = Some(IsolationLevel::ReadCommitted);
         let read_only = true;
         let transaction_modifier = Some(TransactionModifier::Deferred);
         let statements = vec![Statement::Commit { chain: false, modifier: None, end: false }];
@@ -2854,7 +2855,7 @@ mod tests {
         let has_end_keyword = true;
 
         let plan = LogicalPlan::start_transaction(
-            isolation_level.clone(),
+            isolation_level,
             read_only,
             transaction_modifier.clone(),
             statements.clone(),

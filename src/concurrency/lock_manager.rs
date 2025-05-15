@@ -697,6 +697,7 @@ impl LockValidator {
             IsolationLevel::ReadCommitted => self.validate_read_committed(txn, lock_mode),
             IsolationLevel::RepeatableRead => self.validate_repeatable_read(txn, lock_mode),
             IsolationLevel::Serializable => Ok(()),
+            IsolationLevel::Snapshot => self.validate_snapshot(txn, lock_mode),
         }
     }
 
@@ -755,6 +756,18 @@ impl LockValidator {
             TransactionState::Running => Ok(()),
             TransactionState::Tainted => Err(LockError::TransactionAborted),
         }
+    }
+
+    /// Validates lock requests for SNAPSHOT isolation level
+    fn validate_snapshot(
+        &self,
+        txn: &Transaction,
+        lock_mode: LockMode,
+    ) -> Result<(), LockError> {
+        if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
+            txn.set_state(TransactionState::Shrinking);
+        }
+        Ok(())
     }
 }
 
@@ -873,6 +886,11 @@ impl LockManager {
                 }
             }
             IsolationLevel::Serializable => {
+                if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
+                    txn.set_state(TransactionState::Shrinking);
+                }
+            }
+            IsolationLevel::Snapshot => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
@@ -1009,6 +1027,11 @@ impl LockManager {
                 }
             }
             IsolationLevel::Serializable => {
+                if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
+                    txn.set_state(TransactionState::Shrinking);
+                }
+            }
+            IsolationLevel::Snapshot => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }

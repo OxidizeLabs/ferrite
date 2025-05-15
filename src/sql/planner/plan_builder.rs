@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::*;
 use std::sync::Arc;
+use crate::concurrency::transaction::IsolationLevel;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -1114,8 +1115,17 @@ impl LogicalPlanBuilder {
             }
         }
 
+        // Map AST isolation level to internal isolation level
+        let internal_isolation_level = match isolation_level {
+            TransactionIsolationLevel::ReadUncommitted => IsolationLevel::ReadUncommitted,
+            TransactionIsolationLevel::ReadCommitted => IsolationLevel::ReadCommitted,
+            TransactionIsolationLevel::RepeatableRead => IsolationLevel::RepeatableRead,
+            TransactionIsolationLevel::Serializable => IsolationLevel::Serializable,
+            TransactionIsolationLevel::Snapshot => IsolationLevel::Snapshot,
+        };
+
         // Log the transaction modes
-        debug!("Transaction Access Mode: {:?}, Isolation Level: {:?}", access_mode, isolation_level);
+        debug!("Transaction Access Mode: {:?}, Internal Isolation Level: {:?}", access_mode, internal_isolation_level);
 
         // Handle transaction modifiers
         let transaction_modifier = modifier.clone();
@@ -1135,7 +1145,7 @@ impl LogicalPlanBuilder {
 
         // Create the logical plan for starting a transaction
         let transaction_plan = LogicalPlan::start_transaction(
-            Some(isolation_level.to_string()),
+            Some(internal_isolation_level),
             read_only,
             transaction_modifier,
             statements.clone(),
@@ -2267,7 +2277,7 @@ mod tests {
             let plan = plan.unwrap();
             match plan.plan_type {
                 LogicalPlanType::StartTransaction { isolation_level, .. } => {
-                    assert_eq!(isolation_level, Some("SERIALIZABLE".to_string()));
+                    assert_eq!(isolation_level, Some(IsolationLevel::Serializable));
                 }
                 _ => panic!("Expected StartTransaction plan"),
             }
