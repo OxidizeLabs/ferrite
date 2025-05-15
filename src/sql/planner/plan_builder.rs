@@ -1202,13 +1202,23 @@ impl LogicalPlanBuilder {
     }
 
     pub fn build_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement savepoint plan
-        Err("Savepoint not yet implemented".to_string())
+        // Create the logical plan for creating a savepoint
+        debug!("Creating savepoint plan for: {}", stmt.value);
+        
+        // Create a savepoint plan
+        let savepoint_plan = LogicalPlan::savepoint(stmt.value.clone());
+        
+        Ok(savepoint_plan)
     }
 
     pub fn build_release_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement release savepoint plan
-        Err("ReleaseSavepoint not yet implemented".to_string())
+        // Create the logical plan for releasing a savepoint
+        debug!("Creating release savepoint plan for: {}", stmt.value);
+        
+        // Create a release savepoint plan
+        let release_savepoint_plan = LogicalPlan::release_savepoint(stmt.value.clone());
+        
+        Ok(release_savepoint_plan)
     }
 
     // ---------- PRIORITY 2: DDL OPERATIONS ----------
@@ -2389,6 +2399,49 @@ mod tests {
                     assert_eq!(isolation_level, Some(IsolationLevel::Serializable));
                 }
                 _ => panic!("Expected StartTransaction plan"),
+            }
+        }
+    }
+
+    // Add this at the end of the tests module
+    mod savepoint_tests {
+        use super::*;
+        use sqlparser::ast::{Ident, Statement};
+        use sqlparser::parser::ParserError;
+
+        #[test]
+        fn test_build_savepoint_plan() {
+            let mut fixture = TestContext::new("savepoint_test");
+            
+            // Create a logical plan builder directly
+            let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
+            
+            let savepoint_name = Ident::new("my_savepoint");
+            let plan = plan_builder.build_savepoint_plan(&savepoint_name).unwrap();
+            
+            match &plan.plan_type {
+                LogicalPlanType::Savepoint { name } => {
+                    assert_eq!(name, "my_savepoint");
+                }
+                _ => panic!("Expected Savepoint plan"),
+            }
+        }
+
+        #[test]
+        fn test_build_release_savepoint_plan() {
+            let mut fixture = TestContext::new("release_savepoint_test");
+            
+            // Create a logical plan builder directly
+            let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
+            
+            let savepoint_name = Ident::new("my_savepoint");
+            let plan = plan_builder.build_release_savepoint_plan(&savepoint_name).unwrap();
+            
+            match &plan.plan_type {
+                LogicalPlanType::ReleaseSavepoint { name } => {
+                    assert_eq!(name, "my_savepoint");
+                }
+                _ => panic!("Expected ReleaseSavepoint plan"),
             }
         }
     }
