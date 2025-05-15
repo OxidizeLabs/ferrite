@@ -32,6 +32,7 @@ pub enum IsolationLevel {
     ReadCommitted,
     RepeatableRead,
     Serializable,
+    Snapshot
 }
 
 /// Represents a link to a previous version of this tuple.
@@ -367,13 +368,13 @@ impl Transaction {
         match self.isolation_level {
             IsolationLevel::ReadUncommitted => {
                 let visible = !meta.is_deleted();
-                log::debug!("READ_UNCOMMITTED visibility: {}", visible);
+                debug!("READ_UNCOMMITTED visibility: {}", visible);
                 visible
             }
             IsolationLevel::ReadCommitted => {
                 let visible = (meta.is_committed() || meta.get_creator_txn_id() == self.txn_id)
                     && !meta.is_deleted();
-                log::debug!("READ_COMMITTED visibility: {}", visible);
+                debug!("READ_COMMITTED visibility: {}", visible);
                 visible
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
@@ -382,7 +383,8 @@ impl Transaction {
                     && !meta.is_deleted();
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
-            }
+            },
+            IsolationLevel::Snapshot => todo!()
         }
     }
 }
@@ -401,6 +403,7 @@ impl fmt::Display for IsolationLevel {
             IsolationLevel::ReadCommitted => "READ_COMMITTED",
             IsolationLevel::RepeatableRead => "REPEATABLE_READ",
             IsolationLevel::Serializable => "SERIALIZABLE",
+            IsolationLevel::Snapshot => "SNAPSHOT"
         };
         write!(f, "{}", name)
     }

@@ -370,6 +370,12 @@ impl TableHeap {
 
                 Err("No visible version found".to_string())
             }
+
+            IsolationLevel::Snapshot => {
+                // For SNAPSHOT, assume similar behavior to SERIALIZABLE for now
+                // This may involve checking for a consistent snapshot version
+                Ok((Arc::new(meta), Arc::new(tuple)))
+            }
         }
     }
 
