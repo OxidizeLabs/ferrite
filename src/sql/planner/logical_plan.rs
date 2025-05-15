@@ -1,6 +1,7 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
+use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
@@ -39,7 +40,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ptr;
 use std::sync::Arc;
 use std::thread_local;
-use crate::concurrency::transaction::IsolationLevel;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
@@ -178,7 +178,7 @@ pub enum LogicalPlanType {
         name: String,
     },
     Drop {
-        object_type: String,  // "TABLE", "INDEX", etc.
+        object_type: String, // "TABLE", "INDEX", etc.
         if_exists: bool,
         names: Vec<String>,
         cascade: bool,
@@ -205,7 +205,7 @@ pub enum LogicalPlanType {
         operation: String,
     },
     ShowTables {
-        schema_name: Option<String>, 
+        schema_name: Option<String>,
     },
     ShowDatabases,
     ShowColumns {
@@ -532,7 +532,14 @@ impl LogicalPlan {
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::StartTransaction { isolation_level, read_only, transaction_modifier, statements, exception_statements, has_end_keyword } => {
+            LogicalPlanType::StartTransaction {
+                isolation_level,
+                read_only,
+                transaction_modifier,
+                statements,
+                exception_statements,
+                has_end_keyword,
+            } => {
                 result.push_str(&format!("{}→ StartTransaction\n", indent_str));
                 if let Some(level) = isolation_level {
                     result.push_str(&format!("{}   Isolation Level: {}\n", indent_str, level));
@@ -541,11 +548,17 @@ impl LogicalPlan {
                     result.push_str(&format!("{}   Read Only: true\n", indent_str));
                 }
                 if let Some(modifier) = transaction_modifier {
-                    result.push_str(&format!("{}   Transaction Modifier: {:?}\n", indent_str, modifier));
+                    result.push_str(&format!(
+                        "{}   Transaction Modifier: {:?}\n",
+                        indent_str, modifier
+                    ));
                 }
                 result.push_str(&format!("{}   Statements: {:?}\n", indent_str, statements));
                 if let Some(exceptions) = exception_statements {
-                    result.push_str(&format!("{}   Exception Statements: {:?}\n", indent_str, exceptions));
+                    result.push_str(&format!(
+                        "{}   Exception Statements: {:?}\n",
+                        indent_str, exceptions
+                    ));
                 }
                 if *has_end_keyword {
                     result.push_str(&format!("{}   Has End Keyword: true\n", indent_str));
@@ -568,36 +581,58 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ ReleaseSavepoint\n", indent_str));
                 result.push_str(&format!("{}   Name: {}\n", indent_str, name));
             }
-            LogicalPlanType::Drop { object_type, if_exists, names, cascade } => {
+            LogicalPlanType::Drop {
+                object_type,
+                if_exists,
+                names,
+                cascade,
+            } => {
                 result.push_str(&format!("{}→ Drop {}\n", indent_str, object_type));
                 if *if_exists {
                     result.push_str(&format!("{}   IF EXISTS: true\n", indent_str));
                 }
-                result.push_str(&format!("{}   Objects: [{}]\n", indent_str, names.join(", ")));
+                result.push_str(&format!(
+                    "{}   Objects: [{}]\n",
+                    indent_str,
+                    names.join(", ")
+                ));
                 if *cascade {
                     result.push_str(&format!("{}   CASCADE: true\n", indent_str));
                 }
             }
-            LogicalPlanType::CreateSchema { schema_name, if_not_exists } => {
+            LogicalPlanType::CreateSchema {
+                schema_name,
+                if_not_exists,
+            } => {
                 result.push_str(&format!("{}→ CreateSchema\n", indent_str));
                 result.push_str(&format!("{}   Schema Name: {}\n", indent_str, schema_name));
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
             }
-            LogicalPlanType::CreateDatabase { db_name, if_not_exists } => {
+            LogicalPlanType::CreateDatabase {
+                db_name,
+                if_not_exists,
+            } => {
                 result.push_str(&format!("{}→ CreateDatabase\n", indent_str));
                 result.push_str(&format!("{}   Database Name: {}\n", indent_str, db_name));
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
             }
-            LogicalPlanType::AlterTable { table_name, operation } => {
+            LogicalPlanType::AlterTable {
+                table_name,
+                operation,
+            } => {
                 result.push_str(&format!("{}→ AlterTable\n", indent_str));
                 result.push_str(&format!("{}   Table Name: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
             }
-            LogicalPlanType::CreateView { view_name, schema, if_not_exists } => {
+            LogicalPlanType::CreateView {
+                view_name,
+                schema,
+                if_not_exists,
+            } => {
                 result.push_str(&format!("{}→ CreateView\n", indent_str));
                 result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
@@ -605,7 +640,10 @@ impl LogicalPlan {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
             }
-            LogicalPlanType::AlterView { view_name, operation } => {
+            LogicalPlanType::AlterView {
+                view_name,
+                operation,
+            } => {
                 result.push_str(&format!("{}→ AlterView\n", indent_str));
                 result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
@@ -619,7 +657,10 @@ impl LogicalPlan {
             LogicalPlanType::ShowDatabases => {
                 result.push_str(&format!("{}→ ShowDatabases\n", indent_str));
             }
-            LogicalPlanType::ShowColumns { table_name, schema_name } => {
+            LogicalPlanType::ShowColumns {
+                table_name,
+                schema_name,
+            } => {
                 result.push_str(&format!("{}→ ShowColumns\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 if let Some(name) = schema_name {
@@ -711,7 +752,9 @@ impl LogicalPlan {
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         // Get the input schema
-        let Some(input_schema) = input.get_schema() else { todo!() };
+        let Some(input_schema) = input.get_schema() else {
+            todo!()
+        };
 
         // Calculate column mappings
         let mut column_mappings = Vec::with_capacity(expressions.len());
@@ -1013,17 +1056,25 @@ impl LogicalPlan {
                     self.children[0].get_schema()
                 } else {
                     Some(left_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     Some(right_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 // Extract table names/aliases from the schemas
-                let Some(left_alias) = extract_table_alias_from_schema(&left_child_schema) else { todo!() };
-                let Some(right_alias) = extract_table_alias_from_schema(&right_child_schema) else { todo!() };
+                let Some(left_alias) = extract_table_alias_from_schema(&left_child_schema) else {
+                    todo!()
+                };
+                let Some(right_alias) = extract_table_alias_from_schema(&right_child_schema) else {
+                    todo!()
+                };
 
                 debug!(
                     "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
@@ -1056,13 +1107,17 @@ impl LogicalPlan {
                     self.children[0].get_schema()
                 } else {
                     Some(left_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     Some(right_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema);
@@ -1099,13 +1154,17 @@ impl LogicalPlan {
                     self.children[0].get_schema()
                 } else {
                     Some(left_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 let Some(right_child_schema) = (if self.children.len() > 1 {
                     self.children[1].get_schema()
                 } else {
                     Some(right_schema.clone())
-                }) else { todo!() };
+                }) else {
+                    todo!()
+                };
 
                 // Extract table names/aliases from the schemas
                 let left_alias = extract_table_alias_from_schema(&left_child_schema).unwrap();
@@ -1138,13 +1197,20 @@ impl LogicalPlan {
             LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Window { schema, .. } => Some(schema.clone()),
-            _ => None
+            _ => None,
         }
     }
 
     // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
-    
-    pub fn start_transaction(isolation_level: Option<IsolationLevel>, read_only: bool, transaction_modifier: Option<TransactionModifier>, statements: Vec<Statement>, exception_statements: Option<Vec<Statement>>, has_end_keyword: bool) -> Box<Self> {
+
+    pub fn start_transaction(
+        isolation_level: Option<IsolationLevel>,
+        read_only: bool,
+        transaction_modifier: Option<TransactionModifier>,
+        statements: Vec<Statement>,
+        exception_statements: Option<Vec<Statement>>,
+        has_end_keyword: bool,
+    ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::StartTransaction {
                 isolation_level,
@@ -1157,38 +1223,43 @@ impl LogicalPlan {
             vec![], // No children for transaction control statements
         ))
     }
-    
+
     pub fn commit() -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Commit,
             vec![], // No children
         ))
     }
-    
+
     pub fn rollback(chain: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Rollback { chain },
             vec![], // No children
         ))
     }
-    
+
     pub fn savepoint(name: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Savepoint { name },
             vec![], // No children
         ))
     }
-    
+
     pub fn release_savepoint(name: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ReleaseSavepoint { name },
             vec![], // No children
         ))
     }
-    
+
     // ---------- PRIORITY 2: DDL OPERATIONS ----------
-    
-    pub fn drop(object_type: String, if_exists: bool, names: Vec<String>, cascade: bool) -> Box<Self> {
+
+    pub fn drop(
+        object_type: String,
+        if_exists: bool,
+        names: Vec<String>,
+        cascade: bool,
+    ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Drop {
                 object_type,
@@ -1199,7 +1270,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn create_schema(schema_name: String, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateSchema {
@@ -1209,7 +1280,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn create_database(db_name: String, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateDatabase {
@@ -1219,7 +1290,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn alter_table(table_name: String, operation: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::AlterTable {
@@ -1229,7 +1300,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn create_view(view_name: String, schema: Schema, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateView {
@@ -1240,7 +1311,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn alter_view(view_name: String, operation: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::AlterView {
@@ -1250,23 +1321,23 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     // ---------- PRIORITY 3: DATABASE INFORMATION ----------
-    
+
     pub fn show_tables(schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowTables { schema_name },
             vec![], // No children
         ))
     }
-    
+
     pub fn show_databases() -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowDatabases,
             vec![], // No children
         ))
     }
-    
+
     pub fn show_columns(table_name: String, schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowColumns {
@@ -1276,7 +1347,7 @@ impl LogicalPlan {
             vec![], // No children
         ))
     }
-    
+
     pub fn use_db(db_name: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Use { db_name },
@@ -1759,7 +1830,14 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::StartTransaction { isolation_level, read_only, transaction_modifier, statements, exception_statements, has_end_keyword } => {
+            LogicalPlanType::StartTransaction {
+                isolation_level,
+                read_only,
+                transaction_modifier,
+                statements,
+                exception_statements,
+                has_end_keyword,
+            } => {
                 // Create a dummy plan that will perform start transaction
                 Ok(PlanNode::CommandResult(format!(
                     "START TRANSACTION{}{}",
@@ -1771,12 +1849,12 @@ impl<'a> PlanConverter<'a> {
                     if *read_only { " READ ONLY" } else { "" }
                 )))
             }
-            
+
             LogicalPlanType::Commit => {
                 // Create a dummy plan that will perform commit
                 Ok(PlanNode::CommandResult("COMMIT".to_string()))
             }
-            
+
             LogicalPlanType::Rollback { chain } => {
                 // Create a dummy plan that will perform rollback
                 Ok(PlanNode::CommandResult(format!(
@@ -1784,18 +1862,26 @@ impl<'a> PlanConverter<'a> {
                     if *chain { " AND CHAIN" } else { "" }
                 )))
             }
-            
+
             LogicalPlanType::Savepoint { name } => {
                 // Create a dummy plan that will create savepoint
                 Ok(PlanNode::CommandResult(format!("SAVEPOINT {}", name)))
             }
-            
+
             LogicalPlanType::ReleaseSavepoint { name } => {
                 // Create a dummy plan that will release savepoint
-                Ok(PlanNode::CommandResult(format!("RELEASE SAVEPOINT {}", name)))
+                Ok(PlanNode::CommandResult(format!(
+                    "RELEASE SAVEPOINT {}",
+                    name
+                )))
             }
-            
-            LogicalPlanType::Drop { object_type, if_exists, names, cascade } => {
+
+            LogicalPlanType::Drop {
+                object_type,
+                if_exists,
+                names,
+                cascade,
+            } => {
                 // Create a dummy plan that will perform drop operation
                 Ok(PlanNode::CommandResult(format!(
                     "DROP {} {}{}{}",
@@ -1805,56 +1891,70 @@ impl<'a> PlanConverter<'a> {
                     if *cascade { " CASCADE" } else { "" }
                 )))
             }
-            
-            LogicalPlanType::CreateSchema { schema_name, if_not_exists } => {
+
+            LogicalPlanType::CreateSchema {
+                schema_name,
+                if_not_exists,
+            } => {
                 // Create a dummy plan that will create schema
                 Ok(PlanNode::CommandResult(format!(
-                    "CREATE SCHEMA {}{}", 
+                    "CREATE SCHEMA {}{}",
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     schema_name
                 )))
             }
-            
-            LogicalPlanType::CreateDatabase { db_name, if_not_exists } => {
+
+            LogicalPlanType::CreateDatabase {
+                db_name,
+                if_not_exists,
+            } => {
                 // Create a dummy plan that will create database
                 Ok(PlanNode::CommandResult(format!(
-                    "CREATE DATABASE {}{}", 
+                    "CREATE DATABASE {}{}",
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     db_name
                 )))
             }
-            
-            LogicalPlanType::AlterTable { table_name, operation } => {
+
+            LogicalPlanType::AlterTable {
+                table_name,
+                operation,
+            } => {
                 // Create a dummy plan that will alter table
                 Ok(PlanNode::CommandResult(format!(
-                    "ALTER TABLE {} {}", 
-                    table_name, 
-                    operation
+                    "ALTER TABLE {} {}",
+                    table_name, operation
                 )))
             }
-            
-            LogicalPlanType::CreateView { view_name, schema: _, if_not_exists } => {
+
+            LogicalPlanType::CreateView {
+                view_name,
+                schema: _,
+                if_not_exists,
+            } => {
                 // Create a dummy plan that will create view
                 Ok(PlanNode::CommandResult(format!(
-                    "CREATE VIEW {}{}", 
+                    "CREATE VIEW {}{}",
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     view_name
                 )))
             }
-            
-            LogicalPlanType::AlterView { view_name, operation } => {
+
+            LogicalPlanType::AlterView {
+                view_name,
+                operation,
+            } => {
                 // Create a dummy plan that will alter view
                 Ok(PlanNode::CommandResult(format!(
-                    "ALTER VIEW {} {}", 
-                    view_name, 
-                    operation
+                    "ALTER VIEW {} {}",
+                    view_name, operation
                 )))
             }
-            
+
             LogicalPlanType::ShowTables { schema_name } => {
                 // Create a dummy plan that will show tables
                 Ok(PlanNode::CommandResult(format!(
-                    "SHOW TABLES{}", 
+                    "SHOW TABLES{}",
                     if let Some(name) = schema_name {
                         format!(" FROM {}", name)
                     } else {
@@ -1862,16 +1962,19 @@ impl<'a> PlanConverter<'a> {
                     }
                 )))
             }
-            
+
             LogicalPlanType::ShowDatabases => {
                 // Create a dummy plan that will show databases
                 Ok(PlanNode::CommandResult("SHOW DATABASES".to_string()))
             }
-            
-            LogicalPlanType::ShowColumns { table_name, schema_name } => {
+
+            LogicalPlanType::ShowColumns {
+                table_name,
+                schema_name,
+            } => {
                 // Create a dummy plan that will show columns
                 Ok(PlanNode::CommandResult(format!(
-                    "SHOW COLUMNS FROM {}{}", 
+                    "SHOW COLUMNS FROM {}{}",
                     table_name,
                     if let Some(name) = schema_name {
                         format!(" FROM {}", name)
@@ -1880,12 +1983,12 @@ impl<'a> PlanConverter<'a> {
                     }
                 )))
             }
-            
+
             LogicalPlanType::Use { db_name } => {
                 // Create a dummy plan that will use database
                 Ok(PlanNode::CommandResult(format!("USE {}", db_name)))
             }
-            
+
             LogicalPlanType::Explain { plan } => {
                 // Create a recursive explain plan
                 let inner_plan = plan.to_physical_plan()?;
@@ -2817,10 +2920,10 @@ mod tests {
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         // First, create a scan plan
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
-        
+
         // Then create an explain logical plan that wraps the scan plan
         // This calls the static explain constructor method, not the instance method
         let explain_plan = LogicalPlan {
@@ -2829,7 +2932,7 @@ mod tests {
             },
             children: vec![],
         };
-        
+
         // Validate the plan structure
         match &explain_plan.plan_type {
             LogicalPlanType::Explain { plan } => {
@@ -2850,8 +2953,15 @@ mod tests {
         let isolation_level = Some(IsolationLevel::ReadCommitted);
         let read_only = true;
         let transaction_modifier = Some(TransactionModifier::Deferred);
-        let statements = vec![Statement::Commit { chain: false, modifier: None, end: false }];
-        let exception_statements = Some(vec![Statement::Rollback { chain: false, savepoint: None }]);
+        let statements = vec![Statement::Commit {
+            chain: false,
+            modifier: None,
+            end: false,
+        }];
+        let exception_statements = Some(vec![Statement::Rollback {
+            chain: false,
+            savepoint: None,
+        }]);
         let has_end_keyword = true;
 
         let plan = LogicalPlan::start_transaction(
@@ -2886,7 +2996,7 @@ mod tests {
     #[test]
     fn test_commit_plan() {
         let plan = LogicalPlan::commit();
-        
+
         match plan.plan_type {
             LogicalPlanType::Commit => {
                 // Successfully created a Commit plan
@@ -2899,7 +3009,7 @@ mod tests {
     fn test_rollback_plan() {
         let chain = true;
         let plan = LogicalPlan::rollback(chain);
-        
+
         match &plan.plan_type {
             LogicalPlanType::Rollback { chain: c } => {
                 assert_eq!(chain, *c);
@@ -2912,7 +3022,7 @@ mod tests {
     fn test_savepoint_plan() {
         let name = "SAVEPOINT1".to_string();
         let plan = LogicalPlan::savepoint(name.clone());
-        
+
         match &plan.plan_type {
             LogicalPlanType::Savepoint { name: n } => {
                 assert_eq!(name, *n);
@@ -2925,7 +3035,7 @@ mod tests {
     fn test_release_savepoint_plan() {
         let name = "SAVEPOINT1".to_string();
         let plan = LogicalPlan::release_savepoint(name.clone());
-        
+
         match &plan.plan_type {
             LogicalPlanType::ReleaseSavepoint { name: n } => {
                 assert_eq!(name, *n);
@@ -2940,11 +3050,16 @@ mod tests {
         let if_exists = true;
         let names = vec!["users".to_string(), "orders".to_string()];
         let cascade = true;
-        
+
         let plan = LogicalPlan::drop(object_type.clone(), if_exists, names.clone(), cascade);
-        
+
         match &plan.plan_type {
-            LogicalPlanType::Drop { object_type: ot, if_exists: ie, names: n, cascade: c } => {
+            LogicalPlanType::Drop {
+                object_type: ot,
+                if_exists: ie,
+                names: n,
+                cascade: c,
+            } => {
                 assert_eq!(object_type, *ot);
                 assert_eq!(if_exists, *ie);
                 assert_eq!(names, *n);
@@ -2958,11 +3073,14 @@ mod tests {
     fn test_create_schema_plan() {
         let schema_name = "test_schema".to_string();
         let if_not_exists = true;
-        
+
         let plan = LogicalPlan::create_schema(schema_name.clone(), if_not_exists);
-        
+
         match &plan.plan_type {
-            LogicalPlanType::CreateSchema { schema_name: sn, if_not_exists: ine } => {
+            LogicalPlanType::CreateSchema {
+                schema_name: sn,
+                if_not_exists: ine,
+            } => {
                 assert_eq!(schema_name, *sn);
                 assert_eq!(if_not_exists, *ine);
             }
@@ -2974,11 +3092,14 @@ mod tests {
     fn test_create_database_plan() {
         let db_name = "test_db".to_string();
         let if_not_exists = true;
-        
+
         let plan = LogicalPlan::create_database(db_name.clone(), if_not_exists);
-        
+
         match &plan.plan_type {
-            LogicalPlanType::CreateDatabase { db_name: dn, if_not_exists: ine } => {
+            LogicalPlanType::CreateDatabase {
+                db_name: dn,
+                if_not_exists: ine,
+            } => {
                 assert_eq!(db_name, *dn);
                 assert_eq!(if_not_exists, *ine);
             }
@@ -2990,11 +3111,14 @@ mod tests {
     fn test_alter_table_plan() {
         let table_name = "users".to_string();
         let operation = "ADD COLUMN email VARCHAR".to_string();
-        
+
         let plan = LogicalPlan::alter_table(table_name.clone(), operation.clone());
-        
+
         match &plan.plan_type {
-            LogicalPlanType::AlterTable { table_name: tn, operation: op } => {
+            LogicalPlanType::AlterTable {
+                table_name: tn,
+                operation: op,
+            } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(operation, *op);
             }
@@ -3010,11 +3134,15 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
         let if_not_exists = true;
-        
+
         let plan = LogicalPlan::create_view(view_name.clone(), schema.clone(), if_not_exists);
-        
+
         match &plan.plan_type {
-            LogicalPlanType::CreateView { view_name: vn, schema: s, if_not_exists: ine } => {
+            LogicalPlanType::CreateView {
+                view_name: vn,
+                schema: s,
+                if_not_exists: ine,
+            } => {
                 assert_eq!(view_name, *vn);
                 assert_eq!(schema, *s);
                 assert_eq!(if_not_exists, *ine);
@@ -3027,11 +3155,14 @@ mod tests {
     fn test_alter_view_plan() {
         let view_name = "active_users".to_string();
         let operation = "RENAME TO recent_users".to_string();
-        
+
         let plan = LogicalPlan::alter_view(view_name.clone(), operation.clone());
-        
+
         match &plan.plan_type {
-            LogicalPlanType::AlterView { view_name: vn, operation: op } => {
+            LogicalPlanType::AlterView {
+                view_name: vn,
+                operation: op,
+            } => {
                 assert_eq!(view_name, *vn);
                 assert_eq!(operation, *op);
             }
@@ -3043,7 +3174,7 @@ mod tests {
     fn test_show_tables_plan() {
         let schema_name = Some("public".to_string());
         let plan = LogicalPlan::show_tables(schema_name.clone());
-        
+
         match &plan.plan_type {
             LogicalPlanType::ShowTables { schema_name: sn } => {
                 assert_eq!(schema_name, *sn);
@@ -3055,7 +3186,7 @@ mod tests {
     #[test]
     fn test_show_databases_plan() {
         let plan = LogicalPlan::show_databases();
-        
+
         match plan.plan_type {
             LogicalPlanType::ShowDatabases => {
                 // Successfully created a ShowDatabases plan
@@ -3068,11 +3199,14 @@ mod tests {
     fn test_show_columns_plan() {
         let table_name = "users".to_string();
         let schema_name = Some("public".to_string());
-        
+
         let plan = LogicalPlan::show_columns(table_name.clone(), schema_name.clone());
-        
+
         match &plan.plan_type {
-            LogicalPlanType::ShowColumns { table_name: tn, schema_name: sn } => {
+            LogicalPlanType::ShowColumns {
+                table_name: tn,
+                schema_name: sn,
+            } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(schema_name, *sn);
             }
@@ -3084,7 +3218,7 @@ mod tests {
     fn test_use_db_plan() {
         let db_name = "test_db".to_string();
         let plan = LogicalPlan::use_db(db_name.clone());
-        
+
         match &plan.plan_type {
             LogicalPlanType::Use { db_name: dn } => {
                 assert_eq!(db_name, *dn);

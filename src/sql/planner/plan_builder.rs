@@ -3,6 +3,7 @@ use super::schema_manager::SchemaManager;
 use crate::catalog::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
@@ -14,7 +15,6 @@ use parking_lot::RwLock;
 use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::*;
 use std::sync::Arc;
-use crate::concurrency::transaction::IsolationLevel;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -1125,7 +1125,10 @@ impl LogicalPlanBuilder {
         };
 
         // Log the transaction modes
-        debug!("Transaction Access Mode: {:?}, Internal Isolation Level: {:?}", access_mode, internal_isolation_level);
+        debug!(
+            "Transaction Access Mode: {:?}, Internal Isolation Level: {:?}",
+            access_mode, internal_isolation_level
+        );
 
         // Handle transaction modifiers
         let transaction_modifier = modifier.clone();
@@ -1154,17 +1157,29 @@ impl LogicalPlanBuilder {
         );
 
         // Log the transaction initiation
-        debug!("Starting transaction: {} {}", begin_keyword, transaction_kind);
+        debug!(
+            "Starting transaction: {} {}",
+            begin_keyword, transaction_kind
+        );
 
         Ok(transaction_plan)
     }
 
-    pub fn build_commit_plan(&self, chain: &bool, end: &bool, modifier: &Option<TransactionModifier>,) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_commit_plan(
+        &self,
+        chain: &bool,
+        end: &bool,
+        modifier: &Option<TransactionModifier>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement commit plan
         Err("Commit not yet implemented".to_string())
     }
 
-    pub fn build_rollback_plan(&self, chain: &bool, savepoint: &Option<Ident>,) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_rollback_plan(
+        &self,
+        chain: &bool,
+        savepoint: &Option<Ident>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement rollback plan
         Err("Rollback not yet implemented".to_string())
     }
@@ -1174,10 +1189,7 @@ impl LogicalPlanBuilder {
         Err("Savepoint not yet implemented".to_string())
     }
 
-    pub fn build_release_savepoint_plan(
-        &self,
-        stmt: &Ident,
-    ) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_release_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement release savepoint plan
         Err("ReleaseSavepoint not yet implemented".to_string())
     }
@@ -1189,54 +1201,69 @@ impl LogicalPlanBuilder {
         Err("Drop not yet implemented".to_string())
     }
 
-    pub fn build_create_schema_plan(&self, schema_name: &SchemaName,
-                                    if_not_exists: &bool,
-                                    options: &Option<Vec<SqlOption>>,
-                                    default_collate_spec: &Option<Expr>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_schema_plan(
+        &self,
+        schema_name: &SchemaName,
+        if_not_exists: &bool,
+        options: &Option<Vec<SqlOption>>,
+        default_collate_spec: &Option<Expr>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create schema plan
         Err("CreateSchema not yet implemented".to_string())
     }
 
-    pub fn build_create_database_plan(&self, db_name: &ObjectName,
-                                      if_not_exists: &bool,
-                                      location: &Option<String>,
-                                      managed_location: &Option<String>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_database_plan(
+        &self,
+        db_name: &ObjectName,
+        if_not_exists: &bool,
+        location: &Option<String>,
+        managed_location: &Option<String>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create database plan
         Err("CreateDatabase not yet implemented".to_string())
     }
 
-    pub fn build_alter_table_plan(&self, name: &ObjectName,
-                                  if_exists: &bool,
-                                  only: &bool,
-                                  operations: &Vec<AlterTableOperation>,
-                                  location: &Option<HiveSetLocation>,
-                                  on_cluster: &Option<Ident>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_alter_table_plan(
+        &self,
+        name: &ObjectName,
+        if_exists: &bool,
+        only: &bool,
+        operations: &Vec<AlterTableOperation>,
+        location: &Option<HiveSetLocation>,
+        on_cluster: &Option<Ident>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter table plan
         Err("AlterTable not yet implemented".to_string())
     }
 
-    pub fn build_create_view_plan(&self, or_alter: &bool,
-                                  or_replace: &bool,
-                                  materialized: &bool,
-                                  name: &ObjectName,
-                                  columns: &Vec<ViewColumnDef>,
-                                  query: &Box<Query>,
-                                  options: &CreateTableOptions,
-                                  cluster_by: &Vec<Ident>,
-                                  comment: &Option<String>,
-                                  with_no_schema_binding: &bool,
-                                  if_not_exists: &bool,
-                                  temporary: &bool,
-                                  to: &Option<ObjectName>,
-                                  params: &Option<CreateViewParams>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_view_plan(
+        &self,
+        or_alter: &bool,
+        or_replace: &bool,
+        materialized: &bool,
+        name: &ObjectName,
+        columns: &Vec<ViewColumnDef>,
+        query: &Box<Query>,
+        options: &CreateTableOptions,
+        cluster_by: &Vec<Ident>,
+        comment: &Option<String>,
+        with_no_schema_binding: &bool,
+        if_not_exists: &bool,
+        temporary: &bool,
+        to: &Option<ObjectName>,
+        params: &Option<CreateViewParams>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create view plan
         Err("CreateView not yet implemented".to_string())
     }
 
-    pub fn build_alter_view_plan(&self, name: &ObjectName,
-                                 columns: &Vec<Ident>,
-                                 query: &Box<Query>,
-                                 with_options: &Vec<SqlOption>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_alter_view_plan(
+        &self,
+        name: &ObjectName,
+        columns: &Vec<Ident>,
+        query: &Box<Query>,
+        with_options: &Vec<SqlOption>,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter view plan
         Err("AlterView not yet implemented".to_string())
     }
@@ -1326,26 +1353,35 @@ impl LogicalPlanBuilder {
 
     // ---------- DATABASE INFORMATION ----------
 
-    pub fn build_show_tables_plan(&self, terse: &bool,
-                                  history: &bool,
-                                  extended: &bool,
-                                  full: &bool,
-                                  external: &bool,
-                                  show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_tables_plan(
+        &self,
+        terse: &bool,
+        history: &bool,
+        extended: &bool,
+        full: &bool,
+        external: &bool,
+        show_options: &ShowStatementOptions,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show tables plan
         Err("ShowTables not yet implemented".to_string())
     }
 
-    pub fn build_show_databases_plan(&self, terse: &bool,
-                                     history: &bool,
-                                     show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_databases_plan(
+        &self,
+        terse: &bool,
+        history: &bool,
+        show_options: &ShowStatementOptions,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show databases plan
         Err("ShowDatabases not yet implemented".to_string())
     }
 
-    pub fn build_show_columns_plan(&self, extended: &bool,
-                                   full: &bool,
-                                   show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_columns_plan(
+        &self,
+        extended: &bool,
+        full: &bool,
+        show_options: &ShowStatementOptions,
+    ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show columns plan
         Err("ShowColumns not yet implemented".to_string())
     }
@@ -2292,7 +2328,15 @@ mod tests {
             let mut context = TestContext::new("test_access_mode");
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
             let modes = vec![TransactionMode::AccessMode(TransactionAccessMode::ReadOnly)];
-            let plan = builder.build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false);
+            let plan = builder.build_start_transaction_plan(
+                &modes,
+                &true,
+                &None,
+                &None,
+                &vec![],
+                &None,
+                &false,
+            );
             assert!(plan.is_ok());
             let plan = plan.unwrap();
             match plan.plan_type {
@@ -2307,12 +2351,24 @@ mod tests {
         fn test_build_start_transaction_plan_with_isolation_level() {
             let mut context = TestContext::new("test_isolation_level");
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
-            let modes = vec![TransactionMode::IsolationLevel(TransactionIsolationLevel::Serializable)];
-            let plan = builder.build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false);
+            let modes = vec![TransactionMode::IsolationLevel(
+                TransactionIsolationLevel::Serializable,
+            )];
+            let plan = builder.build_start_transaction_plan(
+                &modes,
+                &true,
+                &None,
+                &None,
+                &vec![],
+                &None,
+                &false,
+            );
             assert!(plan.is_ok());
             let plan = plan.unwrap();
             match plan.plan_type {
-                LogicalPlanType::StartTransaction { isolation_level, .. } => {
+                LogicalPlanType::StartTransaction {
+                    isolation_level, ..
+                } => {
                     assert_eq!(isolation_level, Some(IsolationLevel::Serializable));
                 }
                 _ => panic!("Expected StartTransaction plan"),
