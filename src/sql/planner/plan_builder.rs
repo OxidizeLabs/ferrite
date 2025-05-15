@@ -1159,24 +1159,24 @@ impl LogicalPlanBuilder {
         Ok(transaction_plan)
     }
 
-    pub fn build_commit_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_commit_plan(&self, chain: &bool, end: &bool, modifier: &Option<TransactionModifier>,) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement commit plan
         Err("Commit not yet implemented".to_string())
     }
 
-    pub fn build_rollback_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_rollback_plan(&self, chain: &bool, savepoint: &Option<Ident>,) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement rollback plan
         Err("Rollback not yet implemented".to_string())
     }
 
-    pub fn build_savepoint_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement savepoint plan
         Err("Savepoint not yet implemented".to_string())
     }
 
     pub fn build_release_savepoint_plan(
         &self,
-        stmt: &Statement,
+        stmt: &Ident,
     ) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement release savepoint plan
         Err("ReleaseSavepoint not yet implemented".to_string())
@@ -1189,27 +1189,54 @@ impl LogicalPlanBuilder {
         Err("Drop not yet implemented".to_string())
     }
 
-    pub fn build_create_schema_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_schema_plan(&self, schema_name: &SchemaName,
+                                    if_not_exists: &bool,
+                                    options: &Option<Vec<SqlOption>>,
+                                    default_collate_spec: &Option<Expr>) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create schema plan
         Err("CreateSchema not yet implemented".to_string())
     }
 
-    pub fn build_create_database_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_database_plan(&self, db_name: &ObjectName,
+                                      if_not_exists: &bool,
+                                      location: &Option<String>,
+                                      managed_location: &Option<String>) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create database plan
         Err("CreateDatabase not yet implemented".to_string())
     }
 
-    pub fn build_alter_table_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_alter_table_plan(&self, name: &ObjectName,
+                                  if_exists: &bool,
+                                  only: &bool,
+                                  operations: &Vec<AlterTableOperation>,
+                                  location: &Option<HiveSetLocation>,
+                                  on_cluster: &Option<Ident>) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter table plan
         Err("AlterTable not yet implemented".to_string())
     }
 
-    pub fn build_create_view_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_create_view_plan(&self, or_alter: &bool,
+                                  or_replace: &bool,
+                                  materialized: &bool,
+                                  name: &ObjectName,
+                                  columns: &Vec<ViewColumnDef>,
+                                  query: &Box<Query>,
+                                  options: &CreateTableOptions,
+                                  cluster_by: &Vec<Ident>,
+                                  comment: &Option<String>,
+                                  with_no_schema_binding: &bool,
+                                  if_not_exists: &bool,
+                                  temporary: &bool,
+                                  to: &Option<ObjectName>,
+                                  params: &Option<CreateViewParams>) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement create view plan
         Err("CreateView not yet implemented".to_string())
     }
 
-    pub fn build_alter_view_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_alter_view_plan(&self, name: &ObjectName,
+                                 columns: &Vec<Ident>,
+                                 query: &Box<Query>,
+                                 with_options: &Vec<SqlOption>) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement alter view plan
         Err("AlterView not yet implemented".to_string())
     }
@@ -1299,17 +1326,26 @@ impl LogicalPlanBuilder {
 
     // ---------- DATABASE INFORMATION ----------
 
-    pub fn build_show_tables_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_tables_plan(&self, terse: &bool,
+                                  history: &bool,
+                                  extended: &bool,
+                                  full: &bool,
+                                  external: &bool,
+                                  show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show tables plan
         Err("ShowTables not yet implemented".to_string())
     }
 
-    pub fn build_show_databases_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_databases_plan(&self, terse: &bool,
+                                     history: &bool,
+                                     show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show databases plan
         Err("ShowDatabases not yet implemented".to_string())
     }
 
-    pub fn build_show_columns_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_show_columns_plan(&self, extended: &bool,
+                                   full: &bool,
+                                   show_options: &ShowStatementOptions) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement show columns plan
         Err("ShowColumns not yet implemented".to_string())
     }
