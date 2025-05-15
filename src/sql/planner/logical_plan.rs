@@ -32,7 +32,7 @@ use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionTy
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
 use log::debug;
-use sqlparser::ast::{BinaryOperator, JoinOperator};
+use sqlparser::ast::{BinaryOperator, JoinOperator, Statement, TransactionModifier};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
@@ -160,7 +160,11 @@ pub enum LogicalPlanType {
     },
     StartTransaction {
         isolation_level: Option<String>,
-        read_only: bool, 
+        read_only: bool,
+        transaction_modifier: Option<TransactionModifier>,
+        statements: Vec<Statement>,
+        exception_statements: Option<Vec<Statement>>,
+        has_end_keyword: bool,
     },
     Commit,
     Rollback {
@@ -527,13 +531,23 @@ impl LogicalPlan {
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
-            LogicalPlanType::StartTransaction { isolation_level, read_only } => {
+            LogicalPlanType::StartTransaction { isolation_level, read_only, transaction_modifier, statements, exception_statements, has_end_keyword } => {
                 result.push_str(&format!("{}→ StartTransaction\n", indent_str));
                 if let Some(level) = isolation_level {
                     result.push_str(&format!("{}   Isolation Level: {}\n", indent_str, level));
                 }
                 if *read_only {
                     result.push_str(&format!("{}   Read Only: true\n", indent_str));
+                }
+                if let Some(modifier) = transaction_modifier {
+                    result.push_str(&format!("{}   Transaction Modifier: {:?}\n", indent_str, modifier));
+                }
+                result.push_str(&format!("{}   Statements: {:?}\n", indent_str, statements));
+                if let Some(exceptions) = exception_statements {
+                    result.push_str(&format!("{}   Exception Statements: {:?}\n", indent_str, exceptions));
+                }
+                if *has_end_keyword {
+                    result.push_str(&format!("{}   Has End Keyword: true\n", indent_str));
                 }
             }
             LogicalPlanType::Commit => {
@@ -1129,11 +1143,15 @@ impl LogicalPlan {
 
     // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
     
-    pub fn start_transaction(isolation_level: Option<String>, read_only: bool) -> Box<Self> {
+    pub fn start_transaction(isolation_level: Option<String>, read_only: bool, transaction_modifier: Option<TransactionModifier>, statements: Vec<Statement>, exception_statements: Option<Vec<Statement>>, has_end_keyword: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::StartTransaction {
                 isolation_level,
                 read_only,
+                transaction_modifier,
+                statements,
+                exception_statements,
+                has_end_keyword,
             },
             vec![], // No children for transaction control statements
         ))
@@ -1740,7 +1758,7 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::StartTransaction { isolation_level, read_only } => {
+            LogicalPlanType::StartTransaction { isolation_level, read_only, transaction_modifier, statements, exception_statements, has_end_keyword } => {
                 // Create a dummy plan that will perform start transaction
                 Ok(PlanNode::CommandResult(format!(
                     "START TRANSACTION{}{}",
@@ -2830,13 +2848,35 @@ mod tests {
     fn test_start_transaction_plan() {
         let isolation_level = Some("SERIALIZABLE".to_string());
         let read_only = true;
-        
-        let plan = LogicalPlan::start_transaction(isolation_level.clone(), read_only);
-        
+        let transaction_modifier = Some(TransactionModifier::Deferred);
+        let statements = vec![Statement::Commit { chain: false, modifier: None, end: false }];
+        let exception_statements = Some(vec![Statement::Rollback { chain: false, savepoint: None }]);
+        let has_end_keyword = true;
+
+        let plan = LogicalPlan::start_transaction(
+            isolation_level.clone(),
+            read_only,
+            transaction_modifier.clone(),
+            statements.clone(),
+            exception_statements.clone(),
+            has_end_keyword,
+        );
+
         match &plan.plan_type {
-            LogicalPlanType::StartTransaction { isolation_level: level, read_only: ro } => {
+            LogicalPlanType::StartTransaction {
+                isolation_level: level,
+                read_only: ro,
+                transaction_modifier: tm,
+                statements: stmts,
+                exception_statements: ex_stmts,
+                has_end_keyword: hek,
+            } => {
                 assert_eq!(isolation_level, *level);
                 assert_eq!(read_only, *ro);
+                assert_eq!(transaction_modifier, *tm);
+                assert_eq!(statements, *stmts);
+                assert_eq!(exception_statements, *ex_stmts);
+                assert_eq!(has_end_keyword, *hek);
             }
             _ => panic!("Expected StartTransaction plan"),
         }

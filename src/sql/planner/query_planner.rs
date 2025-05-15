@@ -50,14 +50,14 @@ impl QueryPlanner {
             Statement::Delete(_) => self.plan_builder.build_delete_plan(stmt),
             Statement::Explain { .. } => self.plan_builder.build_explain_plan(stmt),
             Statement::StartTransaction {
-                modes: _,
-                begin: _,
-                transaction: _,
-                modifier: _,
-                statements: _,
-                exception_statements: _,
-                has_end_keyword: _
-            } => self.plan_builder.build_start_transaction_plan(stmt),
+                modes,
+                begin,
+                transaction,
+                modifier,
+                statements,
+                exception_statements,
+                has_end_keyword,
+            } => self.plan_builder.build_start_transaction_plan(modes, begin, transaction, modifier, statements, exception_statements, has_end_keyword),
             Statement::Commit {
                 chain: _,
                 modifier: _,
