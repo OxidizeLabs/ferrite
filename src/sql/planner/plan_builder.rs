@@ -2236,4 +2236,41 @@ mod tests {
             }
         }
     }
+
+    mod transaction_tests {
+        use super::*;
+        use sqlparser::ast::{TransactionAccessMode, TransactionIsolationLevel, TransactionMode};
+
+        #[test]
+        fn test_build_start_transaction_plan_with_access_mode() {
+            let mut context = TestContext::new("test_access_mode");
+            let builder = LogicalPlanBuilder::new(context.catalog.clone());
+            let modes = vec![TransactionMode::AccessMode(TransactionAccessMode::ReadOnly)];
+            let plan = builder.build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false);
+            assert!(plan.is_ok());
+            let plan = plan.unwrap();
+            match plan.plan_type {
+                LogicalPlanType::StartTransaction { read_only, .. } => {
+                    assert!(read_only);
+                }
+                _ => panic!("Expected StartTransaction plan"),
+            }
+        }
+
+        #[test]
+        fn test_build_start_transaction_plan_with_isolation_level() {
+            let mut context = TestContext::new("test_isolation_level");
+            let builder = LogicalPlanBuilder::new(context.catalog.clone());
+            let modes = vec![TransactionMode::IsolationLevel(TransactionIsolationLevel::Serializable)];
+            let plan = builder.build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false);
+            assert!(plan.is_ok());
+            let plan = plan.unwrap();
+            match plan.plan_type {
+                LogicalPlanType::StartTransaction { isolation_level, .. } => {
+                    assert_eq!(isolation_level, Some("SERIALIZABLE".to_string()));
+                }
+                _ => panic!("Expected StartTransaction plan"),
+            }
+        }
+    }
 }
