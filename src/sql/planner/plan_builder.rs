@@ -1171,8 +1171,17 @@ impl LogicalPlanBuilder {
         end: &bool,
         modifier: &Option<TransactionModifier>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement commit plan
-        Err("Commit not yet implemented".to_string())
+        // Create the logical plan for committing a transaction
+        debug!("Creating commit plan: chain={}, end={}", chain, end);
+        
+        // Create a commit transaction plan
+        let commit_plan = LogicalPlan::commit_transaction(
+            *chain,
+            *end,
+            modifier.clone(),
+        );
+        
+        Ok(commit_plan)
     }
 
     pub fn build_rollback_plan(
@@ -1180,8 +1189,16 @@ impl LogicalPlanBuilder {
         chain: &bool,
         savepoint: &Option<Ident>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement rollback plan
-        Err("Rollback not yet implemented".to_string())
+        // Create the logical plan for rolling back a transaction
+        debug!("Creating rollback plan: chain={}", chain);
+        
+        // Create a rollback transaction plan
+        let rollback_plan = LogicalPlan::rollback_transaction(
+            *chain,
+            savepoint.clone(),
+        );
+        
+        Ok(rollback_plan)
     }
 
     pub fn build_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
