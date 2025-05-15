@@ -57,53 +57,59 @@ impl QueryPlanner {
                 statements,
                 exception_statements,
                 has_end_keyword,
-            } => self.plan_builder.build_start_transaction_plan(modes, begin, transaction, modifier, statements, exception_statements, has_end_keyword),
+            } => self.plan_builder.build_start_transaction_plan(
+                modes,
+                begin,
+                transaction,
+                modifier,
+                statements,
+                exception_statements,
+                has_end_keyword,
+            ),
             Statement::Commit {
                 chain,
                 modifier,
-                end
+                end,
             } => self.plan_builder.build_commit_plan(chain, end, modifier),
-            Statement::Rollback {
-                chain,
-                savepoint
-            } => self.plan_builder.build_rollback_plan(chain, savepoint),
-            Statement::Savepoint {
-                name
-            } => self.plan_builder.build_savepoint_plan(name),
-            Statement::ReleaseSavepoint {
-                name
-            } => self.plan_builder.build_release_savepoint_plan(name),
+            Statement::Rollback { chain, savepoint } => {
+                self.plan_builder.build_rollback_plan(chain, savepoint)
+            }
+            Statement::Savepoint { name } => self.plan_builder.build_savepoint_plan(name),
+            Statement::ReleaseSavepoint { name } => {
+                self.plan_builder.build_release_savepoint_plan(name)
+            }
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
                 options,
-                default_collate_spec
-            } => self.plan_builder.build_create_schema_plan(schema_name,
-                                                            if_not_exists,
-                                                            options,
-                                                            default_collate_spec),
+                default_collate_spec,
+            } => self.plan_builder.build_create_schema_plan(
+                schema_name,
+                if_not_exists,
+                options,
+                default_collate_spec,
+            ),
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
                 location,
-                managed_location
-            } => self.plan_builder.build_create_database_plan(db_name,
-                                                              if_not_exists,
-                                                              location,
-                                                              managed_location),
+                managed_location,
+            } => self.plan_builder.build_create_database_plan(
+                db_name,
+                if_not_exists,
+                location,
+                managed_location,
+            ),
             Statement::AlterTable {
                 name,
                 if_exists,
                 only,
                 operations,
                 location,
-                on_cluster
-            } => self.plan_builder.build_alter_table_plan(name,
-                                                          if_exists,
-                                                          only,
-                                                          operations,
-                                                          location,
-                                                          on_cluster),
+                on_cluster,
+            } => self
+                .plan_builder
+                .build_alter_table_plan(name, if_exists, only, operations, location, on_cluster),
             Statement::CreateView {
                 or_alter,
                 or_replace,
@@ -118,57 +124,60 @@ impl QueryPlanner {
                 if_not_exists,
                 temporary,
                 to,
-                params
-            } => self.plan_builder.build_create_view_plan(or_alter,
-                                                          or_replace,
-                                                          materialized,
-                                                          name,
-                                                          columns,
-                                                          query,
-                                                          options,
-                                                          cluster_by,
-                                                          comment,
-                                                          with_no_schema_binding,
-                                                          if_not_exists,
-                                                          temporary,
-                                                          to,
-                                                          params),
+                params,
+            } => self.plan_builder.build_create_view_plan(
+                or_alter,
+                or_replace,
+                materialized,
+                name,
+                columns,
+                query,
+                options,
+                cluster_by,
+                comment,
+                with_no_schema_binding,
+                if_not_exists,
+                temporary,
+                to,
+                params,
+            ),
             Statement::AlterView {
                 name,
                 columns,
                 query,
-                with_options
-            } => self.plan_builder.build_alter_view_plan(name,
-                                                         columns,
-                                                         query,
-                                                         with_options),
+                with_options,
+            } => self
+                .plan_builder
+                .build_alter_view_plan(name, columns, query, with_options),
             Statement::ShowTables {
                 terse,
                 history,
                 extended,
                 full,
                 external,
-                show_options
-            } => self.plan_builder.build_show_tables_plan(terse,
-                                                          history,
-                                                          extended,
-                                                          full,
-                                                          external,
-                                                          show_options),
+                show_options,
+            } => self.plan_builder.build_show_tables_plan(
+                terse,
+                history,
+                extended,
+                full,
+                external,
+                show_options,
+            ),
             Statement::ShowDatabases {
                 terse,
                 history,
-                show_options
-            } => self.plan_builder.build_show_databases_plan(terse,
-                                                             history,
-                                                             show_options),
+                show_options,
+            } => self
+                .plan_builder
+                .build_show_databases_plan(terse, history, show_options),
             Statement::ShowColumns {
                 extended,
                 full,
-                show_options
-            } => self.plan_builder.build_show_columns_plan(extended,
-                                                           full,
-                                                           show_options),
+                show_options,
+            } => self
+                .plan_builder
+                .build_show_columns_plan(extended, full, show_options),
             Statement::Use(stmt) => self.plan_builder.build_use_plan(stmt),
             _ => Err(format!("Unsupported statement type: {:?}", stmt)),
         }
