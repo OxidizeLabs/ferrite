@@ -1231,7 +1231,7 @@ impl LogicalPlanBuilder {
         Err("ShowColumns not yet implemented".to_string())
     }
     
-    pub fn build_use_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_use_plan(&self, stmt: &Use) -> Result<Box<LogicalPlan>, String> {
         // TODO: Implement use plan
         Err("Use not yet implemented".to_string())
     }
