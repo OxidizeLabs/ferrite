@@ -81,13 +81,10 @@ impl QueryPlanner {
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
-                options,
-                default_collate_spec,
+                ..
             } => self.plan_builder.build_create_schema_plan(
                 schema_name,
                 if_not_exists,
-                options,
-                default_collate_spec,
             ),
             Statement::CreateDatabase {
                 db_name,

@@ -1223,20 +1223,50 @@ impl LogicalPlanBuilder {
 
     // ---------- PRIORITY 2: DDL OPERATIONS ----------
 
-    pub fn build_drop_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement drop plan
-        Err("Drop not yet implemented".to_string())
+    pub fn build_drop_plan(&self, object_type: String, if_exists: bool, names: Vec<String>,cascade: bool,) -> Result<Box<LogicalPlan>, String> {
+        // Create the logical plan for dropping objects
+        debug!("Creating drop plan for {} objects: {:?}", object_type, names);
+        
+        // Create a drop plan using the static constructor
+        let drop_plan = LogicalPlan::drop(
+            object_type,
+            if_exists,
+            names,
+            cascade
+        );
+        
+        Ok(drop_plan)
     }
 
     pub fn build_create_schema_plan(
         &self,
         schema_name: &SchemaName,
         if_not_exists: &bool,
-        options: &Option<Vec<SqlOption>>,
-        default_collate_spec: &Option<Expr>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement create schema plan
-        Err("CreateSchema not yet implemented".to_string())
+        // Extract the schema name string from SchemaName
+        let schema_name_str = match schema_name {
+            SchemaName::Simple(obj_name) => {
+                if obj_name.0.is_empty() {
+                    return Err("Schema name cannot be empty".to_string());
+                }
+                obj_name.0[0].to_string()
+            },
+            SchemaName::UnnamedAuthorization(ident) => {
+                // Using authorization identifier as schema name
+                ident.to_string()
+            },
+            SchemaName::NamedAuthorization(obj_name, _) => {
+                if obj_name.0.is_empty() {
+                    return Err("Schema name cannot be empty".to_string());
+                }
+                obj_name.0[0].to_string()
+            }
+        };
+        
+        // Use the existing LogicalPlan::create_schema constructor
+        let plan = LogicalPlan::create_schema(schema_name_str, *if_not_exists);
+        
+        Ok(plan)
     }
 
     pub fn build_create_database_plan(
@@ -1246,8 +1276,27 @@ impl LogicalPlanBuilder {
         location: &Option<String>,
         managed_location: &Option<String>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement create database plan
-        Err("CreateDatabase not yet implemented".to_string())
+        // Extract the database name from the ObjectName
+        if db_name.0.is_empty() {
+            return Err("Database name cannot be empty".to_string());
+        }
+        
+        // Extract the string value from the object name structure
+        let db_name_str = match &db_name.0[0] {
+            ObjectNamePart::Identifier(ident) => ident.value.clone()
+        };
+        
+        // Currently, location and managed_location parameters are not used in our logical plan
+        // In a real implementation, you might want to handle these parameters
+        if location.is_some() || managed_location.is_some() {
+            // Log that these parameters are ignored for now
+            debug!("Location and managed_location parameters are currently ignored");
+        }
+        
+        // Use the existing LogicalPlan::create_database constructor
+        let plan = LogicalPlan::create_database(db_name_str, *if_not_exists);
+        
+        Ok(plan)
     }
 
     pub fn build_alter_table_plan(
@@ -2442,6 +2491,50 @@ mod tests {
                     assert_eq!(name, "my_savepoint");
                 }
                 _ => panic!("Expected ReleaseSavepoint plan"),
+            }
+        }
+    }
+
+    // Tests for build_drop_plan
+    mod drop_tests {
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        #[test]
+        fn test_build_drop_plan() {
+            let mut fixture = TestContext::new("drop_plan_test");
+            
+            // Create a logical plan builder directly
+            let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
+            
+            // Test parameters
+            let object_type = "TABLE".to_string();
+            let if_exists = true;
+            let names = vec!["users".to_string(), "orders".to_string()];
+            let cascade = true;
+            
+            // Call the method being tested
+            let plan = plan_builder.build_drop_plan(
+                object_type.clone(),
+                if_exists,
+                names.clone(),
+                cascade
+            ).unwrap();
+            
+            // Verify the plan has the correct type and fields
+            match &plan.plan_type {
+                LogicalPlanType::Drop {
+                    object_type: ot,
+                    if_exists: ie,
+                    names: n,
+                    cascade: c,
+                } => {
+                    assert_eq!(object_type, *ot, "object_type doesn't match");
+                    assert_eq!(if_exists, *ie, "if_exists doesn't match");
+                    assert_eq!(names, *n, "names don't match");
+                    assert_eq!(cascade, *c, "cascade doesn't match");
+                }
+                _ => panic!("Expected Drop plan, got {:?}", plan.plan_type),
             }
         }
     }
