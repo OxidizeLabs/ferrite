@@ -217,7 +217,10 @@ pub enum LogicalPlanType {
         full: bool,
         external: bool,
     },
-    ShowDatabases,
+    ShowDatabases {
+        terse: bool,
+        history: bool,
+    },
     ShowColumns {
         table_name: String,
         schema_name: Option<String>,
@@ -681,8 +684,10 @@ impl LogicalPlan {
                 result.push_str(&format!("{}   Full: {}\n", indent_str, *full));
                 result.push_str(&format!("{}   External: {}\n", indent_str, *external));
             }
-            LogicalPlanType::ShowDatabases => {
+            LogicalPlanType::ShowDatabases { terse, history } => {
                 result.push_str(&format!("{}→ ShowDatabases\n", indent_str));
+                result.push_str(&format!("{}   Terse: {}\n", indent_str, terse));
+                result.push_str(&format!("{}   History: {}\n", indent_str, history));
             }
             LogicalPlanType::ShowColumns {
                 table_name,
@@ -1427,7 +1432,20 @@ impl LogicalPlan {
 
     pub fn show_databases() -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::ShowDatabases,
+            LogicalPlanType::ShowDatabases {
+                terse: false,
+                history: false,
+            },
+            vec![], // No children
+        ))
+    }
+
+    pub fn show_databases_with_options(terse: bool, history: bool) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowDatabases {
+                terse,
+                history,
+            },
             vec![], // No children
         ))
     }
@@ -2074,9 +2092,13 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::ShowDatabases => {
+            LogicalPlanType::ShowDatabases { terse, history } => {
                 // Create a dummy plan that will show databases
-                Ok(PlanNode::CommandResult("SHOW DATABASES".to_string()))
+                Ok(PlanNode::CommandResult(format!(
+                    "SHOW DATABASES{}{}",
+                    if *terse { " TERSE" } else { "" },
+                    if *history { " HISTORY" } else { "" }
+                )))
             }
 
             LogicalPlanType::ShowColumns {
@@ -3365,11 +3387,27 @@ mod tests {
     fn test_show_databases_plan() {
         let plan = LogicalPlan::show_databases();
 
-        match plan.plan_type {
-            LogicalPlanType::ShowDatabases => {
+        match &plan.plan_type {
+            LogicalPlanType::ShowDatabases { terse, history } => {
                 // Successfully created a ShowDatabases plan
+                assert_eq!(terse, &false);
+                assert_eq!(history, &false);
             }
             _ => panic!("Expected ShowDatabases plan"),
+        }
+    }
+
+    #[test]
+    fn test_show_databases_with_options_plan() {
+        let plan = LogicalPlan::show_databases_with_options(true, true);
+
+        match &plan.plan_type {
+            LogicalPlanType::ShowDatabases { terse, history } => {
+                // Successfully created a ShowDatabases plan with options
+                assert_eq!(terse, &true);
+                assert_eq!(history, &true);
+            }
+            _ => panic!("Expected ShowDatabases plan with options"),
         }
     }
 
