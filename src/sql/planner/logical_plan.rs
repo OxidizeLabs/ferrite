@@ -211,6 +211,11 @@ pub enum LogicalPlanType {
     },
     ShowTables {
         schema_name: Option<String>,
+        terse: bool,
+        history: bool,
+        extended: bool,
+        full: bool,
+        external: bool,
     },
     ShowDatabases,
     ShowColumns {
@@ -665,11 +670,16 @@ impl LogicalPlan {
                 result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
             }
-            LogicalPlanType::ShowTables { schema_name } => {
+            LogicalPlanType::ShowTables { schema_name, terse, history, extended, full, external } => {
                 result.push_str(&format!("{}→ ShowTables\n", indent_str));
                 if let Some(name) = schema_name {
                     result.push_str(&format!("{}   Schema: {}\n", indent_str, name));
                 }
+                result.push_str(&format!("{}   Terse: {}\n", indent_str, *terse));
+                result.push_str(&format!("{}   History: {}\n", indent_str, *history));
+                result.push_str(&format!("{}   Extended: {}\n", indent_str, *extended));
+                result.push_str(&format!("{}   Full: {}\n", indent_str, *full));
+                result.push_str(&format!("{}   External: {}\n", indent_str, *external));
             }
             LogicalPlanType::ShowDatabases => {
                 result.push_str(&format!("{}→ ShowDatabases\n", indent_str));
@@ -1214,6 +1224,9 @@ impl LogicalPlan {
             LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Window { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::ShowTables { schema_name: sn, terse: _, history: _, extended: _, full: _, external: _ } => {
+                None
+            }
             _ => None,
         }
     }
@@ -1378,7 +1391,36 @@ impl LogicalPlan {
 
     pub fn show_tables(schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::ShowTables { schema_name },
+            LogicalPlanType::ShowTables { 
+                schema_name,
+                terse: false,
+                history: false,
+                extended: false,
+                full: false,
+                external: false
+            },
+            vec![], // No children
+        ))
+    }
+    
+    // Add a new constructor method that takes all options
+    pub fn show_tables_with_options(
+        schema_name: Option<String>,
+        terse: bool,
+        history: bool,
+        extended: bool,
+        full: bool,
+        external: bool
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowTables { 
+                schema_name,
+                terse,
+                history,
+                extended,
+                full,
+                external
+            },
             vec![], // No children
         ))
     }
@@ -2015,12 +2057,17 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::ShowTables { schema_name } => {
+            LogicalPlanType::ShowTables { schema_name, terse, history, extended, full, external } => {
                 // Create a dummy plan that will show tables
                 Ok(PlanNode::CommandResult(format!(
-                    "SHOW TABLES{}",
+                    "SHOW{}{}{}{}{}TABLES{}",
+                    if *terse { " TERSE" } else { "" },
+                    if *history { " HISTORY" } else { "" },
+                    if *extended { " EXTENDED" } else { "" },
+                    if *full { " FULL" } else { "" },
+                    if *external { " EXTERNAL" } else { "" },
                     if let Some(name) = schema_name {
-                        format!(" FROM {}", name)
+                        format!(" IN {}", name)
                     } else {
                         String::new()
                     }
@@ -3266,10 +3313,51 @@ mod tests {
         let plan = LogicalPlan::show_tables(schema_name.clone());
 
         match &plan.plan_type {
-            LogicalPlanType::ShowTables { schema_name: sn } => {
+            LogicalPlanType::ShowTables { 
+                schema_name: sn, 
+                terse, 
+                history, 
+                extended, 
+                full, 
+                external 
+            } => {
                 assert_eq!(schema_name, *sn);
+                assert_eq!(*terse, false);
+                assert_eq!(*history, false);
+                assert_eq!(*extended, false);
+                assert_eq!(*full, false);
+                assert_eq!(*external, false);
             }
             _ => panic!("Expected ShowTables plan"),
+        }
+        
+        // Also test the show_tables_with_options method
+        let plan_with_options = LogicalPlan::show_tables_with_options(
+            schema_name.clone(), 
+            true, 
+            true, 
+            true, 
+            true, 
+            true
+        );
+        
+        match &plan_with_options.plan_type {
+            LogicalPlanType::ShowTables { 
+                schema_name: sn, 
+                terse, 
+                history, 
+                extended, 
+                full, 
+                external 
+            } => {
+                assert_eq!(schema_name, *sn);
+                assert_eq!(*terse, true);
+                assert_eq!(*history, true);
+                assert_eq!(*extended, true);
+                assert_eq!(*full, true);
+                assert_eq!(*external, true);
+            }
+            _ => panic!("Expected ShowTables plan with options"),
         }
     }
 
