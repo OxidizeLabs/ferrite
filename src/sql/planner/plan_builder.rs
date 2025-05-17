@@ -2011,8 +2011,42 @@ impl LogicalPlanBuilder {
     }
 
     pub fn build_use_plan(&self, stmt: &Use) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement use plan
-        Err("Use not yet implemented".to_string())
+        // Extract the database name from the Use statement based on its variant
+        let db_name = match stmt {
+            Use::Database(obj_name) | Use::Schema(obj_name) | Use::Object(obj_name) => {
+                if obj_name.0.is_empty() {
+                    return Err("Empty database name in USE statement".to_string());
+                }
+                
+                match &obj_name.0[0] {
+                    ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                }
+            },
+            Use::Catalog(obj_name) => {
+                if obj_name.0.is_empty() {
+                    return Err("Empty catalog name in USE statement".to_string());
+                }
+                
+                match &obj_name.0[0] {
+                    ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                }
+            },
+            Use::Warehouse(obj_name) => {
+                return Err("USE WAREHOUSE statement is not supported".to_string());
+            },
+            Use::Role(obj_name) => {
+                return Err("USE ROLE statement is not supported".to_string());
+            },
+            Use::SecondaryRoles(_) => {
+                return Err("USE SECONDARY ROLES statement is not supported".to_string());
+            },
+            Use::Default => {
+                return Err("USE DEFAULT statement is not supported".to_string());
+            },
+        };
+
+        // Create and return the USE logical plan
+        Ok(LogicalPlan::use_db(db_name))
     }
 
     // Add a helper method that directly creates the explain logical plan
