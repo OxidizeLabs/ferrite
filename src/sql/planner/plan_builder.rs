@@ -38,7 +38,17 @@ impl LogicalPlanBuilder {
                 let schema = self.schema_manager.create_values_schema(&values.rows)?;
                 self.build_values_plan(&values.rows, &schema)?
             }
-            SetExpr::Update(update) => self.build_update_plan(update)?,
+            SetExpr::Update(update_stmt) => match &*update_stmt {
+                Statement::Update {
+                    table,
+                    assignments,
+                    from,
+                    selection,
+                    returning,
+                    or,
+                } => self.build_update_plan(table, assignments, from, selection, returning, or)?,
+                _ => return Err("Expected Update statement".to_string()),
+            },
             SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
             SetExpr::SetOperation {
                 op,
@@ -515,18 +525,15 @@ impl LogicalPlanBuilder {
         ))
     }
 
-    pub fn build_update_plan(&self, update: &Statement) -> Result<Box<LogicalPlan>, String> {
-        // Get table info
-        let (table, assignments, selection) = match update {
-            Statement::Update {
-                table,
-                assignments,
-                selection,
-                ..  // Ignore other fields for now (from, returning, or)
-            } => (table, assignments, selection),
-            _ => return Err("Expected Update statement".to_string()),
-        };
-
+    pub fn build_update_plan(
+        &self,
+        table: &TableWithJoins,
+        assignments: &Vec<Assignment>,
+        from: &Option<UpdateTableFromKind>,
+        selection: &Option<Expr>,
+        returning: &Option<Vec<SelectItem>>,
+        or: &Option<SqliteOnConflict>,
+    ) -> Result<Box<LogicalPlan>, String> {
         let table_name = match &table.relation {
             TableFactor::Table { name, .. } => name.to_string(),
             _ => return Err("Only simple table updates supported".to_string()),
@@ -1173,14 +1180,10 @@ impl LogicalPlanBuilder {
     ) -> Result<Box<LogicalPlan>, String> {
         // Create the logical plan for committing a transaction
         debug!("Creating commit plan: chain={}, end={}", chain, end);
-        
+
         // Create a commit transaction plan
-        let commit_plan = LogicalPlan::commit_transaction(
-            *chain,
-            *end,
-            modifier.clone(),
-        );
-        
+        let commit_plan = LogicalPlan::commit_transaction(*chain, *end, modifier.clone());
+
         Ok(commit_plan)
     }
 
@@ -1191,50 +1194,51 @@ impl LogicalPlanBuilder {
     ) -> Result<Box<LogicalPlan>, String> {
         // Create the logical plan for rolling back a transaction
         debug!("Creating rollback plan: chain={}", chain);
-        
+
         // Create a rollback transaction plan
-        let rollback_plan = LogicalPlan::rollback_transaction(
-            *chain,
-            savepoint.clone(),
-        );
-        
+        let rollback_plan = LogicalPlan::rollback_transaction(*chain, savepoint.clone());
+
         Ok(rollback_plan)
     }
 
     pub fn build_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
         // Create the logical plan for creating a savepoint
         debug!("Creating savepoint plan for: {}", stmt.value);
-        
+
         // Create a savepoint plan
         let savepoint_plan = LogicalPlan::savepoint(stmt.value.clone());
-        
+
         Ok(savepoint_plan)
     }
 
     pub fn build_release_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
         // Create the logical plan for releasing a savepoint
         debug!("Creating release savepoint plan for: {}", stmt.value);
-        
+
         // Create a release savepoint plan
         let release_savepoint_plan = LogicalPlan::release_savepoint(stmt.value.clone());
-        
+
         Ok(release_savepoint_plan)
     }
 
     // ---------- PRIORITY 2: DDL OPERATIONS ----------
 
-    pub fn build_drop_plan(&self, object_type: String, if_exists: bool, names: Vec<String>,cascade: bool,) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_drop_plan(
+        &self,
+        object_type: String,
+        if_exists: bool,
+        names: Vec<String>,
+        cascade: bool,
+    ) -> Result<Box<LogicalPlan>, String> {
         // Create the logical plan for dropping objects
-        debug!("Creating drop plan for {} objects: {:?}", object_type, names);
-        
-        // Create a drop plan using the static constructor
-        let drop_plan = LogicalPlan::drop(
-            object_type,
-            if_exists,
-            names,
-            cascade
+        debug!(
+            "Creating drop plan for {} objects: {:?}",
+            object_type, names
         );
-        
+
+        // Create a drop plan using the static constructor
+        let drop_plan = LogicalPlan::drop(object_type, if_exists, names, cascade);
+
         Ok(drop_plan)
     }
 
@@ -1250,11 +1254,11 @@ impl LogicalPlanBuilder {
                     return Err("Schema name cannot be empty".to_string());
                 }
                 obj_name.0[0].to_string()
-            },
+            }
             SchemaName::UnnamedAuthorization(ident) => {
                 // Using authorization identifier as schema name
                 ident.to_string()
-            },
+            }
             SchemaName::NamedAuthorization(obj_name, _) => {
                 if obj_name.0.is_empty() {
                     return Err("Schema name cannot be empty".to_string());
@@ -1262,10 +1266,10 @@ impl LogicalPlanBuilder {
                 obj_name.0[0].to_string()
             }
         };
-        
+
         // Use the existing LogicalPlan::create_schema constructor
         let plan = LogicalPlan::create_schema(schema_name_str, *if_not_exists);
-        
+
         Ok(plan)
     }
 
@@ -1280,22 +1284,22 @@ impl LogicalPlanBuilder {
         if db_name.0.is_empty() {
             return Err("Database name cannot be empty".to_string());
         }
-        
+
         // Extract the string value from the object name structure
         let db_name_str = match &db_name.0[0] {
-            ObjectNamePart::Identifier(ident) => ident.value.clone()
+            ObjectNamePart::Identifier(ident) => ident.value.clone(),
         };
-        
+
         // Currently, location and managed_location parameters are not used in our logical plan
         // In a real implementation, you might want to handle these parameters
         if location.is_some() || managed_location.is_some() {
             // Log that these parameters are ignored for now
             debug!("Location and managed_location parameters are currently ignored");
         }
-        
+
         // Use the existing LogicalPlan::create_database constructor
         let plan = LogicalPlan::create_database(db_name_str, *if_not_exists);
-        
+
         Ok(plan)
     }
 
@@ -1312,24 +1316,24 @@ impl LogicalPlanBuilder {
         if name.0.is_empty() {
             return Err("Table name cannot be empty".to_string());
         }
-        
+
         let table_name = match &name.0[0] {
-            ObjectNamePart::Identifier(ident) => ident.value.clone()
+            ObjectNamePart::Identifier(ident) => ident.value.clone(),
         };
-        
+
         // Handle if_exists condition - if table doesn't exist and if_exists is false, it's an error
         // In our case, we just pass this information to the logical plan
-        
+
         // Handle the ONLY keyword (PostgreSQL-specific for inheritance)
         let only_str = if *only { " ONLY" } else { "" };
-        
+
         // Handle ON CLUSTER (ClickHouse-specific)
         let on_cluster_str = if let Some(cluster) = on_cluster {
             format!(" ON CLUSTER {}", cluster.value)
         } else {
             String::new()
         };
-        
+
         // Convert operations to a string representation
         let operation_str = if operations.is_empty() {
             return Err("No operations specified for ALTER TABLE".to_string());
@@ -1337,44 +1341,57 @@ impl LogicalPlanBuilder {
             // Create a string representation of the first operation
             // In a real implementation, you might want to handle multiple operations
             match &operations[0] {
-                AlterTableOperation::AddColumn { column_keyword, if_not_exists, column_def, .. } => {
+                AlterTableOperation::AddColumn {
+                    column_keyword,
+                    if_not_exists,
+                    column_def,
+                    ..
+                } => {
                     format!(
-                        "ADD {}COLUMN {}{}", 
+                        "ADD {}COLUMN {}{}",
                         if *column_keyword { "COLUMN " } else { "" },
                         if *if_not_exists { "IF NOT EXISTS " } else { "" },
                         column_def.name.value
                     )
-                },
-                AlterTableOperation::DropColumn { column_name, if_exists, .. } => {
+                }
+                AlterTableOperation::DropColumn {
+                    column_name,
+                    if_exists,
+                    ..
+                } => {
                     format!(
-                        "DROP COLUMN {}{}", 
+                        "DROP COLUMN {}{}",
                         if *if_exists { "IF EXISTS " } else { "" },
                         column_name.value
                     )
-                },
-                AlterTableOperation::RenameColumn { old_column_name, new_column_name } => {
+                }
+                AlterTableOperation::RenameColumn {
+                    old_column_name,
+                    new_column_name,
+                } => {
                     format!(
-                        "RENAME COLUMN {} TO {}", 
-                        old_column_name.value, 
-                        new_column_name.value
+                        "RENAME COLUMN {} TO {}",
+                        old_column_name.value, new_column_name.value
                     )
-                },
-                AlterTableOperation::RenameTable { table_name: new_table } => {
+                }
+                AlterTableOperation::RenameTable {
+                    table_name: new_table,
+                } => {
                     let new_name = match &new_table.0[0] {
-                        ObjectNamePart::Identifier(ident) => ident.value.clone()
+                        ObjectNamePart::Identifier(ident) => ident.value.clone(),
                     };
                     format!("RENAME TO {}", new_name)
-                },
+                }
                 AlterTableOperation::AlterColumn { column_name, op } => {
                     format!("ALTER COLUMN {}", column_name.value)
-                },
+                }
                 _ => {
                     // Generic operation string for other types
                     "ALTER TABLE OPERATION".to_string()
                 }
             }
         };
-        
+
         // Handle location (Hive-specific)
         let location_str = if let Some(loc) = location {
             let location_value = loc.location.value.clone();
@@ -1384,21 +1401,18 @@ impl LogicalPlanBuilder {
                 format!(" LOCATION '{}'", location_value)
             }
         } else {
-            String::new() 
+            String::new()
         };
-        
+
         // Build the complete operation string
         let full_operation = format!(
             "{}{}{}{}",
-            operation_str,
-            only_str,
-            on_cluster_str,
-            location_str
+            operation_str, only_str, on_cluster_str, location_str
         );
-        
+
         // Use the existing logical plan constructor
         let plan = LogicalPlan::alter_table(table_name, full_operation);
-        
+
         Ok(plan)
     }
 
@@ -2545,19 +2559,18 @@ mod tests {
     // Add this at the end of the tests module
     mod savepoint_tests {
         use super::*;
-        use sqlparser::ast::{Ident, Statement};
-        use sqlparser::parser::ParserError;
+        use sqlparser::ast::Ident;
 
         #[test]
         fn test_build_savepoint_plan() {
             let mut fixture = TestContext::new("savepoint_test");
-            
+
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
-            
+
             let savepoint_name = Ident::new("my_savepoint");
             let plan = plan_builder.build_savepoint_plan(&savepoint_name).unwrap();
-            
+
             match &plan.plan_type {
                 LogicalPlanType::Savepoint { name } => {
                     assert_eq!(name, "my_savepoint");
@@ -2569,13 +2582,15 @@ mod tests {
         #[test]
         fn test_build_release_savepoint_plan() {
             let mut fixture = TestContext::new("release_savepoint_test");
-            
+
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
-            
+
             let savepoint_name = Ident::new("my_savepoint");
-            let plan = plan_builder.build_release_savepoint_plan(&savepoint_name).unwrap();
-            
+            let plan = plan_builder
+                .build_release_savepoint_plan(&savepoint_name)
+                .unwrap();
+
             match &plan.plan_type {
                 LogicalPlanType::ReleaseSavepoint { name } => {
                     assert_eq!(name, "my_savepoint");
@@ -2593,24 +2608,21 @@ mod tests {
         #[test]
         fn test_build_drop_plan() {
             let mut fixture = TestContext::new("drop_plan_test");
-            
+
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
-            
+
             // Test parameters
             let object_type = "TABLE".to_string();
             let if_exists = true;
             let names = vec!["users".to_string(), "orders".to_string()];
             let cascade = true;
-            
+
             // Call the method being tested
-            let plan = plan_builder.build_drop_plan(
-                object_type.clone(),
-                if_exists,
-                names.clone(),
-                cascade
-            ).unwrap();
-            
+            let plan = plan_builder
+                .build_drop_plan(object_type.clone(), if_exists, names.clone(), cascade)
+                .unwrap();
+
             // Verify the plan has the correct type and fields
             match &plan.plan_type {
                 LogicalPlanType::Drop {
