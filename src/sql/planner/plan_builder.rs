@@ -1433,8 +1433,69 @@ impl LogicalPlanBuilder {
         to: &Option<ObjectName>,
         params: &Option<CreateViewParams>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement create view plan
-        Err("CreateView not yet implemented".to_string())
+        // Extract view name from ObjectName
+        if name.0.is_empty() {
+            return Err("View name cannot be empty".to_string());
+        }
+        
+        let view_name = match &name.0[0] {
+            ObjectNamePart::Identifier(ident) => ident.value.clone(),
+        };
+
+        // Check if view already exists
+        {
+            let catalog = self.expression_parser.catalog();
+            let catalog_guard = catalog.read();
+            if catalog_guard.get_table(&view_name).is_some() {
+                // If view exists and IF NOT EXISTS flag is set, return success with a dummy plan
+                if *if_not_exists {
+                    // Build a query plan to get the schema
+                    let query_plan = self.build_query_plan(query)?;
+                    let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for view".to_string())?;
+                    return Ok(LogicalPlan::create_view(view_name, schema, true));
+                }
+                // Otherwise return error
+                return Err(format!("View '{}' already exists", view_name));
+            }
+        }
+
+        // Build a query plan to derive the view's schema
+        let query_plan = self.build_query_plan(query)?;
+        
+        // Get the schema from the query plan
+        let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for view".to_string())?;
+        
+        // Handle custom column names if provided
+        let final_schema = if !columns.is_empty() {
+            // If column names are provided, replace the column names in the schema
+            if columns.len() != schema.get_column_count() as usize {
+                return Err(format!(
+                    "Number of column names ({}) does not match number of columns in result set ({})",
+                    columns.len(),
+                    schema.get_column_count()
+                ));
+            }
+            
+            let mut new_columns = Vec::new();
+            for (i, col_def) in columns.iter().enumerate() {
+                let original_col = schema.get_column(i).unwrap();
+                let mut new_col = original_col.clone();
+                new_col.set_name(col_def.name.value.clone());
+                new_columns.push(new_col);
+            }
+            
+            Schema::new(new_columns)
+        } else {
+            schema.clone()
+        };
+        
+        // Handle materialized views - in a real implementation, this would involve additional logic
+        if *materialized {
+            debug!("Creating materialized view (implemented as regular view for now)");
+        }
+        
+        // Create the logical plan
+        Ok(LogicalPlan::create_view(view_name, final_schema, *if_not_exists))
     }
 
     pub fn build_alter_view_plan(
@@ -1444,8 +1505,195 @@ impl LogicalPlanBuilder {
         query: &Box<Query>,
         with_options: &Vec<SqlOption>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement alter view plan
-        Err("AlterView not yet implemented".to_string())
+        // Extract view name from ObjectName
+        if name.0.is_empty() {
+            return Err("View name cannot be empty".to_string());
+        }
+        
+        let view_name = match &name.0[0] {
+            ObjectNamePart::Identifier(ident) => ident.value.clone(),
+        };
+
+        // Check if view exists
+        {
+            let catalog = self.expression_parser.catalog();
+            let catalog_guard = catalog.read();
+            if catalog_guard.get_table(&view_name).is_none() {
+                return Err(format!("View '{}' does not exist", view_name));
+            }
+        }
+
+        // Build a query plan to derive the view's new schema
+        let query_plan = self.build_query_plan(query)?;
+        
+        // Get the schema from the query plan
+        let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for altered view".to_string())?;
+        
+        // Handle custom column names if provided
+        if !columns.is_empty() {
+            if columns.len() != schema.get_column_count() as usize {
+                return Err(format!(
+                    "Number of column names ({}) does not match number of columns in result set ({})",
+                    columns.len(),
+                    schema.get_column_count()
+                ));
+            }
+        }
+        
+        // Construct the operation string
+        let mut operation = "AS ".to_string();
+        
+        // Add the column list if specified
+        if !columns.is_empty() {
+            operation.push_str("(");
+            for (i, col) in columns.iter().enumerate() {
+                if i > 0 {
+                    operation.push_str(", ");
+                }
+                operation.push_str(&col.value);
+            }
+            operation.push_str(") ");
+        }
+        
+        // Add the new query
+        // Instead of a placeholder, let's include the actual query text
+        // We'll use a simplified representation that indicates the query type and some key details
+        match &*query.body {
+            SetExpr::Select(select) => {
+                operation.push_str("SELECT ");
+                
+                // Add projection info
+                if !select.projection.is_empty() {
+                    let mut proj_str = Vec::new();
+                    for (i, item) in select.projection.iter().enumerate() {
+                        if i < 3 { // Limit to first few items for brevity
+                            match item {
+                                SelectItem::UnnamedExpr(expr) => proj_str.push(expr.to_string()),
+                                SelectItem::ExprWithAlias { expr, alias } => {
+                                    proj_str.push(format!("{} AS {}", expr, alias.value));
+                                },
+                                SelectItem::Wildcard(_) => proj_str.push("*".to_string()),
+                                SelectItem::QualifiedWildcard(_, _) => proj_str.push("table.*".to_string()),
+                            }
+                        }
+                    }
+                    
+                    if select.projection.len() > 3 {
+                        proj_str.push("...".to_string());
+                    }
+                    
+                    operation.push_str(&proj_str.join(", "));
+                }
+                
+                // Add FROM info if present
+                if !select.from.is_empty() {
+                    operation.push_str(" FROM ");
+                    let table_names: Vec<String> = select.from.iter()
+                        .map(|t| match &t.relation {
+                            TableFactor::Table { name, .. } => name.to_string(),
+                            _ => "...".to_string(),
+                        })
+                        .collect();
+                    operation.push_str(&table_names.join(", "));
+                }
+                
+                // Indicate if WHERE clause is present
+                if select.selection.is_some() {
+                    operation.push_str(" WHERE ...");
+                }
+                
+                // Indicate if GROUP BY clause is present
+                match &select.group_by {
+                    GroupByExpr::All(_) => operation.push_str(" GROUP BY ALL"),
+                    GroupByExpr::Expressions(exprs, _) if !exprs.is_empty() => {
+                        operation.push_str(" GROUP BY ...");
+                    },
+                    _ => {}
+                }
+                
+                // Indicate if HAVING clause is present
+                if select.having.is_some() {
+                    operation.push_str(" HAVING ...");
+                }
+            },
+            SetExpr::Values(_) => operation.push_str("VALUES (...)"),
+            SetExpr::Query(_) => operation.push_str("(...)"),
+            SetExpr::SetOperation { op, .. } => operation.push_str(&format!("{:?} ...", op)),
+            SetExpr::Insert(_) => operation.push_str("INSERT ..."),
+            SetExpr::Update(_) => operation.push_str("UPDATE ..."),
+            SetExpr::Delete(_) => operation.push_str("DELETE ..."),
+            SetExpr::Table(_) => operation.push_str("TABLE ..."),
+        };
+        
+        // Add WITH options if specified
+        if !with_options.is_empty() {
+            operation.push_str(" WITH (");
+            for (i, option) in with_options.iter().enumerate() {
+                if i > 0 {
+                    operation.push_str(", ");
+                }
+                
+                // Handle each SqlOption variant appropriately
+                match option {
+                    SqlOption::Clustered(clustered) => {
+                        match clustered {
+                            TableOptionsClustered::ColumnstoreIndex => {
+                                operation.push_str("COLUMNSTORE_INDEX");
+                            }
+                            TableOptionsClustered::ColumnstoreIndexOrder(columns) => {
+                                operation.push_str("COLUMNSTORE_INDEX_ORDER (");
+                                for (j, col) in columns.iter().enumerate() {
+                                    if j > 0 {
+                                        operation.push_str(", ");
+                                    }
+                                    operation.push_str(&col.value);
+                                }
+                                operation.push_str(")");
+                            }
+                            TableOptionsClustered::Index(indexes) => {
+                                operation.push_str("INDEX (");
+                                for (j, index) in indexes.iter().enumerate() {
+                                    if j > 0 {
+                                        operation.push_str(", ");
+                                    }
+                                    operation.push_str(&index.name.value);
+                                    if let Some(asc) = index.asc {
+                                        operation.push_str(if asc { " ASC" } else { " DESC" });
+                                    }
+                                }
+                                operation.push_str(")");
+                            }
+                        }
+                    }
+                    SqlOption::Ident(ident) => {
+                        operation.push_str(&ident.value);
+                    }
+                    SqlOption::KeyValue { key, value } => {
+                        operation.push_str(&format!("{} = {}", key.value, value));
+                    }
+                    SqlOption::Partition { column_name, range_direction, for_values } => {
+                        operation.push_str(&format!("PARTITION ({} ", column_name.value));
+                        
+                        if let Some(direction) = range_direction {
+                            operation.push_str(&format!("RANGE {:?} ", direction));
+                        }
+                        
+                        operation.push_str("FOR VALUES (");
+                        for (j, value) in for_values.iter().enumerate() {
+                            if j > 0 {
+                                operation.push_str(", ");
+                            }
+                            operation.push_str(&value.to_string());
+                        }
+                        operation.push_str("))");
+                    }
+                }
+            }
+            operation.push_str(")");
+        }
+        
+        // Create the logical plan
+        Ok(LogicalPlan::alter_view(view_name, operation))
     }
 
     pub fn build_delete_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
