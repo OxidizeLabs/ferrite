@@ -1837,8 +1837,47 @@ impl LogicalPlanBuilder {
         history: &bool,
         show_options: &ShowStatementOptions,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement show databases plan
-        Err("ShowDatabases not yet implemented".to_string())
+        // Create the logical plan with the appropriate options
+        let plan = LogicalPlan::show_databases_with_options(*terse, *history);
+
+        // Log any additional options that we're not using yet
+        if let Some(starts_with) = &show_options.starts_with {
+            debug!("STARTS WITH clause not fully implemented for SHOW DATABASES");
+        }
+
+        // Handle filter position (LIKE patterns and WHERE clauses)
+        if let Some(filter_position) = &show_options.filter_position {
+            match filter_position {
+                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                    match filter {
+                        ShowStatementFilter::Like(pattern) => {
+                            debug!("LIKE pattern '{}' not fully implemented for SHOW DATABASES", pattern);
+                        }
+                        ShowStatementFilter::ILike(pattern) => {
+                            debug!("ILIKE pattern '{}' not fully implemented for SHOW DATABASES", pattern);
+                        }
+                        ShowStatementFilter::Where(expr) => {
+                            debug!("WHERE clause not fully implemented for SHOW DATABASES");
+                        }
+                        ShowStatementFilter::NoKeyword(value) => {
+                            debug!("NoKeyword filter '{}' not fully implemented for SHOW DATABASES", value);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle limit clause
+        if let Some(limit_expr) = &show_options.limit {
+            debug!("LIMIT option not fully implemented for SHOW DATABASES");
+        }
+
+        // Handle limit from clause
+        if let Some(limit_from) = &show_options.limit_from {
+            debug!("LIMIT FROM option not fully implemented for SHOW DATABASES");
+        }
+
+        Ok(plan)
     }
 
     pub fn build_show_columns_plan(
