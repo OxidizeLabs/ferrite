@@ -1886,8 +1886,128 @@ impl LogicalPlanBuilder {
         full: &bool,
         show_options: &ShowStatementOptions,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement show columns plan
-        Err("ShowColumns not yet implemented".to_string())
+        // Extract table name and schema name from the options
+        let (table_name, schema_name) = match &show_options.show_in {
+            Some(in_clause) => {
+                // Extract table name from the show_in clause
+                let parent_name = match &in_clause.parent_name {
+                    Some(obj_name) => {
+                        if obj_name.0.is_empty() {
+                            return Err("Table name cannot be empty".to_string());
+                        }
+                        // Get the table name from the object name
+                        let table_name = match &obj_name.0[0] {
+                            ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                        };
+                        table_name
+                    }
+                    None => return Err("Table name is required for SHOW COLUMNS".to_string()),
+                };
+
+                // Extract schema name if present
+                let schema_name = match &in_clause.parent_type {
+                    Some(ShowStatementInParentType::Database | ShowStatementInParentType::Schema) => {
+                        // In this case, the parent_name is the schema and we need to get the table from elsewhere
+                        // This would typically come from the filter_position
+                        if let Some(filter_pos) = &show_options.filter_position {
+                            match filter_pos {
+                                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                                    match filter {
+                                        ShowStatementFilter::NoKeyword(table) => {
+                                            // Parent name is the schema, this is the table
+                                            return Ok(LogicalPlan::show_columns_with_options(
+                                                table.clone(),
+                                                Some(parent_name),
+                                                *extended,
+                                                *full
+                                            ));
+                                        }
+                                        _ => return Err("Table name is required for SHOW COLUMNS".to_string()),
+                                    }
+                                }
+                            }
+                        }
+                        // If we don't have a filter with the table name, we can't proceed
+                        return Err("Table name is required for SHOW COLUMNS".to_string());
+                    }
+                    Some(ShowStatementInParentType::Table) => {
+                        // In this case, parent_name is the table and we might have the schema elsewhere
+                        None
+                    }
+                    _ => None,
+                };
+
+                (parent_name, schema_name)
+            }
+            None => {
+                // If there's no show_in clause, we need to extract the table name
+                // from the filter position if available
+                if let Some(filter_pos) = &show_options.filter_position {
+                    match filter_pos {
+                        ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                            match filter {
+                                ShowStatementFilter::NoKeyword(table) => {
+                                    // No schema provided, just the table
+                                    return Ok(LogicalPlan::show_columns_with_options(
+                                        table.clone(),
+                                        None,
+                                        *extended,
+                                        *full
+                                    ));
+                                }
+                                _ => return Err("Table name is required for SHOW COLUMNS".to_string()),
+                            }
+                        }
+                    }
+                }
+                return Err("Table name is required for SHOW COLUMNS".to_string());
+            }
+        };
+
+        // Create the logical plan with the appropriate options
+        let plan = LogicalPlan::show_columns_with_options(
+            table_name,
+            schema_name,
+            *extended,
+            *full
+        );
+
+        // Handle filter position (LIKE patterns and WHERE clauses)
+        if let Some(filter_position) = &show_options.filter_position {
+            match filter_position {
+                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                    match filter {
+                        ShowStatementFilter::Like(pattern) => {
+                            debug!("LIKE pattern '{}' not fully implemented for SHOW COLUMNS", pattern);
+                        }
+                        ShowStatementFilter::ILike(pattern) => {
+                            debug!("ILIKE pattern '{}' not fully implemented for SHOW COLUMNS", pattern);
+                        }
+                        ShowStatementFilter::Where(expr) => {
+                            debug!("WHERE clause not fully implemented for SHOW COLUMNS");
+                        }
+                        ShowStatementFilter::NoKeyword(_) => {
+                            // Already handled above
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle other options
+        if let Some(starts_with) = &show_options.starts_with {
+            debug!("STARTS WITH clause not fully implemented for SHOW COLUMNS");
+        }
+
+        if let Some(limit_expr) = &show_options.limit {
+            debug!("LIMIT option not fully implemented for SHOW COLUMNS");
+        }
+
+        if let Some(limit_from) = &show_options.limit_from {
+            debug!("LIMIT FROM option not fully implemented for SHOW COLUMNS");
+        }
+
+        Ok(plan)
     }
 
     pub fn build_use_plan(&self, stmt: &Use) -> Result<Box<LogicalPlan>, String> {

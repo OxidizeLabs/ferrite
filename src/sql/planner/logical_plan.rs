@@ -224,6 +224,8 @@ pub enum LogicalPlanType {
     ShowColumns {
         table_name: String,
         schema_name: Option<String>,
+        extended: bool,
+        full: bool,
     },
     Use {
         db_name: String,
@@ -692,12 +694,16 @@ impl LogicalPlan {
             LogicalPlanType::ShowColumns {
                 table_name,
                 schema_name,
+                extended,
+                full,
             } => {
                 result.push_str(&format!("{}→ ShowColumns\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 if let Some(name) = schema_name {
                     result.push_str(&format!("{}   Schema: {}\n", indent_str, name));
                 }
+                result.push_str(&format!("{}   Extended: {}\n", indent_str, extended));
+                result.push_str(&format!("{}   Full: {}\n", indent_str, full));
             }
             LogicalPlanType::Use { db_name } => {
                 result.push_str(&format!("{}→ Use\n", indent_str));
@@ -1455,6 +1461,8 @@ impl LogicalPlan {
             LogicalPlanType::ShowColumns {
                 table_name,
                 schema_name,
+                extended: false,
+                full: false,
             },
             vec![], // No children
         ))
@@ -1463,6 +1471,23 @@ impl LogicalPlan {
     pub fn use_db(db_name: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Use { db_name },
+            vec![], // No children
+        ))
+    }
+
+    pub fn show_columns_with_options(
+        table_name: String, 
+        schema_name: Option<String>, 
+        extended: bool, 
+        full: bool
+    ) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::ShowColumns {
+                table_name,
+                schema_name,
+                extended,
+                full,
+            },
             vec![], // No children
         ))
     }
@@ -2104,10 +2129,14 @@ impl<'a> PlanConverter<'a> {
             LogicalPlanType::ShowColumns {
                 table_name,
                 schema_name,
+                extended,
+                full,
             } => {
                 // Create a dummy plan that will show columns
                 Ok(PlanNode::CommandResult(format!(
-                    "SHOW COLUMNS FROM {}{}",
+                    "SHOW{}{}COLUMNS FROM {}{}",
+                    if *extended { " EXTENDED" } else { "" },
+                    if *full { " FULL" } else { "" },
                     table_name,
                     if let Some(name) = schema_name {
                         format!(" FROM {}", name)
@@ -3422,9 +3451,13 @@ mod tests {
             LogicalPlanType::ShowColumns {
                 table_name: tn,
                 schema_name: sn,
+                extended,
+                full,
             } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(schema_name, *sn);
+                assert_eq!(*extended, false);
+                assert_eq!(*full, false);
             }
             _ => panic!("Expected ShowColumns plan"),
         }
@@ -3457,6 +3490,31 @@ mod tests {
                 assert_eq!(&modifier, m);
             }
             _ => panic!("Expected Commit plan"),
+        }
+    }
+
+    #[test]
+    fn test_show_columns_with_options_plan() {
+        let table_name = "users".to_string();
+        let schema_name = Some("public".to_string());
+        let extended = true;
+        let full = true;
+
+        let plan = LogicalPlan::show_columns_with_options(table_name.clone(), schema_name.clone(), extended, full);
+
+        match &plan.plan_type {
+            LogicalPlanType::ShowColumns {
+                table_name: tn,
+                schema_name: sn,
+                extended: e,
+                full: f,
+            } => {
+                assert_eq!(table_name, *tn);
+                assert_eq!(schema_name, *sn);
+                assert_eq!(*e, extended);
+                assert_eq!(*f, full);
+            }
+            _ => panic!("Expected ShowColumns plan with options"),
         }
     }
 }
