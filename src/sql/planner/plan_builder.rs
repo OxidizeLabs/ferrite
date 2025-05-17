@@ -1672,7 +1672,7 @@ impl LogicalPlanBuilder {
                         operation.push_str(&format!("{} = {}", key.value, value));
                     }
                     SqlOption::Partition { column_name, range_direction, for_values } => {
-                        operation.push_str(&format!("PARTITION ({} ", column_name.value));
+                        operation.push_str(&format!("PARTITION ({} ", column_name.value ));
                         
                         if let Some(direction) = range_direction {
                             operation.push_str(&format!("RANGE {:?} ", direction));
@@ -1790,8 +1790,45 @@ impl LogicalPlanBuilder {
         external: &bool,
         show_options: &ShowStatementOptions,
     ) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement show tables plan
-        Err("ShowTables not yet implemented".to_string())
+        // Try to extract schema name from the options if available
+        let schema_name = match &show_options.show_in {
+            Some(in_clause) => {
+                // Extract from IN clause if specified
+                Some(in_clause.to_string())
+            },
+            None => None,
+        };
+        
+        // Log options that are currently not fully implemented
+        if *history {
+            debug!("SHOW TABLES HISTORY option is not fully implemented");
+        }
+        
+        if *extended {
+            debug!("SHOW TABLES EXTENDED option is not fully implemented");
+        }
+        
+        if *full {
+            debug!("SHOW TABLES FULL option is not fully implemented");
+        }
+        
+        if *external {
+            debug!("SHOW TABLES EXTERNAL option is not fully implemented");
+        }
+        
+        if *terse {
+            debug!("SHOW TABLES TERSE option is not fully implemented");
+        }
+
+        // Create the logical plan with all options
+        Ok(LogicalPlan::show_tables_with_options(
+            schema_name,
+            *terse,
+            *history,
+            *extended,
+            *full,
+            *external
+        ))
     }
 
     pub fn build_show_databases_plan(
