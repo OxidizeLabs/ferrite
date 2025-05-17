@@ -1,12 +1,12 @@
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{error, info};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 
 // Define DiskRequest struct
 #[derive(Debug)]
