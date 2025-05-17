@@ -931,6 +931,7 @@ mod concurrency_tests {
     use parking_lot::Mutex;
     use std::sync::Arc;
     use std::thread;
+    use crossbeam_channel::bounded;
 
     #[test]
     fn test_concurrent_get_next_ts() {
@@ -1290,7 +1291,7 @@ mod concurrency_tests {
         let channel_capacity = 100;
 
         // Create a multi-producer, multi-consumer channel
-        let (sender, receiver) = crossbeam::channel::bounded(channel_capacity);
+        let (sender, receiver) = bounded(channel_capacity);
 
         // Producer: generates timestamps and registers them
         let producer_watermark = Arc::clone(&watermark);
@@ -1563,7 +1564,7 @@ mod concurrency_tests {
 
         // Create a thread that will be forcefully interrupted
         let watermark_clone = Arc::clone(&watermark);
-        let (sender, receiver) = crossbeam::channel::bounded::<()>(1);
+        let (sender, receiver) = bounded::<()>(1);
 
         let handle = thread::spawn(move || {
             // Remove transactions 2 and 4
