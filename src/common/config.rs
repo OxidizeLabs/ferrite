@@ -27,6 +27,7 @@ pub type TxnId = u64; // transaction id type
 pub type Lsn = u64; // log sequence number type
 pub type SlotOffset = u64; // slot offset type
 pub type Oid = u64; // object id type
+pub type DataBaseOid = u64;
 pub type TableOidT = u64;
 pub type ColumnOidT = u64;
 pub type IndexOidT = u64;

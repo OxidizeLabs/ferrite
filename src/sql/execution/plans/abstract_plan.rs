@@ -48,6 +48,10 @@ use parking_lot::RwLock;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::catalog::column::Column;
+use crate::types_db::value::Value;
+use crate::common::rid::RID;
+use crate::types_db::type_id::TypeId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -524,7 +528,14 @@ impl PlanNode {
                     result.push_str(&format!("{}   Read Only: true\n", indent));
                 }
             },
-            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!()
+            PlanNode::CommandResult(cmd) => {
+                result.push_str(&format!("{}→ Command\n", indent));
+                result.push_str(&format!("{}   SQL: {}\n", indent, cmd));
+            },
+            PlanNode::Explain(plan) => {
+                result.push_str(&format!("{}→ Explain\n", indent));
+                result.push_str(&plan.explain_internal(depth + 1));
+            },
         }
         result
     }
@@ -796,12 +807,6 @@ mod basic_behaviour {
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool.clone(),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 
@@ -1044,12 +1049,6 @@ mod complex_behaviour {
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool.clone(),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 

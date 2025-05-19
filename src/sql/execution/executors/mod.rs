@@ -21,3 +21,4 @@ pub mod topn_per_group_executor;
 pub mod update_executor;
 pub mod values_executor;
 pub mod window_executor;
+pub mod command_executor;

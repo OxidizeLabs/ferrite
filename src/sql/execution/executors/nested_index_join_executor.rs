@@ -377,12 +377,6 @@ mod tests {
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
-                0,
-                0,
-                HashMap::default(),
-                HashMap::default(),
-                HashMap::default(),
-                HashMap::default(),
                 transaction_manager.clone(),
             )));
 
