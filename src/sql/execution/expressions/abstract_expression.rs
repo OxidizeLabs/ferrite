@@ -51,15 +51,15 @@ use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
 use crate::sql::execution::expressions::window_expression::WindowExpression;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use sqlparser::ast::BinaryOperator;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
-use sqlparser::ast::BinaryOperator;
-use crate::types_db::type_id::TypeId;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum  Expression {
+pub enum Expression {
     Case(CaseExpression),
     Cast(CastExpression),
     Constant(ConstantExpression),

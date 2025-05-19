@@ -178,7 +178,6 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use sqlparser::ast::{JoinConstraint, JoinOperator};
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {

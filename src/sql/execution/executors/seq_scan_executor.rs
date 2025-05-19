@@ -150,12 +150,11 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
+    use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -228,7 +227,12 @@ mod tests {
         )
     }
 
-    fn create_test_values(schema: &Schema, id: i32, name: &str, age: i32) -> (TupleMeta, Vec<Value>) {
+    fn create_test_values(
+        schema: &Schema,
+        id: i32,
+        name: &str,
+        age: i32,
+    ) -> (TupleMeta, Vec<Value>) {
         let values = vec![
             Value::new(id),
             Value::new(name.to_string()),

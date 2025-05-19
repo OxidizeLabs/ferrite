@@ -1437,7 +1437,7 @@ impl LogicalPlanBuilder {
         if name.0.is_empty() {
             return Err("View name cannot be empty".to_string());
         }
-        
+
         let view_name = match &name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
         };
@@ -1451,7 +1451,9 @@ impl LogicalPlanBuilder {
                 if *if_not_exists {
                     // Build a query plan to get the schema
                     let query_plan = self.build_query_plan(query)?;
-                    let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for view".to_string())?;
+                    let schema = query_plan
+                        .get_schema()
+                        .ok_or_else(|| "Failed to determine schema for view".to_string())?;
                     return Ok(LogicalPlan::create_view(view_name, schema, true));
                 }
                 // Otherwise return error
@@ -1461,10 +1463,12 @@ impl LogicalPlanBuilder {
 
         // Build a query plan to derive the view's schema
         let query_plan = self.build_query_plan(query)?;
-        
+
         // Get the schema from the query plan
-        let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for view".to_string())?;
-        
+        let schema = query_plan
+            .get_schema()
+            .ok_or_else(|| "Failed to determine schema for view".to_string())?;
+
         // Handle custom column names if provided
         let final_schema = if !columns.is_empty() {
             // If column names are provided, replace the column names in the schema
@@ -1475,7 +1479,7 @@ impl LogicalPlanBuilder {
                     schema.get_column_count()
                 ));
             }
-            
+
             let mut new_columns = Vec::new();
             for (i, col_def) in columns.iter().enumerate() {
                 let original_col = schema.get_column(i).unwrap();
@@ -1483,19 +1487,23 @@ impl LogicalPlanBuilder {
                 new_col.set_name(col_def.name.value.clone());
                 new_columns.push(new_col);
             }
-            
+
             Schema::new(new_columns)
         } else {
             schema.clone()
         };
-        
+
         // Handle materialized views - in a real implementation, this would involve additional logic
         if *materialized {
             debug!("Creating materialized view (implemented as regular view for now)");
         }
-        
+
         // Create the logical plan
-        Ok(LogicalPlan::create_view(view_name, final_schema, *if_not_exists))
+        Ok(LogicalPlan::create_view(
+            view_name,
+            final_schema,
+            *if_not_exists,
+        ))
     }
 
     pub fn build_alter_view_plan(
@@ -1509,7 +1517,7 @@ impl LogicalPlanBuilder {
         if name.0.is_empty() {
             return Err("View name cannot be empty".to_string());
         }
-        
+
         let view_name = match &name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
         };
@@ -1525,10 +1533,12 @@ impl LogicalPlanBuilder {
 
         // Build a query plan to derive the view's new schema
         let query_plan = self.build_query_plan(query)?;
-        
+
         // Get the schema from the query plan
-        let schema = query_plan.get_schema().ok_or_else(|| "Failed to determine schema for altered view".to_string())?;
-        
+        let schema = query_plan
+            .get_schema()
+            .ok_or_else(|| "Failed to determine schema for altered view".to_string())?;
+
         // Handle custom column names if provided
         if !columns.is_empty() {
             if columns.len() != schema.get_column_count() as usize {
@@ -1539,10 +1549,10 @@ impl LogicalPlanBuilder {
                 ));
             }
         }
-        
+
         // Construct the operation string
         let mut operation = "AS ".to_string();
-        
+
         // Add the column list if specified
         if !columns.is_empty() {
             operation.push_str("(");
@@ -1554,41 +1564,46 @@ impl LogicalPlanBuilder {
             }
             operation.push_str(") ");
         }
-        
+
         // Add the new query
         // Instead of a placeholder, let's include the actual query text
         // We'll use a simplified representation that indicates the query type and some key details
         match &*query.body {
             SetExpr::Select(select) => {
                 operation.push_str("SELECT ");
-                
+
                 // Add projection info
                 if !select.projection.is_empty() {
                     let mut proj_str = Vec::new();
                     for (i, item) in select.projection.iter().enumerate() {
-                        if i < 3 { // Limit to first few items for brevity
+                        if i < 3 {
+                            // Limit to first few items for brevity
                             match item {
                                 SelectItem::UnnamedExpr(expr) => proj_str.push(expr.to_string()),
                                 SelectItem::ExprWithAlias { expr, alias } => {
                                     proj_str.push(format!("{} AS {}", expr, alias.value));
-                                },
+                                }
                                 SelectItem::Wildcard(_) => proj_str.push("*".to_string()),
-                                SelectItem::QualifiedWildcard(_, _) => proj_str.push("table.*".to_string()),
+                                SelectItem::QualifiedWildcard(_, _) => {
+                                    proj_str.push("table.*".to_string())
+                                }
                             }
                         }
                     }
-                    
+
                     if select.projection.len() > 3 {
                         proj_str.push("...".to_string());
                     }
-                    
+
                     operation.push_str(&proj_str.join(", "));
                 }
-                
+
                 // Add FROM info if present
                 if !select.from.is_empty() {
                     operation.push_str(" FROM ");
-                    let table_names: Vec<String> = select.from.iter()
+                    let table_names: Vec<String> = select
+                        .from
+                        .iter()
                         .map(|t| match &t.relation {
                             TableFactor::Table { name, .. } => name.to_string(),
                             _ => "...".to_string(),
@@ -1596,26 +1611,26 @@ impl LogicalPlanBuilder {
                         .collect();
                     operation.push_str(&table_names.join(", "));
                 }
-                
+
                 // Indicate if WHERE clause is present
                 if select.selection.is_some() {
                     operation.push_str(" WHERE ...");
                 }
-                
+
                 // Indicate if GROUP BY clause is present
                 match &select.group_by {
                     GroupByExpr::All(_) => operation.push_str(" GROUP BY ALL"),
                     GroupByExpr::Expressions(exprs, _) if !exprs.is_empty() => {
                         operation.push_str(" GROUP BY ...");
-                    },
+                    }
                     _ => {}
                 }
-                
+
                 // Indicate if HAVING clause is present
                 if select.having.is_some() {
                     operation.push_str(" HAVING ...");
                 }
-            },
+            }
             SetExpr::Values(_) => operation.push_str("VALUES (...)"),
             SetExpr::Query(_) => operation.push_str("(...)"),
             SetExpr::SetOperation { op, .. } => operation.push_str(&format!("{:?} ...", op)),
@@ -1624,7 +1639,7 @@ impl LogicalPlanBuilder {
             SetExpr::Delete(_) => operation.push_str("DELETE ..."),
             SetExpr::Table(_) => operation.push_str("TABLE ..."),
         };
-        
+
         // Add WITH options if specified
         if !with_options.is_empty() {
             operation.push_str(" WITH (");
@@ -1632,52 +1647,54 @@ impl LogicalPlanBuilder {
                 if i > 0 {
                     operation.push_str(", ");
                 }
-                
+
                 // Handle each SqlOption variant appropriately
                 match option {
-                    SqlOption::Clustered(clustered) => {
-                        match clustered {
-                            TableOptionsClustered::ColumnstoreIndex => {
-                                operation.push_str("COLUMNSTORE_INDEX");
-                            }
-                            TableOptionsClustered::ColumnstoreIndexOrder(columns) => {
-                                operation.push_str("COLUMNSTORE_INDEX_ORDER (");
-                                for (j, col) in columns.iter().enumerate() {
-                                    if j > 0 {
-                                        operation.push_str(", ");
-                                    }
-                                    operation.push_str(&col.value);
-                                }
-                                operation.push_str(")");
-                            }
-                            TableOptionsClustered::Index(indexes) => {
-                                operation.push_str("INDEX (");
-                                for (j, index) in indexes.iter().enumerate() {
-                                    if j > 0 {
-                                        operation.push_str(", ");
-                                    }
-                                    operation.push_str(&index.name.value);
-                                    if let Some(asc) = index.asc {
-                                        operation.push_str(if asc { " ASC" } else { " DESC" });
-                                    }
-                                }
-                                operation.push_str(")");
-                            }
+                    SqlOption::Clustered(clustered) => match clustered {
+                        TableOptionsClustered::ColumnstoreIndex => {
+                            operation.push_str("COLUMNSTORE_INDEX");
                         }
-                    }
+                        TableOptionsClustered::ColumnstoreIndexOrder(columns) => {
+                            operation.push_str("COLUMNSTORE_INDEX_ORDER (");
+                            for (j, col) in columns.iter().enumerate() {
+                                if j > 0 {
+                                    operation.push_str(", ");
+                                }
+                                operation.push_str(&col.value);
+                            }
+                            operation.push_str(")");
+                        }
+                        TableOptionsClustered::Index(indexes) => {
+                            operation.push_str("INDEX (");
+                            for (j, index) in indexes.iter().enumerate() {
+                                if j > 0 {
+                                    operation.push_str(", ");
+                                }
+                                operation.push_str(&index.name.value);
+                                if let Some(asc) = index.asc {
+                                    operation.push_str(if asc { " ASC" } else { " DESC" });
+                                }
+                            }
+                            operation.push_str(")");
+                        }
+                    },
                     SqlOption::Ident(ident) => {
                         operation.push_str(&ident.value);
                     }
                     SqlOption::KeyValue { key, value } => {
                         operation.push_str(&format!("{} = {}", key.value, value));
                     }
-                    SqlOption::Partition { column_name, range_direction, for_values } => {
-                        operation.push_str(&format!("PARTITION ({} ", column_name.value ));
-                        
+                    SqlOption::Partition {
+                        column_name,
+                        range_direction,
+                        for_values,
+                    } => {
+                        operation.push_str(&format!("PARTITION ({} ", column_name.value));
+
                         if let Some(direction) = range_direction {
                             operation.push_str(&format!("RANGE {:?} ", direction));
                         }
-                        
+
                         operation.push_str("FOR VALUES (");
                         for (j, value) in for_values.iter().enumerate() {
                             if j > 0 {
@@ -1691,7 +1708,7 @@ impl LogicalPlanBuilder {
             }
             operation.push_str(")");
         }
-        
+
         // Create the logical plan
         Ok(LogicalPlan::alter_view(view_name, operation))
     }
@@ -1795,27 +1812,27 @@ impl LogicalPlanBuilder {
             Some(in_clause) => {
                 // Extract from IN clause if specified
                 Some(in_clause.to_string())
-            },
+            }
             None => None,
         };
-        
+
         // Log options that are currently not fully implemented
         if *history {
             debug!("SHOW TABLES HISTORY option is not fully implemented");
         }
-        
+
         if *extended {
             debug!("SHOW TABLES EXTENDED option is not fully implemented");
         }
-        
+
         if *full {
             debug!("SHOW TABLES FULL option is not fully implemented");
         }
-        
+
         if *external {
             debug!("SHOW TABLES EXTERNAL option is not fully implemented");
         }
-        
+
         if *terse {
             debug!("SHOW TABLES TERSE option is not fully implemented");
         }
@@ -1827,7 +1844,7 @@ impl LogicalPlanBuilder {
             *history,
             *extended,
             *full,
-            *external
+            *external,
         ))
     }
 
@@ -1848,22 +1865,30 @@ impl LogicalPlanBuilder {
         // Handle filter position (LIKE patterns and WHERE clauses)
         if let Some(filter_position) = &show_options.filter_position {
             match filter_position {
-                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
-                    match filter {
-                        ShowStatementFilter::Like(pattern) => {
-                            debug!("LIKE pattern '{}' not fully implemented for SHOW DATABASES", pattern);
-                        }
-                        ShowStatementFilter::ILike(pattern) => {
-                            debug!("ILIKE pattern '{}' not fully implemented for SHOW DATABASES", pattern);
-                        }
-                        ShowStatementFilter::Where(expr) => {
-                            debug!("WHERE clause not fully implemented for SHOW DATABASES");
-                        }
-                        ShowStatementFilter::NoKeyword(value) => {
-                            debug!("NoKeyword filter '{}' not fully implemented for SHOW DATABASES", value);
-                        }
+                ShowStatementFilterPosition::Infix(filter)
+                | ShowStatementFilterPosition::Suffix(filter) => match filter {
+                    ShowStatementFilter::Like(pattern) => {
+                        debug!(
+                            "LIKE pattern '{}' not fully implemented for SHOW DATABASES",
+                            pattern
+                        );
                     }
-                }
+                    ShowStatementFilter::ILike(pattern) => {
+                        debug!(
+                            "ILIKE pattern '{}' not fully implemented for SHOW DATABASES",
+                            pattern
+                        );
+                    }
+                    ShowStatementFilter::Where(expr) => {
+                        debug!("WHERE clause not fully implemented for SHOW DATABASES");
+                    }
+                    ShowStatementFilter::NoKeyword(value) => {
+                        debug!(
+                            "NoKeyword filter '{}' not fully implemented for SHOW DATABASES",
+                            value
+                        );
+                    }
+                },
             }
         }
 
@@ -1906,12 +1931,15 @@ impl LogicalPlanBuilder {
 
                 // Extract schema name if present
                 let schema_name = match &in_clause.parent_type {
-                    Some(ShowStatementInParentType::Database | ShowStatementInParentType::Schema) => {
+                    Some(
+                        ShowStatementInParentType::Database | ShowStatementInParentType::Schema,
+                    ) => {
                         // In this case, the parent_name is the schema and we need to get the table from elsewhere
                         // This would typically come from the filter_position
                         if let Some(filter_pos) = &show_options.filter_position {
                             match filter_pos {
-                                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                                ShowStatementFilterPosition::Infix(filter)
+                                | ShowStatementFilterPosition::Suffix(filter) => {
                                     match filter {
                                         ShowStatementFilter::NoKeyword(table) => {
                                             // Parent name is the schema, this is the table
@@ -1919,10 +1947,13 @@ impl LogicalPlanBuilder {
                                                 table.clone(),
                                                 Some(parent_name),
                                                 *extended,
-                                                *full
+                                                *full,
                                             ));
                                         }
-                                        _ => return Err("Table name is required for SHOW COLUMNS".to_string()),
+                                        _ => {
+                                            return Err("Table name is required for SHOW COLUMNS"
+                                                .to_string());
+                                        }
                                     }
                                 }
                             }
@@ -1944,7 +1975,8 @@ impl LogicalPlanBuilder {
                 // from the filter position if available
                 if let Some(filter_pos) = &show_options.filter_position {
                     match filter_pos {
-                        ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                        ShowStatementFilterPosition::Infix(filter)
+                        | ShowStatementFilterPosition::Suffix(filter) => {
                             match filter {
                                 ShowStatementFilter::NoKeyword(table) => {
                                     // No schema provided, just the table
@@ -1952,10 +1984,14 @@ impl LogicalPlanBuilder {
                                         table.clone(),
                                         None,
                                         *extended,
-                                        *full
+                                        *full,
                                     ));
                                 }
-                                _ => return Err("Table name is required for SHOW COLUMNS".to_string()),
+                                _ => {
+                                    return Err(
+                                        "Table name is required for SHOW COLUMNS".to_string()
+                                    );
+                                }
                             }
                         }
                     }
@@ -1965,23 +2001,26 @@ impl LogicalPlanBuilder {
         };
 
         // Create the logical plan with the appropriate options
-        let plan = LogicalPlan::show_columns_with_options(
-            table_name,
-            schema_name,
-            *extended,
-            *full
-        );
+        let plan =
+            LogicalPlan::show_columns_with_options(table_name, schema_name, *extended, *full);
 
         // Handle filter position (LIKE patterns and WHERE clauses)
         if let Some(filter_position) = &show_options.filter_position {
             match filter_position {
-                ShowStatementFilterPosition::Infix(filter) | ShowStatementFilterPosition::Suffix(filter) => {
+                ShowStatementFilterPosition::Infix(filter)
+                | ShowStatementFilterPosition::Suffix(filter) => {
                     match filter {
                         ShowStatementFilter::Like(pattern) => {
-                            debug!("LIKE pattern '{}' not fully implemented for SHOW COLUMNS", pattern);
+                            debug!(
+                                "LIKE pattern '{}' not fully implemented for SHOW COLUMNS",
+                                pattern
+                            );
                         }
                         ShowStatementFilter::ILike(pattern) => {
-                            debug!("ILIKE pattern '{}' not fully implemented for SHOW COLUMNS", pattern);
+                            debug!(
+                                "ILIKE pattern '{}' not fully implemented for SHOW COLUMNS",
+                                pattern
+                            );
                         }
                         ShowStatementFilter::Where(expr) => {
                             debug!("WHERE clause not fully implemented for SHOW COLUMNS");
@@ -2017,32 +2056,32 @@ impl LogicalPlanBuilder {
                 if obj_name.0.is_empty() {
                     return Err("Empty database name in USE statement".to_string());
                 }
-                
+
                 match &obj_name.0[0] {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
                 }
-            },
+            }
             Use::Catalog(obj_name) => {
                 if obj_name.0.is_empty() {
                     return Err("Empty catalog name in USE statement".to_string());
                 }
-                
+
                 match &obj_name.0[0] {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
                 }
-            },
+            }
             Use::Warehouse(obj_name) => {
                 return Err("USE WAREHOUSE statement is not supported".to_string());
-            },
+            }
             Use::Role(obj_name) => {
                 return Err("USE ROLE statement is not supported".to_string());
-            },
+            }
             Use::SecondaryRoles(_) => {
                 return Err("USE SECONDARY ROLES statement is not supported".to_string());
-            },
+            }
             Use::Default => {
                 return Err("USE DEFAULT statement is not supported".to_string());
-            },
+            }
         };
 
         // Create and return the USE logical plan
@@ -2101,7 +2140,6 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use chrono::Utc;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {

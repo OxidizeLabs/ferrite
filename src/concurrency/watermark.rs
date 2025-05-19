@@ -928,10 +928,10 @@ mod tests {
 #[cfg(test)]
 mod concurrency_tests {
     use super::*;
+    use crossbeam_channel::bounded;
     use parking_lot::Mutex;
     use std::sync::Arc;
     use std::thread;
-    use crossbeam_channel::bounded;
 
     #[test]
     fn test_concurrent_get_next_ts() {

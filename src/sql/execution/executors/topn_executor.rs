@@ -210,7 +210,6 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {

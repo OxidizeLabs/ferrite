@@ -3,14 +3,10 @@ use crate::catalog::column::Column;
 use crate::catalog::database::Database;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
-use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction_manager::TransactionManager;
-use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::index::{Index, IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use core::fmt;
 use log::{info, warn};
 use parking_lot::RwLock;
@@ -36,10 +32,7 @@ impl Catalog {
     /// # Parameters
     /// - `bpm`: The buffer pool manager backing tables created by this catalog.
     /// - `txn_manager`: The transaction manager in use by the system.
-    pub fn new(
-        bpm: Arc<BufferPoolManager>,
-        txn_manager: Arc<TransactionManager>,
-    ) -> Self {
+    pub fn new(bpm: Arc<BufferPoolManager>, txn_manager: Arc<TransactionManager>) -> Self {
         Self::new_with_existing_data(
             bpm,
             0,
@@ -78,7 +71,7 @@ impl Catalog {
             0, // Use 0 as the default database OID
         );
         databases.insert("default".to_string(), default_db);
-        
+
         Catalog {
             bpm,
             databases,
@@ -137,7 +130,9 @@ impl Catalog {
     /// # Returns
     /// A reference to the current database, or None if no database is selected.
     pub fn get_current_database(&self) -> Option<&Database> {
-        self.current_database.as_ref().and_then(|name| self.databases.get(name))
+        self.current_database
+            .as_ref()
+            .and_then(|name| self.databases.get(name))
     }
 
     /// Gets a mutable reference to the current database.
@@ -228,13 +223,7 @@ impl Catalog {
         index_type: IndexType,
     ) -> Option<(Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)> {
         self.get_current_database_mut()?.create_index(
-            index_name,
-            table_name,
-            key_schema,
-            key_attrs,
-            key_size,
-            unique,
-            index_type,
+            index_name, table_name, key_schema, key_attrs, key_size, unique, index_type,
         )
     }
 
@@ -248,7 +237,8 @@ impl Catalog {
         &self,
         index_oid: IndexOidT,
     ) -> Option<(Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)> {
-        self.get_current_database()?.get_index_by_index_oid(index_oid)
+        self.get_current_database()?
+            .get_index_by_index_oid(index_oid)
     }
 
     pub fn add_index(
@@ -329,13 +319,9 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
-    use crate::common::rid::RID;
-    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
 
@@ -413,18 +399,33 @@ mod tests {
         let mut catalog = Catalog::new(bpm, txn_manager);
 
         // Test creating a new database
-        assert!(catalog.create_database("test_db".to_string()), "Failed to create database");
-        
+        assert!(
+            catalog.create_database("test_db".to_string()),
+            "Failed to create database"
+        );
+
         // Test creating a duplicate database (should fail)
-        assert!(!catalog.create_database("test_db".to_string()), "Should not be able to create duplicate database");
-        
+        assert!(
+            !catalog.create_database("test_db".to_string()),
+            "Should not be able to create duplicate database"
+        );
+
         // Test switching to a database
-        assert!(catalog.use_database("test_db"), "Failed to switch to database");
-        assert_eq!(catalog.get_current_database_name(), Some(&"test_db".to_string()));
-        
+        assert!(
+            catalog.use_database("test_db"),
+            "Failed to switch to database"
+        );
+        assert_eq!(
+            catalog.get_current_database_name(),
+            Some(&"test_db".to_string())
+        );
+
         // Test switching to a non-existent database
-        assert!(!catalog.use_database("nonexistent_db"), "Should not be able to switch to non-existent database");
-        
+        assert!(
+            !catalog.use_database("nonexistent_db"),
+            "Should not be able to switch to non-existent database"
+        );
+
         // Test getting all database names
         let db_names = catalog.get_database_names();
         assert_eq!(db_names.len(), 2); // default + test_db
@@ -443,31 +444,43 @@ mod tests {
         // Create two databases
         catalog.create_database("db1".to_string());
         catalog.create_database("db2".to_string());
-        
+
         // Create schema
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
         ]);
-        
+
         // Create table in db1
         catalog.use_database("db1");
         let table1 = catalog.create_table("table_in_db1".to_string(), schema.clone());
         assert!(table1.is_some(), "Failed to create table in db1");
-        
+
         // Create table in db2
         catalog.use_database("db2");
         let table2 = catalog.create_table("table_in_db2".to_string(), schema.clone());
         assert!(table2.is_some(), "Failed to create table in db2");
-        
+
         // Verify tables are in the correct databases
         catalog.use_database("db1");
-        assert!(catalog.get_table("table_in_db1").is_some(), "Table should exist in db1");
-        assert!(catalog.get_table("table_in_db2").is_none(), "Table from db2 should not be visible in db1");
-        
+        assert!(
+            catalog.get_table("table_in_db1").is_some(),
+            "Table should exist in db1"
+        );
+        assert!(
+            catalog.get_table("table_in_db2").is_none(),
+            "Table from db2 should not be visible in db1"
+        );
+
         catalog.use_database("db2");
-        assert!(catalog.get_table("table_in_db2").is_some(), "Table should exist in db2");
-        assert!(catalog.get_table("table_in_db1").is_none(), "Table from db1 should not be visible in db2");
+        assert!(
+            catalog.get_table("table_in_db2").is_some(),
+            "Table should exist in db2"
+        );
+        assert!(
+            catalog.get_table("table_in_db1").is_none(),
+            "Table from db1 should not be visible in db2"
+        );
     }
 
     #[test]

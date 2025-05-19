@@ -1,5 +1,6 @@
 pub mod abstract_executor;
 pub mod aggregation_executor;
+pub mod command_executor;
 pub mod create_index_executor;
 pub mod create_table_executor;
 pub mod delete_executor;
@@ -21,4 +22,3 @@ pub mod topn_per_group_executor;
 pub mod update_executor;
 pub mod values_executor;
 pub mod window_executor;
-pub mod command_executor;
