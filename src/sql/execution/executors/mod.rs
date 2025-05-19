@@ -16,6 +16,7 @@ pub mod nested_loop_join_executor;
 pub mod projection_executor;
 pub mod seq_scan_executor;
 pub mod sort_executor;
+pub mod start_transaction_executor;
 pub mod table_scan_executor;
 pub mod topn_executor;
 pub mod topn_per_group_executor;
