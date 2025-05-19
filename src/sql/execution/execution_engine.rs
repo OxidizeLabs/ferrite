@@ -2,8 +2,6 @@ use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
-use crate::concurrency::transaction::{IsolationLevel, Transaction};
-use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::wal_manager::WALManager;
 use crate::sql::execution::check_option::CheckOptions;
@@ -16,11 +14,9 @@ use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info};
-use md5;
 use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -366,6 +362,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::storage::table::tuple::TupleMeta;
 
     struct TestContext {
         engine: ExecutionEngine,

@@ -1,7 +1,6 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
-use crate::types_db::value::Value;
 use log::debug;
 use std::any::Any;
 use std::fmt::{Debug, Formatter};

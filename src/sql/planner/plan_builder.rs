@@ -12,7 +12,6 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
-use sqlparser::ast::Value as SqlValue;
 use sqlparser::ast::*;
 use std::sync::Arc;
 

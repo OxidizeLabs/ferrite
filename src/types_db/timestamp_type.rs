@@ -1,7 +1,6 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use std::fmt::Display;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Implementation for TimestampType

@@ -7,7 +7,7 @@ use crate::storage::table::tuple::Tuple;
 use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{info, warn};
+use log::warn;
 use parking_lot::RwLock;
 use std::sync::Arc;
 

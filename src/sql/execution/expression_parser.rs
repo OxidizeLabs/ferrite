@@ -46,7 +46,6 @@ use crate::sql::execution::expressions::logic_expression::{LogicExpression, Logi
 use crate::sql::execution::expressions::map_access_expression::{
     MapAccessExpression, MapAccessKey,
 };
-use crate::sql::execution::expressions::method_expression::MethodExpression;
 use crate::sql::execution::expressions::overlay_expression::OverlayExpression;
 use crate::sql::execution::expressions::position_expression::PositionExpression;
 use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
