@@ -134,6 +134,22 @@ impl ExecutionEngine {
                     }
                 }
             }
+            PlanNode::StartTransaction(_) => {
+                debug!("Executing start transaction statement");
+                
+                // StartTransaction doesn't generate any result tuples
+                // Just execute next() once to trigger the transaction creation
+                root_executor.next();
+                
+                // Get transaction information from the executor's context
+                let exec_context = root_executor.get_executor_context();
+                let txn_context = exec_context.read().get_transaction_context();
+                let txn_id = txn_context.get_transaction_id();
+                let isolation_level = txn_context.get_transaction().get_isolation_level();
+                
+                info!("Transaction {} started successfully with isolation level {:?}", txn_id, isolation_level);
+                Ok(true)
+            }
             _ => {
                 debug!("Executing query statement");
                 let schema = root_executor.get_output_schema();
@@ -350,7 +366,7 @@ mod tests {
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
@@ -363,6 +379,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
     use crate::storage::table::tuple::TupleMeta;
+    use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
 
     struct TestContext {
         engine: ExecutionEngine,
@@ -370,7 +387,7 @@ mod tests {
         exec_ctx: Arc<RwLock<ExecutionContext>>,
         planner: QueryPlanner,
         bpm: Arc<BufferPoolManager>,
-        transaction_context: Arc<TransactionContext>,
+        txn_manager: Arc<TransactionManager>,
         _temp_dir: TempDir,
     }
 
@@ -409,6 +426,7 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
 
+            // Create transaction manager
             let txn_manager = Arc::new(TransactionManager::new());
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
@@ -418,9 +436,10 @@ mod tests {
 
             let lock_manager = Arc::new(LockManager::new());
 
-            let txn = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            // Create a transaction using the transaction manager
+            let txn = txn_manager.begin(IsolationLevel::ReadUncommitted).unwrap();
             let transaction_context =
-                Arc::new(TransactionContext::new(txn, lock_manager, txn_manager));
+                Arc::new(TransactionContext::new(txn, lock_manager.clone(), txn_manager.clone()));
 
             // Create WAL manager with the log manager
             let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
@@ -452,7 +471,7 @@ mod tests {
                 exec_ctx,
                 planner,
                 bpm,
-                transaction_context,
+                txn_manager,
                 _temp_dir: temp_dir,
             }
         }
@@ -484,7 +503,7 @@ mod tests {
         }
 
         fn transaction_context(&self) -> Arc<TransactionContext> {
-            self.transaction_context.clone()
+            self.exec_ctx.read().get_transaction_context()
         }
     }
 
@@ -1792,5 +1811,76 @@ mod tests {
             "Hash mismatch - expected {}, got {}",
             expected_hash, hash
         );
+    }
+
+    #[test]
+    fn test_start_transaction_execution() {
+        let ctx = TestContext::new("test_start_transaction_execution");
+        
+        // Save the initial isolation level
+        let initial_isolation_level = ctx.exec_ctx.read()
+            .get_transaction_context()
+            .get_transaction()
+            .get_isolation_level();
+        
+        println!("Initial isolation level: {:?}", initial_isolation_level);
+        
+        let plan_node = StartTransactionPlanNode::new(Some(initial_isolation_level), false);
+        let plan = PlanNode::StartTransaction(plan_node);
+        
+        // Execute the plan
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_plan(&plan, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+            
+        assert!(success, "StartTransaction execution failed");
+        
+        // Verify that isolation level changed to what we requested
+        let new_isolation_level = ctx.exec_ctx.read()
+            .get_transaction_context()
+            .get_transaction()
+            .get_isolation_level();
+        
+        println!("New isolation level: {:?}", new_isolation_level);
+        
+        // Check that isolation level changed to what we requested
+        
+        assert_eq!(new_isolation_level, IsolationLevel::Serializable, 
+            "Isolation level should be {:?}, got {:?}", IsolationLevel::Serializable, new_isolation_level);
+        
+        // Optionally verify the transaction was started successfully
+        let txn_state = ctx.exec_ctx.read().get_transaction_context().get_transaction().get_state();
+        assert_eq!(txn_state, TransactionState::Running, "Transaction should be in running state");
+        
+        // Test with SQL statement - create a new context
+        let mut ctx2 = TestContext::new("test_start_transaction_sql");
+        
+        // Save the initial isolation level
+        let initial_isolation_level = ctx2.exec_ctx.read()
+            .get_transaction_context()
+            .get_transaction()
+            .get_isolation_level();
+
+        // Execute BEGIN TRANSACTION with SQL
+        let sql = format!("BEGIN TRANSACTION ISOLATION LEVEL {}", initial_isolation_level);
+        let mut writer = TestResultWriter::new();
+        let success = ctx2
+            .engine
+            .execute_sql(&sql, ctx2.exec_ctx.clone(), &mut writer)
+            .unwrap();
+            
+        assert!(success, "BEGIN TRANSACTION SQL execution failed");
+        
+        // Verify isolation level changed as expected
+        let new_isolation_level = ctx2.exec_ctx.read()
+            .get_transaction_context()
+            .get_transaction()
+            .get_isolation_level();
+        
+        assert_eq!(new_isolation_level, IsolationLevel::Serializable,
+            "Isolation level should be {:?} for SQL-initiated transaction, got {:?}",
+                   IsolationLevel::Serializable, new_isolation_level);
     }
 }

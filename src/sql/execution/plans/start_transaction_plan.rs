@@ -2,18 +2,19 @@ use crate::catalog::schema::Schema;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use crate::concurrency::transaction::IsolationLevel;
 
 /// Represents a plan node that starts a transaction with specified isolation level and read-only status
 #[derive(Debug, Clone, PartialEq)]
 pub struct StartTransactionPlanNode {
     output_schema: Schema,
-    isolation_level: Option<String>,
+    isolation_level: Option<IsolationLevel>,
     read_only: bool,
     children: Vec<PlanNode>,
 }
 
 impl StartTransactionPlanNode {
-    pub fn new(isolation_level: Option<String>, read_only: bool) -> Self {
+    pub fn new(isolation_level: Option<IsolationLevel>, read_only: bool) -> Self {
         // Create an empty schema since transaction operations don't return data
         let output_schema = Schema::new(vec![]);
 
@@ -26,7 +27,7 @@ impl StartTransactionPlanNode {
     }
 
     /// Get the isolation level for the transaction, if specified
-    pub fn get_isolation_level(&self) -> &Option<String> {
+    pub fn get_isolation_level(&self) -> &Option<IsolationLevel> {
         &self.isolation_level
     }
 
@@ -77,10 +78,10 @@ mod tests {
     #[test]
     fn test_start_transaction_creation() {
         // Test with isolation level and read-only flag
-        let isolation_level = Some(String::from("SERIALIZABLE"));
+        let isolation_level = Some(IsolationLevel::Serializable);
         let read_only = true;
 
-        let plan_node = StartTransactionPlanNode::new(isolation_level.clone(), read_only);
+        let plan_node = StartTransactionPlanNode::new(isolation_level, read_only);
 
         assert_eq!(plan_node.get_isolation_level(), &isolation_level);
         assert_eq!(plan_node.is_read_only(), read_only);
@@ -95,7 +96,7 @@ mod tests {
     #[test]
     fn test_start_transaction_display() {
         // Create plan with isolation level and read-only flag
-        let plan_node = StartTransactionPlanNode::new(Some(String::from("SERIALIZABLE")), true);
+        let plan_node = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), true);
 
         // Basic display
         assert_eq!(plan_node.to_string(), "→ StartTransaction");
@@ -114,9 +115,9 @@ mod tests {
 
         // Create plan with isolation level but without read-only flag
         let plan_node_not_readonly =
-            StartTransactionPlanNode::new(Some(String::from("READ COMMITTED")), false);
+            StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), false);
         let detailed_not_readonly = format!("{:#}", plan_node_not_readonly);
-        assert!(detailed_not_readonly.contains("Isolation Level: READ COMMITTED"));
+        assert!(detailed_not_readonly.contains("Isolation Level: SERIALIZABLE"));
         assert!(!detailed_not_readonly.contains("Read Only"));
     }
 
@@ -131,15 +132,15 @@ mod tests {
     fn test_different_isolation_levels() {
         // Test with different standard isolation levels
         let levels = vec![
-            "READ UNCOMMITTED",
-            "READ COMMITTED",
-            "REPEATABLE READ",
-            "SERIALIZABLE",
+            IsolationLevel::ReadUncommitted,
+            IsolationLevel::ReadCommitted,
+            IsolationLevel::RepeatableRead,
+            IsolationLevel::Serializable,
         ];
 
         for level in levels {
-            let plan_node = StartTransactionPlanNode::new(Some(level.to_string()), false);
-            assert_eq!(plan_node.get_isolation_level(), &Some(level.to_string()));
+            let plan_node = StartTransactionPlanNode::new(Some(level), false);
+            assert_eq!(plan_node.get_isolation_level(), &Some(level));
 
             // Check the display
             let detailed = format!("{:#}", plan_node);
@@ -148,26 +149,14 @@ mod tests {
     }
 
     #[test]
-    fn test_case_sensitivity() {
-        // Test case sensitivity handling of isolation levels
-        let levels = vec!["serializable", "Serializable", "SERIALIZABLE"];
-
-        for level in levels {
-            let plan_node = StartTransactionPlanNode::new(Some(level.to_string()), false);
-            let detailed = format!("{:#}", plan_node);
-            assert!(detailed.contains(&format!("Isolation Level: {}", level)));
-        }
-    }
-
-    #[test]
     fn test_empty_isolation_level() {
         // Test with empty string for isolation level
-        let plan_node = StartTransactionPlanNode::new(Some(String::from("")), false);
-        assert_eq!(plan_node.get_isolation_level(), &Some(String::from("")));
+        let plan_node = StartTransactionPlanNode::new(None, false);
+        assert_eq!(plan_node.get_isolation_level(), &None);
 
-        // The empty string should still be displayed
+        // When isolation_level is None, it shouldn't be displayed in the output
         let detailed = format!("{:#}", plan_node);
-        assert!(detailed.contains("Isolation Level: "));
+        assert!(!detailed.contains("Isolation Level:"));
     }
 
     #[test]
@@ -176,12 +165,12 @@ mod tests {
         let test_cases = vec![
             (None, false),
             (None, true),
-            (Some(String::from("SERIALIZABLE")), false),
-            (Some(String::from("SERIALIZABLE")), true),
+            (Some(IsolationLevel::Serializable), false),
+            (Some(IsolationLevel::Serializable), true),
         ];
 
         for (isolation_level, read_only) in test_cases {
-            let plan_node = StartTransactionPlanNode::new(isolation_level.clone(), read_only);
+            let plan_node = StartTransactionPlanNode::new(isolation_level, read_only);
 
             // Verify parameters were set correctly
             assert_eq!(plan_node.get_isolation_level(), &isolation_level);
@@ -207,7 +196,7 @@ mod tests {
     #[test]
     fn test_integration_with_plan_system() {
         // Create a start transaction plan node
-        let plan_node = StartTransactionPlanNode::new(Some(String::from("SERIALIZABLE")), true);
+        let plan_node = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), true);
 
         // Create a PlanNode enum variant from it
         let plan_enum = PlanNode::StartTransaction(plan_node);
@@ -217,7 +206,7 @@ mod tests {
             PlanNode::StartTransaction(inner_node) => {
                 assert_eq!(
                     inner_node.get_isolation_level(),
-                    &Some(String::from("SERIALIZABLE"))
+                    &Some(IsolationLevel::Serializable)
                 );
                 assert_eq!(inner_node.is_read_only(), true);
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
@@ -241,7 +230,7 @@ mod tests {
     #[test]
     fn test_explain_output() {
         // Create a start transaction plan node
-        let plan_node = StartTransactionPlanNode::new(Some(String::from("SERIALIZABLE")), true);
+        let plan_node = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), true);
 
         // Create a PlanNode enum variant from it
         let plan_enum = PlanNode::StartTransaction(plan_node);
@@ -273,26 +262,5 @@ mod tests {
         assert!(lines[0].starts_with("  →")); // Should have 2 spaces (indent level 1)
         assert!(lines[1].starts_with("     ")); // Should have 5 spaces (2 + 3)
         assert!(lines[2].starts_with("     ")); // Should have 5 spaces (2 + 3)
-    }
-
-    #[test]
-    fn test_invalid_isolation_levels() {
-        // The StartTransactionPlanNode should accept any string as isolation level
-        // since validation should happen at a higher level (parser/planner)
-
-        // Test with non-standard isolation level
-        let invalid_levels = vec!["SNAPSHOT", "READ ONLY", "INVALID LEVEL"];
-
-        for level in invalid_levels {
-            // This should not panic or error
-            let plan_node = StartTransactionPlanNode::new(Some(level.to_string()), false);
-
-            // The level should be stored as-is
-            assert_eq!(plan_node.get_isolation_level(), &Some(level.to_string()));
-
-            // The display should show the level
-            let detailed = format!("{:#}", plan_node);
-            assert!(detailed.contains(&format!("Isolation Level: {}", level)));
-        }
     }
 }

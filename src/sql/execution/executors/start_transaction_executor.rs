@@ -44,23 +44,12 @@ impl AbstractExecutor for StartTransactionExecutor {
         self.executed = true;
 
         // Get transaction information from plan
-        let isolation_level_str = self.plan.get_isolation_level();
-        let read_only = self.plan.is_read_only();
-
-        // Parse isolation level string
-        let isolation_level = match isolation_level_str {
-            Some(level_str) => {
-                match IsolationLevel::from_str(level_str) {
-                    Some(level) => level,
-                    None => {
-                        error!("Invalid isolation level: {}", level_str);
-                        // Default to SERIALIZABLE if invalid
-                        IsolationLevel::Serializable
-                    }
-                }
-            }
-            None => IsolationLevel::default(), // Default isolation level
+        let isolation_level = match self.plan.get_isolation_level() {
+            &Some(level) => level,
+            &None => IsolationLevel::ReadCommitted,
         };
+        let read_only = self.plan.is_read_only();
+        
 
         let context = self.context.read();
         let txn_manager = context.get_transaction_context().get_transaction_manager();
@@ -206,7 +195,7 @@ mod tests {
         let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
         
         // Create a start transaction plan with serializable isolation level
-        let plan = StartTransactionPlanNode::new(Some("SERIALIZABLE".to_string()), false);
+        let plan = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), false);
         
         // Create the executor
         let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
@@ -270,7 +259,7 @@ mod tests {
         let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
         
         // Create a start transaction plan with an invalid isolation level
-        let plan = StartTransactionPlanNode::new(Some("INVALID_LEVEL".to_string()), false);
+        let plan = StartTransactionPlanNode::new(None, false);
         
         // Create the executor
         let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
@@ -286,9 +275,9 @@ mod tests {
         let new_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
         assert_ne!(new_txn_id, original_txn_id, "New transaction ID should be different from original");
         
-        // Check isolation level - should default to SERIALIZABLE for invalid levels
+        // Check isolation level - should default to READ COMMITTED when none is specified
         let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
-        assert_eq!(isolation_level, IsolationLevel::Serializable);
+        assert_eq!(isolation_level, IsolationLevel::ReadCommitted);
     }
 
     #[test]
@@ -300,7 +289,7 @@ mod tests {
         let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
         
         // Create a start transaction plan with read-only flag set to true
-        let plan = StartTransactionPlanNode::new(Some("READ COMMITTED".to_string()), true);
+        let plan = StartTransactionPlanNode::new(Some(IsolationLevel::ReadCommitted), true);
         
         // Create the executor
         let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
@@ -328,21 +317,21 @@ mod tests {
     fn test_all_isolation_levels() {
         // Test each of the isolation levels
         let isolation_levels = vec![
-            ("READ UNCOMMITTED", IsolationLevel::ReadUncommitted),
-            ("READ COMMITTED", IsolationLevel::ReadCommitted),
-            ("REPEATABLE READ", IsolationLevel::RepeatableRead),
-            ("SERIALIZABLE", IsolationLevel::Serializable),
+            IsolationLevel::ReadUncommitted,
+            IsolationLevel::ReadCommitted,
+            IsolationLevel::RepeatableRead,
+            IsolationLevel::Serializable,
         ];
         
-        for (level_str, expected_level) in isolation_levels {
-            let test_context = TestContext::new(&format!("isolation_level_{}_test", level_str.replace(" ", "_").to_lowercase()));
+        for expected_level in isolation_levels {
+            let test_context = TestContext::new(&format!("isolation_level_{}_test", expected_level.to_string().to_lowercase()));
             let exec_context = test_context.create_execution_context();
             
             // Store the original transaction ID
             let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
             
             // Create a start transaction plan with this isolation level
-            let plan = StartTransactionPlanNode::new(Some(level_str.to_string()), false);
+            let plan = StartTransactionPlanNode::new(Some(expected_level), false);
             
             // Create the executor
             let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
@@ -360,37 +349,7 @@ mod tests {
             
             // Check isolation level
             let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
-            assert_eq!(isolation_level, expected_level, "Isolation level should match for {}", level_str);
-        }
-    }
-
-    #[test]
-    fn test_case_insensitive_isolation_levels() {
-        // Test case insensitivity of isolation level strings
-        let isolation_levels = vec![
-            ("read uncommitted", IsolationLevel::ReadUncommitted),
-            ("Read Committed", IsolationLevel::ReadCommitted),
-            ("REPEATABLE read", IsolationLevel::RepeatableRead),
-            ("Serializable", IsolationLevel::Serializable),
-        ];
-        
-        for (level_str, expected_level) in isolation_levels {
-            let test_context = TestContext::new(&format!("case_insensitive_{}_test", level_str.replace(" ", "_").to_lowercase()));
-            let exec_context = test_context.create_execution_context();
-            
-            // Create a start transaction plan with this isolation level
-            let plan = StartTransactionPlanNode::new(Some(level_str.to_string()), false);
-            
-            // Create the executor
-            let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
-            
-            // Initialize and execute
-            executor.init();
-            executor.next();
-            
-            // Check isolation level
-            let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
-            assert_eq!(isolation_level, expected_level, "Case insensitive isolation level should match for {}", level_str);
+            assert_eq!(isolation_level, expected_level, "Isolation level should match for {}", expected_level);
         }
     }
 
@@ -473,7 +432,7 @@ mod tests {
         test_context.transaction_manager.shutdown().unwrap();
         
         // Try to start a transaction after shutdown
-        let plan = StartTransactionPlanNode::new(Some("SERIALIZABLE".to_string()), false);
+        let plan = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), false);
         let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
         
         // Initialize and execute
