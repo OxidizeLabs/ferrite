@@ -46,7 +46,14 @@ impl QueryPlanner {
                 selection,
                 returning,
                 or,
-            } => self.plan_builder.build_update_plan(table, assignments, from, selection, returning, or),
+            } => self.plan_builder.build_update_plan(
+                table,
+                assignments,
+                from,
+                selection,
+                returning,
+                or,
+            ),
             Statement::Delete(_) => self.plan_builder.build_delete_plan(stmt),
             Statement::Explain { .. } => self.plan_builder.build_explain_plan(stmt),
             Statement::StartTransaction {
@@ -82,10 +89,9 @@ impl QueryPlanner {
                 schema_name,
                 if_not_exists,
                 ..
-            } => self.plan_builder.build_create_schema_plan(
-                schema_name,
-                if_not_exists,
-            ),
+            } => self
+                .plan_builder
+                .build_create_schema_plan(schema_name, if_not_exists),
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,

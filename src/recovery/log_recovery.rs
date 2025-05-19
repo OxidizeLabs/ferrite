@@ -1,13 +1,12 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
-use crate::catalog::schema::Schema;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction::Transaction;
+use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::recovery::wal_manager::WALManager;
-use crate::recovery::log_iterator::LogIterator;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::storage::table::tuple::Tuple;
@@ -103,7 +102,7 @@ impl LogRecoveryManager {
 
         // Create a log iterator to safely read through the log
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
-        
+
         // Process each log record
         while let Some(log_record) = log_iterator.next() {
             let lsn = log_record.get_lsn();
@@ -183,7 +182,7 @@ impl LogRecoveryManager {
 
         // Create a log iterator to safely read through the log
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
-        
+
         // Process each log record
         while let Some(log_record) = log_iterator.next() {
             let lsn = log_record.get_lsn();
@@ -258,8 +257,9 @@ impl LogRecoveryManager {
                 // Get the offset for this LSN
                 if let Some(offset) = lsn_to_offset_map.get(&current_lsn) {
                     // Create a LogIterator at this specific offset
-                    let mut single_record_iterator = LogIterator::with_offset(self.disk_manager.clone(), *offset);
-                    
+                    let mut single_record_iterator =
+                        LogIterator::with_offset(self.disk_manager.clone(), *offset);
+
                     if let Some(log_record) = single_record_iterator.next() {
                         if log_record.get_txn_id() == txn_id {
                             match log_record.get_log_record_type() {
@@ -319,20 +319,20 @@ impl LogRecoveryManager {
     fn build_lsn_offset_map(&self) -> Result<HashMap<Lsn, u64>, String> {
         let mut map = HashMap::new();
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
-        
+
         // Track the current offset
         let mut current_offset = 0;
-        
+
         while let Some(log_record) = log_iterator.next() {
             let lsn = log_record.get_lsn();
-            
+
             // Store the offset for this LSN
             map.insert(lsn, current_offset);
-            
+
             // Update the offset for the next record
             current_offset = log_iterator.get_offset();
         }
-        
+
         Ok(map)
     }
 
@@ -521,6 +521,7 @@ mod tests {
     use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
+    use crate::catalog::Schema;
 
     // Common test context for all test modules
     pub struct TestContext {
@@ -599,18 +600,18 @@ mod tests {
                 let _ = fs::remove_file(&self.db_file_path);
             }
         }
-        
+
         /// Helper to create a simple test tuple
         pub fn create_test_tuple(&self, id: PageId) -> Tuple {
             // Create a dummy tuple - in tests we don't need real data
             // Using the RID to represent the tuple's location
             let rid = RID::new(id, 0);
-            
+
             // In actual implementation, this would create a real tuple with schema
             // For testing, we'll just create an empty tuple
             Tuple::new(&[], &Schema::new(vec![]), rid)
         }
-        
+
         /// Helper to create a test transaction with a specific ID
         pub fn create_test_transaction(&self, id: TxnId) -> Transaction {
             // Create a transaction with given ID and default isolation level
@@ -628,7 +629,7 @@ mod tests {
             // Commit records in the WAL will trigger a flush
             let flush_txn = self.create_test_transaction(999);
             self.wal_manager.write_commit_record(&flush_txn);
-            
+
             self.wal_manager.force_run_flush_thread();
 
             sleep(Duration::from_millis(20));
@@ -643,30 +644,28 @@ mod tests {
 
     /// Tests for the analysis phase of log recovery
     mod analysis_tests {
-        use std::time::Duration;
-        use tokio::time::sleep;
         use super::*;
 
         /// Test analyzing logs with no transactions
         #[test]
         fn test_analysis_empty_log() {
             let ctx = TestContext::new("analysis_empty_test");
-            
+
             // Start recovery (which includes analysis)
             let result = ctx.recovery_manager.start_recovery();
             assert!(result.is_ok(), "Recovery should succeed on empty log");
-            
+
             // Analyze the log directly to check results
             let (txn_table, dirty_page_table, start_redo_lsn) =
                 ctx.recovery_manager.analyze_log().unwrap();
-            
+
             // Verify no active transactions found
             assert_eq!(
                 txn_table.get_active_txns().len(),
                 0,
                 "Should have no active transactions"
             );
-            
+
             // Verify no dirty pages found
             assert_eq!(
                 dirty_page_table.get_dirty_pages().len(),
@@ -674,25 +673,25 @@ mod tests {
                 "Should have no dirty pages"
             );
         }
-        
+
         /// Test analyzing logs with a single complete transaction
         #[test]
         fn test_analysis_complete_transaction() {
             let ctx = TestContext::new("analysis_complete_txn_test");
-            
+
             // Create and run a transaction with BEGIN and COMMIT
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
-            
+
             // Update the transaction's LSN
             txn.set_prev_lsn(begin_lsn);
-            
+
             // Commit the transaction
             let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
-            
+
             // Simulate crash after commit
             ctx.simulate_crash();
-            
+
             // Analysis should show no active transactions since it completed
             let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
             assert_eq!(
@@ -701,19 +700,19 @@ mod tests {
                 "Should have no active transactions after complete txn"
             );
         }
-        
+
         /// Test analyzing logs with an incomplete transaction
         #[test]
         fn test_analysis_incomplete_transaction() {
             let ctx = TestContext::new("analysis_incomplete_txn_test");
-            
+
             // Create a transaction but don't commit it
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
-            
+
             // Update the transaction's LSN
             txn.set_prev_lsn(begin_lsn);
-            
+
             // Add some operations but don't commit
             let rid = RID::new(1, 0);
             let old_tuple = ctx.create_test_tuple(1);
@@ -721,12 +720,12 @@ mod tests {
             let update_lsn = ctx
                 .wal_manager
                 .write_update_record(&txn, rid, old_tuple, new_tuple);
-            
+
             // Simulate crash before commit
             ctx.simulate_crash();
-            
+
             // sleep(Duration::from_millis(10));
-            
+
             // Analysis should show one active transaction
             let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
             assert_eq!(
@@ -742,7 +741,7 @@ mod tests {
             );
         }
     }
-    
+
     /// Tests for the redo phase of log recovery
     mod redo_tests {
         use super::*;
@@ -751,40 +750,37 @@ mod tests {
         #[test]
         fn test_redo_empty_log() {
             let ctx = TestContext::new("redo_empty_test");
-            
+
             // Start recovery
             let result = ctx.recovery_manager.start_recovery();
             assert!(result.is_ok(), "Recovery should succeed on empty log");
         }
-        
+
         /// Test redo with update operations
         #[test]
         fn test_redo_update_operations() {
             let ctx = TestContext::new("redo_update_test");
-            
+
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
             txn.set_prev_lsn(begin_lsn);
-            
+
             // Perform multiple updates
             let rid = RID::new(1, 0);
             let old_tuple = ctx.create_test_tuple(1);
             let new_tuple = ctx.create_test_tuple(2);
-            let update_lsn = ctx.wal_manager.write_update_record(
-                &txn,
-                rid,
-                old_tuple,
-                new_tuple,
-            );
+            let update_lsn = ctx
+                .wal_manager
+                .write_update_record(&txn, rid, old_tuple, new_tuple);
             txn.set_prev_lsn(update_lsn);
-            
+
             // Commit the transaction
             let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
-            
+
             // Simulate crash after commit
             ctx.simulate_crash();
-            
+
             // Now recover
             let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
                 ctx.recovery_manager.analyze_log().unwrap();
@@ -793,14 +789,14 @@ mod tests {
                 &mut dirty_page_table,
                 start_redo_lsn,
             );
-            
+
             assert!(redo_result.is_ok(), "Redo phase should succeed");
-            
+
             // In a real test, we would validate the page contents were correctly restored
             // This would require mocking or implementing the actual page read/write operations
         }
     }
-    
+
     /// Tests for the undo phase of log recovery
     mod undo_tests {
         use super::*;
@@ -809,22 +805,22 @@ mod tests {
         #[test]
         fn test_undo_no_active_transactions() {
             let ctx = TestContext::new("undo_no_active_txn_test");
-            
+
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
             txn.set_prev_lsn(begin_lsn);
-            
+
             // Commit the transaction
             let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
-            
+
             // Simulate crash after commit
             ctx.simulate_crash();
-            
+
             // Recovery and undo phase
             let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
             let undo_result = ctx.recovery_manager.undo_log(&txn_table);
-            
+
             assert!(undo_result.is_ok(), "Undo phase should succeed");
             assert_eq!(
                 txn_table.get_active_txns().len(),
@@ -832,32 +828,29 @@ mod tests {
                 "Should have no active transactions"
             );
         }
-        
+
         /// Test undo with incomplete transactions
         #[test]
         fn test_undo_active_transactions() {
             let ctx = TestContext::new("undo_active_txn_test");
-            
+
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
             txn.set_prev_lsn(begin_lsn);
-            
+
             // Perform an update but don't commit
             let rid = RID::new(1, 0);
             let old_tuple = ctx.create_test_tuple(1);
             let new_tuple = ctx.create_test_tuple(2);
-            let update_lsn = ctx.wal_manager.write_update_record(
-                &txn,
-                rid,
-                old_tuple,
-                new_tuple,
-            );
+            let update_lsn = ctx
+                .wal_manager
+                .write_update_record(&txn, rid, old_tuple, new_tuple);
             txn.set_prev_lsn(update_lsn);
-            
+
             // Simulate crash before commit
             ctx.simulate_crash();
-            
+
             // Recovery and undo phase
             let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
             assert_eq!(
@@ -865,15 +858,15 @@ mod tests {
                 1,
                 "Should have one active transaction"
             );
-            
+
             let undo_result = ctx.recovery_manager.undo_log(&txn_table);
             assert!(undo_result.is_ok(), "Undo phase should succeed");
-            
+
             // In a real test, we would validate the updates were properly rolled back
             // This would require mocking or implementing the actual page read/write operations
         }
     }
-    
+
     /// End-to-end tests for the complete recovery process
     mod integration_tests {
         use super::*;
@@ -882,13 +875,13 @@ mod tests {
         #[test]
         fn test_complete_recovery_process() {
             let ctx = TestContext::new("complete_recovery_test");
-            
+
             // Create multiple transactions
             // Transaction 1: Completes successfully
             let txn1 = ctx.create_test_transaction(1);
             let begin_lsn1 = ctx.wal_manager.write_begin_record(&txn1);
             txn1.set_prev_lsn(begin_lsn1);
-            
+
             let rid1 = RID::new(1, 0);
             let old_tuple1 = ctx.create_test_tuple(1);
             let new_tuple1 = ctx.create_test_tuple(2);
@@ -896,14 +889,14 @@ mod tests {
                 .wal_manager
                 .write_update_record(&txn1, rid1, old_tuple1, new_tuple1);
             txn1.set_prev_lsn(update_lsn1);
-            
+
             let commit_lsn1 = ctx.wal_manager.write_commit_record(&txn1);
-            
+
             // Transaction 2: Aborts explicitly
             let txn2 = ctx.create_test_transaction(2);
             let begin_lsn2 = ctx.wal_manager.write_begin_record(&txn2);
             txn2.set_prev_lsn(begin_lsn2);
-            
+
             let rid2 = RID::new(2, 0);
             let old_tuple2 = ctx.create_test_tuple(3);
             let new_tuple2 = ctx.create_test_tuple(4);
@@ -911,14 +904,14 @@ mod tests {
                 .wal_manager
                 .write_update_record(&txn2, rid2, old_tuple2, new_tuple2);
             txn2.set_prev_lsn(update_lsn2);
-            
+
             let abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
-            
+
             // Transaction 3: Incomplete (simulating crash during execution)
             let txn3 = ctx.create_test_transaction(3);
             let begin_lsn3 = ctx.wal_manager.write_begin_record(&txn3);
             txn3.set_prev_lsn(begin_lsn3);
-            
+
             let rid3 = RID::new(3, 0);
             let old_tuple3 = ctx.create_test_tuple(5);
             let new_tuple3 = ctx.create_test_tuple(6);
@@ -926,33 +919,33 @@ mod tests {
                 .wal_manager
                 .write_update_record(&txn3, rid3, old_tuple3, new_tuple3);
             txn3.set_prev_lsn(update_lsn3);
-            
+
             // Simulate crash
             ctx.simulate_crash();
-            
+
             // Perform recovery
             let recovery_result = ctx.recovery_manager.start_recovery();
             assert!(
                 recovery_result.is_ok(),
                 "Complete recovery process should succeed"
             );
-            
+
             // In a real test, we would validate:
             // 1. Transaction 1's changes are preserved (committed)
             // 2. Transaction 2's changes are rolled back (explicitly aborted)
             // 3. Transaction 3's changes are rolled back (incomplete at crash)
         }
-        
+
         /// Test recovery after a crash during recovery
         #[test]
         fn test_recovery_after_recovery_crash() {
             let ctx = TestContext::new("recovery_after_crash_test");
-            
+
             // Create and complete a transaction
             let txn = ctx.create_test_transaction(1);
             let begin_lsn = ctx.wal_manager.write_begin_record(&txn);
             txn.set_prev_lsn(begin_lsn);
-            
+
             let rid = RID::new(1, 0);
             let old_tuple = ctx.create_test_tuple(1);
             let new_tuple = ctx.create_test_tuple(2);
@@ -960,22 +953,22 @@ mod tests {
                 .wal_manager
                 .write_update_record(&txn, rid, old_tuple, new_tuple);
             txn.set_prev_lsn(update_lsn);
-            
+
             // Don't commit - simulate crash
             ctx.simulate_crash();
-            
+
             // Create a new context that will "recover" the database
             let recovery_ctx = TestContext::new("recovery_after_crash_test");
             // Point it to the same files
             // In a real test, we would need to implement this properly
-            
+
             // Now simulate a crash during recovery
             recovery_ctx.simulate_crash();
-            
+
             // Create a final context for recovery after recovery crash
             let final_ctx = TestContext::new("recovery_after_crash_test");
             // Again, point it to the same files
-            
+
             // This recovery should also succeed
             let final_recovery_result = final_ctx.recovery_manager.start_recovery();
             assert!(

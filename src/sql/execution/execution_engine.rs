@@ -353,7 +353,6 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
-    use crate::common::rid::RID;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -361,12 +360,10 @@ mod tests {
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableInfo;
-    use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val::Null;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use std::sync::Arc;
     use tempfile::TempDir;
 

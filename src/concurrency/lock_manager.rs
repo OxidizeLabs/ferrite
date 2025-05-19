@@ -759,11 +759,7 @@ impl LockValidator {
     }
 
     /// Validates lock requests for SNAPSHOT isolation level
-    fn validate_snapshot(
-        &self,
-        txn: &Transaction,
-        lock_mode: LockMode,
-    ) -> Result<(), LockError> {
+    fn validate_snapshot(&self, txn: &Transaction, lock_mode: LockMode) -> Result<(), LockError> {
         if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
             txn.set_state(TransactionState::Shrinking);
         }

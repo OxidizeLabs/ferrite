@@ -579,7 +579,11 @@ impl LogicalPlan {
                     result.push_str(&format!("{}   Has End Keyword: true\n", indent_str));
                 }
             }
-            LogicalPlanType::Commit { chain, end, modifier } => {
+            LogicalPlanType::Commit {
+                chain,
+                end,
+                modifier,
+            } => {
                 result.push_str(&format!("{}→ Commit\n", indent_str));
                 if *chain {
                     result.push_str(&format!("{}   Chain: true\n", indent_str));
@@ -675,7 +679,14 @@ impl LogicalPlan {
                 result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
             }
-            LogicalPlanType::ShowTables { schema_name, terse, history, extended, full, external } => {
+            LogicalPlanType::ShowTables {
+                schema_name,
+                terse,
+                history,
+                extended,
+                full,
+                external,
+            } => {
                 result.push_str(&format!("{}→ ShowTables\n", indent_str));
                 if let Some(name) = schema_name {
                     result.push_str(&format!("{}   Schema: {}\n", indent_str, name));
@@ -1235,9 +1246,14 @@ impl LogicalPlan {
             LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Window { schema, .. } => Some(schema.clone()),
-            LogicalPlanType::ShowTables { schema_name: sn, terse: _, history: _, extended: _, full: _, external: _ } => {
-                None
-            }
+            LogicalPlanType::ShowTables {
+                schema_name: sn,
+                terse: _,
+                history: _,
+                extended: _,
+                full: _,
+                external: _,
+            } => None,
             _ => None,
         }
     }
@@ -1293,7 +1309,7 @@ impl LogicalPlan {
 
     pub fn rollback(chain: bool) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::Rollback { 
+            LogicalPlanType::Rollback {
                 chain,
                 savepoint: None,
             },
@@ -1301,15 +1317,9 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn rollback_transaction(
-        chain: bool,
-        savepoint: Option<Ident>,
-    ) -> Box<Self> {
+    pub fn rollback_transaction(chain: bool, savepoint: Option<Ident>) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::Rollback { 
-                chain,
-                savepoint,
-            },
+            LogicalPlanType::Rollback { chain, savepoint },
             vec![], // No children for transaction control statements
         ))
     }
@@ -1402,18 +1412,18 @@ impl LogicalPlan {
 
     pub fn show_tables(schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::ShowTables { 
+            LogicalPlanType::ShowTables {
                 schema_name,
                 terse: false,
                 history: false,
                 extended: false,
                 full: false,
-                external: false
+                external: false,
             },
             vec![], // No children
         ))
     }
-    
+
     // Add a new constructor method that takes all options
     pub fn show_tables_with_options(
         schema_name: Option<String>,
@@ -1421,16 +1431,16 @@ impl LogicalPlan {
         history: bool,
         extended: bool,
         full: bool,
-        external: bool
+        external: bool,
     ) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::ShowTables { 
+            LogicalPlanType::ShowTables {
                 schema_name,
                 terse,
                 history,
                 extended,
                 full,
-                external
+                external,
             },
             vec![], // No children
         ))
@@ -1448,10 +1458,7 @@ impl LogicalPlan {
 
     pub fn show_databases_with_options(terse: bool, history: bool) -> Box<Self> {
         Box::new(Self::new(
-            LogicalPlanType::ShowDatabases {
-                terse,
-                history,
-            },
+            LogicalPlanType::ShowDatabases { terse, history },
             vec![], // No children
         ))
     }
@@ -1476,10 +1483,10 @@ impl LogicalPlan {
     }
 
     pub fn show_columns_with_options(
-        table_name: String, 
-        schema_name: Option<String>, 
-        extended: bool, 
-        full: bool
+        table_name: String,
+        schema_name: Option<String>,
+        extended: bool,
+        full: bool,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowColumns {
@@ -1987,7 +1994,11 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::Commit { chain, end, modifier } => {
+            LogicalPlanType::Commit {
+                chain,
+                end,
+                modifier,
+            } => {
                 // Create a dummy plan that will perform commit
                 let cmd = if *chain {
                     if *end {
@@ -2100,7 +2111,14 @@ impl<'a> PlanConverter<'a> {
                 )))
             }
 
-            LogicalPlanType::ShowTables { schema_name, terse, history, extended, full, external } => {
+            LogicalPlanType::ShowTables {
+                schema_name,
+                terse,
+                history,
+                extended,
+                full,
+                external,
+            } => {
                 // Create a dummy plan that will show tables
                 Ok(PlanNode::CommandResult(format!(
                     "SHOW{}{}{}{}{}TABLES{}",
@@ -3160,7 +3178,11 @@ mod tests {
         let plan = LogicalPlan::commit();
 
         match &plan.plan_type {
-            LogicalPlanType::Commit { chain, end, modifier } => {
+            LogicalPlanType::Commit {
+                chain,
+                end,
+                modifier,
+            } => {
                 assert_eq!(*chain, false);
                 assert_eq!(*end, false);
                 assert!(modifier.is_none());
@@ -3175,7 +3197,10 @@ mod tests {
         let plan = LogicalPlan::rollback(chain);
 
         match &plan.plan_type {
-            LogicalPlanType::Rollback { chain: c, savepoint } => {
+            LogicalPlanType::Rollback {
+                chain: c,
+                savepoint,
+            } => {
                 assert_eq!(chain, *c);
                 assert!(savepoint.is_none());
             }
@@ -3190,7 +3215,10 @@ mod tests {
         let plan = LogicalPlan::rollback_transaction(chain, savepoint.clone());
 
         match &plan.plan_type {
-            LogicalPlanType::Rollback { chain: c, savepoint: sp } => {
+            LogicalPlanType::Rollback {
+                chain: c,
+                savepoint: sp,
+            } => {
                 assert_eq!(chain, *c);
                 if let Some(sp_val) = sp {
                     if let Some(expected) = &savepoint {
@@ -3364,13 +3392,13 @@ mod tests {
         let plan = LogicalPlan::show_tables(schema_name.clone());
 
         match &plan.plan_type {
-            LogicalPlanType::ShowTables { 
-                schema_name: sn, 
-                terse, 
-                history, 
-                extended, 
-                full, 
-                external 
+            LogicalPlanType::ShowTables {
+                schema_name: sn,
+                terse,
+                history,
+                extended,
+                full,
+                external,
             } => {
                 assert_eq!(schema_name, *sn);
                 assert_eq!(*terse, false);
@@ -3381,25 +3409,25 @@ mod tests {
             }
             _ => panic!("Expected ShowTables plan"),
         }
-        
+
         // Also test the show_tables_with_options method
         let plan_with_options = LogicalPlan::show_tables_with_options(
-            schema_name.clone(), 
-            true, 
-            true, 
-            true, 
-            true, 
-            true
+            schema_name.clone(),
+            true,
+            true,
+            true,
+            true,
+            true,
         );
-        
+
         match &plan_with_options.plan_type {
-            LogicalPlanType::ShowTables { 
-                schema_name: sn, 
-                terse, 
-                history, 
-                extended, 
-                full, 
-                external 
+            LogicalPlanType::ShowTables {
+                schema_name: sn,
+                terse,
+                history,
+                extended,
+                full,
+                external,
             } => {
                 assert_eq!(schema_name, *sn);
                 assert_eq!(*terse, true);
@@ -3484,7 +3512,11 @@ mod tests {
         let plan = LogicalPlan::commit_transaction(chain, end, modifier.clone());
 
         match &plan.plan_type {
-            LogicalPlanType::Commit { chain: c, end: e, modifier: m } => {
+            LogicalPlanType::Commit {
+                chain: c,
+                end: e,
+                modifier: m,
+            } => {
                 assert_eq!(chain, *c);
                 assert_eq!(end, *e);
                 assert_eq!(&modifier, m);
@@ -3500,7 +3532,12 @@ mod tests {
         let extended = true;
         let full = true;
 
-        let plan = LogicalPlan::show_columns_with_options(table_name.clone(), schema_name.clone(), extended, full);
+        let plan = LogicalPlan::show_columns_with_options(
+            table_name.clone(),
+            schema_name.clone(),
+            extended,
+            full,
+        );
 
         match &plan.plan_type {
             LogicalPlanType::ShowColumns {

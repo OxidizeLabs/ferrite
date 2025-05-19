@@ -32,7 +32,7 @@ pub enum IsolationLevel {
     ReadCommitted,
     RepeatableRead,
     Serializable,
-    Snapshot
+    Snapshot,
 }
 
 /// Represents a link to a previous version of this tuple.
@@ -383,8 +383,8 @@ impl Transaction {
                     && !meta.is_deleted();
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
-            },
-            IsolationLevel::Snapshot => todo!()
+            }
+            IsolationLevel::Snapshot => todo!(),
         }
     }
 }
@@ -403,7 +403,7 @@ impl fmt::Display for IsolationLevel {
             IsolationLevel::ReadCommitted => "READ_COMMITTED",
             IsolationLevel::RepeatableRead => "REPEATABLE_READ",
             IsolationLevel::Serializable => "SERIALIZABLE",
-            IsolationLevel::Snapshot => "SNAPSHOT"
+            IsolationLevel::Snapshot => "SNAPSHOT",
         };
         write!(f, "{}", name)
     }

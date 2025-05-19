@@ -357,7 +357,7 @@ mod tests {
         // Create test context
         let ctx = TestContext::new("test_window_row_number");
         let catalog = Arc::new(RwLock::new(Catalog::new(
-            ctx.bpm(), // index_names
+            ctx.bpm(),                       // index_names
             ctx.transaction_manager.clone(), // txn_manager
         )));
         let execution_ctx = Arc::new(RwLock::new(ExecutionContext::new(

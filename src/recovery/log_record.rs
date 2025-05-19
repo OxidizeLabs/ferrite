@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 use std::mem::size_of;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The type of the log record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,7 +48,7 @@ pub enum LogRecordType {
 #[derive(Debug)]
 pub struct LogRecord {
     size: i32,
-    lsn: AtomicU64,  // Changed from Lsn to AtomicU64
+    lsn: AtomicU64, // Changed from Lsn to AtomicU64
     txn_id: TxnId,
     prev_lsn: Lsn,
     log_record_type: LogRecordType,
@@ -66,10 +66,7 @@ pub struct LogRecord {
 }
 
 // Helper function to serialize an Option<Arc<Tuple>>
-fn serialize_arc_tuple<S>(
-    tuple: &Option<Arc<Tuple>>, 
-    serializer: S
-) -> Result<S::Ok, S::Error>
+fn serialize_arc_tuple<S>(tuple: &Option<Arc<Tuple>>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -88,25 +85,20 @@ where
 }
 
 // Helper function to deserialize into Option<Arc<Tuple>>
-fn deserialize_arc_tuple<'de, D>(
-    deserializer: D
-) -> Result<Option<Arc<Tuple>>, D::Error>
+fn deserialize_arc_tuple<'de, D>(deserializer: D) -> Result<Option<Arc<Tuple>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     // First deserialize to Option<Tuple>
     let option_tuple: Option<Tuple> = Deserialize::deserialize(deserializer)?;
-    
+
     // Convert Option<Tuple> to Option<Arc<Tuple>>
     let result = option_tuple.map(Arc::new);
     Ok(result)
 }
 
 // Helper for serializing AtomicU64
-fn serialize_atomic_u64<S>(
-    atomic: &AtomicU64,
-    serializer: S
-) -> Result<S::Ok, S::Error>
+fn serialize_atomic_u64<S>(atomic: &AtomicU64, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -115,9 +107,7 @@ where
 }
 
 // Helper for deserializing AtomicU64
-fn deserialize_atomic_u64<'de, D>(
-    deserializer: D
-) -> Result<AtomicU64, D::Error>
+fn deserialize_atomic_u64<'de, D>(deserializer: D) -> Result<AtomicU64, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -129,7 +119,7 @@ where
 impl Serialize for LogRecord {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         // Create a serializable struct that uses our helper functions
         #[derive(Serialize)]
@@ -486,7 +476,11 @@ impl LogRecord {
     pub fn to_string(&self) -> String {
         format!(
             "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size, self.get_lsn(), self.txn_id, self.prev_lsn, self.log_record_type as i32,
+            self.size,
+            self.get_lsn(),
+            self.txn_id,
+            self.prev_lsn,
+            self.log_record_type as i32,
         )
     }
 
@@ -952,30 +946,30 @@ mod tests {
 
     #[test]
     fn test_bincode_serialization_transaction_record() {
-        let record = LogRecord::new_transaction_record(
-            DUMMY_TXN_ID, 
-            DUMMY_PREV_LSN, 
-            LogRecordType::Begin
-        );
-        
+        let record =
+            LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Begin);
+
         // Serialize to bytes
         let bytes = record.to_bytes().unwrap();
-        
+
         // Deserialize back to a record
         let deserialized_record = LogRecord::from_bytes(&bytes).unwrap();
-        
+
         // Check that the deserialized record matches the original
         assert_eq!(deserialized_record.get_txn_id(), record.get_txn_id());
         assert_eq!(deserialized_record.get_prev_lsn(), record.get_prev_lsn());
-        assert_eq!(deserialized_record.get_log_record_type(), record.get_log_record_type());
+        assert_eq!(
+            deserialized_record.get_log_record_type(),
+            record.get_log_record_type()
+        );
         assert_eq!(deserialized_record.get_size(), record.get_size());
     }
-    
+
     #[test]
     fn test_bincode_serialization_insert_record() {
         let tuple = create_test_tuple();
         let rid = tuple.get_rid();
-        
+
         let record = LogRecord::new_insert_delete_record(
             DUMMY_TXN_ID,
             DUMMY_PREV_LSN,
@@ -983,34 +977,40 @@ mod tests {
             rid,
             Arc::new(tuple),
         );
-        
+
         // Serialize to bytes
         let bytes = record.to_bytes().unwrap();
-        
+
         // Deserialize back to a record
         let deserialized_record = LogRecord::from_bytes(&bytes).unwrap();
-        
+
         // Check that the deserialized record matches the original
         assert_eq!(deserialized_record.get_txn_id(), record.get_txn_id());
         assert_eq!(deserialized_record.get_prev_lsn(), record.get_prev_lsn());
-        assert_eq!(deserialized_record.get_log_record_type(), record.get_log_record_type());
+        assert_eq!(
+            deserialized_record.get_log_record_type(),
+            record.get_log_record_type()
+        );
         assert_eq!(deserialized_record.get_size(), record.get_size());
-        assert_eq!(deserialized_record.get_insert_rid(), record.get_insert_rid());
-        
+        assert_eq!(
+            deserialized_record.get_insert_rid(),
+            record.get_insert_rid()
+        );
+
         // Compare tuple data
         let original_tuple = record.get_insert_tuple().unwrap();
         let deserialized_tuple = deserialized_record.get_insert_tuple().unwrap();
-        
+
         assert_eq!(original_tuple.get_rid(), deserialized_tuple.get_rid());
         assert_eq!(original_tuple.get_values(), deserialized_tuple.get_values());
     }
-    
+
     #[test]
     fn test_bincode_serialization_update_record() {
         let old_tuple = create_test_tuple();
         let new_tuple = create_test_tuple_updated();
         let rid = old_tuple.get_rid();
-        
+
         let record = LogRecord::new_update_record(
             DUMMY_TXN_ID,
             DUMMY_PREV_LSN,
@@ -1019,35 +1019,53 @@ mod tests {
             Arc::new(old_tuple),
             Arc::new(new_tuple),
         );
-        
+
         // Serialize to bytes
         let bytes = record.to_bytes().unwrap();
-        
+
         // Deserialize back to a record
         let deserialized_record = LogRecord::from_bytes(&bytes).unwrap();
-        
+
         // Check that the deserialized record matches the original
         assert_eq!(deserialized_record.get_txn_id(), record.get_txn_id());
         assert_eq!(deserialized_record.get_prev_lsn(), record.get_prev_lsn());
-        assert_eq!(deserialized_record.get_log_record_type(), record.get_log_record_type());
+        assert_eq!(
+            deserialized_record.get_log_record_type(),
+            record.get_log_record_type()
+        );
         assert_eq!(deserialized_record.get_size(), record.get_size());
-        assert_eq!(deserialized_record.get_update_rid(), record.get_update_rid());
-        
+        assert_eq!(
+            deserialized_record.get_update_rid(),
+            record.get_update_rid()
+        );
+
         // Compare old tuple data
         let original_old_tuple = record.get_original_tuple().unwrap();
         let deserialized_old_tuple = deserialized_record.get_original_tuple().unwrap();
-        
-        assert_eq!(original_old_tuple.get_rid(), deserialized_old_tuple.get_rid());
-        assert_eq!(original_old_tuple.get_values(), deserialized_old_tuple.get_values());
-        
+
+        assert_eq!(
+            original_old_tuple.get_rid(),
+            deserialized_old_tuple.get_rid()
+        );
+        assert_eq!(
+            original_old_tuple.get_values(),
+            deserialized_old_tuple.get_values()
+        );
+
         // Compare new tuple data
         let original_new_tuple = record.get_update_tuple().unwrap();
         let deserialized_new_tuple = deserialized_record.get_update_tuple().unwrap();
-        
-        assert_eq!(original_new_tuple.get_rid(), deserialized_new_tuple.get_rid());
-        assert_eq!(original_new_tuple.get_values(), deserialized_new_tuple.get_values());
+
+        assert_eq!(
+            original_new_tuple.get_rid(),
+            deserialized_new_tuple.get_rid()
+        );
+        assert_eq!(
+            original_new_tuple.get_values(),
+            deserialized_new_tuple.get_values()
+        );
     }
-    
+
     #[test]
     fn test_bincode_serialization_new_page_record() {
         let record = LogRecord::new_page_record(
@@ -1057,19 +1075,25 @@ mod tests {
             DUMMY_PREV_PAGE_ID,
             DUMMY_PAGE_ID,
         );
-        
+
         // Serialize to bytes
         let bytes = record.to_bytes().unwrap();
-        
+
         // Deserialize back to a record
         let deserialized_record = LogRecord::from_bytes(&bytes).unwrap();
-        
+
         // Check that the deserialized record matches the original
         assert_eq!(deserialized_record.get_txn_id(), record.get_txn_id());
         assert_eq!(deserialized_record.get_prev_lsn(), record.get_prev_lsn());
-        assert_eq!(deserialized_record.get_log_record_type(), record.get_log_record_type());
+        assert_eq!(
+            deserialized_record.get_log_record_type(),
+            record.get_log_record_type()
+        );
         assert_eq!(deserialized_record.get_size(), record.get_size());
-        assert_eq!(deserialized_record.get_new_page_record(), record.get_new_page_record());
+        assert_eq!(
+            deserialized_record.get_new_page_record(),
+            record.get_new_page_record()
+        );
         assert_eq!(deserialized_record.get_page_id(), record.get_page_id());
     }
 }

@@ -445,7 +445,7 @@ mod tests {
 
         // Insert data into left table
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
-        
+
         // Insert each tuple separately with proper Value objects
         for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
@@ -462,7 +462,7 @@ mod tests {
 
         // Insert data into right table
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
-        
+
         // Insert each tuple separately with proper Value objects
         for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];

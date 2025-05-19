@@ -11,8 +11,8 @@ use log::{info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// A static atomic counter for generating unique database IDs
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
@@ -46,7 +46,7 @@ impl Database {
     ) -> Self {
         // Generate a new unique database OID using the atomic counter
         let db_oid = NEXT_DATABASE_ID.fetch_add(1, Ordering::SeqCst);
-        
+
         Database {
             name,
             db_oid,
@@ -79,7 +79,7 @@ impl Database {
         if db_oid >= current_max {
             NEXT_DATABASE_ID.store(db_oid + 1, Ordering::SeqCst);
         }
-        
+
         Database {
             name,
             db_oid,
@@ -123,7 +123,7 @@ impl Database {
         if db_oid >= current_max {
             NEXT_DATABASE_ID.store(db_oid + 1, Ordering::SeqCst);
         }
-        
+
         Database {
             name,
             db_oid,
@@ -256,14 +256,15 @@ impl Database {
 
         // Update catalog maps
         self.index_names.insert(index_name.to_string(), index_oid);
-        self.indexes.insert(index_oid, (index_info.clone(), index.clone()));
+        self.indexes
+            .insert(index_oid, (index_info.clone(), index.clone()));
 
         self.next_index_oid += 1;
 
         // Now we would need to populate the index with existing table data
-        // This part would be handled similarly to the original implementation, 
+        // This part would be handled similarly to the original implementation,
         // but is omitted here for brevity
-        
+
         // Return reference to the newly created index info
         self.get_index_by_index_oid(index_oid)
     }
@@ -378,4 +379,4 @@ impl Display for Database {
 
         Ok(())
     }
-} 
+}

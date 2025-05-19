@@ -166,7 +166,6 @@ mod tests {
     use crate::storage::index::index::IndexType;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {

@@ -103,11 +103,10 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
+    use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -169,7 +168,12 @@ mod tests {
         }
     }
 
-    fn create_test_values(schema: &Schema, id: i32, name: &str, age: i32) -> (TupleMeta, Vec<Value>) {
+    fn create_test_values(
+        schema: &Schema,
+        id: i32,
+        name: &str,
+        age: i32,
+    ) -> (TupleMeta, Vec<Value>) {
         let values = vec![
             Value::new(id),
             Value::new(name.to_string()),
@@ -193,10 +197,7 @@ mod tests {
         ]));
 
         // Create catalog and table
-        let mut catalog = Catalog::new(
-            bpm.clone(),
-            transaction_manager,
-        );
+        let mut catalog = Catalog::new(bpm.clone(), transaction_manager);
 
         let table_name = "test_table".to_string();
         let table_info = catalog.create_table(table_name, (*schema).clone()).unwrap();
@@ -248,7 +249,7 @@ mod tests {
             ctx.bpm.clone(),
             ctx.transaction_manager.clone(),
         )));
-        
+
         let plan;
         {
             let mut catalog = catalog_guard.write();
@@ -257,11 +258,7 @@ mod tests {
             let table_info = catalog.create_table(table_name, (*schema).clone()).unwrap();
 
             // Create executor
-            plan = Arc::new(TableScanNode::new(
-                table_info,
-                schema.clone(),
-                None,
-            ));
+            plan = Arc::new(TableScanNode::new(table_info, schema.clone(), None));
         }
 
         let context = Arc::new(RwLock::new(ExecutionContext::new(

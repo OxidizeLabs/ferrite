@@ -143,7 +143,11 @@ impl Record {
 
     /// Returns a detailed string representation of the record.
     pub fn to_string_detailed(&self, schema: Schema) -> String {
-        format!("RID: {}, {}", self.rid, self.tuple.to_string_detailed(schema))
+        format!(
+            "RID: {}, {}",
+            self.rid,
+            self.tuple.to_string_detailed(schema)
+        )
     }
 }
 
@@ -260,4 +264,4 @@ mod tests {
 
         Ok(())
     }
-} 
+}

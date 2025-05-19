@@ -48,10 +48,6 @@ use parking_lot::RwLock;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::catalog::column::Column;
-use crate::types_db::value::Value;
-use crate::common::rid::RID;
-use crate::types_db::type_id::TypeId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -107,7 +103,7 @@ pub enum PlanNode {
     StartTransaction(StartTransactionPlanNode),
     Empty,
     CommandResult(String),
-    Explain(Box<PlanNode>)
+    Explain(Box<PlanNode>),
 }
 
 pub trait AbstractPlanNode: Display {
@@ -518,7 +514,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            },
+            }
             PlanNode::StartTransaction(node) => {
                 result.push_str(&format!("{}→ StartTransaction\n", indent));
                 if let Some(level) = node.get_isolation_level() {
@@ -527,15 +523,15 @@ impl PlanNode {
                 if node.is_read_only() {
                     result.push_str(&format!("{}   Read Only: true\n", indent));
                 }
-            },
+            }
             PlanNode::CommandResult(cmd) => {
                 result.push_str(&format!("{}→ Command\n", indent));
                 result.push_str(&format!("{}   SQL: {}\n", indent, cmd));
-            },
+            }
             PlanNode::Explain(plan) => {
                 result.push_str(&format!("{}→ Explain\n", indent));
                 result.push_str(&plan.explain_internal(depth + 1));
-            },
+            }
         }
         result
     }
@@ -731,7 +727,7 @@ impl PlanNode {
                     vec![],
                     Schema::new(vec![]),
                 )))
-            },
+            }
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
     }

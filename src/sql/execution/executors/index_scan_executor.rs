@@ -443,7 +443,6 @@ mod index_scan_executor_tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
-    use std::collections::HashMap;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -595,7 +594,7 @@ mod index_scan_executor_tests {
 
             // Insert test data
             for i in 1..=10 {
-                let values =  vec![Value::new(i), Value::new(i * 10)];
+                let values = vec![Value::new(i), Value::new(i * 10)];
 
                 // Insert using transactional table heap
                 let rid = txn_table_heap

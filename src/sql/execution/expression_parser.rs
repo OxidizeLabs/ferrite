@@ -2124,8 +2124,10 @@ impl ExpressionParser {
                     match child.as_ref() {
                         Expression::Comparison(_) => (),
                         _ => {
-                            return Err("Join condition must be a comparison or AND of comparisons"
-                                .to_string());
+                            return Err(
+                                "Join condition must be a comparison or AND of comparisons"
+                                    .to_string(),
+                            );
                         }
                     }
                 }
@@ -3013,7 +3015,6 @@ mod tests {
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use sqlparser::ast::Ident;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
