@@ -4,6 +4,7 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::executors::index_scan_executor::IndexScanExecutor;
+use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::comparison_expression::{
     ComparisonExpression, ComparisonType,
@@ -12,6 +13,7 @@ use crate::sql::execution::expressions::constant_value_expression::ConstantExpre
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
+use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Val;
@@ -26,7 +28,8 @@ pub struct NestedIndexJoinExecutor {
     initialized: bool,
     current_left_tuple: Option<(Arc<Tuple>, RID)>, // Current tuple from outer (left) relation
     right_exhausted: bool, // Whether we've exhausted the inner (right) relation for current left tuple
-    current_index_executor: Option<IndexScanExecutor>, // Track current index scan executor
+    current_right_executor: Option<Box<dyn AbstractExecutor>>, // Track current right relation executor (either index scan or seq scan)
+    processed_right_rids: Vec<RID>, // Keep track of right RIDs we've already processed for current left tuple
 }
 
 impl NestedIndexJoinExecutor {
@@ -39,7 +42,8 @@ impl NestedIndexJoinExecutor {
             initialized: false,
             current_left_tuple: None,
             right_exhausted: false,
-            current_index_executor: None,
+            current_right_executor: None,
+            processed_right_rids: Vec::new(),
         }
     }
 
@@ -89,16 +93,60 @@ impl NestedIndexJoinExecutor {
     }
 
     fn get_next_inner_tuple(&mut self) -> Option<(Arc<Tuple>, RID)> {
-        // If we have a current index executor, try to get next tuple from it
-        if let Some(executor) = &mut self.current_index_executor {
-            if let Some(tuple) = executor.next() {
-                return Some(tuple);
+        // If we have a current right executor, try to get next tuple from it
+        if let Some(executor) = &mut self.current_right_executor {
+            loop {
+                if let Some(tuple_and_rid) = executor.next() {
+                    let right_rid = tuple_and_rid.1;
+                    // Skip if we've already processed this right tuple for the current left tuple
+                    if self.processed_right_rids.contains(&right_rid) {
+                        debug!("Skipping already processed RID: {:?}", right_rid);
+                        continue; // Skip to next tuple
+                    }
+                    
+                    // Add the RID to processed list
+                    debug!("Adding RID to processed list: {:?}", right_rid);
+                    self.processed_right_rids.push(right_rid);
+                    
+                    return Some(tuple_and_rid);
+                } else {
+                    // No more tuples from this executor
+                    break;
+                }
             }
-            // If no more tuples, clear the executor
-            self.current_index_executor = None;
+            // If we get here, exhausted the executor
+            self.current_right_executor = None;
             return None;
         }
 
+        // Create executor for the current left tuple
+        self.create_right_executor()?;
+        
+        // Now try to get the first result with the newly created executor
+        if let Some(executor) = &mut self.current_right_executor {
+            if let Some(tuple_and_rid) = executor.next() {
+                let right_rid = tuple_and_rid.1;
+                
+                // Check if we've already processed this RID
+                if self.processed_right_rids.contains(&right_rid) {
+                    debug!("Skipping already processed RID (first result): {:?}", right_rid);
+                    return self.get_next_inner_tuple(); // Recursively try next
+                }
+                
+                // Add to processed list
+                debug!("Adding RID to processed list (first result): {:?}", right_rid);
+                self.processed_right_rids.push(right_rid);
+                
+                return Some(tuple_and_rid);
+            }
+        }
+        
+        // No results found
+        None
+    }
+    
+    // New helper method to create the right executor
+    fn create_right_executor(&mut self) -> Option<()> {
         // Get the current left tuple
         let (left_tuple, _) = self.current_left_tuple.as_ref()?;
 
@@ -111,11 +159,13 @@ impl NestedIndexJoinExecutor {
         let mut predicate_keys = Vec::new();
         for (left_expr, right_expr) in left_key_exprs.iter().zip(right_key_exprs.iter()) {
             if let Ok(value) = left_expr.evaluate(left_tuple, self.plan.get_left_schema()) {
+                debug!("Evaluated left key expression to: {:?}", value);
+                
                 // Create comparison expression for index scan
                 let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
                     right_expr.clone(),
                     Arc::new(Expression::Constant(ConstantExpression::new(
-                        value,
+                        value.clone(),
                         Column::new("const", TypeId::Integer),
                         vec![],
                     ))),
@@ -123,6 +173,8 @@ impl NestedIndexJoinExecutor {
                     vec![],
                 )));
                 predicate_keys.push(predicate);
+            } else {
+                debug!("Failed to evaluate left key expression");
             }
         }
 
@@ -143,13 +195,30 @@ impl NestedIndexJoinExecutor {
         let table_indexes = catalog_guard.get_table_indexes(&table_name);
 
         // Find suitable index
-        let index_info = table_indexes
+        let index_info = match table_indexes
             .iter()
             .find(|idx| {
                 let key_schema = idx.get_key_schema();
                 key_schema.get_column_count() as usize == right_key_exprs.len()
-            })
-            .expect("No suitable index found for join");
+            }) {
+                Some(idx) => idx,
+                None => {
+                    // No suitable index found - create a sequential scan instead
+                    debug!("No suitable index found, falling back to sequential scan");
+                    let seq_scan_plan = Arc::new(SeqScanPlanNode::new(
+                        right_schema.clone(),
+                        table_info.get_table_oidt(),
+                        table_name.to_string(),
+                    ));
+                    
+                    let mut seq_scan_executor = SeqScanExecutor::new(self.context.clone(), seq_scan_plan);
+                    seq_scan_executor.init();
+                    
+                    // Store the executor for retrieving right tuples
+                    self.current_right_executor = Some(Box::new(seq_scan_executor));
+                    return Some(());
+                }
+            };
 
         // Create a dummy executor for the index scan
         let dummy_executor = Box::new(DummyExecutor {
@@ -158,7 +227,7 @@ impl NestedIndexJoinExecutor {
             context: self.context.clone(),
         });
 
-        // Create and execute index scan
+        // Create and execute index scan 
         let index_scan_plan = Arc::new(IndexScanNode::new(
             right_schema,
             table_name.to_string(),
@@ -173,12 +242,10 @@ impl NestedIndexJoinExecutor {
             IndexScanExecutor::new(dummy_executor, self.context.clone(), index_scan_plan);
 
         index_scan_executor.init();
-        self.current_index_executor = Some(index_scan_executor);
-
-        // Return first result from new executor
-        self.current_index_executor
-            .as_mut()
-            .and_then(|exec| exec.next())
+        
+        // Store for future use
+        self.current_right_executor = Some(Box::new(index_scan_executor));
+        Some(())
     }
 }
 
@@ -253,7 +320,9 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
 
                     // Try to get next matching tuple from right relation using index
                     if let Some((right_tuple, _)) = self.get_next_inner_tuple() {
+                        // Double-check the predicate since get_next_inner_tuple already filters by key equality
                         if self.evaluate_predicate(&left_tuple_clone, &right_tuple) {
+                            debug!("Found matching tuple pair, constructing join result");
                             return Some((
                                 self.construct_output_tuple(&left_tuple_clone, &right_tuple),
                                 left_rid_clone,
@@ -261,9 +330,10 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
                         }
                         continue;
                     } else {
-                        // Clear the current index executor when exhausted
-                        self.current_index_executor = None;
+                        // No more matching tuples for this left tuple
+                        debug!("No more right tuples for current left tuple");
                         self.right_exhausted = true;
+                        self.current_right_executor = None;
                     }
                 }
             }
@@ -271,14 +341,17 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
             // Get next tuple from left relation
             if let Some(children) = &mut self.children_executors {
                 if let Some(left_tuple) = children[0].next() {
-                    debug!("Got new left tuple: {:?}", left_tuple.0.get_values());
+                    debug!("Got new left tuple: {:?}, clearing processed RIDs list", left_tuple.0.get_values());
                     self.current_left_tuple = Some(left_tuple);
                     self.right_exhausted = false;
+                    // Clear the list of processed right RIDs for the new left tuple
+                    self.processed_right_rids.clear();
                     continue;
                 }
             }
 
             // No more tuples from left relation
+            debug!("No more left tuples, ending join");
             return None;
         }
     }
@@ -575,6 +648,52 @@ mod tests {
         let mut index_executor = CreateIndexExecutor::new(exec_ctx.clone(), index_plan, false);
         index_executor.init();
         index_executor.next(); // Execute index creation
+
+        // Populate the index with data from right table
+        {
+            let catalog = ctx.catalog.read();
+            let table_info = catalog.get_table("right_table").unwrap();
+            let index_info = catalog.get_table_indexes("right_table")[0].clone();
+            let table_heap = table_info.get_table_heap();
+            
+            // Create a sequential scan to iterate through all tuples
+            let right_scan = SeqScanPlanNode::new(
+                right_schema.clone(),
+                right_table_info.get_table_oidt(),
+                "right_table".to_string(),
+            );
+            let mut right_executor = SeqScanExecutor::new(exec_ctx.clone(), Arc::new(right_scan));
+            right_executor.init();
+            
+            // Manually insert entries into the index using the B+ tree directly
+            let index_oid = index_info.get_index_oid();
+            if let Some((_, btree)) = catalog.get_index_by_index_oid(index_oid) {
+                let dummy_transaction = ctx.transaction_context.get_transaction();
+                
+                // Insert each tuple's keys into the index
+                while let Some((tuple, rid)) = right_executor.next() {
+                    // Extract the key value (id) from the tuple
+                    let key_columns = vec![0]; // column index for "id"
+                    let mut key_values = Vec::new();
+                    for &col_idx in &key_columns {
+                        key_values.push(tuple.get_values()[col_idx].clone());
+                    }
+                    
+                    // Create key tuple with just the indexed column
+                    let key_schema = index_info.get_key_schema();
+                    let key_tuple = Tuple::new(&key_values, key_schema, rid);
+                    
+                    // Extract the key value for the B+ tree
+                    let key_value = key_values[0].clone();
+                    
+                    // Insert directly into B+ tree
+                    let mut btree_write = btree.write();
+                    btree_write.insert(key_value, rid);
+                    
+                    debug!("Inserted index entry for key: {:?}, RID: {:?}", key_values, rid);
+                }
+            }
+        }
 
         // Verify index was created
         {
