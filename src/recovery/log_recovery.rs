@@ -1,20 +1,12 @@
 use crate::buffer::buffer_pool_manager::BufferPoolManager;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
-use crate::common::rid::RID;
-use crate::concurrency::transaction::IsolationLevel;
-use crate::concurrency::transaction::Transaction;
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
-use crate::recovery::wal_manager::WALManager;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
-use crate::storage::table::tuple::Tuple;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
@@ -511,6 +503,7 @@ impl DirtyPageTable {
 mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::Schema;
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
@@ -521,7 +514,6 @@ mod tests {
     use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
-    use crate::catalog::Schema;
 
     // Common test context for all test modules
     pub struct TestContext {

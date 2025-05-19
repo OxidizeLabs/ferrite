@@ -2,20 +2,14 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::sql::execution::expressions::comparison_expression::{
-    ComparisonExpression, ComparisonType,
-};
+use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::types_db::type_id::TypeId;
+use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
 use log::{debug, trace};
 use parking_lot::RwLock;
-use sqlparser::ast::{JoinConstraint, JoinOperator as JoinType};
-use std::collections::HashMap;
+use sqlparser::ast::JoinOperator as JoinType;
 use std::sync::Arc;
 
 pub struct NestedLoopJoinExecutor {
@@ -234,7 +228,13 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::value::Value;
     use std::sync::Arc;
+    use sqlparser::ast::JoinConstraint;
     use tempfile::TempDir;
+    use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::storage::table::tuple::TupleMeta;
+    use crate::types_db::type_id::TypeId;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

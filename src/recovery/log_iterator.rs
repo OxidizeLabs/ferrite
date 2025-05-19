@@ -1,7 +1,6 @@
-use crate::common::config::{Lsn, INVALID_LSN};
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::disk_manager::FileDiskManager;
-use log::{debug, error, trace, warn};
+use log::{debug, warn};
 use std::sync::Arc;
 
 /// `LogIterator` provides a robust way to iterate through log records in a log file.
@@ -200,7 +199,7 @@ impl LogIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::config::TxnId;
+    use crate::common::config::{Lsn, TxnId, INVALID_LSN};
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::disk_manager::FileDiskManager;
     use std::fs;
