@@ -357,13 +357,7 @@ mod tests {
         // Create test context
         let ctx = TestContext::new("test_window_row_number");
         let catalog = Arc::new(RwLock::new(Catalog::new(
-            ctx.bpm(),
-            0,                               // next_index_oid
-            0,                               // next_table_oid
-            HashMap::new(),                  // tables
-            HashMap::new(),                  // indexes
-            HashMap::new(),                  // table_names
-            HashMap::new(),                  // index_names
+            ctx.bpm(), // index_names
             ctx.transaction_manager.clone(), // txn_manager
         )));
         let execution_ctx = Arc::new(RwLock::new(ExecutionContext::new(
@@ -452,12 +446,6 @@ mod tests {
         let ctx = TestContext::new("test_window_partitioned");
         let catalog = Arc::new(RwLock::new(Catalog::new(
             ctx.bpm(),
-            0,                               // next_index_oid
-            0,                               // next_table_oid
-            HashMap::new(),                  // tables
-            HashMap::new(),                  // indexes
-            HashMap::new(),                  // table_names
-            HashMap::new(),                  // index_names
             ctx.transaction_manager.clone(), // txn_manager
         )));
         let execution_ctx = Arc::new(RwLock::new(ExecutionContext::new(

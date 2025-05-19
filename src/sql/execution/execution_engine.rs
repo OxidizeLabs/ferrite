@@ -419,12 +419,6 @@ mod tests {
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 Arc::clone(&bpm),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
                 txn_manager.clone(),
             )));
 

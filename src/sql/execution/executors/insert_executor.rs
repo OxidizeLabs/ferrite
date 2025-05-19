@@ -245,12 +245,6 @@ mod tests {
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 Arc::clone(&buffer_pool),
-                0,
-                0,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 

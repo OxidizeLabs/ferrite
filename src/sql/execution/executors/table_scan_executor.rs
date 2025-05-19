@@ -195,12 +195,6 @@ mod tests {
         // Create catalog and table
         let mut catalog = Catalog::new(
             bpm.clone(),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
             transaction_manager,
         );
 
@@ -250,30 +244,29 @@ mod tests {
 
         // Create schema and empty table
         let schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
-        let mut catalog = Catalog::new(
-            bpm.clone(),
-            0,
-            0,
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            ctx.transaction_manager,
-        );
+        let catalog_guard = Arc::new(RwLock::new(Catalog::new(
+            ctx.bpm.clone(),
+            ctx.transaction_manager.clone(),
+        )));
+        
+        let plan;
+        {
+            let mut catalog = catalog_guard.write();
 
-        let table_name = "empty_table".to_string();
-        let table_info = catalog.create_table(table_name, (*schema).clone()).unwrap();
+            let table_name = "empty_table".to_string();
+            let table_info = catalog.create_table(table_name, (*schema).clone()).unwrap();
 
-        // Create executor
-        let plan = Arc::new(TableScanNode::new(
-            table_info, // table_info is already an Arc<TableInfo>
-            schema.clone(),
-            None,
-        ));
+            // Create executor
+            plan = Arc::new(TableScanNode::new(
+                table_info,
+                schema.clone(),
+                None,
+            ));
+        }
 
         let context = Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm,
-            Arc::new(RwLock::new(catalog)),
+            catalog_guard,
             ctx.transaction_context,
         )));
 

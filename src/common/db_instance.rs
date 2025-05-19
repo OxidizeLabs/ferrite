@@ -124,13 +124,7 @@ impl DBInstance {
 
         // Initialize catalog with default values
         let catalog = Arc::new(RwLock::new(Catalog::new(
-            buffer_pool_manager.clone(), // Buffer pool manager
-            0,                           // next_index_oid
-            0,                           // next_table_oid
-            HashMap::new(),              // tables
-            HashMap::new(),              // indexes
-            HashMap::new(),              // table_names
-            HashMap::new(),              // index_names
+            buffer_pool_manager.clone(),
             transaction_manager,
         )));
 

@@ -622,12 +622,6 @@ mod tests {
             // Create catalog using the transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool.clone(),
-                0,
-                0,
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
                 txn_manager.clone(),
             )));
 
