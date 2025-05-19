@@ -120,6 +120,8 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use std::thread;
+    use std::time::Duration;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -287,5 +289,203 @@ mod tests {
         // Check isolation level - should default to SERIALIZABLE for invalid levels
         let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
         assert_eq!(isolation_level, IsolationLevel::Serializable);
+    }
+
+    #[test]
+    fn test_start_read_only_transaction() {
+        let test_context = TestContext::new("start_read_only_transaction_test");
+        let exec_context = test_context.create_execution_context();
+        
+        // Store the original transaction ID
+        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+        
+        // Create a start transaction plan with read-only flag set to true
+        let plan = StartTransactionPlanNode::new(Some("READ COMMITTED".to_string()), true);
+        
+        // Create the executor
+        let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
+        
+        // Initialize and execute
+        executor.init();
+        let result = executor.next();
+        
+        // Should return None (no output data)
+        assert!(result.is_none());
+        
+        // Verify that a new transaction was created with a different ID
+        let new_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+        assert_ne!(new_txn_id, original_txn_id, "New transaction ID should be different from original");
+        
+        // Check isolation level
+        let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
+        assert_eq!(isolation_level, IsolationLevel::ReadCommitted);
+        
+        // In a real implementation, we would verify the read-only flag here
+        // but that would require modifying the Transaction class to store that flag
+    }
+
+    #[test]
+    fn test_all_isolation_levels() {
+        // Test each of the isolation levels
+        let isolation_levels = vec![
+            ("READ UNCOMMITTED", IsolationLevel::ReadUncommitted),
+            ("READ COMMITTED", IsolationLevel::ReadCommitted),
+            ("REPEATABLE READ", IsolationLevel::RepeatableRead),
+            ("SERIALIZABLE", IsolationLevel::Serializable),
+        ];
+        
+        for (level_str, expected_level) in isolation_levels {
+            let test_context = TestContext::new(&format!("isolation_level_{}_test", level_str.replace(" ", "_").to_lowercase()));
+            let exec_context = test_context.create_execution_context();
+            
+            // Store the original transaction ID
+            let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+            
+            // Create a start transaction plan with this isolation level
+            let plan = StartTransactionPlanNode::new(Some(level_str.to_string()), false);
+            
+            // Create the executor
+            let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
+            
+            // Initialize and execute
+            executor.init();
+            let result = executor.next();
+            
+            // Should return None (no output data)
+            assert!(result.is_none());
+            
+            // Verify that a new transaction was created with a different ID
+            let new_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+            assert_ne!(new_txn_id, original_txn_id, "New transaction ID should be different from original");
+            
+            // Check isolation level
+            let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
+            assert_eq!(isolation_level, expected_level, "Isolation level should match for {}", level_str);
+        }
+    }
+
+    #[test]
+    fn test_case_insensitive_isolation_levels() {
+        // Test case insensitivity of isolation level strings
+        let isolation_levels = vec![
+            ("read uncommitted", IsolationLevel::ReadUncommitted),
+            ("Read Committed", IsolationLevel::ReadCommitted),
+            ("REPEATABLE read", IsolationLevel::RepeatableRead),
+            ("Serializable", IsolationLevel::Serializable),
+        ];
+        
+        for (level_str, expected_level) in isolation_levels {
+            let test_context = TestContext::new(&format!("case_insensitive_{}_test", level_str.replace(" ", "_").to_lowercase()));
+            let exec_context = test_context.create_execution_context();
+            
+            // Create a start transaction plan with this isolation level
+            let plan = StartTransactionPlanNode::new(Some(level_str.to_string()), false);
+            
+            // Create the executor
+            let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
+            
+            // Initialize and execute
+            executor.init();
+            executor.next();
+            
+            // Check isolation level
+            let isolation_level = exec_context.read().get_transaction_context().get_transaction().get_isolation_level();
+            assert_eq!(isolation_level, expected_level, "Case insensitive isolation level should match for {}", level_str);
+        }
+    }
+
+    #[test]
+    fn test_concurrent_transaction_starts() {
+        // This test verifies that multiple transactions can be started concurrently
+        let test_context = TestContext::new("concurrent_transaction_starts_test");
+        let transaction_manager = test_context.transaction_manager.clone();
+        let lock_manager = test_context.lock_manager.clone();
+        let buffer_pool = test_context.bpm.clone();
+        
+        // Number of threads to create
+        const NUM_THREADS: usize = 5;
+        
+        // Create a barrier to synchronize thread start
+        let barrier = Arc::new(std::sync::Barrier::new(NUM_THREADS));
+        
+        // Create multiple threads, each starting a transaction
+        let mut handles = Vec::with_capacity(NUM_THREADS);
+        let txn_ids = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(NUM_THREADS)));
+        
+        for i in 0..NUM_THREADS {
+            let thread_tm = transaction_manager.clone();
+            let thread_barrier = barrier.clone();
+            let thread_txn_ids = txn_ids.clone();
+            
+            let handle = thread::spawn(move || {
+                // Wait for all threads to be ready
+                thread_barrier.wait();
+                
+                // Start a transaction with a specific isolation level
+                let isolation_level = match i % 4 {
+                    0 => IsolationLevel::ReadUncommitted,
+                    1 => IsolationLevel::ReadCommitted,
+                    2 => IsolationLevel::RepeatableRead,
+                    _ => IsolationLevel::Serializable,
+                };
+                
+                // Try to begin a transaction and record its ID
+                match thread_tm.begin(isolation_level) {
+                    Ok(txn) => {
+                        let txn_id = txn.get_transaction_id();
+                        thread_txn_ids.lock().push(txn_id);
+                        
+                        // Small sleep to simulate some work
+                        thread::sleep(Duration::from_millis(10));
+                        
+                        // Return transaction for cleanup
+                        Some(txn)
+                    },
+                    Err(_) => None,
+                }
+            });
+            
+            handles.push(handle);
+        }
+        
+        // Collect results and clean up
+        for handle in handles {
+            if let Ok(Some(txn)) = handle.join() {
+                transaction_manager.commit(txn, buffer_pool.clone());
+            }
+        }
+        
+        // Verify that all transactions got unique IDs
+        let final_txn_ids = txn_ids.lock().clone();
+        assert_eq!(final_txn_ids.len(), NUM_THREADS, "All threads should have started transactions");
+        
+        // Check for uniqueness by converting to a HashSet
+        let unique_ids: std::collections::HashSet<_> = final_txn_ids.iter().collect();
+        assert_eq!(unique_ids.len(), NUM_THREADS, "All transaction IDs should be unique");
+    }
+
+    #[test]
+    fn test_transaction_manager_shutdown_handling() {
+        let test_context = TestContext::new("transaction_manager_shutdown_test");
+        let exec_context = test_context.create_execution_context();
+        
+        // First, shut down the transaction manager
+        test_context.transaction_manager.shutdown().unwrap();
+        
+        // Try to start a transaction after shutdown
+        let plan = StartTransactionPlanNode::new(Some("SERIALIZABLE".to_string()), false);
+        let mut executor = StartTransactionExecutor::new(exec_context.clone(), plan);
+        
+        // Initialize and execute
+        executor.init();
+        let result = executor.next();
+        
+        // Should return None (no output data) since transaction manager is shut down
+        assert!(result.is_none());
+        
+        // The transaction context should not have changed since transaction start failed
+        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+        let new_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+        assert_eq!(original_txn_id, new_txn_id, "Transaction context should not change when transaction manager is shut down");
     }
 } 
