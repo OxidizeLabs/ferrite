@@ -32,7 +32,7 @@ impl CommandExecutor {
         }
     }
 
-    fn execute_command(&mut self) -> Option<(Arc<TupleMeta>, Tuple)> {
+    fn execute_command(&mut self) -> Option<(TupleMeta, Tuple)> {
         let command = self.command.trim();
 
         // Parse the command to determine the operation
@@ -43,14 +43,14 @@ impl CommandExecutor {
         } else {
             // For other commands, just return the command as a message
             let values = vec![Value::new(command.to_string())];
-            let meta = Arc::new(TupleMeta::new(0)); // Using 0 as transaction ID for system commands
+            let meta = TupleMeta::new(0); // Using 0 as transaction ID for system commands
             let rid = Default::default();
             let tuple = Tuple::new(&values, &self.schema, rid);
             Some((meta, tuple))
         }
     }
 
-    fn execute_create_database(&self) -> Option<(Arc<TupleMeta>, Tuple)> {
+    fn execute_create_database(&self) -> Option<(TupleMeta, Tuple)> {
         // Parse command: "CREATE DATABASE [IF NOT EXISTS] <db_name>"
         let parts: Vec<&str> = self.command.split_whitespace().collect();
         if parts.len() < 3 {
@@ -85,14 +85,14 @@ impl CommandExecutor {
         };
 
         let values = vec![Value::new(message)];
-        let meta = Arc::new(TupleMeta::new(0)); // Using 0 as transaction ID for system commands
+        let meta = TupleMeta::new(0); // Using 0 as transaction ID for system commands
         let rid = Default::default();
         let tuple = Tuple::new(&values, &self.schema, rid);
 
         Some((meta, tuple))
     }
 
-    fn execute_use_database(&self) -> Option<(Arc<TupleMeta>, Tuple)> {
+    fn execute_use_database(&self) -> Option<(TupleMeta, Tuple)> {
         // Parse command: "USE <db_name>"
         let parts: Vec<&str> = self.command.split_whitespace().collect();
         if parts.len() < 2 {
@@ -116,7 +116,7 @@ impl CommandExecutor {
         };
 
         let values = vec![Value::new(message)];
-        let meta = Arc::new(TupleMeta::new(0)); // Using 0 as transaction ID for system commands
+        let meta = TupleMeta::new(0); // Using 0 as transaction ID for system commands
         let rid = Default::default();
         let tuple = Tuple::new(&values, &self.schema, rid);
 
@@ -137,7 +137,10 @@ impl AbstractExecutor for CommandExecutor {
         self.executed = true;
 
         // Execute the command and get the result tuple
-        self.execute_command().map(|(meta, tuple)| (tuple, meta))
+        self.execute_command().map(|(meta, tuple)| {
+            let rid = tuple.get_rid();
+            (Arc::new(tuple), rid)
+        })
     }
 
     fn get_output_schema(&self) -> &Schema {

@@ -9,6 +9,7 @@ pub struct StartTransactionPlanNode {
     output_schema: Schema,
     isolation_level: Option<String>,
     read_only: bool,
+    children: Vec<PlanNode>,
 }
 
 impl StartTransactionPlanNode {
@@ -20,6 +21,7 @@ impl StartTransactionPlanNode {
             output_schema,
             isolation_level,
             read_only,
+            children: Vec::new(),
         }
     }
 
@@ -40,8 +42,7 @@ impl AbstractPlanNode for StartTransactionPlanNode {
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        static CHILDREN: Vec<PlanNode> = Vec::new();
-        &CHILDREN
+        &self.children
     }
 
     fn get_type(&self) -> PlanType {
@@ -71,6 +72,7 @@ impl Display for StartTransactionPlanNode {
 mod tests {
     use super::*;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
+    use std::fmt::Write;
 
     #[test]
     fn test_start_transaction_creation() {
@@ -219,6 +221,7 @@ mod tests {
                 );
                 assert_eq!(inner_node.is_read_only(), true);
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
+                assert!(inner_node.get_children().is_empty());
             }
             _ => panic!("Expected StartTransaction variant"),
         }
@@ -244,17 +247,17 @@ mod tests {
         let plan_enum = PlanNode::StartTransaction(plan_node);
 
         // Simulate what explain_internal would do
-        let mut result = String::new();
         let indent = "  ".repeat(1); // Indent level 1
+        let mut result = String::new();
 
         match &plan_enum {
             PlanNode::StartTransaction(node) => {
-                writeln!(result, "{}→ StartTransaction", indent).unwrap();
+                write!(result, "{}→ StartTransaction", indent).unwrap();
                 if let Some(level) = node.get_isolation_level() {
-                    writeln!(result, "{}   Isolation Level: {}", indent, level).unwrap();
+                    write!(result, "\n{}   Isolation Level: {}", indent, level).unwrap();
                 }
                 if node.is_read_only() {
-                    writeln!(result, "{}   Read Only: true", indent).unwrap();
+                    write!(result, "\n{}   Read Only: true", indent).unwrap();
                 }
             }
             _ => panic!("Expected StartTransaction variant"),

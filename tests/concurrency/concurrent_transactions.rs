@@ -49,12 +49,6 @@ impl ConcurrentTestContext {
 
         let catalog = Arc::new(RwLock::new(Catalog::new(
             buffer_pool_manager.clone(),
-            0,
-            0,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
             transaction_manager
         )));
 
