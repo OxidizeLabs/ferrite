@@ -1279,17 +1279,6 @@ impl LogicalPlan {
         ))
     }
 
-    pub fn commit() -> Box<Self> {
-        Box::new(Self::new(
-            LogicalPlanType::Commit {
-                chain: false,
-                end: false,
-                modifier: None,
-            },
-            vec![], // No children
-        ))
-    }
-
     pub fn commit_transaction(
         chain: bool,
         end: bool,
@@ -1302,16 +1291,6 @@ impl LogicalPlan {
                 modifier,
             },
             vec![], // No children for transaction control statements
-        ))
-    }
-
-    pub fn rollback(chain: bool) -> Box<Self> {
-        Box::new(Self::new(
-            LogicalPlanType::Rollback {
-                chain,
-                savepoint: None,
-            },
-            vec![], // No children
         ))
     }
 
@@ -1994,28 +1973,24 @@ impl<'a> PlanConverter<'a> {
                 end,
                 modifier,
             } => {
-                // Create a dummy plan that will perform commit
-                let cmd = if *chain {
-                    if *end {
-                        "COMMIT AND CHAIN AND RELEASE"
-                    } else {
-                        "COMMIT AND CHAIN"
-                    }
-                } else if *end {
-                    "COMMIT AND RELEASE"
-                } else {
-                    "COMMIT"
-                };
-                Ok(PlanNode::CommandResult(cmd.to_string()))
+                // Create a CommitTransaction plan node
+                Ok(PlanNode::CommitTransaction(
+                    crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode::new(
+                        *chain, 
+                        *end
+                    )
+                ))
             }
 
             LogicalPlanType::Rollback { chain, savepoint } => {
-                // Create a dummy plan that will perform rollback
-                let mut cmd = format!("ROLLBACK{}", if *chain { " AND CHAIN" } else { "" });
-                if let Some(s) = savepoint {
-                    cmd = format!("{} TO SAVEPOINT {}", cmd, s.value);
-                }
-                Ok(PlanNode::CommandResult(cmd))
+                // Create a RollbackTransaction plan node
+                let savepoint_str = savepoint.as_ref().map(|s| s.value.clone());
+                Ok(PlanNode::RollbackTransaction(
+                    crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode::new(
+                        *chain,
+                        savepoint_str
+                    )
+                ))
             }
 
             LogicalPlanType::Savepoint { name } => {
@@ -3170,7 +3145,7 @@ mod tests {
 
     #[test]
     fn test_commit_plan() {
-        let plan = LogicalPlan::commit();
+        let plan = LogicalPlan::commit_transaction(false, false, None);
 
         match &plan.plan_type {
             LogicalPlanType::Commit {
@@ -3178,8 +3153,8 @@ mod tests {
                 end,
                 modifier,
             } => {
-                assert_eq!(*chain, false);
-                assert_eq!(*end, false);
+                assert_eq!(false, *chain);
+                assert_eq!(false, *end);
                 assert!(modifier.is_none());
             }
             _ => panic!("Expected Commit plan"),
@@ -3189,7 +3164,7 @@ mod tests {
     #[test]
     fn test_rollback_plan() {
         let chain = true;
-        let plan = LogicalPlan::rollback(chain);
+        let plan = LogicalPlan::rollback_transaction(chain, None);
 
         match &plan.plan_type {
             LogicalPlanType::Rollback {

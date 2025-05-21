@@ -15,6 +15,7 @@ pub struct ExecutionContext {
     nlj_check_exec_set: VecDeque<(Box<dyn AbstractExecutor>, Box<dyn AbstractExecutor>)>,
     check_options: Arc<CheckOptions>,
     is_delete: bool,
+    chain_after_transaction: bool,
 }
 
 impl ExecutionContext {
@@ -40,6 +41,7 @@ impl ExecutionContext {
             nlj_check_exec_set: VecDeque::new(),
             check_options: Arc::new(options),
             is_delete: false,
+            chain_after_transaction: false,
         }
     }
 
@@ -102,5 +104,15 @@ impl ExecutionContext {
     /// Sets a new transaction context
     pub fn set_transaction_context(&mut self, txn_ctx: Arc<TransactionContext>) {
         self.transaction_context = txn_ctx;
+    }
+    
+    /// Gets whether transaction should be chained after commit/rollback
+    pub fn should_chain_after_transaction(&self) -> bool {
+        self.chain_after_transaction
+    }
+    
+    /// Sets whether transaction should be chained after commit/rollback
+    pub fn set_chain_after_transaction(&mut self, chain: bool) {
+        self.chain_after_transaction = chain;
     }
 }

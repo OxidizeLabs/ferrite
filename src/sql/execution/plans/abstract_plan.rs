@@ -49,6 +49,8 @@ use parking_lot::RwLock;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode;
+use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -102,6 +104,8 @@ pub enum PlanNode {
     CreateTable(CreateTablePlanNode),
     CreateIndex(CreateIndexPlanNode),
     StartTransaction(StartTransactionPlanNode),
+    CommitTransaction(CommitTransactionPlanNode),
+    RollbackTransaction(RollbackTransactionPlanNode),
     Empty,
     CommandResult(String),
     Explain(Box<PlanNode>),
@@ -163,6 +167,8 @@ impl PlanNode {
             PlanNode::CreateTable(node) => node,
             PlanNode::CreateIndex(node) => node,
             PlanNode::StartTransaction(node) => node,
+            PlanNode::CommitTransaction(node) => node,
+            PlanNode::RollbackTransaction(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => {
                 // These plan nodes don't fully implement AbstractPlanNode
@@ -530,6 +536,24 @@ impl PlanNode {
                     result.push_str(&format!("{}   Read Only: true\n", indent));
                 }
             }
+            PlanNode::CommitTransaction(node) => {
+                result.push_str(&format!("{}→ CommitTransaction\n", indent));
+                if node.is_chain() {
+                    result.push_str(&format!("{}   Chain: true\n", indent));
+                }
+                if node.is_end() {
+                    result.push_str(&format!("{}   End: true\n", indent));
+                }
+            }
+            PlanNode::RollbackTransaction(node) => {
+                result.push_str(&format!("{}→ RollbackTransaction\n", indent));
+                if node.is_chain() {
+                    result.push_str(&format!("{}   Chain: true\n", indent));
+                }
+                if let Some(savepoint) = node.get_savepoint() {
+                    result.push_str(&format!("{}   Savepoint: {}\n", indent, savepoint));
+                }
+            }
             PlanNode::CommandResult(cmd) => {
                 result.push_str(&format!("{}→ Command\n", indent));
                 result.push_str(&format!("{}   SQL: {}\n", indent, cmd));
@@ -726,7 +750,25 @@ impl PlanNode {
                     node.clone(),
                 )))
             },
-            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
+            PlanNode::CommitTransaction(node) => {
+                use crate::sql::execution::executors::commit_transaction_executor::CommitTransactionExecutor;
+                Ok(Box::new(CommitTransactionExecutor::new(
+                    context,
+                    node.clone(),
+                )))
+            },
+            PlanNode::RollbackTransaction(node) => {
+                use crate::sql::execution::executors::rollback_transaction_executor::RollbackTransactionExecutor;
+                Ok(Box::new(RollbackTransactionExecutor::new(
+                    context,
+                    node.clone(),
+                )))
+            },
+            PlanNode::CommandResult(cmd) => {
+                use crate::sql::execution::executors::command_executor::CommandExecutor;
+                Ok(Box::new(CommandExecutor::new(context, cmd.clone())))
+            },
+            PlanNode::Explain(_) => todo!(),
         }
     }
 }
