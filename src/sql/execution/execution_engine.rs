@@ -1825,7 +1825,8 @@ mod tests {
         
         println!("Initial isolation level: {:?}", initial_isolation_level);
         
-        let plan_node = StartTransactionPlanNode::new(Some(initial_isolation_level), false);
+        // Use Serializable isolation level for the plan
+        let plan_node = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), false);
         let plan = PlanNode::StartTransaction(plan_node);
         
         // Execute the plan
@@ -1864,11 +1865,11 @@ mod tests {
             .get_isolation_level();
 
         // Execute BEGIN TRANSACTION with SQL
-        let sql = format!("BEGIN TRANSACTION ISOLATION LEVEL {}", initial_isolation_level);
+        let sql = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE";
         let mut writer = TestResultWriter::new();
         let success = ctx2
             .engine
-            .execute_sql(&sql, ctx2.exec_ctx.clone(), &mut writer)
+            .execute_sql(sql, ctx2.exec_ctx.clone(), &mut writer)
             .unwrap();
             
         assert!(success, "BEGIN TRANSACTION SQL execution failed");
