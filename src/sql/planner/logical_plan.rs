@@ -1980,16 +1980,13 @@ impl<'a> PlanConverter<'a> {
                 exception_statements,
                 has_end_keyword,
             } => {
-                // Create a dummy plan that will perform start transaction
-                Ok(PlanNode::CommandResult(format!(
-                    "START TRANSACTION{}{}",
-                    if let Some(level) = isolation_level {
-                        format!(" ISOLATION LEVEL {}", level)
-                    } else {
-                        String::new()
-                    },
-                    if *read_only { " READ ONLY" } else { "" }
-                )))
+                // Create a StartTransaction plan node instead of a CommandResult
+                Ok(PlanNode::StartTransaction(
+                    crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode::new(
+                        isolation_level.clone(),
+                        *read_only,
+                    )
+                ))
             }
 
             LogicalPlanType::Commit {

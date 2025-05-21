@@ -16,6 +16,7 @@ use crate::sql::execution::executors::nested_loop_join_executor::NestedLoopJoinE
 use crate::sql::execution::executors::projection_executor::ProjectionExecutor;
 use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::executors::sort_executor::SortExecutor;
+use crate::sql::execution::executors::start_transaction_executor::StartTransactionExecutor;
 use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::executors::topn_executor::TopNExecutor;
 use crate::sql::execution::executors::topn_per_group_executor::TopNPerGroupExecutor;
@@ -163,7 +164,12 @@ impl PlanNode {
             PlanNode::CreateIndex(node) => node,
             PlanNode::StartTransaction(node) => node,
             PlanNode::Empty => panic!("Empty plan node"),
-            PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
+            PlanNode::CommandResult(_) | PlanNode::Explain(_) => {
+                // These plan nodes don't fully implement AbstractPlanNode
+                // So we handle them as special cases in Display implementation
+                // But to avoid panics, we'll throw a more descriptive error
+                panic!("CommandResult and Explain plan nodes cannot be used with as_abstract_plan_node")
+            }
         }
     }
 
@@ -714,20 +720,12 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
-            PlanNode::StartTransaction(_) => {
-                // For transaction operations, simply return a CommandResult
-                Ok(Box::new(MockExecutor::new(
+            PlanNode::StartTransaction(node) => {
+                Ok(Box::new(StartTransactionExecutor::new(
                     context,
-                    Arc::new(MockScanNode::new(
-                        Schema::new(vec![]),
-                        "START TRANSACTION".to_string(),
-                        vec![],
-                    )),
-                    0,
-                    vec![],
-                    Schema::new(vec![]),
+                    node.clone(),
                 )))
-            }
+            },
             PlanNode::CommandResult(_) | PlanNode::Explain(_) => todo!(),
         }
     }
@@ -736,6 +734,8 @@ impl PlanNode {
 impl Display for PlanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            PlanNode::CommandResult(cmd) => write!(f, "CommandResult({})", cmd),
+            PlanNode::Explain(plan) => write!(f, "Explain({})", plan),
             _ => self.as_abstract_plan_node().fmt(f),
         }
     }
