@@ -1116,12 +1116,9 @@ impl LogicalPlan {
                 };
 
                 // Extract table names/aliases from the schemas
-                let Some(left_alias) = extract_table_alias_from_schema(&left_child_schema) else {
-                    todo!()
-                };
-                let Some(right_alias) = extract_table_alias_from_schema(&right_child_schema) else {
-                    todo!()
-                };
+                // If no alias is found, we can still proceed with merging the schemas
+                let left_alias = extract_table_alias_from_schema(&left_child_schema);
+                let right_alias = extract_table_alias_from_schema(&right_child_schema);
 
                 debug!(
                     "Merging schemas in get_schema with aliases: left={:?}, right={:?}",
