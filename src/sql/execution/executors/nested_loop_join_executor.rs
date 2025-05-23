@@ -252,15 +252,28 @@ impl NestedLoopJoinExecutor {
      * Ensures right tuples are output even if no left match exists
      */
     fn handle_right_outer_join(&mut self, left_tuple: Option<&Arc<Tuple>>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 6: Right outer join processing")
         // 1. If left_tuple is Some:
-        //    a. Evaluate join predicate
-        //    b. If true: combine tuples, mark right as matched, return result
-        //    c. If false: track right tuple as potentially unmatched
-        // 2. After all left tuples processed:
-        //    a. Process unmatched right tuples
-        //    b. Create null-padded tuples (nulls + right)
-        //    c. Return unmatched right tuples one by one
+        if let Some(left_tuple) = left_tuple {
+            //    a. Evaluate join predicate
+            if self.evaluate_join_predicate(left_tuple, right_tuple) {
+                //    b. If true: combine tuples, mark right as matched, return result
+                let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
+                let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                Some((combined_tuple, combined_rid))
+            } else {
+                //    c. If false: track right tuple as potentially unmatched
+                // Return None to continue checking other left tuples for this right tuple
+                None
+            }
+        } else {
+            // 2. After all left tuples processed (left_tuple is None):
+            //    a. Process unmatched right tuples
+            //    b. Create null-padded tuples (nulls + right)
+            let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
+            let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+            //    c. Return unmatched right tuples one by one
+            Some((padded_tuple, padded_rid))
+        }
     }
 
     /**
