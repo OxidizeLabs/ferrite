@@ -281,15 +281,46 @@ impl NestedLoopJoinExecutor {
      * Ensures all tuples from both sides are output, with nulls for unmatched
      */
     fn handle_full_outer_join(&mut self, left_tuple: Option<&Arc<Tuple>>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 7: Full outer join processing")
-        // 1. During normal processing (both tuples available):
-        //    a. Evaluate join predicate
-        //    b. If true: combine tuples, mark both as matched
-        //    c. Track unmatched tuples from both sides
-        // 2. After main loop completion:
-        //    a. Process unmatched left tuples (left + nulls)
-        //    b. Process unmatched right tuples (nulls + right)
-        // 3. Return results in phases: matched, unmatched left, unmatched right
+        match (left_tuple, right_tuple) {
+            // 1. During normal processing (both tuples available):
+            (Some(left_tuple), Some(right_tuple)) => {
+                //    a. Evaluate join predicate
+                if self.evaluate_join_predicate(left_tuple, right_tuple) {
+                    //    b. If true: combine tuples, mark both as matched
+                    self.current_left_matched = true;
+                    let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
+                    let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                    Some((combined_tuple, combined_rid))
+                } else {
+                    //    c. Track unmatched tuples from both sides
+                    // Return None to continue checking other combinations
+                    None
+                }
+            }
+            
+            // 2. After main loop completion:
+            //    a. Process unmatched left tuples (left + nulls)
+            (Some(left_tuple), None) => {
+                // Processing unmatched left tuples
+                let padded_tuple = self.create_null_padded_tuple(Some(left_tuple), None);
+                let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                Some((padded_tuple, padded_rid))
+            }
+            
+            //    b. Process unmatched right tuples (nulls + right)
+            (None, Some(right_tuple)) => {
+                // Processing unmatched right tuples
+                let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
+                let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                Some((padded_tuple, padded_rid))
+            }
+            
+            // 3. Both tuples are None - shouldn't happen in normal execution
+            (None, None) => {
+                // This case shouldn't occur in normal full outer join processing
+                None
+            }
+        }
     }
 
     /**
