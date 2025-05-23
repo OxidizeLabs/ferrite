@@ -772,10 +772,8 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         match join_type {
             JoinType::RightOuter(_) | JoinType::FullOuter(_) | JoinType::RightSemi(_) | JoinType::RightAnti(_) => {
                 if !self.processing_unmatched_right && self.unmatched_right_tuples.is_empty() {
-                    // Get the predicate and schemas before the mutable borrow
-                    let predicate = self.plan.get_predicate().clone();
-                    let left_schema = self.plan.get_left_schema().clone();
-                    let right_schema = self.plan.get_right_schema().clone();
+                    // Get the predicate without cloning - we'll use it directly
+                    let predicate = self.plan.get_predicate();
                     
                     // Collect all unmatched right tuples by scanning the right executor
                     if let Some(ref mut children) = self.children_executors {
@@ -791,8 +789,14 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                             children[0].init();
                             while let Some(left_result) = children[0].next() {
                                 let (left_tuple, _) = &left_result;
-                                // Evaluate predicate directly using the cloned predicate and schemas
-                                match predicate.evaluate_join(left_tuple, &left_schema, right_tuple, &right_schema) {
+                                
+                                // Use the evaluate_join_predicate logic directly
+                                // Get schemas directly from plan without cloning
+                                let left_schema = self.plan.get_left_schema();
+                                let right_schema = self.plan.get_right_schema();
+                                
+                                // Evaluate predicate using the same logic as evaluate_join_predicate
+                                match predicate.evaluate_join(left_tuple, left_schema, right_tuple, right_schema) {
                                     Ok(value) => {
                                         match value.as_bool() {
                                             Ok(result) => {
@@ -803,25 +807,28 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                             },
                                             Err(_) => {
                                                 // Handle null values - treat as false for join predicates
+                                                trace!("Join predicate evaluated to null or error, treating as false");
                                             }
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         // Handle evaluation errors as false
+                                        trace!("Join predicate evaluation error: {:?}, treating as false", e);
                                     }
                                 }
                             }
                             
-                            // If no match found, add to unmatched right tuples
+                            // If no match found, add to unmatched right tuples based on join type
                             if !is_matched {
                                 match join_type {
                                     JoinType::RightOuter(_) | JoinType::FullOuter(_) => {
                                         self.unmatched_right_tuples.push(right_result);
                                     },
                                     JoinType::RightSemi(_) => {
-                                        // Right semi - don't add unmatched tuples
+                                        // Right semi - don't add unmatched tuples (we want matched ones)
                                     },
                                     JoinType::RightAnti(_) => {
+                                        // Right anti - add unmatched tuples (this is what we want to output)
                                         self.unmatched_right_tuples.push(right_result);
                                     },
                                     _ => {}
