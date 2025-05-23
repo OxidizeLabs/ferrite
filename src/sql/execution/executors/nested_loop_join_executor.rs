@@ -138,12 +138,21 @@ impl NestedLoopJoinExecutor {
      * Used for successful joins where both sides have values
      */
     fn combine_tuples(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Arc<Tuple> {
-        todo!("IMPLEMENTATION STEP 2: Combine left and right tuple values")
-        // 1. Get values from left tuple
-        // 2. Get values from right tuple  
-        // 3. Create combined vector of values [left_values..., right_values...]
-        // 4. Create new tuple with combined values
-        // 5. Return Arc<Tuple>
+        // 1. Get output schema from the plan
+        let output_schema = self.plan.get_output_schema();
+        
+        // 2. Create combined vector of values
+        let mut combined_values = Vec::new();
+        
+        // 3. Add values from left tuple
+        combined_values.extend(left_tuple.get_values().iter().cloned());
+        
+        // 4. Add values from right tuple
+        combined_values.extend(right_tuple.get_values().iter().cloned());
+        
+        // 5. Create and return new tuple with combined values
+        let rid = RID::new(0, 0); // Use dummy RID for joined tuples
+        Arc::new(Tuple::new(&combined_values, output_schema, rid))
     }
 
     /**
