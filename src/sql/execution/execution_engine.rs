@@ -1189,15 +1189,15 @@ mod tests {
 
         let test_cases = vec![
             // Inner join
-            (
-                "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id",
-                4, // Alice, Bob, Charlie, David
-            ),
-            // Left join
             // (
-            //     "SELECT u.name, d.name FROM users u LEFT JOIN departments d ON u.dept_id = d.id",
-            //     5, // All users including Eve with NULL department
+            //     "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id",
+            //     4, // Alice, Bob, Charlie, David
             // ),
+            // Left join
+            (
+                "SELECT u.name, d.name FROM users u LEFT JOIN departments d ON u.dept_id = d.id",
+                5, // All users including Eve with NULL department
+            ),
             // Join with additional conditions
             // (
             //     "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id WHERE d.name = 'Engineering'",
