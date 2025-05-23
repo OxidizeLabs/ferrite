@@ -372,15 +372,33 @@ impl NestedLoopJoinExecutor {
      * Returns left tuples that have NO matching right tuples
      */
     fn handle_anti_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 10: Anti join processing")
         // 1. If right_tuple is Some:
-        //    a. Evaluate join predicate
-        //    b. If true: mark left tuple as matched (exclude from output)
-        //    c. If false: continue checking
-        // 2. If right_tuple is None (end of right side):
-        //    a. If left tuple was never matched: return left tuple
-        //    b. If left tuple was matched: return None
-        // 3. Only output left schema columns
+        if let Some(right_tuple) = right_tuple {
+            //    a. Evaluate join predicate
+            if self.evaluate_join_predicate(left_tuple, right_tuple) {
+                //    b. If true: mark left tuple as matched (exclude from output)
+                self.current_left_matched = true;
+            }
+            //    c. If false: continue checking
+            None
+        } else {
+            // 2. If right_tuple is None (end of right side):
+            //    a. If left tuple was never matched: return left tuple
+            if !self.current_left_matched {
+                //    b. Return left tuple ONLY (no right columns)
+                // Create a new tuple with only left schema columns
+                let left_schema = self.plan.get_left_schema();
+                let left_values = left_tuple.get_values().clone();
+                let left_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                let left_only_tuple = Arc::new(Tuple::new(&left_values, left_schema, left_rid));
+                
+                Some((left_only_tuple, left_rid))
+            } else {
+                //    c. If left tuple was matched: return None
+                None
+            }
+        }
+        // 3. Only output left schema columns (handled above)
     }
 
     /**
