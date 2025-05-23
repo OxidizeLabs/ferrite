@@ -6,6 +6,7 @@ use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 use log::{debug, trace};
 use parking_lot::RwLock;
@@ -365,8 +366,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
     }
 }
 
-#[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -377,6 +377,743 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::disk_manager::FileDiskManager;
+    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::types_db::type_id::TypeId;
+    use crate::types_db::types::Type;
+    use crate::types_db::value::Value;
+    use sqlparser::ast::JoinConstraint;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        transaction_manager: Arc<TransactionManager>,
+        transaction_context: Arc<TransactionContext>,
+        catalog: Arc<RwLock<Catalog>>,
+        _temp_dir: TempDir,
+    }
+
+    impl TestContext {
+        fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 100;
+            const K: usize = 2;
+
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create disk components
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
+            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_scheduler,
+                disk_manager.clone(),
+                replacer.clone(),
+            ));
+
+            // Create transaction manager and lock manager
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            // Create transaction with ID 0 and ReadUncommitted isolation level
+            let transaction = Arc::new(Transaction::new(0, IsolationLevel::ReadUncommitted));
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
+            // Create catalog
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                bpm.clone(),
+                transaction_manager.clone(),
+            )));
+
+            Self {
+                bpm,
+                transaction_manager,
+                transaction_context,
+                catalog,
+                _temp_dir: temp_dir,
+            }
+        }
+    }
+
+    // Helper function to create a basic test context
+    fn create_basic_test_context() -> (TestContext, Arc<RwLock<ExecutionContext>>) {
+        let ctx = TestContext::new("helper_test");
+        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm.clone(),
+            ctx.catalog.clone(),
+            ctx.transaction_context.clone(),
+        )));
+        (ctx, execution_context)
+    }
+
+    // Helper function to create test tuples
+    fn create_test_tuple(values: Vec<Value>) -> Arc<Tuple> {
+        let schema = Schema::new(values.iter().enumerate().map(|(i, v)| {
+            Column::new(&format!("col_{}", i), v.get_type_id())
+        }).collect());
+
+        let rid = RID::new(0, 0);
+        Arc::new(Tuple::new(&values, &schema, rid))
+    }
+
+    // Helper function to create a test executor with mock data
+    fn create_test_executor() -> NestedLoopJoinExecutor {
+        let (_, execution_context) = create_basic_test_context();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(true),
+            Column::new("", TypeId::Boolean),
+            vec![],
+        )));
+
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            left_schema,
+            right_schema,
+            predicate,
+            JoinType::Inner(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![], // Empty children for unit tests
+        ));
+
+        NestedLoopJoinExecutor::new(execution_context, join_plan)
+    }
+
+    #[test]
+    fn test_create_null_padded_tuple_left_null() {
+        let executor = create_test_executor();
+
+        // Create a right tuple
+        let right_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new(100),
+            Value::new("Test Post"),
+        ]);
+
+        // Test with left tuple as None (should pad left side with nulls)
+        let result = executor.create_null_padded_tuple(None, Some(&right_tuple));
+        let values = result.get_values();
+
+        // Should have 5 columns total (2 from left schema + 3 from right schema)
+        assert_eq!(values.len(), 5);
+
+        // Left side should be nulls
+        assert!(values[0].is_null()); // left id
+        assert!(values[1].is_null()); // left name
+
+        // Right side should have actual values
+        assert_eq!(values[2].as_integer().unwrap(), 1);
+        assert_eq!(values[3].as_integer().unwrap(), 100);
+        assert_eq!(ToString::to_string(&values[4]), "Test Post");
+    }
+
+    #[test]
+    fn test_create_null_padded_tuple_right_null() {
+        let executor = create_test_executor();
+
+        // Create a left tuple
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        // Test with right tuple as None (should pad right side with nulls)
+        let result = executor.create_null_padded_tuple(Some(&left_tuple), None);
+        let values = result.get_values();
+
+        // Should have 5 columns total (2 from left schema + 3 from right schema)
+        assert_eq!(values.len(), 5);
+
+        // Left side should have actual values
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+
+        // Right side should be nulls
+        assert!(values[2].is_null()); // right id
+        assert!(values[3].is_null()); // right user_id
+        assert!(values[4].is_null()); // right title
+    }
+
+    #[test]
+    fn test_create_null_padded_tuple_both_null() {
+        let executor = create_test_executor();
+
+        // Test with both tuples as None (should create all nulls)
+        let result = executor.create_null_padded_tuple(None, None);
+        let values = result.get_values();
+
+        // Should have 5 columns total (2 from left schema + 3 from right schema)
+        assert_eq!(values.len(), 5);
+
+        // All values should be null
+        for value in values {
+            assert!(value.is_null());
+        }
+    }
+
+    #[test]
+    fn test_combine_tuples() {
+        let executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.combine_tuples(&left_tuple, &right_tuple);
+        let values = result.get_values();
+
+        // Should have 5 columns total
+        assert_eq!(values.len(), 5);
+
+        // Left values first
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+
+        // Then right values
+        assert_eq!(values[2].as_integer().unwrap(), 100);
+        assert_eq!(values[3].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[4]), "Alice's Post");
+    }
+
+    #[test]
+    fn test_evaluate_join_predicate_true() {
+        let executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1), // matches left tuple id
+            Value::new("Alice's Post"),
+        ]);
+
+        // Since our test executor uses a constant TRUE predicate, this should return true
+        let result = executor.evaluate_join_predicate(&left_tuple, &right_tuple);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_evaluate_join_predicate_false() {
+        // Create executor with FALSE predicate
+        let (_, execution_context) = create_basic_test_context();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(false),
+            Column::new("", TypeId::Boolean),
+            vec![],
+        )));
+
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            left_schema,
+            right_schema,
+            predicate,
+            JoinType::Inner(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![],
+        ));
+
+        let executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(2), // doesn't match left tuple id
+            Value::new("Bob's Post"),
+        ]);
+
+        let result = executor.evaluate_join_predicate(&left_tuple, &right_tuple);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_handle_inner_join_match() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_inner_join(&left_tuple, &right_tuple);
+
+        // Should return a combined tuple since predicate is always true
+        assert!(result.is_some());
+
+        let (combined_tuple, _) = result.unwrap();
+        let values = combined_tuple.get_values();
+        assert_eq!(values.len(), 5);
+        assert!(executor.current_left_matched); // Should be marked as matched
+    }
+
+    #[test]
+    fn test_handle_inner_join_no_match() {
+        // Create executor with FALSE predicate for no match scenario
+        let (_, execution_context) = create_basic_test_context();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(false),
+            Column::new("", TypeId::Boolean),
+            vec![],
+        )));
+
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            left_schema,
+            right_schema,
+            predicate,
+            JoinType::Inner(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![],
+        ));
+
+        let mut executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(2),
+            Value::new("Bob's Post"),
+        ]);
+
+        let result = executor.handle_inner_join(&left_tuple, &right_tuple);
+
+        // Should return None since predicate is false
+        assert!(result.is_none());
+        assert!(!executor.current_left_matched); // Should not be marked as matched
+    }
+
+    #[test]
+    fn test_handle_left_outer_join_with_match() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_left_outer_join(&left_tuple, Some(&right_tuple));
+
+        // Should return a combined tuple since predicate is always true
+        assert!(result.is_some());
+
+        let (combined_tuple, _) = result.unwrap();
+        let values = combined_tuple.get_values();
+        assert_eq!(values.len(), 5);
+        assert!(executor.current_left_matched);
+    }
+
+    #[test]
+    fn test_handle_left_outer_join_no_right_tuple() {
+        let mut executor = create_test_executor();
+        executor.current_left_matched = false; // Simulate no previous match
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let result = executor.handle_left_outer_join(&left_tuple, None);
+
+        // Should return left tuple with null padding since no match was found
+        assert!(result.is_some());
+
+        let (padded_tuple, _) = result.unwrap();
+        let values = padded_tuple.get_values();
+        assert_eq!(values.len(), 5);
+
+        // Left side should have values, right side should be null
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+        assert!(values[2].is_null());
+        assert!(values[3].is_null());
+        assert!(values[4].is_null());
+    }
+
+    #[test]
+    fn test_handle_cross_join() {
+        let executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_cross_join(&left_tuple, &right_tuple);
+
+        // Cross join should always return combined tuple
+        assert!(result.is_some());
+
+        let (combined_tuple, _) = result.unwrap();
+        let values = combined_tuple.get_values();
+        assert_eq!(values.len(), 5);
+    }
+
+    #[test]
+    fn test_handle_semi_join_match() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_semi_join(&left_tuple, &right_tuple);
+
+        // Should return left tuple only (no right columns)
+        assert!(result.is_some());
+
+        let (result_tuple, _) = result.unwrap();
+        let values = result_tuple.get_values();
+
+        // Should only have left table columns
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+        assert!(executor.current_left_matched);
+    }
+
+    #[test]
+    fn test_handle_anti_join_no_match() {
+        // Create executor with FALSE predicate to simulate no match
+        let (_, execution_context) = create_basic_test_context();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("user_id", TypeId::Integer),
+            Column::new("title", TypeId::VarChar),
+        ]);
+
+        let predicate = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(false),
+            Column::new("", TypeId::Boolean),
+            vec![],
+        )));
+
+        let join_plan = Arc::new(NestedLoopJoinNode::new(
+            left_schema,
+            right_schema,
+            predicate,
+            JoinType::Anti(JoinConstraint::None),
+            vec![],
+            vec![],
+            vec![],
+        ));
+
+        let mut executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
+        executor.current_left_matched = false; // No match found during scan
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        // Test with None right tuple (end of right side)
+        let result = executor.handle_anti_join(&left_tuple, None);
+
+        // Should return left tuple since no match was found
+        assert!(result.is_some());
+
+        let (result_tuple, _) = result.unwrap();
+        let values = result_tuple.get_values();
+
+        // Should only have left table columns
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+    }
+
+    #[test]
+    fn test_handle_anti_join_with_match() {
+        let mut executor = create_test_executor();
+        executor.current_left_matched = true; // Match was found during scan
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        // Test with None right tuple (end of right side)
+        let result = executor.handle_anti_join(&left_tuple, None);
+
+        // Should return None since a match was found
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_handle_right_outer_join_with_match() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_right_outer_join(Some(&left_tuple), &right_tuple);
+
+        // Should return combined tuple since predicate is always true
+        assert!(result.is_some());
+
+        let (combined_tuple, _) = result.unwrap();
+        let values = combined_tuple.get_values();
+        assert_eq!(values.len(), 5);
+    }
+
+    #[test]
+    fn test_handle_right_outer_join_no_left_match() {
+        let mut executor = create_test_executor();
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(999), // No matching left tuple
+            Value::new("Orphaned Post"),
+        ]);
+
+        // Simulate processing unmatched right tuples
+        executor.unmatched_right_tuples.push((right_tuple.clone(), RID::new(0, 0)));
+        executor.processing_unmatched_right = true;
+        executor.unmatched_right_index = 0;
+
+        let result = executor.handle_right_outer_join(None, &right_tuple);
+
+        // Should return right tuple with null left padding
+        assert!(result.is_some());
+
+        let (padded_tuple, _) = result.unwrap();
+        let values = padded_tuple.get_values();
+        assert_eq!(values.len(), 5);
+
+        // Left side should be null, right side should have values
+        assert!(values[0].is_null());
+        assert!(values[1].is_null());
+        assert_eq!(values[2].as_integer().unwrap(), 100);
+        assert_eq!(values[3].as_integer().unwrap(), 999);
+        assert_eq!(ToString::to_string(&values[4]), "Orphaned Post");
+    }
+
+    #[test]
+    fn test_handle_full_outer_join_match() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        let right_tuple = create_test_tuple(vec![
+            Value::new(100),
+            Value::new(1),
+            Value::new("Alice's Post"),
+        ]);
+
+        let result = executor.handle_full_outer_join(Some(&left_tuple), Some(&right_tuple));
+
+        // Should return combined tuple since predicate is always true
+        assert!(result.is_some());
+
+        let (combined_tuple, _) = result.unwrap();
+        let values = combined_tuple.get_values();
+        assert_eq!(values.len(), 5);
+    }
+
+    #[test]
+    fn test_handle_full_outer_join_unmatched_left() {
+        let mut executor = create_test_executor();
+
+        let left_tuple = create_test_tuple(vec![
+            Value::new(1),
+            Value::new("Alice"),
+        ]);
+
+        // Simulate processing unmatched left tuples
+        executor.unmatched_left_tuples.push((left_tuple.clone(), RID::new(0, 0)));
+        executor.processing_unmatched_left = true;
+        executor.unmatched_left_index = 0;
+
+        let result = executor.handle_full_outer_join(Some(&left_tuple), None);
+
+        // Should return left tuple with null right padding
+        assert!(result.is_some());
+
+        let (padded_tuple, _) = result.unwrap();
+        let values = padded_tuple.get_values();
+        assert_eq!(values.len(), 5);
+
+        // Left side should have values, right side should be null
+        assert_eq!(values[0].as_integer().unwrap(), 1);
+        assert_eq!(ToString::to_string(&values[1]), "Alice");
+        assert!(values[2].is_null());
+        assert!(values[3].is_null());
+        assert!(values[4].is_null());
+    }
+
+    #[test]
+    fn test_reset_right_executor() {
+        let mut executor = create_test_executor();
+
+        // Set some state
+        executor.current_right_executor_exhausted = true;
+
+        executor.reset_right_executor();
+
+        // Should reset the right executor state
+        assert!(!executor.current_right_executor_exhausted);
+    }
+
+    #[test]
+    fn test_state_management() {
+        let mut executor = create_test_executor();
+
+        // Test initial state
+        assert!(!executor.initialized);
+        assert!(executor.current_left_tuple.is_none());
+        assert!(!executor.current_right_executor_exhausted);
+        assert!(!executor.left_executor_exhausted);
+        assert!(!executor.current_left_matched);
+        assert!(executor.unmatched_right_tuples.is_empty());
+        assert!(!executor.processing_unmatched_right);
+        assert_eq!(executor.unmatched_right_index, 0);
+        assert!(executor.unmatched_left_tuples.is_empty());
+        assert!(!executor.processing_unmatched_left);
+        assert_eq!(executor.unmatched_left_index, 0);
+
+        // Test state changes
+        executor.initialized = true;
+        executor.current_left_matched = true;
+        executor.processing_unmatched_right = true;
+        executor.unmatched_right_index = 5;
+
+        assert!(executor.initialized);
+        assert!(executor.current_left_matched);
+        assert!(executor.processing_unmatched_right);
+        assert_eq!(executor.unmatched_right_index, 5);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::catalog::Catalog;
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::expressions::abstract_expression::Expression;
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
+    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
@@ -384,15 +1121,13 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::types_db::value::Value;
-    use std::sync::Arc;
-    use sqlparser::ast::JoinConstraint;
-    use tempfile::TempDir;
-    use crate::sql::execution::expressions::abstract_expression::Expression;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::types::Type;
+    use crate::types_db::value::Value;
+    use sqlparser::ast::JoinConstraint;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -806,7 +1541,8 @@ mod tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            let user_name = values[1].to_string();
+            let user_name = ToString::to_string(&values[1]);
+            
             match user_name.as_str() {
                 "Alice" => alice_posts += 1,
                 "Bob" => bob_posts += 1,
@@ -1200,7 +1936,8 @@ mod tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            let user_name = values[1].to_string();
+            let user_name = ToString::to_string(&values[1]);
+            
             
             match user_name.as_str() {
                 "Alice" => {
@@ -1370,8 +2107,8 @@ mod tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            let post_title = values[4].to_string();
-            
+            let post_title = ToString::to_string(&values[4]);
+
             if post_title.contains("Orphaned") {
                 orphaned_posts += 1;
                 // User data should be null
@@ -1685,7 +2422,7 @@ mod tests {
             // Semi join should only return left table columns
             assert_eq!(values.len(), 2); // Only user columns (id, name)
             
-            let user_name = values[1].to_string();
+            let user_name = ToString::to_string(&values[1]);
             match user_name.as_str() {
                 "Alice" => alice_found = true,
                 "Bob" => bob_found = true,
@@ -1838,7 +2575,7 @@ mod tests {
             // Anti join should only return left table columns
             assert_eq!(values.len(), 2); // Only user columns (id, name)
             
-            let user_name = values[1].to_string();
+            let user_name = ToString::to_string(&values[1]);
             match user_name.as_str() {
                 "Charlie" => charlie_found = true,
                 "David" => david_found = true,
@@ -1988,7 +2725,7 @@ mod tests {
             // Left semi join should only return left table columns
             assert_eq!(values.len(), 2); // Only department columns
             
-            let dept_name = values[1].to_string();
+            let dept_name = ToString::to_string(&values[1]);
             departments_found.push(dept_name);
         }
 
@@ -2135,7 +2872,7 @@ mod tests {
             // Left anti join should only return left table columns
             assert_eq!(values.len(), 2); // Only department columns
             
-            let dept_name = values[1].to_string();
+            let dept_name = ToString::to_string(&values[1]);
             departments_found.push(dept_name);
         }
 
@@ -2283,7 +3020,7 @@ mod tests {
             // Right semi join should only return right table columns
             assert_eq!(values.len(), 3); // Only post columns (id, user_id, title)
             
-            let post_title = values[2].to_string();
+            let post_title = ToString::to_string(&values[2]);
             post_titles.push(post_title);
         }
 
@@ -2432,7 +3169,7 @@ mod tests {
             // Right anti join should only return right table columns
             assert_eq!(values.len(), 3); // Only post columns (id, user_id, title)
             
-            let post_title = values[2].to_string();
+            let post_title = ToString::to_string(&values[2]);
             post_titles.push(post_title);
         }
 
@@ -2588,8 +3325,8 @@ mod tests {
             let values = tuple.get_values();
             
             // Verify the join condition is met
-            let product_category_id = values[2].as_i32().unwrap();
-            let category_id = values[3].as_i32().unwrap();
+            let product_category_id = values[2].as_integer().unwrap();
+            let category_id = values[3].as_integer().unwrap();
             assert_eq!(product_category_id, category_id);
         }
 
