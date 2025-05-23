@@ -344,15 +344,27 @@ impl NestedLoopJoinExecutor {
      * Returns left tuples that have at least one matching right tuple
      */
     fn handle_semi_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 9: Semi join processing")
         // 1. Evaluate join predicate
-        // 2. If predicate is true:
-        //    a. Mark current left tuple as matched
-        //    b. Return left tuple ONLY (no right columns)
-        //    c. Skip to next left tuple (optimization)
-        // 3. If predicate is false:
-        //    a. Continue to next right tuple
-        // 4. Only output left schema columns
+        if self.evaluate_join_predicate(left_tuple, right_tuple) {
+            // 2. If predicate is true:
+            //    a. Mark current left tuple as matched
+            self.current_left_matched = true;
+            
+            //    b. Return left tuple ONLY (no right columns)
+            //    c. Skip to next left tuple (optimization)
+            // Create a new tuple with only left schema columns
+            let left_schema = self.plan.get_left_schema();
+            let left_values = left_tuple.get_values().clone();
+            let left_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+            let left_only_tuple = Arc::new(Tuple::new(&left_values, left_schema, left_rid));
+            
+            Some((left_only_tuple, left_rid))
+        } else {
+            // 3. If predicate is false:
+            //    a. Continue to next right tuple
+            None
+        }
+        // 4. Only output left schema columns (handled above)
     }
 
     /**
