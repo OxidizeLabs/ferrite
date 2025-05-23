@@ -328,11 +328,15 @@ impl NestedLoopJoinExecutor {
      * Returns cartesian product of all tuple combinations
      */
     fn handle_cross_join(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 8: Cross join processing")
-        // 1. Ignore predicate (or assume it's always true)
+        // 1. Cross join ignores predicate (or assumes it's always true)
         // 2. Combine every left tuple with every right tuple
+        let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
+        
         // 3. Return combined tuple directly
-        // Note: Simplest case - just combine all pairs
+        let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+        Some((combined_tuple, combined_rid))
+        
+        // Note: Cross join is the simplest case - just combine all pairs
     }
 
     /**
