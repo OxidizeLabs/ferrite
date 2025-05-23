@@ -197,14 +197,21 @@ impl NestedLoopJoinExecutor {
      * Returns Some(tuple) if join condition is met, None otherwise
      */
     fn handle_inner_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 4: Inner join processing")
         // 1. Evaluate join predicate for tuple pair
-        // 2. If predicate is true:
-        //    a. Mark current left tuple as matched
-        //    b. Combine tuples using combine_tuples()
-        //    c. Return Some((combined_tuple, combined_rid))
-        // 3. If predicate is false:
-        //    a. Return None to continue searching
+        if self.evaluate_join_predicate(left_tuple, right_tuple) {
+            // 2. If predicate is true:
+            //    a. Mark current left tuple as matched
+            self.current_left_matched = true;
+            //    b. Combine tuples using combine_tuples()
+            let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
+            //    c. Return Some((combined_tuple, combined_rid))
+            let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+            Some((combined_tuple, combined_rid))
+        } else {
+            // 3. If predicate is false:
+            //    a. Return None to continue searching
+            None
+        }
     }
 
     /**
@@ -212,15 +219,32 @@ impl NestedLoopJoinExecutor {
      * Ensures left tuples are output even if no right match exists
      */
     fn handle_left_outer_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 5: Left outer join processing")
         // 1. If right_tuple is Some:
-        //    a. Evaluate join predicate
-        //    b. If true: mark as matched, combine tuples, return result
-        //    c. If false: return None to continue
-        // 2. If right_tuple is None (end of right side):
-        //    a. Check if current left tuple was matched
-        //    b. If not matched: create null-padded tuple with left + nulls
-        //    c. Return the null-padded result
+        if let Some(right_tuple) = right_tuple {
+            //    a. Evaluate join predicate
+            if self.evaluate_join_predicate(left_tuple, right_tuple) {
+                //    b. If true: mark as matched, combine tuples, return result
+                self.current_left_matched = true;
+                let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
+                let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                Some((combined_tuple, combined_rid))
+            } else {
+                //    c. If false: return None to continue
+                None
+            }
+        } else {
+            // 2. If right_tuple is None (end of right side):
+            //    a. Check if current left tuple was matched
+            if !self.current_left_matched {
+                //    b. If not matched: create null-padded tuple with left + nulls
+                let padded_tuple = self.create_null_padded_tuple(Some(left_tuple), None);
+                let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
+                Some((padded_tuple, padded_rid))
+            } else {
+                //    c. If was matched: return None (already output this left tuple)
+                None
+            }
+        }
     }
 
     /**
