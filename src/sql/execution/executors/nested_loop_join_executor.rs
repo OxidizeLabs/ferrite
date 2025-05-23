@@ -551,67 +551,299 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
      * Implements the nested loop algorithm with join type-specific handling
      */
     fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
-        todo!("IMPLEMENTATION STEP 13: Main nested loop execution")
         // PHASE 1: INITIALIZATION CHECK
-        // 1. If not initialized, call init()
-        // 2. Return None if initialization failed
+        if !self.initialized {
+            self.init();
+            if !self.initialized {
+                return None; // Failed to initialize
+            }
+        }
 
         // PHASE 2: HANDLE POST-PROCESSING (for outer joins)
-        // 1. If processing_unmatched_right:
-        //    a. Return next unmatched right tuple with nulls
-        //    b. Increment unmatched_right_index
-        //    c. Switch to unmatched left processing when done
-        // 2. If processing_unmatched_left:
-        //    a. Return next unmatched left tuple with nulls
-        //    b. Increment unmatched_left_index
-        //    c. Return None when completely done
+        // Handle unmatched right tuples for right/full outer joins
+        if self.processing_unmatched_right {
+            if self.unmatched_right_index < self.unmatched_right_tuples.len() {
+                let (right_tuple, _) = &self.unmatched_right_tuples[self.unmatched_right_index];
+                self.unmatched_right_index += 1;
+                
+                // Create null-padded tuple for unmatched right tuple
+                let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
+                let rid = RID::new(0, 0);
+                return Some((padded_tuple, rid));
+            } else {
+                // Done with unmatched right tuples
+                self.processing_unmatched_right = false;
+                let join_type = self.plan.get_join_type();
+                if matches!(join_type, JoinType::FullOuter(_)) {
+                    self.processing_unmatched_left = true;
+                    self.unmatched_left_index = 0;
+                } else {
+                    return None;
+                }
+            }
+        }
+
+        // Handle unmatched left tuples for full outer joins
+        if self.processing_unmatched_left {
+            if self.unmatched_left_index < self.unmatched_left_tuples.len() {
+                let (left_tuple, _) = &self.unmatched_left_tuples[self.unmatched_left_index];
+                self.unmatched_left_index += 1;
+                
+                // Create null-padded tuple for unmatched left tuple
+                let padded_tuple = self.create_null_padded_tuple(Some(left_tuple), None);
+                let rid = RID::new(0, 0);
+                return Some((padded_tuple, rid));
+            } else {
+                return None; // Completely done
+            }
+        }
 
         // PHASE 3: MAIN NESTED LOOP ALGORITHM
-        // 1. OUTER LOOP (Left tuples):
-        //    while !left_executor_exhausted {
-        //        a. If current_left_tuple is None:
-        //           - Get next tuple from left executor
-        //           - If None: mark left_executor_exhausted, break
-        //           - Reset right executor for new left tuple
-        //           - Reset current_left_matched flag
-        //        
-        //        b. INNER LOOP (Right tuples):
-        //           while !current_right_executor_exhausted {
-        //               - Get next tuple from right executor
-        //               - If None: mark current_right_executor_exhausted
-        //               - Otherwise: process tuple pair based on join type
-        //           }
-        //        
-        //        c. If right executor exhausted:
-        //           - Handle end-of-inner-loop logic for current join type
-        //           - Move to next left tuple
-        //    }
+        loop {
+            // OUTER LOOP (Left tuples): Get current left tuple or fetch next
+            if self.current_left_tuple.is_none() {
+                if let Some(ref mut children) = self.children_executors {
+                    if let Some(left_result) = children[0].next() {
+                        self.current_left_tuple = Some(left_result);
+                        self.current_left_matched = false;
+                        self.reset_right_executor();
+                    } else {
+                        // No more left tuples
+                        self.left_executor_exhausted = true;
+                        break;
+                    }
+                } else {
+                    return None; // No child executors
+                }
+            }
 
-        // PHASE 4: JOIN TYPE DISPATCH
-        // Based on self.plan.get_join_type(), call appropriate handler:
-        // match join_type {
-        //     JoinType::Inner(_) => self.handle_inner_join(left, right),
-        //     JoinType::Left(_) | JoinType::LeftOuter(_) => self.handle_left_outer_join(left, right),
-        //     JoinType::Right(_) | JoinType::RightOuter(_) => self.handle_right_outer_join(left, right),
-        //     JoinType::FullOuter(_) => self.handle_full_outer_join(left, right),
-        //     JoinType::CrossJoin => self.handle_cross_join(left, right),
-        //     JoinType::Semi(_) | JoinType::LeftSemi(_) => self.handle_semi_join(left, right),
-        //     JoinType::Anti(_) | JoinType::LeftAnti(_) => self.handle_anti_join(left, right),
-        //     JoinType::RightSemi(_) => /* Mirror of left semi with sides swapped */,
-        //     JoinType::RightAnti(_) => /* Mirror of left anti with sides swapped */,
-        //     JoinType::Join(_) => /* Treat as inner join */,
-        //     _ => /* Unsupported join types - return error or None */
-        // }
+            // Clone the left tuple to avoid borrowing issues
+            let (left_tuple, left_rid) = self.current_left_tuple.as_ref().unwrap().clone();
 
-        // PHASE 5: FINALIZATION
-        // 1. If main loop completed:
-        //    a. For right/full outer: start processing unmatched right tuples
-        //    b. For full outer: queue unmatched left tuples for later
-        //    c. Return None if no more results available
+            // INNER LOOP (Right tuples): Process right tuples for current left
+            while !self.current_right_executor_exhausted {
+                if let Some(ref mut children) = self.children_executors {
+                    if let Some(right_result) = children[1].next() {
+                        let (right_tuple, _) = &right_result;
+                        let join_type = self.plan.get_join_type();
 
-        // LOGGING AND DEBUGGING:
-        // trace!("Processing left tuple: {:?}, right tuple: {:?}", left_tuple, right_tuple);
-        // debug!("Join predicate result: {}", predicate_result);
+                        // PHASE 4: JOIN TYPE DISPATCH
+                        // Evaluate join predicate and dispatch to appropriate handler
+                        let predicate_result = match join_type {
+                            JoinType::CrossJoin => true, // Cross join always matches
+                            _ => self.evaluate_join_predicate(&left_tuple, right_tuple),
+                        };
+                        
+                        let result = match join_type {
+                            JoinType::Inner(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_inner_join(&left_tuple, right_tuple)
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::LeftOuter(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_left_outer_join(&left_tuple, Some(right_tuple))
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::RightOuter(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_right_outer_join(Some(&left_tuple), right_tuple)
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::FullOuter(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_full_outer_join(Some(&left_tuple), Some(right_tuple))
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::CrossJoin => {
+                                self.current_left_matched = true;
+                                self.handle_cross_join(&left_tuple, right_tuple)
+                            },
+                            JoinType::Semi(_) | JoinType::LeftSemi(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_semi_join(&left_tuple, right_tuple)
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::Anti(_) | JoinType::LeftAnti(_) => {
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                }
+                                None // Anti join doesn't output during main loop
+                            },
+                            JoinType::RightSemi(_) => {
+                                // Right semi join: return right tuple if predicate matches
+                                if predicate_result {
+                                    let right_schema = self.plan.get_right_schema();
+                                    let right_values = right_tuple.get_values().clone();
+                                    let right_rid = RID::new(0, 0);
+                                    let right_only_tuple = Arc::new(Tuple::new(&right_values, right_schema, right_rid));
+                                    Some((right_only_tuple, right_rid))
+                                } else {
+                                    None
+                                }
+                            },
+                            JoinType::RightAnti(_) => {
+                                // Right anti join: track matches, output unmatched rights later
+                                None // Anti join doesn't output during main loop
+                            },
+                            JoinType::Join(_) => {
+                                // Treat as inner join
+                                if predicate_result {
+                                    self.current_left_matched = true;
+                                    self.handle_inner_join(&left_tuple, right_tuple)
+                                } else {
+                                    None
+                                }
+                            },
+                            _ => None, // Unsupported join types
+                        };
+
+                        if result.is_some() {
+                            trace!("Processing left tuple: {:?}, right tuple: {:?}", left_tuple, right_tuple);
+                            debug!("Join predicate result: {}", predicate_result);
+                            return result;
+                        }
+                    } else {
+                        // No more right tuples for current left tuple
+                        self.current_right_executor_exhausted = true;
+                    }
+                } else {
+                    return None; // No child executors
+                }
+            }
+
+            // Right executor exhausted - handle end of inner loop for current left tuple
+            let join_type = self.plan.get_join_type();
+            let end_of_inner_result = match join_type {
+                JoinType::LeftOuter(_) => {
+                    if !self.current_left_matched {
+                        self.handle_left_outer_join(&left_tuple, None)
+                    } else {
+                        None
+                    }
+                },
+                JoinType::Anti(_) | JoinType::LeftAnti(_) => {
+                    if !self.current_left_matched {
+                        self.handle_anti_join(&left_tuple, None)
+                    } else {
+                        None
+                    }
+                },
+                JoinType::FullOuter(_) => {
+                    if !self.current_left_matched {
+                        // Track unmatched left tuple for later processing
+                        self.unmatched_left_tuples.push((left_tuple, left_rid));
+                    }
+                    None
+                },
+                _ => None,
+            };
+
+            if end_of_inner_result.is_some() {
+                self.current_left_tuple = None;
+                return end_of_inner_result;
+            }
+
+            // Move to next left tuple
+            self.current_left_tuple = None;
+        }
+
+        // PHASE 5: FINALIZATION - COLLECT UNMATCHED RIGHT TUPLES
+        // Main loop completed - for right/full outer joins, collect unmatched right tuples
+        let join_type = self.plan.get_join_type();
+        match join_type {
+            JoinType::RightOuter(_) | JoinType::FullOuter(_) | JoinType::RightSemi(_) | JoinType::RightAnti(_) => {
+                if !self.processing_unmatched_right && self.unmatched_right_tuples.is_empty() {
+                    // Get the predicate and schemas before the mutable borrow
+                    let predicate = self.plan.get_predicate().clone();
+                    let left_schema = self.plan.get_left_schema().clone();
+                    let right_schema = self.plan.get_right_schema().clone();
+                    
+                    // Collect all unmatched right tuples by scanning the right executor
+                    if let Some(ref mut children) = self.children_executors {
+                        // Reset right executor to scan all right tuples
+                        children[1].init();
+                        
+                        while let Some(right_result) = children[1].next() {
+                            let (right_tuple, _) = &right_result;
+                            let mut is_matched = false;
+                            
+                            // Check if this right tuple matches any left tuple
+                            // Reset left executor to scan all left tuples
+                            children[0].init();
+                            while let Some(left_result) = children[0].next() {
+                                let (left_tuple, _) = &left_result;
+                                // Evaluate predicate directly using the cloned predicate and schemas
+                                match predicate.evaluate_join(left_tuple, &left_schema, right_tuple, &right_schema) {
+                                    Ok(value) => {
+                                        match value.as_bool() {
+                                            Ok(result) => {
+                                                if result {
+                                                    is_matched = true;
+                                                    break;
+                                                }
+                                            },
+                                            Err(_) => {
+                                                // Handle null values - treat as false for join predicates
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // Handle evaluation errors as false
+                                    }
+                                }
+                            }
+                            
+                            // If no match found, add to unmatched right tuples
+                            if !is_matched {
+                                match join_type {
+                                    JoinType::RightOuter(_) | JoinType::FullOuter(_) => {
+                                        self.unmatched_right_tuples.push(right_result);
+                                    },
+                                    JoinType::RightSemi(_) => {
+                                        // Right semi - don't add unmatched tuples
+                                    },
+                                    JoinType::RightAnti(_) => {
+                                        self.unmatched_right_tuples.push(right_result);
+                                    },
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Start processing unmatched right tuples
+                    if !self.unmatched_right_tuples.is_empty() {
+                        self.processing_unmatched_right = true;
+                        self.unmatched_right_index = 0;
+                        return self.next(); // Recurse to process unmatched right tuples
+                    } else if matches!(join_type, JoinType::FullOuter(_)) {
+                        // For full outer join, also process unmatched left tuples
+                        self.processing_unmatched_left = true;
+                        self.unmatched_left_index = 0;
+                        return self.next(); // Recurse to process unmatched left tuples
+                    }
+                }
+            },
+            _ => {}
+        }
+
+        None // No more results available
     }
 
     fn get_output_schema(&self) -> &Schema {
