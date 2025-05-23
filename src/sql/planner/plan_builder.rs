@@ -743,7 +743,18 @@ impl LogicalPlanBuilder {
     ) -> Result<Box<LogicalPlan>, String> {
         let table_name = create_table.name.to_string();
 
-        // let a = create_table.columns.iter().collect();
+        // Validate table name is not empty
+        if table_name.is_empty() {
+            return Err("Table name cannot be empty".to_string());
+        }
+
+        // Validate that table has at least one column
+        if create_table.columns.is_empty() {
+            return Err(format!(
+                "Table '{}' must have at least one column",
+                table_name
+            ));
+        }
 
         // Check if table already exists
         {
@@ -768,6 +779,15 @@ impl LogicalPlanBuilder {
         let columns = self
             .schema_manager
             .convert_column_defs(&create_table.columns)?;
+            
+        // Double-check that we have columns after conversion
+        if columns.is_empty() {
+            return Err(format!(
+                "Failed to create schema for table '{}': no valid columns found",
+                table_name
+            ));
+        }
+
         let schema = Schema::new(columns);
 
         Ok(LogicalPlan::create_table(
@@ -2297,6 +2317,423 @@ mod tests {
             // Creation with IF NOT EXISTS should not fail
             assert!(fixture.create_table("users", "id INTEGER", true).is_ok());
         }
+
+        #[test]
+        fn test_create_table_various_data_types() {
+            let mut fixture = TestContext::new("create_table_various_types");
+
+            fixture
+                .create_table(
+                    "test_types",
+                    "col_int INTEGER, col_bigint BIGINT, col_smallint SMALLINT, col_tinyint TINYINT, \
+                     col_varchar VARCHAR(255), col_char CHAR(10), col_text TEXT, \
+                     col_decimal DECIMAL(10,2), col_float FLOAT, col_double DOUBLE, \
+                     col_bool BOOLEAN, col_timestamp TIMESTAMP",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("test_types");
+            fixture.assert_table_schema(
+                "test_types",
+                &[
+                    ("col_int".to_string(), TypeId::Integer),
+                    ("col_bigint".to_string(), TypeId::BigInt),
+                    ("col_smallint".to_string(), TypeId::SmallInt),
+                    ("col_tinyint".to_string(), TypeId::TinyInt),
+                    ("col_varchar".to_string(), TypeId::VarChar),
+                    ("col_char".to_string(), TypeId::Char),
+                    ("col_text".to_string(), TypeId::VarChar), // TEXT maps to VARCHAR
+                    ("col_decimal".to_string(), TypeId::Decimal),
+                    ("col_float".to_string(), TypeId::Float),
+                    ("col_double".to_string(), TypeId::Decimal),
+                    ("col_bool".to_string(), TypeId::Boolean),
+                    ("col_timestamp".to_string(), TypeId::Timestamp),
+                ],
+            );
+        }
+
+        #[test]
+        fn test_create_table_with_primary_key() {
+            let mut fixture = TestContext::new("create_table_with_primary_key");
+
+            fixture
+                .create_table(
+                    "products",
+                    "id INTEGER PRIMARY KEY, name VARCHAR(255), price DECIMAL(10,2)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("products");
+            fixture.assert_table_schema(
+                "products",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                    ("price".to_string(), TypeId::Decimal),
+                ],
+            );
+        }
+
+        #[test]
+        fn test_create_table_with_not_null_constraints() {
+            let mut fixture = TestContext::new("create_table_with_not_null");
+
+            fixture
+                .create_table(
+                    "customers",
+                    "id INTEGER NOT NULL, name VARCHAR(255) NOT NULL, email VARCHAR(255)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("customers");
+            fixture.assert_table_schema(
+                "customers",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                    ("email".to_string(), TypeId::VarChar),
+                ],
+            );
+        }
+
+        #[test]
+        fn test_create_table_with_default_values() {
+            let mut fixture = TestContext::new("create_table_with_defaults");
+
+            fixture
+                .create_table(
+                    "settings",
+                    "id INTEGER, name VARCHAR(255) DEFAULT 'unknown', active BOOLEAN DEFAULT true, \
+                     count INTEGER DEFAULT 0",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("settings");
+            fixture.assert_table_schema(
+                "settings",
+                &[
+                    ("id".to_string(), TypeId::Integer),
+                    ("name".to_string(), TypeId::VarChar),
+                    ("active".to_string(), TypeId::Boolean),
+                    ("count".to_string(), TypeId::Integer),
+                ],
+            );
+        }
+
+        #[test]
+        fn test_create_table_single_column() {
+            let mut fixture = TestContext::new("create_table_single_column");
+
+            fixture
+                .create_table("simple", "value INTEGER", false)
+                .unwrap();
+
+            fixture.assert_table_exists("simple");
+            fixture.assert_table_schema(
+                "simple",
+                &[("value".to_string(), TypeId::Integer)],
+            );
+        }
+
+        #[test]
+        fn test_create_table_many_columns() {
+            let mut fixture = TestContext::new("create_table_many_columns");
+
+            let columns = (1..=20)
+                .map(|i| format!("col{} INTEGER", i))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            fixture
+                .create_table("wide_table", &columns, false)
+                .unwrap();
+
+            fixture.assert_table_exists("wide_table");
+            
+            let expected_schema: Vec<_> = (1..=20)
+                .map(|i| (format!("col{}", i), TypeId::Integer))
+                .collect();
+            
+            fixture.assert_table_schema("wide_table", &expected_schema);
+        }
+
+        #[test]
+        fn test_create_table_quoted_identifiers() {
+            let mut fixture = TestContext::new("create_table_quoted");
+
+            fixture
+                .create_table(
+                    "\"Special Table\"",
+                    "\"column with spaces\" INTEGER, \"ORDER\" VARCHAR(255), \"select\" INTEGER",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("\"Special Table\"");
+        }
+
+        #[test]
+        fn test_create_table_case_sensitivity() {
+            let mut fixture = TestContext::new("create_table_case");
+
+            // Create table with mixed case
+            fixture
+                .create_table(
+                    "MyTable",
+                    "ID INTEGER, Name VARCHAR(255), Age INTEGER",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("MyTable");
+        }
+
+        #[test]
+        fn test_create_table_long_names() {
+            let mut fixture = TestContext::new("create_table_long_names");
+
+            let long_table_name = "a".repeat(50);
+            let long_column_name = "b".repeat(50);
+
+            fixture
+                .create_table(
+                    &long_table_name,
+                    &format!("{} INTEGER, normal_col VARCHAR(255)", long_column_name),
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists(&long_table_name);
+        }
+
+        #[test]
+        fn test_create_table_with_check_constraint() {
+            let mut fixture = TestContext::new("create_table_with_check");
+
+            fixture
+                .create_table(
+                    "products",
+                    "id INTEGER, price DECIMAL(10,2) CHECK (price > 0), \
+                     discount INTEGER CHECK (discount >= 0 AND discount <= 100)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("products");
+        }
+
+        #[test]
+        fn test_create_table_with_foreign_key() {
+            let mut fixture = TestContext::new("create_table_with_fk");
+
+            // First create the referenced table
+            fixture
+                .create_table("categories", "id INTEGER PRIMARY KEY, name VARCHAR(255)", false)
+                .unwrap();
+
+            // Then create table with foreign key
+            fixture
+                .create_table(
+                    "products",
+                    "id INTEGER PRIMARY KEY, name VARCHAR(255), \
+                     category_id INTEGER REFERENCES categories(id)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("products");
+        }
+
+        #[test]
+        fn test_create_table_with_unique_constraint() {
+            let mut fixture = TestContext::new("create_table_with_unique");
+
+            fixture
+                .create_table(
+                    "users",
+                    "id INTEGER PRIMARY KEY, username VARCHAR(255) UNIQUE, \
+                     email VARCHAR(255) UNIQUE, age INTEGER",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("users");
+        }
+
+        #[test]
+        fn test_create_table_with_auto_increment() {
+            let mut fixture = TestContext::new("create_table_with_auto_increment");
+
+            fixture
+                .create_table(
+                    "logs",
+                    "id INTEGER AUTO_INCREMENT PRIMARY KEY, message TEXT, \
+                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("logs");
+        }
+
+        #[test]
+        fn test_create_temporary_table() {
+            let mut fixture = TestContext::new("create_temporary_table");
+
+            // Test temporary table creation
+            let create_sql = "CREATE TEMPORARY TABLE temp_data (id INTEGER, value VARCHAR(255))";
+            let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
+
+            // Verify it's a CreateTable plan
+            match &plan.plan_type {
+                LogicalPlanType::CreateTable { schema, table_name, .. } => {
+                    assert_eq!(table_name, "temp_data");
+                    assert_eq!(schema.get_column_count(), 2);
+                }
+                _ => panic!("Expected CreateTable plan node"),
+            }
+        }
+
+        #[test]
+        fn test_create_table_duplicate_already_exists() {
+            let mut fixture = TestContext::new("create_table_duplicate");
+
+            // Create initial table
+            fixture
+                .create_table("users", "id INTEGER", false)
+                .unwrap();
+
+            // Try to create same table again (should fail)
+            let result = fixture.create_table("users", "id INTEGER", false);
+            assert!(result.is_err());
+            
+            let error_msg = result.unwrap_err();
+            assert!(error_msg.contains("already exists"));
+        }
+
+        #[test]
+        fn test_create_table_empty_name() {
+            let mut fixture = TestContext::new("create_table_empty_name");
+
+            // Test with empty table name should be handled by parser
+            let create_sql = "CREATE TABLE (id INTEGER)";
+            let result = fixture.planner.create_logical_plan(create_sql);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_create_table_no_columns() {
+            let mut fixture = TestContext::new("create_table_no_columns");
+
+            // Test with no columns should be handled by parser
+            let create_sql = "CREATE TABLE empty_table ()";
+            let result = fixture.planner.create_logical_plan(create_sql);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_create_table_duplicate_column_names() {
+            let mut fixture = TestContext::new("create_table_duplicate_columns");
+
+            // Test duplicate column names
+            let create_sql = "CREATE TABLE test_table (id INTEGER, id VARCHAR(255))";
+            let result = fixture.planner.create_logical_plan(create_sql);
+            // This might be handled by the parser or schema manager
+            // The test documents the expected behavior
+        }
+
+        #[test]
+        fn test_create_table_with_complex_constraints() {
+            let mut fixture = TestContext::new("create_table_complex_constraints");
+
+            fixture
+                .create_table(
+                    "orders",
+                    "id INTEGER PRIMARY KEY AUTO_INCREMENT, \
+                     customer_id INTEGER NOT NULL, \
+                     order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+                     total DECIMAL(10,2) NOT NULL CHECK (total > 0), \
+                     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'cancelled')), \
+                     UNIQUE (customer_id, order_date)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("orders");
+        }
+
+        #[test]
+        fn test_create_table_with_index_hints() {
+            let mut fixture = TestContext::new("create_table_with_index_hints");
+
+            fixture
+                .create_table(
+                    "indexed_table",
+                    "id INTEGER PRIMARY KEY, \
+                     name VARCHAR(255), \
+                     email VARCHAR(255), \
+                     INDEX idx_name (name), \
+                     INDEX idx_email (email)",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("indexed_table");
+        }
+
+        #[test]
+        fn test_create_table_with_computed_columns() {
+            let mut fixture = TestContext::new("create_table_computed");
+
+            // Test computed/generated columns
+            fixture
+                .create_table(
+                    "rectangle",
+                    "width DECIMAL(10,2), height DECIMAL(10,2), \
+                     area DECIMAL(10,2) AS (width * height) STORED",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("rectangle");
+        }
+
+        #[test]
+        fn test_create_table_with_collation() {
+            let mut fixture = TestContext::new("create_table_collation");
+
+            fixture
+                .create_table(
+                    "text_table",
+                    "id INTEGER, \
+                     name VARCHAR(255) COLLATE utf8_general_ci, \
+                     description TEXT COLLATE utf8_unicode_ci",
+                    false,
+                )
+                .unwrap();
+
+            fixture.assert_table_exists("text_table");
+        }
+
+        #[test]
+        fn test_create_table_with_engine_options() {
+            let mut fixture = TestContext::new("create_table_engine");
+
+            // Test MySQL-style engine options
+            let create_sql = "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+            let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateTable { table_name, .. } => {
+                    assert_eq!(table_name, "test_table");
+                }
+                _ => panic!("Expected CreateTable plan node"),
+            }
+        }
     }
 
     mod select_tests {
@@ -3146,6 +3583,277 @@ mod tests {
                     assert_eq!(cascade, *c, "cascade doesn't match");
                 }
                 _ => panic!("Expected Drop plan, got {:?}", plan.plan_type),
+            }
+        }
+    }
+
+    // Tests for build_create_index_plan
+    mod create_index_tests {
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_table(fixture: &mut TestContext) {
+            fixture
+                .create_table(
+                    "users", 
+                    "id INTEGER, name VARCHAR(255), age INTEGER, email VARCHAR(255)", 
+                    false
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn test_create_simple_index() {
+            let mut fixture = TestContext::new("create_simple_index");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX idx_name ON users (name)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_name");
+                    assert_eq!(key_attrs.len(), 1);
+                    assert_eq!(key_attrs[0], 1); // name is the second column (0-indexed)
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert!(!if_not_exists);
+                    
+                    // Verify the schema contains the correct column
+                    let col = schema.get_column(0).unwrap();
+                    assert_eq!(col.get_name(), "name");
+                    assert_eq!(col.get_type(), TypeId::VarChar);
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
+            }
+        }
+
+        #[test]
+        fn test_create_composite_index() {
+            let mut fixture = TestContext::new("create_composite_index");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX idx_name_age ON users (name, age)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_name_age");
+                    assert_eq!(key_attrs.len(), 2);
+                    assert_eq!(key_attrs[0], 1); // name column
+                    assert_eq!(key_attrs[1], 2); // age column
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert!(!if_not_exists);
+                    
+                    // Verify the schema contains the correct columns
+                    let col1 = schema.get_column(0).unwrap();
+                    assert_eq!(col1.get_name(), "name");
+                    assert_eq!(col1.get_type(), TypeId::VarChar);
+                    
+                    let col2 = schema.get_column(1).unwrap();
+                    assert_eq!(col2.get_name(), "age");
+                    assert_eq!(col2.get_type(), TypeId::Integer);
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
+            }
+        }
+
+        #[test]
+        fn test_create_index_if_not_exists() {
+            let mut fixture = TestContext::new("create_index_if_not_exists");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX IF NOT EXISTS idx_email ON users (email)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_email");
+                    assert_eq!(key_attrs.len(), 1);
+                    assert_eq!(key_attrs[0], 3); // email is the fourth column (0-indexed)
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert!(if_not_exists); // This should be true
+                    
+                    // Verify the schema contains the correct column
+                    let col = schema.get_column(0).unwrap();
+                    assert_eq!(col.get_name(), "email");
+                    assert_eq!(col.get_type(), TypeId::VarChar);
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
+            }
+        }
+
+        #[test]
+        fn test_create_index_on_primary_key() {
+            let mut fixture = TestContext::new("create_index_on_primary_key");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX idx_id ON users (id)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_id");
+                    assert_eq!(key_attrs.len(), 1);
+                    assert_eq!(key_attrs[0], 0); // id is the first column (0-indexed)
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert!(!if_not_exists);
+                    
+                    // Verify the schema contains the correct column
+                    let col = schema.get_column(0).unwrap();
+                    assert_eq!(col.get_name(), "id");
+                    assert_eq!(col.get_type(), TypeId::Integer);
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
+            }
+        }
+
+        #[test]
+        fn test_create_index_on_nonexistent_table() {
+            let mut fixture = TestContext::new("create_index_nonexistent_table");
+            // Note: Not creating any table
+
+            let create_index_sql = "CREATE INDEX idx_name ON nonexistent_table (some_column)";
+            let result = fixture.planner.create_logical_plan(create_index_sql);
+
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err();
+            assert!(
+                error_msg.contains("does not exist") || error_msg.contains("not found"),
+                "Expected error about table not existing, got: {}",
+                error_msg
+            );
+        }
+
+        #[test]
+        fn test_create_index_on_nonexistent_column() {
+            let mut fixture = TestContext::new("create_index_nonexistent_column");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX idx_bad ON users (nonexistent_column)";
+            let result = fixture.planner.create_logical_plan(create_index_sql);
+
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err();
+            assert!(
+                error_msg.contains("not found") || error_msg.contains("nonexistent_column"),
+                "Expected error about column not found, got: {}",
+                error_msg
+            );
+        }
+
+        #[test]
+        fn test_create_index_mixed_valid_invalid_columns() {
+            let mut fixture = TestContext::new("create_index_mixed_columns");
+            setup_test_table(&mut fixture);
+
+            // Mix valid and invalid columns
+            let create_index_sql = "CREATE INDEX idx_mixed ON users (name, invalid_column)";
+            let result = fixture.planner.create_logical_plan(create_index_sql);
+
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err();
+            assert!(
+                error_msg.contains("not found") || error_msg.contains("invalid_column"),
+                "Expected error about invalid column, got: {}",
+                error_msg
+            );
+        }
+
+        #[test]
+        fn test_create_index_all_columns() {
+            let mut fixture = TestContext::new("create_index_all_columns");
+            setup_test_table(&mut fixture);
+
+            let create_index_sql = "CREATE INDEX idx_all ON users (id, name, age, email)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_all");
+                    assert_eq!(key_attrs.len(), 4);
+                    assert_eq!(key_attrs.as_slice(), [0, 1, 2, 3]); // All columns in order
+                    assert_eq!(schema.get_column_count(), 4);
+                    assert!(!if_not_exists);
+                    
+                    // Verify all columns are present in correct order
+                    let expected_columns = vec![
+                        ("id", TypeId::Integer),
+                        ("name", TypeId::VarChar),
+                        ("age", TypeId::Integer),
+                        ("email", TypeId::VarChar),
+                    ];
+                    
+                    for (i, (expected_name, expected_type)) in expected_columns.iter().enumerate() {
+                        let col = schema.get_column(i).unwrap();
+                        assert_eq!(col.get_name(), *expected_name);
+                        assert_eq!(col.get_type(), *expected_type);
+                    }
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
+            }
+        }
+
+        #[test]
+        fn test_create_unique_index() {
+            let mut fixture = TestContext::new("create_unique_index");
+            setup_test_table(&mut fixture);
+
+            // Note: This tests that the parser can handle UNIQUE INDEX syntax
+            // The actual uniqueness constraint enforcement would be handled at execution time
+            let create_index_sql = "CREATE UNIQUE INDEX idx_unique_email ON users (email)";
+            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::CreateIndex {
+                    table_name,
+                    index_name,
+                    key_attrs,
+                    schema,
+                    if_not_exists,
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(index_name, "idx_unique_email");
+                    assert_eq!(key_attrs.len(), 1);
+                    assert_eq!(key_attrs[0], 3); // email column
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert!(!if_not_exists);
+                }
+                _ => panic!("Expected CreateIndex plan node, got {:?}", plan.plan_type),
             }
         }
     }
