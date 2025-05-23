@@ -531,11 +531,6 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                 debug!("Right/Full outer join detected - preparing unmatched right tuple tracking");
                 // Unmatched right tuples tracking is already initialized above
             }
-            //    b. For full outer: prepare left unmatched tracking
-            JoinType::FullOuter(_) => {
-                debug!("Full outer join detected - preparing unmatched left tuple tracking");
-                // Unmatched left tuples tracking is already initialized above
-            }
             _ => {
                 debug!("Inner/Left/Semi/Anti join detected - no special unmatched tracking needed");
             }
@@ -566,10 +561,23 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                 let (right_tuple, _) = &self.unmatched_right_tuples[self.unmatched_right_index];
                 self.unmatched_right_index += 1;
                 
-                // Create null-padded tuple for unmatched right tuple
-                let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
-                let rid = RID::new(0, 0);
-                return Some((padded_tuple, rid));
+                let join_type = self.plan.get_join_type();
+                match join_type {
+                    JoinType::RightAnti(_) => {
+                        // For right anti join, return only right table columns (like left anti join)
+                        let right_schema = self.plan.get_right_schema();
+                        let right_values = right_tuple.get_values().clone();
+                        let right_rid = RID::new(0, 0);
+                        let right_only_tuple = Arc::new(Tuple::new(&right_values, right_schema, right_rid));
+                        return Some((right_only_tuple, right_rid));
+                    },
+                    _ => {
+                        // For other right joins, create null-padded tuple for unmatched right tuple
+                        let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
+                        let rid = RID::new(0, 0);
+                        return Some((padded_tuple, rid));
+                    }
+                }
             } else {
                 // Done with unmatched right tuples
                 self.processing_unmatched_right = false;
@@ -892,7 +900,6 @@ mod unit_tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         catalog: Arc<RwLock<Catalog>>,
         _temp_dir: TempDir,
@@ -950,7 +957,6 @@ mod unit_tests {
 
             Self {
                 bpm,
-                transaction_manager,
                 transaction_context,
                 catalog,
                 _temp_dir: temp_dir,
@@ -1631,7 +1637,6 @@ mod integration_tests {
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
         catalog: Arc<RwLock<Catalog>>,
         _temp_dir: TempDir,
@@ -1689,7 +1694,6 @@ mod integration_tests {
 
             Self {
                 bpm,
-                transaction_manager,
                 transaction_context,
                 catalog,
                 _temp_dir: temp_dir,
@@ -3783,17 +3787,6 @@ mod integration_tests {
                 1, 0, Column::new("id", TypeId::Integer), vec![],
             ))),
             ComparisonType::Equal,
-            vec![],
-        )));
-
-        let price_check = Arc::new(Expression::Comparison(ComparisonExpression::new(
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 1, Column::new("price", TypeId::Integer), vec![],
-            ))),
-            Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                1, 2, Column::new("min_price", TypeId::Integer), vec![],
-            ))),
-            ComparisonType::GreaterThanOrEqual,
             vec![],
         )));
 
