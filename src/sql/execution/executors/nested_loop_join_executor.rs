@@ -433,32 +433,117 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
      * Sets up child executors and prepares for execution
      */
     fn init(&mut self) {
-        todo!("IMPLEMENTATION STEP 12: Initialize nested loop join executor")
         // 1. VALIDATE PLAN STRUCTURE:
+        if self.initialized {
+            debug!("NestedLoopJoinExecutor already initialized");
+            return;
+        }
+
+        debug!("Initializing NestedLoopJoinExecutor");
+
         //    a. Verify exactly 2 children exist
-        //    b. Validate join predicate is not null
-        //    c. Check schemas are compatible
+        let children_plans = self.plan.get_children();
+        if children_plans.len() != 2 {
+            panic!("NestedLoopJoin requires exactly 2 children, got {}", children_plans.len());
+        }
+
+        //    b. Validate join predicate is not null (it's Arc<Expression>, so it exists)
+        let predicate = self.plan.get_predicate();
+        debug!("Join predicate: {:?}", predicate);
+
+        //    c. Check schemas are compatible - this is handled by the planner
+        let left_schema = self.plan.get_left_schema();
+        let right_schema = self.plan.get_right_schema();
+        debug!("Left schema: {:?}", left_schema);
+        debug!("Right schema: {:?}", right_schema);
 
         // 2. CREATE CHILD EXECUTORS:
         //    a. Get left and right child plans from self.plan
+        let left_plan = self.plan.get_left_child();
+        let right_plan = self.plan.get_right_child();
+
         //    b. Create executor instances for each child
+        let mut child_executors = Vec::with_capacity(2);
+
+        // Create left executor
+        debug!("Creating left executor with plan: {:?}", left_plan);
+        match left_plan.create_executor(self.context.clone()) {
+            Ok(left_executor) => {
+                debug!("Left executor created successfully");
+                child_executors.push(left_executor);
+            }
+            Err(e) => {
+                panic!("Failed to create left executor: {}", e);
+            }
+        }
+
+        // Create right executor  
+        debug!("Creating right executor with plan: {:?}", right_plan);
+        match right_plan.create_executor(self.context.clone()) {
+            Ok(right_executor) => {
+                debug!("Right executor created successfully");
+                child_executors.push(right_executor);
+            }
+            Err(e) => {
+                panic!("Failed to create right executor: {}", e);
+            }
+        }
+
         //    c. Store in self.children_executors
+        self.children_executors = Some(child_executors);
 
         // 3. INITIALIZE CHILD EXECUTORS:
-        //    a. Call init() on left executor
-        //    b. Call init() on right executor
+        if let Some(ref mut children) = self.children_executors {
+            //    a. Call init() on left executor
+            debug!("Initializing left executor");
+            children[0].init();
+            debug!("Left executor initialized with schema: {:?}", children[0].get_output_schema());
+
+            //    b. Call init() on right executor
+            debug!("Initializing right executor");
+            children[1].init();
+            debug!("Right executor initialized with schema: {:?}", children[1].get_output_schema());
+        }
 
         // 4. INITIALIZE STATE VARIABLES:
         //    a. Set initialized = true
+        self.initialized = true;
+
         //    b. Reset all iteration state
+        self.current_left_tuple = None;
+        self.current_right_executor_exhausted = false;
+        self.left_executor_exhausted = false;
+
         //    c. Clear any cached data structures
+        self.current_left_matched = false;
+        self.unmatched_right_tuples.clear();
+        self.processing_unmatched_right = false;
+        self.unmatched_right_index = 0;
+        self.unmatched_left_tuples.clear();
+        self.processing_unmatched_left = false;
+        self.unmatched_left_index = 0;
 
         // 5. SPECIAL SETUP FOR OUTER JOINS:
-        //    a. For right/full outer: prepare unmatched tracking
-        //    b. For full outer: prepare left unmatched tracking
+        let join_type = self.plan.get_join_type();
+        match join_type {
+            //    a. For right/full outer: prepare unmatched tracking
+            JoinType::RightOuter(_) | JoinType::FullOuter(_) => {
+                debug!("Right/Full outer join detected - preparing unmatched right tuple tracking");
+                // Unmatched right tuples tracking is already initialized above
+            }
+            //    b. For full outer: prepare left unmatched tracking
+            JoinType::FullOuter(_) => {
+                debug!("Full outer join detected - preparing unmatched left tuple tracking");
+                // Unmatched left tuples tracking is already initialized above
+            }
+            _ => {
+                debug!("Inner/Left/Semi/Anti join detected - no special unmatched tracking needed");
+            }
+        }
         
         // 6. LOG INITIALIZATION:
-        //    debug!("NestedLoopJoin initialized - Join Type: {:?}", self.plan.get_join_type());
+        debug!("NestedLoopJoin initialized - Join Type: {:?}", self.plan.get_join_type());
+        debug!("NestedLoopJoinExecutor initialization completed successfully");
     }
 
     /**
