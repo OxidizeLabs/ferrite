@@ -406,12 +406,24 @@ impl NestedLoopJoinExecutor {
      * Resets the right child executor to the beginning for the next outer loop iteration
      */
     fn reset_right_executor(&mut self) {
-        todo!("IMPLEMENTATION STEP 11: Reset right executor state")
         // 1. Re-initialize the right child executor
+        if let Some(ref mut children) = self.children_executors {
+            if children.len() >= 2 {
+                // Re-initialize the right child executor (index 1)
+                children[1].init();
+            }
+        }
+        
         // 2. Reset right executor exhausted flag
-        // 3. Clear any right-side state tracking
-        // Note: This requires re-initialization which may be expensive
-        // Alternative: Cache right tuples in memory (trade memory for speed)
+        self.current_right_executor_exhausted = false;
+        
+        // 3. Clear any right-side state tracking that's specific to current iteration
+        // Note: We don't clear unmatched_right_tuples here as it's used for 
+        // tracking across the entire join operation for outer joins.
+        // The main join logic will handle when to populate and process those.
+        
+        // Log the reset for debugging
+        trace!("Reset right executor for next left tuple iteration");
     }
 }
 
