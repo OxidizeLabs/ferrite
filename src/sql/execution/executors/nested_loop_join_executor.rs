@@ -160,13 +160,36 @@ impl NestedLoopJoinExecutor {
      * Returns true if the predicate evaluates to true for the given tuple pair
      */
     fn evaluate_join_predicate(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> bool {
-        todo!("IMPLEMENTATION STEP 3: Evaluate predicate expression")
-        // 1. Create evaluation context with both tuples
-        // 2. Set tuple indices: left=0, right=1
-        // 3. Call predicate.evaluate() with the context
-        // 4. Extract boolean result from Value
-        // 5. Handle null/error cases (typically treat as false)
-        // 6. Return boolean result
+        // 1. Get the predicate from the plan
+        let predicate = self.plan.get_predicate();
+        
+        // 2. Get schemas for both sides
+        let left_schema = self.plan.get_left_schema();
+        let right_schema = self.plan.get_right_schema();
+        
+        // 3. Call predicate.evaluate_join() with the context
+        // The predicate knows how to resolve column references:
+        // - tuple_index 0 refers to left_tuple
+        // - tuple_index 1 refers to right_tuple
+        match predicate.evaluate_join(left_tuple, left_schema, right_tuple, right_schema) {
+            Ok(value) => {
+                // 4. Extract boolean result from Value
+                // 5. Handle null/error cases (typically treat as false)
+                match value.as_bool() {
+                    Ok(result) => result,
+                    Err(_) => {
+                        // Handle null values - treat as false for join predicates
+                        trace!("Join predicate evaluated to null or error, treating as false");
+                        false
+                    }
+                }
+            }
+            Err(e) => {
+                // Handle evaluation errors as false
+                trace!("Join predicate evaluation error: {:?}, treating as false", e);
+                false
+            }
+        }
     }
 
     /**
