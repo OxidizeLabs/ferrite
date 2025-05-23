@@ -98,12 +98,39 @@ impl NestedLoopJoinExecutor {
      * Used when one side of the join has no match and needs to be padded with nulls
      */
     fn create_null_padded_tuple(&self, left_tuple: Option<&Arc<Tuple>>, right_tuple: Option<&Arc<Tuple>>) -> Arc<Tuple> {
-        todo!("IMPLEMENTATION STEP 1: Create combined tuple with nulls for missing side")
-        // 1. Get output schema to determine final tuple structure
-        // 2. If left_tuple is None, create null values for left schema columns
-        // 3. If right_tuple is None, create null values for right schema columns
-        // 4. Combine values and create new tuple
-        // 5. Return Arc<Tuple> with combined values
+        // 1. Get schemas to determine final tuple structure
+        let left_schema = self.plan.get_left_schema();
+        let right_schema = self.plan.get_right_schema();
+        let output_schema = self.plan.get_output_schema();
+        
+        // 2. Create combined vector of values
+        let mut combined_values = Vec::new();
+        
+        // 3. Add left tuple values or nulls
+        if let Some(left_tuple) = left_tuple {
+            // Add actual values from left tuple
+            combined_values.extend(left_tuple.get_values().iter().cloned());
+        } else {
+            // Create null values for left schema columns
+            for _ in left_schema.get_columns() {
+                combined_values.push(Value::new(Val::Null));
+            }
+        }
+        
+        // 4. Add right tuple values or nulls
+        if let Some(right_tuple) = right_tuple {
+            // Add actual values from right tuple
+            combined_values.extend(right_tuple.get_values().iter().cloned());
+        } else {
+            // Create null values for right schema columns
+            for _ in right_schema.get_columns() {
+                combined_values.push(Value::new(Val::Null));
+            }
+        }
+        
+        // 5. Create and return new tuple with combined values
+        let rid = RID::new(0, 0); // Use dummy RID for joined tuples
+        Arc::new(Tuple::new(&combined_values, output_schema, rid))
     }
 
     /**
