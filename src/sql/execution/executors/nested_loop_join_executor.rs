@@ -674,6 +674,9 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                             JoinType::Semi(_) | JoinType::LeftSemi(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
+                                    // For semi join, once we find a match, we should move to next left tuple
+                                    // Set the right executor as exhausted to skip remaining right tuples for this left
+                                    self.current_right_executor_exhausted = true;
                                     self.handle_semi_join(&left_tuple, right_tuple)
                                 } else {
                                     None
