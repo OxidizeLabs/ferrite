@@ -2835,6 +2835,16 @@ impl ExpressionParser {
         let args = self.parse_function_arguments(&func.args, schema)?;
         let function_name = func.name.to_string().to_uppercase();
 
+        // Check for nested aggregates - aggregate functions cannot contain other aggregate functions
+        for arg in &args {
+            if self.contains_aggregate(arg) {
+                return Err(format!(
+                    "Nested aggregate functions are not allowed: {} cannot contain aggregate expressions",
+                    function_name
+                ));
+            }
+        }
+
         let aggregate_type = match agg_type {
             AggregateFunctionType::Count => {
                 if self.is_count_star(&func.args) {
@@ -2864,6 +2874,17 @@ impl ExpressionParser {
             return_type,
             function_name,
         )))
+    }
+
+    /// Helper method to check if an expression contains aggregate functions
+    fn contains_aggregate(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::Aggregate(_) => true,
+            _ => expr
+                .get_children()
+                .iter()
+                .any(|child| self.contains_aggregate(child)),
+        }
     }
 
     fn infer_scalar_return_type(
