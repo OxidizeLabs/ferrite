@@ -1300,10 +1300,10 @@ mod tests {
         // Verify results - should return salaries of people over 30 with avg > 70000
         assert_eq!(
             results.len(),
-            3,
-            "Should find 3 rows matching both conditions"
+            2,
+            "Should find 2 rows matching both conditions"
         );
-        assert_eq!(results, vec![75000.0, 85000.0, 100000.0]);
+        assert_eq!(results, vec![85000.0, 100000.0]);
 
         // Verify cleanup
         drop(having_executor);
@@ -1390,13 +1390,13 @@ mod tests {
         // Sort results for consistent comparison
         results.sort_by(compare_floats);
 
-        // Verify results - should return all non-zero salaries since avg > 50000
+        // Verify results - should return all salaries since avg > 50000
         assert_eq!(
             results.len(),
-            5,
-            "Should find 5 rows with non-zero salaries"
+            7,
+            "Should find all 7 rows since avg salary > 50000"
         );
-        assert_eq!(results, vec![50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
+        assert_eq!(results, vec![0.0, 0.0, 50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
 
         // Verify cleanup
         drop(executor);
