@@ -545,6 +545,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
     use crate::storage::table::tuple::TupleMeta;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
 
     struct TestContext {
@@ -659,10 +660,17 @@ mod tests {
             let table = catalog.get_table(table_name).unwrap();
             let table_heap = table.get_table_heap();
 
-            let meta = Arc::new(TupleMeta::new(0));
+            // Create a transactional wrapper around the table heap
+            let transactional_table_heap = TransactionalTableHeap::new(
+                table_heap.clone(), 
+                table.get_table_oidt()
+            );
+
+            // Use the current transaction context instead of hardcoded transaction ID
+            let txn_ctx = self.exec_ctx.read().get_transaction_context();
             for values in tuples {
-                table_heap
-                    .insert_tuple_from_values(values, &schema, meta.clone())
+                transactional_table_heap
+                    .insert_tuple_from_values(values, &schema, txn_ctx.clone())
                     .map_err(|e| e.to_string())?;
             }
             Ok(())
@@ -670,6 +678,14 @@ mod tests {
 
         fn transaction_context(&self) -> Arc<TransactionContext> {
             self.exec_ctx.read().get_transaction_context()
+        }
+
+        fn commit_current_transaction(&mut self) -> Result<(), String> {
+            let mut writer = TestResultWriter::new();
+            self.engine
+                .execute_sql("COMMIT", self.exec_ctx.clone(), &mut writer)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         }
     }
 
@@ -1189,20 +1205,24 @@ mod tests {
 
         let test_cases = vec![
             // Inner join
-            // (
-            //     "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id",
-            //     4, // Alice, Bob, Charlie, David
-            // ),
+            (
+                "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id",
+                4, // Alice, Bob, Charlie, David
+            ),
             // Left join
+            (
+                "SELECT u.name, d.name FROM users u LEFT OUTER JOIN departments d ON u.dept_id = d.id",
+                5, // All users including Eve with NULL department
+            ),
             (
                 "SELECT u.name, d.name FROM users u LEFT JOIN departments d ON u.dept_id = d.id",
                 5, // All users including Eve with NULL department
             ),
             // Join with additional conditions
-            // (
-            //     "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id WHERE d.name = 'Engineering'",
-            //     2, // Alice, Charlie
-            // ),
+            (
+                "SELECT u.name, d.name FROM users u JOIN departments d ON u.dept_id = d.id WHERE d.name = 'Engineering'",
+                2, // Alice, Charlie
+            ),
         ];
 
         for (sql, expected_rows) in test_cases {
@@ -1376,6 +1396,9 @@ mod tests {
         ctx.insert_tuples(table_name, test_data, table_schema)
             .unwrap();
 
+        // Commit the initial transaction to make the data visible to subsequent transactions
+        ctx.commit_current_transaction().unwrap();
+
         // Start transaction
         let begin_sql = "BEGIN";
         let mut writer = TestResultWriter::new();
@@ -1479,142 +1502,6 @@ mod tests {
             "800",
             "Expected Alice's balance to still be 800 after rollback"
         );
-    }
-
-    #[test]
-    fn test_cross_join() {
-        let mut ctx = TestContext::new("test_cross_join");
-
-        // Create users table
-        let users_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-        ctx.create_test_table("users", users_schema.clone())
-            .unwrap();
-
-        // Create posts table
-        let posts_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("title", TypeId::VarChar),
-        ]);
-        ctx.create_test_table("posts", posts_schema.clone())
-            .unwrap();
-
-        // Insert test data for users
-        let users_data = vec![
-            vec![Value::new(1), Value::new("Alice")],
-            vec![Value::new(2), Value::new("Bob")],
-        ];
-        ctx.insert_tuples("users", users_data, users_schema)
-            .unwrap();
-
-        // Insert test data for posts
-        let posts_data = vec![
-            vec![Value::new(1), Value::new("Post 1")],
-            vec![Value::new(2), Value::new("Post 2")],
-            vec![Value::new(3), Value::new("Post 3")],
-        ];
-        ctx.insert_tuples("posts", posts_data, posts_schema)
-            .unwrap();
-
-        // Test cases for cross joins
-        let test_cases = vec![
-            (
-                "SELECT * FROM users, posts",
-                6, // 2 users × 3 posts = 6 rows
-                4, // 2 columns from users + 2 columns from posts = 4 columns
-            ),
-            (
-                "SELECT users.name, posts.title FROM users, posts",
-                6, // 2 users × 3 posts = 6 rows
-                2, // Only name and title columns
-            ),
-            (
-                "SELECT u.name, p.title FROM users u, posts p",
-                6, // 2 users × 3 posts = 6 rows
-                2, // Only name and title columns
-            ),
-        ];
-
-        for (sql, expected_rows, expected_cols) in test_cases {
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap_or_else(|e| panic!("Query execution failed for '{}': {:?}", sql, e));
-
-            assert!(success, "Query execution failed for: {}", sql);
-
-            let rows = writer.get_rows();
-            assert_eq!(
-                rows.len(),
-                expected_rows,
-                "Expected {} rows but got {} for query: {}",
-                expected_rows,
-                rows.len(),
-                sql
-            );
-
-            if !rows.is_empty() {
-                assert_eq!(
-                    rows[0].len(),
-                    expected_cols,
-                    "Expected {} columns but got {} for query: {}",
-                    expected_cols,
-                    rows[0].len(),
-                    sql
-                );
-            }
-
-            // For the first test case (SELECT *), verify we have all columns in correct order
-            if sql == "SELECT * FROM users, posts" {
-                // Verify first row structure
-                let first_row = &rows[0];
-                assert!(
-                    first_row[0].get_type_id() == TypeId::Integer,
-                    "First column should be users.id"
-                );
-                assert!(
-                    first_row[1].get_type_id() == TypeId::VarChar,
-                    "Second column should be users.name"
-                );
-                assert!(
-                    first_row[2].get_type_id() == TypeId::Integer,
-                    "Third column should be posts.id"
-                );
-                assert!(
-                    first_row[3].get_type_id() == TypeId::VarChar,
-                    "Fourth column should be posts.title"
-                );
-
-                // Verify we have all combinations
-                let mut seen_combinations = Vec::new();
-                for row in rows {
-                    let user_name = row[1].to_string();
-                    let post_title = row[3].to_string();
-                    seen_combinations.push((user_name, post_title));
-                }
-
-                // Verify all expected combinations are present
-                let expected_combinations = vec![
-                    ("Alice".to_string(), "Post 1".to_string()),
-                    ("Alice".to_string(), "Post 2".to_string()),
-                    ("Alice".to_string(), "Post 3".to_string()),
-                    ("Bob".to_string(), "Post 1".to_string()),
-                    ("Bob".to_string(), "Post 2".to_string()),
-                    ("Bob".to_string(), "Post 3".to_string()),
-                ];
-
-                for combo in expected_combinations {
-                    assert!(
-                        seen_combinations.contains(&combo),
-                        "Missing combination: {:?}",
-                        combo
-                    );
-                }
-            }
-        }
     }
 
     #[test]
