@@ -5031,6 +5031,74 @@ mod tests {
                 _ => panic!("Expected NestedLoopJoin node"),
             }
         }
+
+        #[test]
+        fn test_left_join_same_as_left_outer_join() {
+            let mut fixture = TestContext::new("left_join_synonym");
+            setup_test_tables(&mut fixture);
+
+            // Test LEFT JOIN
+            let left_join_sql = "SELECT u.name, o.amount \
+                               FROM users u \
+                               LEFT JOIN orders o ON u.id = o.user_id";
+
+            let left_join_plan = fixture.planner.create_logical_plan(left_join_sql).unwrap();
+
+            // Test LEFT OUTER JOIN
+            let left_outer_join_sql = "SELECT u.name, o.amount \
+                                     FROM users u \
+                                     LEFT OUTER JOIN orders o ON u.id = o.user_id";
+
+            let left_outer_join_plan = fixture.planner.create_logical_plan(left_outer_join_sql).unwrap();
+
+            // Both should produce NestedLoopJoin plans with equivalent join types
+            match (&left_join_plan.children[0].plan_type, &left_outer_join_plan.children[0].plan_type) {
+                (LogicalPlanType::NestedLoopJoin { join_type: left_join_type, .. }, 
+                 LogicalPlanType::NestedLoopJoin { join_type: left_outer_join_type, .. }) => {
+                    // Both should be treated as left outer joins
+                    assert!(matches!(left_join_type, JoinOperator::Left(_)));
+                    assert!(matches!(left_outer_join_type, JoinOperator::LeftOuter(_)));
+                    
+                    // Verify the plans have the same structure and schemas
+                    assert_eq!(left_join_plan.children[0].get_schema(), left_outer_join_plan.children[0].get_schema());
+                }
+                _ => panic!("Expected NestedLoopJoin nodes for both LEFT JOIN and LEFT OUTER JOIN"),
+            }
+        }
+
+        #[test]
+        fn test_right_join_same_as_right_outer_join() {
+            let mut fixture = TestContext::new("right_join_synonym");
+            setup_test_tables(&mut fixture);
+
+            // Test RIGHT JOIN
+            let right_join_sql = "SELECT u.name, o.amount \
+                                FROM users u \
+                                RIGHT JOIN orders o ON u.id = o.user_id";
+
+            let right_join_plan = fixture.planner.create_logical_plan(right_join_sql).unwrap();
+
+            // Test RIGHT OUTER JOIN
+            let right_outer_join_sql = "SELECT u.name, o.amount \
+                                      FROM users u \
+                                      RIGHT OUTER JOIN orders o ON u.id = o.user_id";
+
+            let right_outer_join_plan = fixture.planner.create_logical_plan(right_outer_join_sql).unwrap();
+
+            // Both should produce NestedLoopJoin plans with equivalent join types
+            match (&right_join_plan.children[0].plan_type, &right_outer_join_plan.children[0].plan_type) {
+                (LogicalPlanType::NestedLoopJoin { join_type: right_join_type, .. }, 
+                 LogicalPlanType::NestedLoopJoin { join_type: right_outer_join_type, .. }) => {
+                    // Both should be treated as right outer joins
+                    assert!(matches!(right_join_type, JoinOperator::Right(_)));
+                    assert!(matches!(right_outer_join_type, JoinOperator::RightOuter(_)));
+                    
+                    // Verify the plans have the same structure and schemas
+                    assert_eq!(right_join_plan.children[0].get_schema(), right_outer_join_plan.children[0].get_schema());
+                }
+                _ => panic!("Expected NestedLoopJoin nodes for both RIGHT JOIN and RIGHT OUTER JOIN"),
+            }
+        }
     }
 
     mod group_by_tests {
