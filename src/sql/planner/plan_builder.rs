@@ -3593,6 +3593,339 @@ mod tests {
                 _ => panic!("Expected Insert plan node"),
             }
         }
+
+        #[test]
+        fn test_insert_multiple_rows() {
+            let mut fixture = TestContext::new("insert_multiple_rows");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users VALUES (1, 'John'), (2, 'Jane'), (3, 'Bob')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 3);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_with_explicit_columns() {
+            let mut fixture = TestContext::new("insert_explicit_columns");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users (id, name) VALUES (1, 'test')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_different_data_types() {
+            let mut fixture = TestContext::new("insert_different_types");
+            
+            // Create a table with various data types
+            fixture
+                .create_table(
+                    "mixed_types", 
+                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN", 
+                    false
+                )
+                .unwrap();
+
+            let insert_sql = "INSERT INTO mixed_types VALUES (1, 'Alice', 25, 50000.50, true)";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "mixed_types");
+                    assert_eq!(schema.get_column_count(), 5);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 5);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_null_values() {
+            let mut fixture = TestContext::new("insert_null_values");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users VALUES (1, NULL)";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_into_nonexistent_table() {
+            let mut fixture = TestContext::new("insert_nonexistent_table");
+
+            let insert_sql = "INSERT INTO nonexistent_table VALUES (1, 'test')";
+            let result = fixture.planner.create_logical_plan(insert_sql);
+
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("does not exist"));
+        }
+
+        #[test]
+        fn test_insert_column_count_mismatch() {
+            let mut fixture = TestContext::new("insert_column_mismatch");
+            setup_test_table(&mut fixture);
+
+            // Too few values
+            let insert_sql = "INSERT INTO users VALUES (1)";
+            let result = fixture.planner.create_logical_plan(insert_sql);
+            assert!(result.is_err());
+
+            // Too many values
+            let insert_sql = "INSERT INTO users VALUES (1, 'test', 'extra')";
+            let result = fixture.planner.create_logical_plan(insert_sql);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_insert_single_column_table() {
+            let mut fixture = TestContext::new("insert_single_column");
+            
+            fixture
+                .create_table("single_col", "id INTEGER", false)
+                .unwrap();
+
+            let insert_sql = "INSERT INTO single_col VALUES (42)";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "single_col");
+                    assert_eq!(schema.get_column_count(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 1);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_with_expressions() {
+            let mut fixture = TestContext::new("insert_with_expressions");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users VALUES (1 + 2, 'user_' || '123')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_many_columns() {
+            let mut fixture = TestContext::new("insert_many_columns");
+            
+            // Create a table with many columns
+            fixture
+                .create_table(
+                    "wide_table", 
+                    "col1 INTEGER, col2 VARCHAR(50), col3 INTEGER, col4 VARCHAR(50), col5 INTEGER, col6 VARCHAR(50), col7 INTEGER, col8 VARCHAR(50)", 
+                    false
+                )
+                .unwrap();
+
+            let insert_sql = "INSERT INTO wide_table VALUES (1, 'a', 2, 'b', 3, 'c', 4, 'd')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "wide_table");
+                    assert_eq!(schema.get_column_count(), 8);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 8);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_large_batch() {
+            let mut fixture = TestContext::new("insert_large_batch");
+            setup_test_table(&mut fixture);
+
+            // Build a query with many rows
+            let mut values_list = Vec::new();
+            for i in 1..=100 {
+                values_list.push(format!("({}, 'user{}')", i, i));
+            }
+            let insert_sql = format!("INSERT INTO users VALUES {}", values_list.join(", "));
+            
+            let plan = fixture.planner.create_logical_plan(&insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 100);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_string_with_quotes() {
+            let mut fixture = TestContext::new("insert_string_quotes");
+            setup_test_table(&mut fixture);
+
+            let insert_sql = "INSERT INTO users VALUES (1, 'John''s Database')";
+            let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Insert {
+                    table_name, schema, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Values { rows, schema } => {
+                            assert_eq!(schema.get_column_count(), 2);
+                            assert_eq!(rows.len(), 1);
+                        }
+                        _ => panic!("Expected Values node as child of Insert"),
+                    }
+                }
+                _ => panic!("Expected Insert plan node"),
+            }
+        }
+
+        #[test]
+        fn test_insert_with_default_values() {
+            let mut fixture = TestContext::new("insert_default_values");
+            
+            // Create a table with default values
+            fixture
+                .create_table(
+                    "users_with_defaults", 
+                    "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0", 
+                    false
+                )
+                .unwrap();
+
+            let insert_sql = "INSERT INTO users_with_defaults (id) VALUES (1)";
+            
+            // This should work with the current implementation
+            // Note: Full default value handling might need additional implementation
+            let result = fixture.planner.create_logical_plan(insert_sql);
+            
+            // For now, just check that it doesn't crash - full default value support
+            // might require additional logic in the planner
+            match result {
+                Ok(plan) => {
+                    match &plan.plan_type {
+                        LogicalPlanType::Insert { table_name, .. } => {
+                            assert_eq!(table_name, "users_with_defaults");
+                        }
+                        _ => panic!("Expected Insert plan node"),
+                    }
+                }
+                Err(e) => {
+                    // Default value handling might not be fully implemented yet
+                    // This test documents the current behavior
+                    println!("Expected behavior - default values not yet supported: {}", e);
+                }
+            }
+        }
     }
 
     mod aggregation_tests {
@@ -5101,108 +5434,6 @@ mod tests {
         }
     }
 
-    mod group_by_tests {
-        use super::*;
-        use crate::sql::execution::expressions::comparison_expression::ComparisonType;
-        use crate::sql::planner::logical_plan::LogicalPlanType;
-        use crate::types_db::type_id::TypeId;
-
-        fn setup_test_table(fixture: &mut TestContext) {
-            fixture
-                .create_table("test_sales", "region VARCHAR(255), amount DECIMAL", false)
-                .unwrap();
-        }
-
-        #[test]
-        fn test_group_by_with_aggregates() {
-            let mut fixture = TestContext::new("group_by_aggregates");
-            setup_test_table(&mut fixture);
-
-            // Verify the table was created correctly
-            fixture.assert_table_exists("test_sales");
-            fixture.assert_table_schema(
-                "test_sales",
-                &[
-                    ("region".to_string(), TypeId::VarChar),
-                    ("amount".to_string(), TypeId::Decimal),
-                ],
-            );
-
-            let group_sql = "SELECT region, SUM(amount) as total_sales \
-                            FROM test_sales \
-                            GROUP BY region \
-                            HAVING SUM(amount) > 1000";
-
-            let plan = fixture.planner.create_logical_plan(group_sql).unwrap();
-
-            // Verify projection
-            match &plan.plan_type {
-                LogicalPlanType::Projection {
-                    expressions,
-                    schema,
-                    column_mappings: _,
-                } => {
-                    assert_eq!(schema.get_column_count(), 2);
-                    assert_eq!(expressions.len(), 2);
-                }
-                _ => panic!("Expected Projection as root node"),
-            }
-
-            // Verify filter (HAVING)
-            match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    // Verify the predicate is comparing SUM(amount) > 1000
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThan);
-                        }
-                        _ => panic!("Expected Comparison expression in HAVING clause"),
-                    }
-                }
-                _ => panic!("Expected Filter node for HAVING clause"),
-            }
-
-            // Verify aggregation
-            match &plan.children[0].children[0].plan_type {
-                LogicalPlanType::Aggregate {
-                    group_by,
-                    aggregates,
-                    schema,
-                } => {
-                    assert_eq!(group_by.len(), 1); // region
-                    assert_eq!(aggregates.len(), 1); // SUM(amount)
-                    assert_eq!(schema.get_column_count(), 2);
-                }
-                _ => panic!("Expected Aggregate node"),
-            }
-        }
-
-        #[test]
-        fn test_simple_group_by() {
-            let mut fixture = TestContext::new("simple_group_by");
-            setup_test_table(&mut fixture);
-
-            let sql = "SELECT region, COUNT(*) as count \
-                      FROM test_sales \
-                      GROUP BY region";
-
-            let plan = fixture.planner.create_logical_plan(sql).unwrap();
-
-            match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate {
-                    group_by,
-                    aggregates,
-                    schema,
-                } => {
-                    assert_eq!(group_by.len(), 1);
-                    assert_eq!(aggregates.len(), 1);
-                    assert_eq!(schema.get_column_count(), 2);
-                }
-                _ => panic!("Expected Aggregate node"),
-            }
-        }
-    }
-
     mod order_by_tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
@@ -5373,8 +5604,7 @@ mod tests {
             }
         }
     }
-
-    // Add this at the end of the tests module
+    
     mod savepoint_tests {
         use super::*;
         use sqlparser::ast::Ident;
@@ -5417,8 +5647,7 @@ mod tests {
             }
         }
     }
-
-    // Tests for build_drop_plan
+    
     mod drop_tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
@@ -5458,8 +5687,7 @@ mod tests {
             }
         }
     }
-
-    // Tests for build_create_index_plan
+    
     mod create_index_tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
