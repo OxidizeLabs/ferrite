@@ -569,6 +569,30 @@ impl LogicalPlanBuilder {
         // Parse update assignments
         let mut update_exprs = Vec::new();
         for assignment in assignments {
+            // Validate that the column being updated exists in the table schema
+            let column_name = match &assignment.target {
+                sqlparser::ast::AssignmentTarget::ColumnName(obj_name) => {
+                    obj_name.to_string()
+                }
+                sqlparser::ast::AssignmentTarget::Tuple(_) => {
+                    return Err("Tuple assignments are not supported".to_string());
+                }
+            };
+            
+            // Check if column exists in the schema
+            let column_exists = (0..schema.get_column_count())
+                .any(|i| {
+                    if let Some(col) = schema.get_column(i as usize) {
+                        col.get_name() == column_name
+                    } else {
+                        false
+                    }
+                });
+            
+            if !column_exists {
+                return Err(format!("Column '{}' does not exist in table '{}'", column_name, table_name));
+            }
+            
             let value_expr = self
                 .expression_parser
                 .parse_expression(&assignment.value, &schema)?;
@@ -3924,6 +3948,521 @@ mod tests {
                     // This test documents the current behavior
                     println!("Expected behavior - default values not yet supported: {}", e);
                 }
+            }
+        }
+    }
+
+    mod update_tests {
+        use super::*;
+        use crate::sql::planner::logical_plan::LogicalPlanType;
+
+        fn setup_test_table(fixture: &mut TestContext) {
+            fixture
+                .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER, department VARCHAR(255), salary INTEGER", false)
+                .unwrap();
+        }
+
+        #[test]
+        fn test_simple_update() {
+            let mut fixture = TestContext::new("simple_update");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET age = 30";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    // Should have a table scan as child
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_where() {
+            let mut fixture = TestContext::new("update_with_where");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET age = 25 WHERE id = 1";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    // Should have a filter as child (which has table scan as its child)
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected Filter node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_multiple_columns() {
+            let mut fixture = TestContext::new("update_multiple_columns");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET age = 30, name = 'John', salary = 60000";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 3); // Three columns being updated
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_arithmetic_expression() {
+            let mut fixture = TestContext::new("update_arithmetic");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET salary = salary + 1000";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_complex_where() {
+            let mut fixture = TestContext::new("update_complex_where");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET salary = 75000 WHERE age > 25 AND department = 'Engineering'";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected Filter node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_nonexistent_table() {
+            let mut fixture = TestContext::new("update_nonexistent");
+
+            let update_sql = "UPDATE nonexistent_table SET age = 30";
+            let result = fixture.planner.create_logical_plan(update_sql);
+
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("not found"));
+        }
+
+        #[test]
+        fn test_update_nonexistent_column() {
+            let mut fixture = TestContext::new("update_nonexistent_column");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET nonexistent_column = 30";
+            let result = fixture.planner.create_logical_plan(update_sql);
+
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_update_with_null() {
+            let mut fixture = TestContext::new("update_with_null");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET name = NULL WHERE id = 1";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected Filter node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_string_literal() {
+            let mut fixture = TestContext::new("update_string_literal");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET name = 'John Doe', department = 'Marketing'";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 2);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_column_reference() {
+            let mut fixture = TestContext::new("update_column_reference");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET salary = age * 1000";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_different_data_types() {
+            let mut fixture = TestContext::new("update_different_types");
+            
+            // Create a table with various data types
+            fixture
+                .create_table(
+                    "mixed_types", 
+                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN", 
+                    false
+                )
+                .unwrap();
+
+            let update_sql = "UPDATE mixed_types SET name = 'Alice', age = 25, salary = 50000.50, active = true";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "mixed_types");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 4);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "mixed_types");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_subexpression() {
+            let mut fixture = TestContext::new("update_subexpression");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET salary = (age + 5) * 1000 WHERE id = 1";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected Filter node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_single_column_table() {
+            let mut fixture = TestContext::new("update_single_column");
+            
+            fixture
+                .create_table("single_col", "value INTEGER", false)
+                .unwrap();
+
+            let update_sql = "UPDATE single_col SET value = 42";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "single_col");
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "single_col");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_with_comparison_in_where() {
+            let mut fixture = TestContext::new("update_comparison_where");
+            setup_test_table(&mut fixture);
+
+            let test_cases = vec![
+                "UPDATE users SET age = 30 WHERE id > 5",
+                "UPDATE users SET age = 30 WHERE id < 10", 
+                "UPDATE users SET age = 30 WHERE id >= 5",
+                "UPDATE users SET age = 30 WHERE id <= 10",
+                "UPDATE users SET age = 30 WHERE id != 5",
+                "UPDATE users SET age = 30 WHERE name = 'John'",
+            ];
+
+            for update_sql in test_cases {
+                let plan = fixture.planner.create_logical_plan(update_sql)
+                    .unwrap_or_else(|e| panic!("Failed to create plan for: {}, error: {}", update_sql, e));
+
+                match &plan.plan_type {
+                    LogicalPlanType::Update {
+                        table_name, schema, table_oid, update_expressions, ..
+                    } => {
+                        assert_eq!(table_name, "users");
+                        assert_eq!(schema.get_column_count(), 5);
+                        assert_eq!(*table_oid, 0);
+                        assert_eq!(update_expressions.len(), 1);
+
+                        match &plan.children[0].plan_type {
+                            LogicalPlanType::Filter { table_name, .. } => {
+                                assert_eq!(table_name, "users");
+                            }
+                            _ => panic!("Expected Filter node as child of Update for: {}", update_sql),
+                        }
+                    }
+                    _ => panic!("Expected Update plan node for: {}", update_sql),
+                }
+            }
+        }
+
+        #[test]
+        fn test_update_with_logical_operators() {
+            let mut fixture = TestContext::new("update_logical_operators");
+            setup_test_table(&mut fixture);
+
+            let test_cases = vec![
+                "UPDATE users SET salary = 60000 WHERE age > 25 AND department = 'Engineering'",
+                "UPDATE users SET salary = 60000 WHERE age < 30 OR department = 'Sales'", 
+                "UPDATE users SET salary = 60000 WHERE NOT (age < 25)",
+            ];
+
+            for update_sql in test_cases {
+                let plan = fixture.planner.create_logical_plan(update_sql)
+                    .unwrap_or_else(|e| panic!("Failed to create plan for: {}, error: {}", update_sql, e));
+
+                match &plan.plan_type {
+                    LogicalPlanType::Update {
+                        table_name, schema, table_oid, update_expressions, ..
+                    } => {
+                        assert_eq!(table_name, "users");
+                        assert_eq!(schema.get_column_count(), 5);
+                        assert_eq!(*table_oid, 0);
+                        assert_eq!(update_expressions.len(), 1);
+
+                        match &plan.children[0].plan_type {
+                            LogicalPlanType::Filter { table_name, .. } => {
+                                assert_eq!(table_name, "users");
+                            }
+                            _ => panic!("Expected Filter node as child of Update for: {}", update_sql),
+                        }
+                    }
+                    _ => panic!("Expected Update plan node for: {}", update_sql),
+                }
+            }
+        }
+
+        #[test]
+        fn test_update_with_parentheses_in_expression() {
+            let mut fixture = TestContext::new("update_parentheses");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET salary = (age * 1000) + 5000 WHERE (id > 1 AND id < 10)";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 1);
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected Filter node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_all_columns() {
+            let mut fixture = TestContext::new("update_all_columns");
+            setup_test_table(&mut fixture);
+
+            let update_sql = "UPDATE users SET id = 1, name = 'Updated', age = 35, department = 'IT', salary = 80000";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 5); // All columns being updated
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
+            }
+        }
+
+        #[test]
+        fn test_update_same_column_multiple_times() {
+            let mut fixture = TestContext::new("update_same_column");
+            setup_test_table(&mut fixture);
+
+            // SQL that tries to update the same column multiple times
+            // This should be parsed successfully (whether it's logically valid is a different matter)
+            let update_sql = "UPDATE users SET age = 25, age = 30";
+            let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
+
+            match &plan.plan_type {
+                LogicalPlanType::Update {
+                    table_name, schema, table_oid, update_expressions, ..
+                } => {
+                    assert_eq!(table_name, "users");
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(*table_oid, 0);
+                    assert_eq!(update_expressions.len(), 2); // Two assignments
+
+                    match &plan.children[0].plan_type {
+                        LogicalPlanType::TableScan { table_name, .. } => {
+                            assert_eq!(table_name, "users");
+                        }
+                        _ => panic!("Expected TableScan node as child of Update"),
+                    }
+                }
+                _ => panic!("Expected Update plan node"),
             }
         }
     }
