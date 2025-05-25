@@ -651,7 +651,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                     None
                                 }
                             },
-                            JoinType::LeftOuter(_) => {
+                            JoinType::LeftOuter(_) | JoinType::Left(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
                                     self.handle_left_outer_join(&left_tuple, Some(right_tuple))
@@ -659,7 +659,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                     None
                                 }
                             },
-                            JoinType::RightOuter(_) => {
+                            JoinType::RightOuter(_) | JoinType::Right(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
                                     self.handle_right_outer_join(Some(&left_tuple), right_tuple)
@@ -741,7 +741,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
             // Right executor exhausted - handle end of inner loop for current left tuple
             let join_type = self.plan.get_join_type();
             let end_of_inner_result = match join_type {
-                JoinType::LeftOuter(_) => {
+                JoinType::LeftOuter(_) | JoinType::Left(_) => {
                     if !self.current_left_matched {
                         self.handle_left_outer_join(&left_tuple, None)
                     } else {
@@ -778,7 +778,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         // Main loop completed - for right/full outer joins, collect unmatched right tuples
         let join_type = self.plan.get_join_type();
         match join_type {
-            JoinType::RightOuter(_) | JoinType::FullOuter(_) | JoinType::RightSemi(_) | JoinType::RightAnti(_) => {
+            JoinType::RightOuter(_) | JoinType::Right(_) | JoinType::FullOuter(_) | JoinType::RightSemi(_) | JoinType::RightAnti(_) => {
                 if !self.processing_unmatched_right && self.unmatched_right_tuples.is_empty() {
                     // Get the predicate without cloning - we'll use it directly
                     let predicate = self.plan.get_predicate();
@@ -829,7 +829,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                             // If no match found, add to unmatched right tuples based on join type
                             if !is_matched {
                                 match join_type {
-                                    JoinType::RightOuter(_) | JoinType::FullOuter(_) => {
+                                    JoinType::RightOuter(_) | JoinType::Right(_) | JoinType::FullOuter(_) => {
                                         self.unmatched_right_tuples.push(right_result);
                                     },
                                     JoinType::RightSemi(_) => {
