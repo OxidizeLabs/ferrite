@@ -197,26 +197,50 @@ impl TransactionManager {
 
         // Flush any dirty pages from this transaction
         for (_table_oid, rid) in txn.get_write_set() {
+            log::debug!("Processing RID {:?} in write set for commit", rid);
             // Update tuple metadata with commit timestamp
             let page_id = rid.get_page_id();
             if let Some(page_guard) = bpm.fetch_page::<TablePage>(page_id) {
                 let mut page = page_guard.write();
-                if let Ok((mut meta, _)) = page.get_tuple(&rid) {
-                    // Only update commit timestamp if this transaction created/modified the tuple
-                    if meta.get_creator_txn_id() == txn.get_transaction_id() {
-                        meta.set_commit_timestamp(commit_ts);
-                        if let Err(e) = page.update_tuple_meta(&meta, &rid) {
-                            log::error!("Failed to update tuple metadata: {}", e);
-                            return false;
-                        }
+                match page.get_tuple(&rid) {
+                    Ok((mut meta, _)) => {
                         log::debug!(
-                            "Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}",
+                            "Retrieved tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}, txn_id: {}",
                             rid,
                             meta.get_creator_txn_id(),
-                            commit_ts
+                            meta.get_commit_timestamp(),
+                            txn.get_transaction_id()
                         );
+                        // Only update commit timestamp if this transaction created/modified the tuple
+                        if meta.get_creator_txn_id() == txn.get_transaction_id() {
+                            meta.set_commit_timestamp(commit_ts);
+                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                                log::error!("Failed to update tuple metadata for RID {:?}: {}", rid, e);
+                                return false;
+                            }
+                            log::debug!(
+                                "Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}",
+                                rid,
+                                meta.get_creator_txn_id(),
+                                commit_ts
+                            );
+                        } else {
+                            log::debug!(
+                                "Skipping RID {:?} - creator_txn {} != current_txn {}",
+                                rid,
+                                meta.get_creator_txn_id(),
+                                txn.get_transaction_id()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to get tuple metadata for RID {:?}: {}", rid, e);
+                        return false;
                     }
                 }
+            } else {
+                log::error!("Failed to fetch page {} for RID {:?}", page_id, rid);
+                return false;
             }
 
             // Flush the page
