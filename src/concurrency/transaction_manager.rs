@@ -202,8 +202,9 @@ impl TransactionManager {
             let page_id = rid.get_page_id();
             if let Some(page_guard) = bpm.fetch_page::<TablePage>(page_id) {
                 let mut page = page_guard.write();
-                match page.get_tuple(&rid) {
-                    Ok((mut meta, _)) => {
+                // Use get_tuple_meta instead of get_tuple to handle deleted tuples
+                match page.get_tuple_meta(&rid) {
+                    Ok(mut meta) => {
                         log::debug!(
                             "Retrieved tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}, txn_id: {}",
                             rid,
@@ -219,10 +220,11 @@ impl TransactionManager {
                                 return false;
                             }
                             log::debug!(
-                                "Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}",
+                                "Updated tuple metadata for RID {:?} - creator_txn: {}, commit_ts: {}, deleted: {}",
                                 rid,
                                 meta.get_creator_txn_id(),
-                                commit_ts
+                                commit_ts,
+                                meta.is_deleted()
                             );
                         } else {
                             log::debug!(
