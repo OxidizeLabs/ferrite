@@ -1,4 +1,4 @@
-use crate::catalog::schema::Schema;
+ use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::value::Value;
