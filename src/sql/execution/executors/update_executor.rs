@@ -3,6 +3,7 @@ use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::executors::filter_executor::FilterExecutor;
+use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
@@ -134,7 +135,23 @@ impl AbstractExecutor for UpdateExecutor {
                         filter_plan.clone().into(),
                     )));
                 }
-                _ => warn!("Unexpected child plan type for UpdateExecutor"),
+                PlanNode::SeqScan(seq_scan_plan) => {
+                    // Direct table scan without filter (UPDATE without WHERE clause)
+                    debug!("Creating SeqScanExecutor for UPDATE without WHERE clause");
+                    self.child_executor = Some(Box::new(SeqScanExecutor::new(
+                        self.context.clone(),
+                        Arc::new(seq_scan_plan.clone()),
+                    )));
+                }
+                PlanNode::TableScan(table_scan_plan) => {
+                    // Direct table scan without filter (UPDATE without WHERE clause)
+                    debug!("Creating TableScanExecutor for UPDATE without WHERE clause");
+                    self.child_executor = Some(Box::new(TableScanExecutor::new(
+                        self.context.clone(),
+                        Arc::new(table_scan_plan.clone()),
+                    )));
+                }
+                _ => warn!("Unexpected child plan type for UpdateExecutor: {:?}", child),
             }
         }
 
@@ -1075,7 +1092,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_all_rows() {
+    fn test_update_executor_all_rows() {
         let ctx = TestContext::new("test_update_all_rows");
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
