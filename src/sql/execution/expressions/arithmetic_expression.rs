@@ -54,24 +54,77 @@ impl ArithmeticExpression {
 
     fn infer_return_type(left: &Column, right: &Column) -> Result<Column, String> {
         match (left.get_type(), right.get_type()) {
+            // Same type operations
+            (TypeId::TinyInt, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::TinyInt))
+            }
+            (TypeId::SmallInt, TypeId::SmallInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::SmallInt))
+            }
             (TypeId::Integer, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Integer))
             }
+            (TypeId::BigInt, TypeId::BigInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::BigInt))
+            }
+            (TypeId::Float, TypeId::Float) => {
+                Ok(Column::new("arithmetic_result", TypeId::Float))
+            }
             (TypeId::Decimal, TypeId::Decimal) => {
+                Ok(Column::new("arithmetic_result", TypeId::Decimal))
+            }
+            
+            // Mixed integer type operations - promote to larger type
+            (TypeId::TinyInt, TypeId::SmallInt) | (TypeId::SmallInt, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::SmallInt))
+            }
+            (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Integer))
+            }
+            (TypeId::TinyInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::BigInt))
+            }
+            (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Integer))
+            }
+            (TypeId::SmallInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::SmallInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::BigInt))
+            }
+            (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
+                Ok(Column::new("arithmetic_result", TypeId::BigInt))
+            }
+            
+            // Floating point operations - promote to Decimal for precision
+            (TypeId::TinyInt, TypeId::Float) | (TypeId::Float, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Float))
+            }
+            (TypeId::SmallInt, TypeId::Float) | (TypeId::Float, TypeId::SmallInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Float))
+            }
+            (TypeId::Integer, TypeId::Float) | (TypeId::Float, TypeId::Integer) => {
+                Ok(Column::new("arithmetic_result", TypeId::Float))
+            }
+            (TypeId::BigInt, TypeId::Float) | (TypeId::Float, TypeId::BigInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Float))
+            }
+            (TypeId::Float, TypeId::Decimal) | (TypeId::Decimal, TypeId::Float) => {
+                Ok(Column::new("arithmetic_result", TypeId::Decimal))
+            }
+            
+            // Decimal operations - promote to Decimal for precision
+            (TypeId::TinyInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::TinyInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::Decimal))
+            }
+            (TypeId::SmallInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
             }
             (TypeId::Integer, TypeId::Decimal) | (TypeId::Decimal, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
             }
-            (TypeId::BigInt, TypeId::BigInt) => {
-                Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
-            (TypeId::BigInt, TypeId::Integer) | (TypeId::Integer, TypeId::BigInt) => {
-                Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
             (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
             }
+            
             _ => Err(format!(
                 "Invalid types for arithmetic operation: {}({:?}) and {}({:?})",
                 left.get_name(),
@@ -89,6 +142,43 @@ impl ExpressionOps for ArithmeticExpression {
         let right_value = self.get_right().evaluate(tuple, schema)?;
 
         match (left_value.get_val(), right_value.get_val()) {
+            // TinyInt operations
+            (Val::TinyInt(l), Val::TinyInt(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(|v| Value::new_with_type(Val::TinyInt(v), TypeId::TinyInt))
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            
+            // SmallInt operations
+            (Val::SmallInt(l), Val::SmallInt(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            
+            // Integer operations
             (Val::Integer(l), Val::Integer(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r),
@@ -105,6 +195,8 @@ impl ExpressionOps for ArithmeticExpression {
                     .map(Value::from)
                     .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
+            
+            // BigInt operations
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r),
@@ -121,6 +213,25 @@ impl ExpressionOps for ArithmeticExpression {
                     .map(Value::from)
                     .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
+            
+            // Float operations
+            (Val::Float(l), Val::Float(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + *r,
+                    ArithmeticOp::Subtract => *l - *r,
+                    ArithmeticOp::Multiply => *l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(*l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            
+            // Decimal operations
             (Val::Decimal(l), Val::Decimal(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => *l + *r,
@@ -136,22 +247,177 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 Ok(Value::from(result))
             }
-            (Val::Integer(l), Val::Decimal(r)) | (Val::Decimal(r), Val::Integer(l)) => {
-                let l = *l as f64;
-                let r = *r;
+            
+            // Mixed integer type operations
+            (Val::TinyInt(l), Val::SmallInt(r)) => {
+                let l = *l as i16;
                 let result = match self.op {
-                    ArithmeticOp::Add => l + r,
-                    ArithmeticOp::Subtract => l - r,
-                    ArithmeticOp::Multiply => l * r,
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
                     ArithmeticOp::Divide => {
-                        if r != 0.0 {
-                            Ok(l / r)
-                        } else {
-                            Err(ExpressionError::ArithmeticError(DivisionByZero))
-                        }?
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
                     }
                 };
-                Ok(Value::from(result))
+                result
+                    .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::SmallInt(l), Val::TinyInt(r)) => {
+                let r = *r as i16;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(r),
+                    ArithmeticOp::Subtract => l.checked_sub(r),
+                    ArithmeticOp::Multiply => l.checked_mul(r),
+                    ArithmeticOp::Divide => {
+                        if r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(r)
+                    }
+                };
+                result
+                    .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::TinyInt(l), Val::Integer(r)) => {
+                let l = *l as i32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::Integer(l), Val::TinyInt(r)) => {
+                let r = *r as i32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(r),
+                    ArithmeticOp::Subtract => l.checked_sub(r),
+                    ArithmeticOp::Multiply => l.checked_mul(r),
+                    ArithmeticOp::Divide => {
+                        if r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::SmallInt(l), Val::Integer(r)) => {
+                let l = *l as i32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::Integer(l), Val::SmallInt(r)) => {
+                let r = *r as i32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(r),
+                    ArithmeticOp::Subtract => l.checked_sub(r),
+                    ArithmeticOp::Multiply => l.checked_mul(r),
+                    ArithmeticOp::Divide => {
+                        if r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::TinyInt(l), Val::BigInt(r)) => {
+                let l = *l as i64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::BigInt(l), Val::TinyInt(r)) => {
+                let r = *r as i64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(r),
+                    ArithmeticOp::Subtract => l.checked_sub(r),
+                    ArithmeticOp::Multiply => l.checked_mul(r),
+                    ArithmeticOp::Divide => {
+                        if r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::SmallInt(l), Val::BigInt(r)) => {
+                let l = *l as i64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r),
+                    ArithmeticOp::Subtract => l.checked_sub(*r),
+                    ArithmeticOp::Multiply => l.checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::BigInt(l), Val::SmallInt(r)) => {
+                let r = *r as i64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(r),
+                    ArithmeticOp::Subtract => l.checked_sub(r),
+                    ArithmeticOp::Multiply => l.checked_mul(r),
+                    ArithmeticOp::Divide => {
+                        if r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::BigInt(l), Val::Integer(r)) => {
                 let result = match self.op {
@@ -185,16 +451,147 @@ impl ExpressionOps for ArithmeticExpression {
                     .map(Value::from)
                     .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
-            (Val::BigInt(l), Val::Decimal(r)) | (Val::Decimal(r), Val::BigInt(l)) => {
-                let l = *l as f64;
-                let r = *r;
+            
+            // Float with integer types
+            (Val::TinyInt(l), Val::Float(r)) => {
+                let l = *l as f32;
                 let result = match self.op {
-                    ArithmeticOp::Add => l + r,
-                    ArithmeticOp::Subtract => l - r,
-                    ArithmeticOp::Multiply => l * r,
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::Float(l), Val::TinyInt(r)) => {
+                let r = *r as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
                     ArithmeticOp::Divide => {
                         if r != 0.0 {
-                            Ok(l / r)
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::SmallInt(l), Val::Float(r)) => {
+                let l = *l as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::Float(l), Val::SmallInt(r)) => {
+                let r = *r as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::Integer(l), Val::Float(r)) => {
+                let l = *l as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::Float(l), Val::Integer(r)) => {
+                let r = *r as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::BigInt(l), Val::Float(r)) => {
+                let l = *l as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            (Val::Float(l), Val::BigInt(r)) => {
+                let r = *r as f32;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
+            }
+            
+            // Decimal with integer types
+            (Val::TinyInt(l), Val::Decimal(r)) => {
+                let l = *l as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
@@ -202,6 +599,153 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 Ok(Value::from(result))
             }
+            (Val::Decimal(l), Val::TinyInt(r)) => {
+                let r = *r as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::SmallInt(l), Val::Decimal(r)) => {
+                let l = *l as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::Decimal(l), Val::SmallInt(r)) => {
+                let r = *r as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::Integer(l), Val::Decimal(r)) => {
+                let l = *l as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::Decimal(l), Val::Integer(r)) => {
+                let r = *r as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::BigInt(l), Val::Decimal(r)) => {
+                let l = *l as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::Decimal(l), Val::BigInt(r)) => {
+                let r = *r as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            
+            // Float with Decimal
+            (Val::Float(l), Val::Decimal(r)) => {
+                let l = *l as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => l + *r,
+                    ArithmeticOp::Subtract => l - *r,
+                    ArithmeticOp::Multiply => l * *r,
+                    ArithmeticOp::Divide => {
+                        if *r != 0.0 {
+                            Ok(l / *r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            (Val::Decimal(l), Val::Float(r)) => {
+                let r = *r as f64;
+                let result = match self.op {
+                    ArithmeticOp::Add => *l + r,
+                    ArithmeticOp::Subtract => *l - r,
+                    ArithmeticOp::Multiply => *l * r,
+                    ArithmeticOp::Divide => {
+                        if r != 0.0 {
+                            Ok(*l / r)
+                        } else {
+                            Err(ExpressionError::ArithmeticError(DivisionByZero))
+                        }?
+                    }
+                };
+                Ok(Value::from(result))
+            }
+            
             _ => Err(ExpressionError::ArithmeticError(Unknown)),
         }
     }
@@ -364,15 +908,35 @@ impl ExpressionOps for ArithmeticExpression {
         let right_type = self.get_right().get_return_type().get_type();
 
         match (left_type, right_type) {
-            (TypeId::Integer, TypeId::Integer)
-            | (TypeId::Decimal, TypeId::Decimal)
-            | (TypeId::Integer, TypeId::Decimal)
-            | (TypeId::Decimal, TypeId::Integer)
+            // Same type operations
+            (TypeId::TinyInt, TypeId::TinyInt)
+            | (TypeId::SmallInt, TypeId::SmallInt)
+            | (TypeId::Integer, TypeId::Integer)
             | (TypeId::BigInt, TypeId::BigInt)
-            | (TypeId::BigInt, TypeId::Integer)
-            | (TypeId::Integer, TypeId::BigInt)
-            | (TypeId::BigInt, TypeId::Decimal)
-            | (TypeId::Decimal, TypeId::BigInt) => Ok(()),
+            | (TypeId::Float, TypeId::Float)
+            | (TypeId::Decimal, TypeId::Decimal)
+            
+            // Mixed integer type operations
+            | (TypeId::TinyInt, TypeId::SmallInt) | (TypeId::SmallInt, TypeId::TinyInt)
+            | (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt)
+            | (TypeId::TinyInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::TinyInt)
+            | (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt)
+            | (TypeId::SmallInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::SmallInt)
+            | (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer)
+            
+            // Float operations
+            | (TypeId::TinyInt, TypeId::Float) | (TypeId::Float, TypeId::TinyInt)
+            | (TypeId::SmallInt, TypeId::Float) | (TypeId::Float, TypeId::SmallInt)
+            | (TypeId::Integer, TypeId::Float) | (TypeId::Float, TypeId::Integer)
+            | (TypeId::BigInt, TypeId::Float) | (TypeId::Float, TypeId::BigInt)
+            | (TypeId::Float, TypeId::Decimal) | (TypeId::Decimal, TypeId::Float)
+            
+            // Decimal operations
+            | (TypeId::TinyInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::TinyInt)
+            | (TypeId::SmallInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::SmallInt)
+            | (TypeId::Integer, TypeId::Decimal) | (TypeId::Decimal, TypeId::Integer)
+            | (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => Ok(()),
+            
             _ => Err(ExpressionError::ArithmeticError(Unknown)),
         }
     }
@@ -1441,5 +2005,678 @@ mod unit_tests {
 
         // This should fail during validation of the invalid column reference
         assert!(expr.validate(&schema).is_err());
+    }
+
+    #[test]
+    fn test_tinyint_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let tinyint_val1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::TinyInt(10), TypeId::TinyInt),
+            Column::new("const", TypeId::TinyInt),
+            vec![],
+        )));
+        let tinyint_val2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::TinyInt(5), TypeId::TinyInt),
+            Column::new("const", TypeId::TinyInt),
+            vec![],
+        )));
+
+        // Test TinyInt addition
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![tinyint_val1.clone(), tinyint_val2.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::TinyInt(15), TypeId::TinyInt));
+
+        // Test TinyInt subtraction
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![tinyint_val1.clone(), tinyint_val2.clone()],
+        ));
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::TinyInt(5), TypeId::TinyInt));
+
+        // Test TinyInt multiplication
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![tinyint_val1.clone(), tinyint_val2.clone()],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::TinyInt(50), TypeId::TinyInt));
+
+        // Test TinyInt division
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![tinyint_val1, tinyint_val2],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::TinyInt(2), TypeId::TinyInt));
+    }
+
+    #[test]
+    fn test_smallint_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let smallint_val1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::SmallInt(1000), TypeId::SmallInt),
+            Column::new("const", TypeId::SmallInt),
+            vec![],
+        )));
+        let smallint_val2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::SmallInt(250), TypeId::SmallInt),
+            Column::new("const", TypeId::SmallInt),
+            vec![],
+        )));
+
+        // Test SmallInt addition
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![smallint_val1.clone(), smallint_val2.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::SmallInt(1250), TypeId::SmallInt));
+
+        // Test SmallInt subtraction
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![smallint_val1.clone(), smallint_val2.clone()],
+        ));
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::SmallInt(750), TypeId::SmallInt));
+
+        // Test SmallInt multiplication (this will overflow, so we expect an error)
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![smallint_val1.clone(), smallint_val2.clone()],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema);
+        assert!(result.is_err()); // Should overflow since 1000 * 250 = 250000 > i16::MAX
+
+        // Test SmallInt division
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![smallint_val1, smallint_val2],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::SmallInt(4), TypeId::SmallInt));
+    }
+
+    #[test]
+    fn test_float_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let float_val1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Float(5.5), TypeId::Float),
+            Column::new("const", TypeId::Float),
+            vec![],
+        )));
+        let float_val2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Float(2.5), TypeId::Float),
+            Column::new("const", TypeId::Float),
+            vec![],
+        )));
+
+        // Test Float addition
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![float_val1.clone(), float_val2.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::Float(8.0), TypeId::Float));
+
+        // Test Float subtraction
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![float_val1.clone(), float_val2.clone()],
+        ));
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::Float(3.0), TypeId::Float));
+
+        // Test Float multiplication
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![float_val1.clone(), float_val2.clone()],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::Float(13.75), TypeId::Float));
+
+        // Test Float division
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![float_val1, float_val2],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::Float(2.2), TypeId::Float));
+    }
+
+    #[test]
+    fn test_mixed_numeric_type_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test Integer + TinyInt
+        let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(100),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let tinyint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::TinyInt(5), TypeId::TinyInt),
+            Column::new("const", TypeId::TinyInt),
+            vec![],
+        )));
+
+        let mixed_expr1 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![int_val.clone(), tinyint_val.clone()],
+        ));
+        let result = mixed_expr1.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(105)); // 100 + 5 = 105, promoted to Integer
+
+        // Test SmallInt + BigInt
+        let smallint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::SmallInt(1000), TypeId::SmallInt),
+            Column::new("const", TypeId::SmallInt),
+            vec![],
+        )));
+        let bigint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(5000000000i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        let mixed_expr2 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![smallint_val.clone(), bigint_val.clone()],
+        ));
+        let result = mixed_expr2.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(5000001000i64)); // 1000 + 5000000000 = 5000001000, promoted to BigInt
+
+        // Test Float + Decimal
+        let float_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Float(3.14), TypeId::Float),
+            Column::new("const", TypeId::Float),
+            vec![],
+        )));
+        let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(2.71),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let mixed_expr3 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![float_val.clone(), decimal_val.clone()],
+        ));
+        let result = mixed_expr3.evaluate(&tuple, &schema).unwrap();
+        // Note: Due to floating-point precision, we need to check the approximate value
+        if let Val::Decimal(val) = result.get_val() {
+            assert!((val - 5.85).abs() < 0.001); // Check within tolerance
+        } else {
+            panic!("Expected Decimal result");
+        }
+
+        // Test TinyInt + SmallInt
+        let mixed_expr4 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![tinyint_val, smallint_val],
+        ));
+        let result = mixed_expr4.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new_with_type(Val::SmallInt(5000), TypeId::SmallInt)); // 5 * 1000 = 5000, promoted to SmallInt
+    }
+
+    #[test]
+    fn test_invalid_type_combinations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test String + Integer
+        let string_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::VarLen("hello".to_string()), TypeId::VarChar),
+            Column::new("const", TypeId::VarChar),
+            vec![],
+        )));
+        let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(42),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let invalid_expr1 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![string_val.clone(), int_val.clone()],
+        ));
+        let result = invalid_expr1.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Boolean + Decimal
+        let bool_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Boolean(true), TypeId::Boolean),
+            Column::new("const", TypeId::Boolean),
+            vec![],
+        )));
+        let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(3.14),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let invalid_expr2 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![bool_val.clone(), decimal_val.clone()],
+        ));
+        let result = invalid_expr2.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Timestamp + Integer
+        let timestamp_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Timestamp(1234567890), TypeId::Timestamp),
+            Column::new("const", TypeId::Timestamp),
+            vec![],
+        )));
+
+        let invalid_expr3 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![timestamp_val.clone(), int_val.clone()],
+        ));
+        let result = invalid_expr3.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test UUID + BigInt
+        let uuid_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::UUID("550e8400-e29b-41d4-a716-446655440000".to_string()), TypeId::UUID),
+            Column::new("const", TypeId::UUID),
+            vec![],
+        )));
+        let bigint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1000000i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        let invalid_expr4 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![uuid_val, bigint_val],
+        ));
+        let result = invalid_expr4.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Array + Vector
+        let array_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Array(vec![Value::new(1), Value::new(2)]), TypeId::Array),
+            Column::new("const", TypeId::Array),
+            vec![],
+        )));
+        let vector_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Vector(vec![Value::new(3), Value::new(4)]), TypeId::Vector),
+            Column::new("const", TypeId::Vector),
+            vec![],
+        )));
+
+        let invalid_expr5 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![array_val, vector_val],
+        ));
+        let result = invalid_expr5.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test JSON + Point
+        let json_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::JSON("{\"key\": \"value\"}".to_string()), TypeId::JSON),
+            Column::new("const", TypeId::JSON),
+            vec![],
+        )));
+        let point_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Point(1.0, 2.0), TypeId::Point),
+            Column::new("const", TypeId::Point),
+            vec![],
+        )));
+
+        let invalid_expr6 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![json_val, point_val],
+        ));
+        let result = invalid_expr6.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_null_value_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test Null + Integer
+        let null_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new_with_type(Val::Null, TypeId::Invalid),
+            Column::new("const", TypeId::Invalid),
+            vec![],
+        )));
+        let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(42),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let null_expr1 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![null_val.clone(), int_val.clone()],
+        ));
+        let result = null_expr1.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Integer + Null
+        let null_expr2 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![int_val.clone(), null_val.clone()],
+        ));
+        let result = null_expr2.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Null + Null
+        let null_expr3 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![null_val.clone(), null_val.clone()],
+        ));
+        let result = null_expr3.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test Null / Decimal
+        let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(3.14),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let null_expr4 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![null_val, decimal_val],
+        ));
+        let result = null_expr4.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_type_inference_for_unsupported_types() {
+        // Test type inference for TinyInt combinations
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::TinyInt),
+            &Column::new("b", TypeId::TinyInt),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::TinyInt);
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::TinyInt),
+            &Column::new("b", TypeId::Integer),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::Integer);
+
+        // Test type inference for SmallInt combinations
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::SmallInt),
+            &Column::new("b", TypeId::SmallInt),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::SmallInt);
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::SmallInt),
+            &Column::new("b", TypeId::BigInt),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::BigInt);
+
+        // Test type inference for Float combinations
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::Float),
+            &Column::new("b", TypeId::Float),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::Float);
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::Float),
+            &Column::new("b", TypeId::Decimal),
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_type(), TypeId::Decimal);
+
+        // Test type inference for completely invalid combinations
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::VarChar),
+            &Column::new("b", TypeId::Boolean),
+        );
+        assert!(result.is_err());
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::Timestamp),
+            &Column::new("b", TypeId::Date),
+        );
+        assert!(result.is_err());
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::UUID),
+            &Column::new("b", TypeId::JSON),
+        );
+        assert!(result.is_err());
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::Array),
+            &Column::new("b", TypeId::Vector),
+        );
+        assert!(result.is_err());
+
+        let result = ArithmeticExpression::infer_return_type(
+            &Column::new("a", TypeId::Point),
+            &Column::new("b", TypeId::Binary),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validation_with_unsupported_types() {
+        let schema = Schema::new(vec![
+            Column::new("tinyint_col", TypeId::TinyInt),
+            Column::new("smallint_col", TypeId::SmallInt),
+            Column::new("float_col", TypeId::Float),
+            Column::new("string_col", TypeId::VarChar),
+            Column::new("bool_col", TypeId::Boolean),
+        ]);
+
+        // Test validation with TinyInt
+        let tinyint_expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![
+                Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    0,
+                    Column::new("tinyint_col", TypeId::TinyInt),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(5),
+                    Column::new("const", TypeId::Integer),
+                    vec![],
+                ))),
+            ],
+        );
+        assert!(tinyint_expr.validate(&schema).is_ok()); // Now supported
+
+        // Test validation with SmallInt
+        let smallint_expr = ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![
+                Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    1,
+                    Column::new("smallint_col", TypeId::SmallInt),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(2.5),
+                    Column::new("const", TypeId::Decimal),
+                    vec![],
+                ))),
+            ],
+        );
+        assert!(smallint_expr.validate(&schema).is_ok()); // Now supported
+
+        // Test validation with Float
+        let float_expr = ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![
+                Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    2,
+                    Column::new("float_col", TypeId::Float),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(1000i64),
+                    Column::new("const", TypeId::BigInt),
+                    vec![],
+                ))),
+            ],
+        );
+        assert!(float_expr.validate(&schema).is_ok()); // Now supported
+
+        // Test validation with String
+        let string_expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![
+                Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    3,
+                    Column::new("string_col", TypeId::VarChar),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(42),
+                    Column::new("const", TypeId::Integer),
+                    vec![],
+                ))),
+            ],
+        );
+        assert!(string_expr.validate(&schema).is_err());
+
+        // Test validation with Boolean
+        let bool_expr = ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![
+                Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                    0,
+                    4,
+                    Column::new("bool_col", TypeId::Boolean),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(3.14),
+                    Column::new("const", TypeId::Decimal),
+                    vec![],
+                ))),
+            ],
+        );
+        assert!(bool_expr.validate(&schema).is_err());
+    }
+
+    #[test]
+    fn test_extreme_value_edge_cases() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test with maximum values
+        let max_int = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i32::MAX),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let max_bigint = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i64::MAX),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        // Test Integer max + BigInt max (should overflow)
+        let overflow_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![max_int.clone(), max_bigint.clone()],
+        ));
+        let result = overflow_expr.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test with minimum values
+        let min_int = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i32::MIN),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let min_bigint = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i64::MIN),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        // Test Integer min - BigInt max (should underflow)
+        let underflow_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![min_int, max_bigint],
+        ));
+        let result = underflow_expr.evaluate(&tuple, &schema);
+        assert!(result.is_err());
+
+        // Test very large decimal values
+        let large_decimal1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(f64::MAX / 2.0),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+        let large_decimal2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(f64::MAX / 2.0),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        // Test large decimal multiplication (might overflow to infinity)
+        let large_mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![large_decimal1, large_decimal2],
+        ));
+        let result = large_mul_expr.evaluate(&tuple, &schema).unwrap();
+        // Result should be infinity
+        if let Val::Decimal(val) = result.get_val() {
+            assert!(val.is_infinite());
+        } else {
+            panic!("Expected decimal result");
+        }
+
+        // Test very small decimal values
+        let tiny_decimal = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(f64::MIN_POSITIVE),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+        let large_divisor = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(f64::MAX),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        // Test tiny decimal / large decimal (should approach zero)
+        let tiny_div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![tiny_decimal, large_divisor],
+        ));
+        let result = tiny_div_expr.evaluate(&tuple, &schema).unwrap();
+        if let Val::Decimal(val) = result.get_val() {
+            assert!(*val >= 0.0 && *val < 1e-300); // Very close to zero
+        } else {
+            panic!("Expected decimal result");
+        }
     }
 }
