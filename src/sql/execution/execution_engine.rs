@@ -513,6 +513,7 @@ impl ExecutionEngine {
 
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
+        debug!("Got transaction manager from factory: {:p}", txn_manager.as_ref());
 
         // Write abort record to WAL
         let transaction = txn_ctx.get_transaction();
@@ -522,6 +523,7 @@ impl ExecutionEngine {
         transaction.set_prev_lsn(lsn);
 
         // Attempt to abort
+        debug!("About to call txn_manager.abort() on transaction {}", transaction.get_transaction_id());
         txn_manager.abort(transaction);
         debug!("Transaction aborted successfully");
         Ok(true)
@@ -598,21 +600,6 @@ mod tests {
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
 
-            // Create transaction manager
-            let txn_manager = Arc::new(TransactionManager::new());
-
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                Arc::clone(&bpm),
-                txn_manager.clone(),
-            )));
-
-            let lock_manager = Arc::new(LockManager::new());
-
-            // Create a transaction using the transaction manager
-            let txn = txn_manager.begin(IsolationLevel::ReadUncommitted).unwrap();
-            let transaction_context =
-                Arc::new(TransactionContext::new(txn, lock_manager.clone(), txn_manager.clone()));
-
             // Create WAL manager with the log manager
             let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
 
@@ -621,6 +608,17 @@ mod tests {
                 bpm.clone(),
                 wal_manager.clone(),
             ));
+
+            // Get the transaction manager from the factory to ensure consistency
+            let txn_manager = transaction_factory.get_transaction_manager();
+
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                Arc::clone(&bpm),
+                txn_manager.clone(),
+            )));
+
+            // Create a transaction using the factory's transaction manager
+            let transaction_context = transaction_factory.begin_transaction(IsolationLevel::ReadUncommitted);
 
             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
                 bpm.clone(),
