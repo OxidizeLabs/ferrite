@@ -263,6 +263,8 @@ impl TransactionManager {
     /// # Parameters
     /// - `txn`: The transaction to abort.
     pub fn abort(&self, txn: Arc<Transaction>) {
+        log::debug!("ABORT: Starting abort for transaction {}", txn.get_transaction_id());
+        log::debug!("Starting abort for transaction {}", txn.get_transaction_id());
         let current_state = txn.get_state();
         if current_state != TransactionState::Running && current_state != TransactionState::Tainted
         {
@@ -273,9 +275,15 @@ impl TransactionManager {
         let write_set = txn.get_write_set();
 
         // Roll back changes using undo logs
+        log::debug!("ABORT: Rolling back {} write operations for transaction {}", write_set.len(), txn.get_transaction_id());
+        log::debug!("Rolling back {} write operations for transaction {}", write_set.len(), txn.get_transaction_id());
         for (table_oid, rid) in write_set {
+            log::debug!("ABORT: Processing write operation for table_oid={}, rid={:?}", table_oid, rid);
             if let Some(table_heap) = self.get_table_heap(table_oid) {
+                log::debug!("ABORT: Found table heap for table_oid={}", table_oid);
                 if let Some(undo_link) = self.get_undo_link(rid) {
+                    log::debug!("ABORT: Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}", rid, undo_link.prev_txn, undo_link.prev_log_idx);
+                    log::debug!("Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}", rid, undo_link.prev_txn, undo_link.prev_log_idx);
                     // Get the undo log
                     let undo_log = self.get_undo_log(undo_link.clone());
 
@@ -286,11 +294,23 @@ impl TransactionManager {
                     meta.set_undo_log_idx(undo_link.prev_log_idx);
 
                     // Use a reference to the Arc<Tuple> without cloning
+                    log::debug!("Rolling back tuple at RID {:?} with data: {:?}", rid, undo_log.tuple);
                     if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid)
                     {
                         log::error!("Failed to rollback tuple: {}", e);
+                    } else {
+                        log::debug!("Successfully rolled back tuple at RID {:?}", rid);
                     }
+                    
+                    // Update the undo link to point to the previous version
+                    let prev_version_link = if undo_log.prev_version.prev_txn != 0 {
+                        Some(undo_log.prev_version.clone())
+                    } else {
+                        None
+                    };
+                    self.update_undo_link(rid, prev_version_link, None);
                 } else {
+                    log::debug!("ABORT: No undo link found for RID {:?} - marking as deleted", rid);
                     // If no undo link exists, this was a newly inserted tuple
                     // Mark it as deleted since it was part of an aborted transaction
                     let mut meta = TupleMeta::new(txn.get_transaction_id());
@@ -725,7 +745,7 @@ mod tests {
                 });
 
             if let Err(ref err) = result {
-                println!("Warning: Tuple insertion failed: {}", err);
+                log::debug!("Warning: Tuple insertion failed: {}", err);
             }
 
             result
@@ -806,7 +826,7 @@ mod tests {
                 Ok(rid) => rid,
                 Err(e) => {
                     // Skip the test if insertion fails
-                    println!(
+                    log::debug!(
                         "Skipping test_commit_transaction: tuple insertion failed: {}",
                         e
                     );
@@ -842,7 +862,7 @@ mod tests {
             // Get tuple with verification transaction - handle potential error
             let result = table_heap.get_tuple_with_txn(rid, txn_ctx);
             if result.is_err() {
-                println!(
+                log::debug!(
                     "Warning: Failed to read committed tuple: {:?}",
                     result.err()
                 );
@@ -886,7 +906,7 @@ mod tests {
                 Ok(rid) => rid,
                 Err(e) => {
                     // Skip the test if insertion fails
-                    println!(
+                    log::debug!(
                         "Skipping test_abort_transaction: tuple insertion failed: {}",
                         e
                     );
@@ -922,7 +942,7 @@ mod tests {
             // After an abort, we expect the result to be an error
             // But if the test environment isn't cooperating, we'll just skip
             if result.is_ok() {
-                println!("Warning: Expected error reading aborted tuple but got success");
+                log::debug!("Warning: Expected error reading aborted tuple but got success");
                 ctx.txn_manager()
                     .commit(verify_txn, ctx.buffer_pool_manager());
                 return;
@@ -999,7 +1019,7 @@ mod tests {
                 Ok(rid) => rid,
                 Err(e) => {
                     // Skip the test if insertion fails
-                    println!(
+                    log::debug!(
                         "Skipping test_transaction_isolation: tuple insertion failed: {}",
                         e
                     );
@@ -1031,7 +1051,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Warning: Expected update to succeed after commit, but got error: {:?}",
                     update_result.err()
                 );
@@ -1081,7 +1101,7 @@ mod tests {
                 match txn_table_heap.insert_tuple_from_values(values.clone(), &schema, txn_ctx1) {
                     Ok(rid) => rid,
                     Err(e) => {
-                        println!(
+                        log::debug!(
                             "Skipping test_read_uncommitted_isolation: tuple insertion failed: {}",
                             e
                         );
@@ -1095,7 +1115,7 @@ mod tests {
                 assert_eq!(meta.get_creator_txn_id(), txn1.get_transaction_id());
                 assert_eq!(tuple.get_values(), values.as_slice());
             } else {
-                println!(
+                log::debug!(
                     "Warning: Expected to read uncommitted tuple but got error: {:?}",
                     get_result.err()
                 );
@@ -1137,7 +1157,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_repeatable_read_isolation: initial tuple insertion failed: {}",
                         e
                     );
@@ -1164,7 +1184,7 @@ mod tests {
             // First read
             let first_read = txn_table_heap.get_tuple(rid, reader_ctx.clone());
             if first_read.is_err() {
-                println!(
+                log::debug!(
                     "Skipping test_repeatable_read_isolation: first read failed: {:?}",
                     first_read.err()
                 );
@@ -1210,14 +1230,14 @@ mod tests {
                         Ok((_, second_tuple)) => {
                             // Check if values match the original values (ideal REPEATABLE READ behavior)
                             if second_tuple.get_values() == initial_values.as_slice() {
-                                println!(
+                                log::debug!(
                                     "REPEATABLE READ working correctly: second read sees original values"
                                 );
                             } else {
-                                println!(
+                                log::debug!(
                                     "Warning: REPEATABLE READ did not preserve original values - this might be implementation dependent"
                                 );
-                                println!(
+                                log::debug!(
                                     "Expected: {:?}, Got: {:?}",
                                     initial_values,
                                     second_tuple.get_values()
@@ -1225,15 +1245,15 @@ mod tests {
                             }
                         }
                         Err(e) => {
-                            println!("Warning: Second read failed: {}", e);
-                            println!(
+                            log::debug!("Warning: Second read failed: {}", e);
+                            log::debug!(
                                 "This may be acceptable depending on transaction isolation implementation"
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Skipping update test part: update failed: {}", e);
+                    log::debug!("Skipping update test part: update failed: {}", e);
                 }
             }
 
@@ -1272,7 +1292,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_serializable_isolation: tuple insertion failed: {}",
                         e
                     );
@@ -1303,7 +1323,7 @@ mod tests {
             if let Ok((meta, tuple)) = read_after_commit {
                 assert_eq!(tuple.get_values(), values.as_slice());
             } else {
-                println!(
+                log::debug!(
                     "Warning: Expected to read committed tuple but got error: {:?}",
                     read_after_commit.err()
                 );
@@ -1317,12 +1337,12 @@ mod tests {
             // In a real SERIALIZABLE implementation, this would likely fail due to a conflict
             // But our implementation might not fully enforce this, so just log the result
             if conflict_result.is_err() {
-                println!(
+                log::debug!(
                     "Serializable correctly prevented conflicting insert: {:?}",
                     conflict_result.err()
                 );
             } else {
-                println!(
+                log::debug!(
                     "Note: Serializable allowed potentially conflicting insert - this may be implementation dependent"
                 );
             }
@@ -1408,7 +1428,7 @@ mod tests {
                         rids.push(rid);
                     }
                     Err(e) => {
-                        println!("Warning: Failed to insert tuple {}: {}", i, e);
+                        log::debug!("Warning: Failed to insert tuple {}: {}", i, e);
                     }
                 }
             }
@@ -1456,7 +1476,7 @@ mod tests {
                     let txn = match reader_txn_manager.begin(IsolationLevel::ReadCommitted) {
                         Ok(txn) => txn,
                         Err(e) => {
-                            println!("Reader {} failed to begin transaction: {}", i, e);
+                            log::debug!("Reader {} failed to begin transaction: {}", i, e);
                             return 0;
                         }
                     };
@@ -1477,7 +1497,7 @@ mod tests {
                                 }
                                 Err(e) => {
                                     // Tuple might be modified or locked by a writer
-                                    println!("Reader {} failed to read tuple: {}", i, e);
+                                    log::debug!("Reader {} failed to read tuple: {}", i, e);
                                 }
                             }
 
@@ -1514,7 +1534,7 @@ mod tests {
                     let txn = match writer_txn_manager.begin(IsolationLevel::ReadCommitted) {
                         Ok(txn) => txn,
                         Err(e) => {
-                            println!("Writer {} failed to begin transaction: {}", i, e);
+                            log::debug!("Writer {} failed to begin transaction: {}", i, e);
                             return 0;
                         }
                     };
@@ -1540,7 +1560,7 @@ mod tests {
                     );
 
                     if update_result.is_err() {
-                        println!(
+                        log::debug!(
                             "Writer {} failed to update tuple: {:?}",
                             i,
                             update_result.err()
@@ -1564,7 +1584,7 @@ mod tests {
                 .map(|h| match h.join() {
                     Ok(count) => count,
                     Err(_) => {
-                        println!("Warning: Thread panicked");
+                        log::debug!("Warning: Thread panicked");
                         0
                     }
                 })
@@ -1572,7 +1592,7 @@ mod tests {
 
             // Verify that at least some operations succeeded
             let total_operations: usize = results.iter().sum();
-            println!(
+            log::debug!(
                 "Concurrent read-write test completed with {} successful operations",
                 total_operations
             );
@@ -1621,7 +1641,7 @@ mod tests {
                     rid
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_concurrent_updates: Failed to insert initial tuple: {}",
                         e
                     );
@@ -1666,7 +1686,7 @@ mod tests {
                         let txn = match updater_txn_manager.begin(IsolationLevel::ReadCommitted) {
                             Ok(txn) => txn,
                             Err(e) => {
-                                println!(
+                                log::debug!(
                                     "Thread {} failed to begin transaction on attempt {}: {}",
                                     i, attempt, e
                                 );
@@ -1683,7 +1703,7 @@ mod tests {
                         // Read current value
                         let result = updater_table_heap.get_tuple(updater_rid, txn_ctx.clone());
                         if result.is_err() {
-                            println!(
+                            log::debug!(
                                 "Thread {} failed to read tuple on attempt {}: {:?}",
                                 i,
                                 attempt,
@@ -1701,7 +1721,7 @@ mod tests {
                             Some(value) => match value.as_integer() {
                                 Ok(counter_val) => counter_val,
                                 Err(_) => {
-                                    println!(
+                                    log::debug!(
                                         "Thread {} couldn't extract counter value on attempt {}",
                                         i, attempt
                                     );
@@ -1710,7 +1730,7 @@ mod tests {
                                 }
                             },
                             None => {
-                                println!(
+                                log::debug!(
                                     "Thread {} couldn't extract counter value on attempt {}",
                                     i, attempt
                                 );
@@ -1733,7 +1753,7 @@ mod tests {
                         );
 
                         if update_result.is_err() {
-                            println!(
+                            log::debug!(
                                 "Thread {} failed to update tuple on attempt {}: {:?}",
                                 i,
                                 attempt,
@@ -1747,7 +1767,7 @@ mod tests {
                         if updater_txn_manager.commit(txn, updater_buffer_pool.clone()) {
                             successful_updates += 1;
                         } else {
-                            println!(
+                            log::debug!(
                                 "Thread {} failed to commit transaction on attempt {}",
                                 i, attempt
                             );
@@ -1769,7 +1789,7 @@ mod tests {
                 .map(|h| match h.join() {
                     Ok(count) => count,
                     Err(_) => {
-                        println!("Warning: Thread panicked");
+                        log::debug!("Warning: Thread panicked");
                         0
                     }
                 })
@@ -1777,7 +1797,7 @@ mod tests {
 
             let total_successful_updates: usize = successful_updates.iter().sum();
 
-            println!(
+            log::debug!(
                 "Concurrent updates test completed with {} successful updates out of {} attempts",
                 total_successful_updates,
                 num_updaters * updates_per_thread
@@ -1802,17 +1822,17 @@ mod tests {
                     Some(value) => match value.as_integer() {
                         Ok(counter_val) => counter_val,
                         Err(_) => {
-                            println!("Failed to extract final counter value");
+                            log::debug!("Failed to extract final counter value");
                             0
                         }
                     },
                     None => {
-                        println!("Failed to get counter value from tuple");
+                        log::debug!("Failed to get counter value from tuple");
                         0
                     }
                 };
 
-                println!(
+                log::debug!(
                     "Final counter value: {}, Expected at least: {}",
                     final_counter, total_successful_updates
                 );
@@ -1831,7 +1851,7 @@ mod tests {
                     "Final counter value should be greater than 0"
                 );
             } else {
-                println!("Failed to read final counter value: {:?}", result.err());
+                log::debug!("Failed to read final counter value: {:?}", result.err());
             }
 
             // Cleanup
@@ -1876,7 +1896,7 @@ mod tests {
                     rid
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_deadlock_detection: Failed to insert initial tuple 1: {}",
                         e
                     );
@@ -1895,7 +1915,7 @@ mod tests {
                     rid
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_deadlock_detection: Failed to insert initial tuple 2: {}",
                         e
                     );
@@ -1909,7 +1929,7 @@ mod tests {
                     .commit(setup_txn, ctx.buffer_pool_manager())
             );
 
-            println!("Setup complete for deadlock detection test");
+            log::debug!("Setup complete for deadlock detection test");
 
             // Create shared resources for threads
             let txn_manager = ctx.txn_manager();
@@ -1940,7 +1960,7 @@ mod tests {
                 let txn1 = match t1_txn_manager.begin(IsolationLevel::ReadCommitted) {
                     Ok(txn) => txn,
                     Err(e) => {
-                        println!("T1: Failed to begin transaction: {}", e);
+                        log::debug!("T1: Failed to begin transaction: {}", e);
                         return "T1: Failed to begin transaction";
                     }
                 };
@@ -1951,18 +1971,18 @@ mod tests {
                     t1_txn_manager.clone(),
                 ));
 
-                println!("T1: Started transaction {}", txn1.get_transaction_id());
+                log::debug!("T1: Started transaction {}", txn1.get_transaction_id());
 
                 // T1: Lock resource A (rid1)
-                println!("T1: Attempting to lock resource A (rid1)");
+                log::debug!("T1: Attempting to lock resource A (rid1)");
                 let result1 = t1_table_heap.get_tuple(t1_rid1, txn_ctx1.clone());
                 if result1.is_err() {
-                    println!("T1: Failed to get resource A: {:?}", result1.err());
+                    log::debug!("T1: Failed to get resource A: {:?}", result1.err());
                     t1_txn_manager.abort(txn1);
                     return "T1: Failed to acquire first lock";
                 }
 
-                println!("T1: Acquired lock on resource A (rid1)");
+                log::debug!("T1: Acquired lock on resource A (rid1)");
 
                 // Wait for T2 to acquire its first lock
                 t1_barrier.wait();
@@ -1971,11 +1991,11 @@ mod tests {
                 thread::sleep(std::time::Duration::from_millis(50));
 
                 // T1: Try to lock resource B (rid2) - may cause deadlock
-                println!("T1: Attempting to lock resource B (rid2) - may deadlock");
+                log::debug!("T1: Attempting to lock resource B (rid2) - may deadlock");
                 let result2 = t1_table_heap.get_tuple(t1_rid2, txn_ctx1.clone());
 
                 let status = if result2.is_ok() {
-                    println!("T1: Successfully acquired lock on resource B (rid2)");
+                    log::debug!("T1: Successfully acquired lock on resource B (rid2)");
                     // Update resource B
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
@@ -1998,16 +2018,16 @@ mod tests {
                     );
 
                     if update_result.is_ok() {
-                        println!("T1: Successfully updated resource B (rid2)");
+                        log::debug!("T1: Successfully updated resource B (rid2)");
                         t1_txn_manager.commit(txn1, t1_buffer_pool);
                         "T1: Completed successfully"
                     } else {
-                        println!("T1: Failed to update resource B: {:?}", update_result.err());
+                        log::debug!("T1: Failed to update resource B: {:?}", update_result.err());
                         t1_txn_manager.abort(txn1);
                         "T1: Failed during update"
                     }
                 } else {
-                    println!(
+                    log::debug!(
                         "T1: Failed to acquire lock on resource B: {:?}",
                         result2.err()
                     );
@@ -2033,7 +2053,7 @@ mod tests {
                 let txn2 = match t2_txn_manager.begin(IsolationLevel::ReadCommitted) {
                     Ok(txn) => txn,
                     Err(e) => {
-                        println!("T2: Failed to begin transaction: {}", e);
+                        log::debug!("T2: Failed to begin transaction: {}", e);
                         return "T2: Failed to begin transaction";
                     }
                 };
@@ -2044,18 +2064,18 @@ mod tests {
                     t2_txn_manager.clone(),
                 ));
 
-                println!("T2: Started transaction {}", txn2.get_transaction_id());
+                log::debug!("T2: Started transaction {}", txn2.get_transaction_id());
 
                 // T2: Lock resource B (rid2)
-                println!("T2: Attempting to lock resource B (rid2)");
+                log::debug!("T2: Attempting to lock resource B (rid2)");
                 let result1 = t2_table_heap.get_tuple(t2_rid2, txn_ctx2.clone());
                 if result1.is_err() {
-                    println!("T2: Failed to get resource B: {:?}", result1.err());
+                    log::debug!("T2: Failed to get resource B: {:?}", result1.err());
                     t2_txn_manager.abort(txn2);
                     return "T2: Failed to acquire first lock";
                 }
 
-                println!("T2: Acquired lock on resource B (rid2)");
+                log::debug!("T2: Acquired lock on resource B (rid2)");
 
                 // Signal T1 that we have our first lock
                 t2_barrier.wait();
@@ -2064,11 +2084,11 @@ mod tests {
                 thread::sleep(std::time::Duration::from_millis(50));
 
                 // T2: Try to lock resource A (rid1) - may cause deadlock
-                println!("T2: Attempting to lock resource A (rid1) - may deadlock");
+                log::debug!("T2: Attempting to lock resource A (rid1) - may deadlock");
                 let result2 = t2_table_heap.get_tuple(t2_rid1, txn_ctx2.clone());
 
                 let status = if result2.is_ok() {
-                    println!("T2: Successfully acquired lock on resource A (rid1)");
+                    log::debug!("T2: Successfully acquired lock on resource A (rid1)");
                     // Update resource A
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
@@ -2091,16 +2111,16 @@ mod tests {
                     );
 
                     if update_result.is_ok() {
-                        println!("T2: Successfully updated resource A (rid1)");
+                        log::debug!("T2: Successfully updated resource A (rid1)");
                         t2_txn_manager.commit(txn2, t2_buffer_pool);
                         "T2: Completed successfully"
                     } else {
-                        println!("T2: Failed to update resource A: {:?}", update_result.err());
+                        log::debug!("T2: Failed to update resource A: {:?}", update_result.err());
                         t2_txn_manager.abort(txn2);
                         "T2: Failed during update"
                     }
                 } else {
-                    println!(
+                    log::debug!(
                         "T2: Failed to acquire lock on resource A: {:?}",
                         result2.err()
                     );
@@ -2122,9 +2142,9 @@ mod tests {
                 Err(_) => "T2: Thread panicked".to_string(),
             };
 
-            println!("Deadlock detection test results:");
-            println!("T1: {}", t1_result);
-            println!("T2: {}", t2_result);
+            log::debug!("Deadlock detection test results:");
+            log::debug!("T1: {}", t1_result);
+            log::debug!("T2: {}", t2_result);
 
             // In a proper deadlock detection system, at least one transaction should
             // be aborted or time out to resolve the deadlock
@@ -2132,14 +2152,14 @@ mod tests {
                 && t2_result.contains("Completed successfully");
 
             if both_succeeded {
-                println!(
+                log::debug!(
                     "Note: Both transactions completed successfully, which suggests there might not be proper deadlock detection."
                 );
-                println!(
+                log::debug!(
                     "This could be because the lock manager implementation uses timeouts or a different concurrency control method."
                 );
             } else {
-                println!(
+                log::debug!(
                     "At least one transaction failed, which may indicate deadlock detection worked correctly."
                 );
             }
@@ -2187,7 +2207,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_undo_log_creation: tuple insertion failed: {}",
                         e
                     );
@@ -2207,7 +2227,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Skipping test_undo_log_creation: update failed: {:?}",
                     update_result.err()
                 );
@@ -2278,7 +2298,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_undo_log_application: tuple insertion failed: {}",
                         e
                     );
@@ -2298,7 +2318,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Skipping test_undo_log_application: update failed: {:?}",
                     update_result.err()
                 );
@@ -2315,7 +2335,7 @@ mod tests {
                     "Tuple should be updated"
                 );
             } else {
-                println!(
+                log::debug!(
                     "Warning: Failed to read updated tuple: {:?}",
                     after_update.err()
                 );
@@ -2391,7 +2411,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_multiple_versions: initial tuple insertion failed: {}",
                         e
                     );
@@ -2424,7 +2444,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Skipping part of test_multiple_versions: second update failed: {:?}",
                     update_result.err()
                 );
@@ -2457,7 +2477,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Skipping part of test_multiple_versions: third update failed: {:?}",
                     update_result.err()
                 );
@@ -2486,7 +2506,7 @@ mod tests {
                     "Most recent version should be visible"
                 );
             } else {
-                println!(
+                log::debug!(
                     "Warning: Failed to read latest version: {:?}",
                     current_read.err()
                 );
@@ -2529,7 +2549,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_garbage_collection: tuple insertion failed: {}",
                         e
                     );
@@ -2562,7 +2582,7 @@ mod tests {
                 );
 
                 if update_result.is_err() {
-                    println!(
+                    log::debug!(
                         "Warning: Update failed in iteration {}: {:?}",
                         i,
                         update_result.err()
@@ -2590,11 +2610,11 @@ mod tests {
             let undo_link_after = ctx.txn_manager().get_undo_link(rid);
 
             if undo_link_after.is_some() {
-                println!(
+                log::debug!(
                     "Undo link still exists after garbage collection - this is valid if there are still active transactions"
                 );
             } else {
-                println!(
+                log::debug!(
                     "Undo link was removed by garbage collection - this is valid if no active transactions need the old versions"
                 );
             }
@@ -2653,7 +2673,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_deep_undo_chain: initial tuple insertion failed: {}",
                         e
                     );
@@ -2694,7 +2714,7 @@ mod tests {
                 );
 
                 if update_result.is_err() {
-                    println!(
+                    log::debug!(
                         "Update failed at chain depth {}: {:?}",
                         i,
                         update_result.err()
@@ -2750,17 +2770,17 @@ mod tests {
                     Some(value) => match value.as_integer() {
                         Ok(val) => val,
                         Err(_) => {
-                            println!("Failed to extract final value");
+                            log::debug!("Failed to extract final value");
                             -1
                         }
                     },
                     None => {
-                        println!("No value found at index 1");
+                        log::debug!("No value found at index 1");
                         -1
                     }
                 };
 
-                println!(
+                log::debug!(
                     "Final tuple value: {}, Expected: {}",
                     actual_value, expected_value
                 );
@@ -2811,7 +2831,7 @@ mod tests {
                         rids.push(rid);
                     }
                     Err(e) => {
-                        println!("Failed to insert tuple {}: {}", i, e);
+                        log::debug!("Failed to insert tuple {}: {}", i, e);
                     }
                 }
             }
@@ -2847,7 +2867,7 @@ mod tests {
                     let txn = match worker_txn_manager.begin(IsolationLevel::ReadCommitted) {
                         Ok(txn) => txn,
                         Err(e) => {
-                            println!("Worker {} failed to begin transaction: {}", i, e);
+                            log::debug!("Worker {} failed to begin transaction: {}", i, e);
                             return false;
                         }
                     };
@@ -2871,7 +2891,7 @@ mod tests {
                     );
 
                     if update_result.is_err() {
-                        println!(
+                        log::debug!(
                             "Worker {} failed to update tuple: {:?}",
                             i,
                             update_result.err()
@@ -2889,14 +2909,14 @@ mod tests {
                     if should_commit {
                         let commit_result = worker_txn_manager.commit(txn, worker_buffer_pool);
                         if !commit_result {
-                            println!("Worker {} failed to commit", i);
+                            log::debug!("Worker {} failed to commit", i);
                             return false;
                         }
-                        println!("Worker {} successfully committed", i);
+                        log::debug!("Worker {} successfully committed", i);
                         true
                     } else {
                         worker_txn_manager.abort(txn);
-                        println!("Worker {} intentionally aborted", i);
+                        log::debug!("Worker {} intentionally aborted", i);
                         false
                     }
                 });
@@ -2938,7 +2958,7 @@ mod tests {
                         (i as i32 + 1) * 100
                     };
 
-                    println!(
+                    log::debug!(
                         "Tuple {} final value: {}, Expected: {}",
                         i, value, expected_value
                     );
@@ -2948,7 +2968,7 @@ mod tests {
                         i
                     );
                 } else {
-                    println!("Failed to read tuple {}: {:?}", i, result.err());
+                    log::debug!("Failed to read tuple {}: {:?}", i, result.err());
                 }
             }
 
@@ -2990,7 +3010,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!("Skipping case 1: initial tuple insertion failed: {}", e);
+                    log::debug!("Skipping case 1: initial tuple insertion failed: {}", e);
                     return;
                 }
             };
@@ -3007,12 +3027,12 @@ mod tests {
             );
 
             if update_result1.is_err() {
-                println!(
+                log::debug!(
                     "Case 1: Updating own uncommitted tuple failed: {:?}",
                     update_result1.err()
                 );
             } else {
-                println!("Case 1: Successfully updated own uncommitted tuple");
+                log::debug!("Case 1: Successfully updated own uncommitted tuple");
             }
 
             // Commit transaction
@@ -3037,16 +3057,16 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!("Skipping case 2: initial tuple insertion failed: {}", e);
+                    log::debug!("Skipping case 2: initial tuple insertion failed: {}", e);
                     return;
                 }
             };
 
             // Delete the tuple
             match txn_table_heap.delete_tuple(rid2, txn_ctx2.clone()) {
-                Ok(_) => println!("Case 2: Successfully deleted tuple"),
+                Ok(_) => log::debug!("Case 2: Successfully deleted tuple"),
                 Err(e) => {
-                    println!("Case 2: Failed to delete tuple: {}", e);
+                    log::debug!("Case 2: Failed to delete tuple: {}", e);
                     return;
                 }
             }
@@ -3064,12 +3084,12 @@ mod tests {
 
             // This should fail since the tuple is deleted
             if update_result2.is_err() {
-                println!(
+                log::debug!(
                     "Case 2: Correctly failed to update deleted tuple: {:?}",
                     update_result2.err()
                 );
             } else {
-                println!("Case 2: Unexpected: Successfully updated deleted tuple");
+                log::debug!("Case 2: Unexpected: Successfully updated deleted tuple");
             }
 
             // Commit transaction
@@ -3094,7 +3114,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!("Skipping case 3: initial tuple insertion failed: {}", e);
+                    log::debug!("Skipping case 3: initial tuple insertion failed: {}", e);
                     return;
                 }
             };
@@ -3122,27 +3142,27 @@ mod tests {
             );
 
             if update_result3.is_err() {
-                println!(
+                log::debug!(
                     "Case 3: Correctly failed to update uncommitted tuple from another transaction: {:?}",
                     update_result3.err()
                 );
             } else {
-                println!("Case 3: Successfully updated uncommitted tuple from another transaction");
+                log::debug!("Case 3: Successfully updated uncommitted tuple from another transaction");
             }
 
             // Abort the first transaction
             ctx.txn_manager().abort(txn3a);
-            println!("Case 3: Aborted first transaction");
+            log::debug!("Case 3: Aborted first transaction");
 
             // Check if the tuple is still visible to txn3b
             let read_result3 = txn_table_heap.get_tuple(rid3, txn_ctx3b.clone());
             if read_result3.is_err() {
-                println!(
+                log::debug!(
                     "Case 3: Correctly cannot see aborted tuple: {:?}",
                     read_result3.err()
                 );
             } else {
-                println!(
+                log::debug!(
                     "Case 3: Can still see aborted tuple (may be valid depending on implementation)"
                 );
             }
@@ -3182,7 +3202,7 @@ mod tests {
             let rid = match txn_table_heap.insert_tuple_from_values(values, &schema, setup_ctx) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_undo_log_stress: initial tuple insertion failed: {}",
                         e
                     );
@@ -3242,7 +3262,7 @@ mod tests {
                         let txn = match thread_tm.begin(IsolationLevel::ReadCommitted) {
                             Ok(txn) => txn,
                             Err(e) => {
-                                println!(
+                                log::debug!(
                                     "Thread {} failed to begin transaction on update {}: {}",
                                     thread_id, i, e
                                 );
@@ -3259,7 +3279,7 @@ mod tests {
                         // Read current counter value
                         let read_result = thread_table.get_tuple(rid, txn_ctx.clone());
                         if read_result.is_err() {
-                            println!(
+                            log::debug!(
                                 "Thread {} failed to read tuple on update {}: {:?}",
                                 thread_id,
                                 i,
@@ -3278,7 +3298,7 @@ mod tests {
                             Some(value) => match value.as_integer() {
                                 Ok(val) => val,
                                 Err(_) => {
-                                    println!(
+                                    log::debug!(
                                         "Thread {} failed to extract counter value on update {}",
                                         thread_id, i
                                     );
@@ -3288,7 +3308,7 @@ mod tests {
                                 }
                             },
                             None => {
-                                println!(
+                                log::debug!(
                                     "Thread {} failed to get counter value on update {}",
                                     thread_id, i
                                 );
@@ -3311,7 +3331,7 @@ mod tests {
                         );
 
                         if update_result.is_err() {
-                            println!(
+                            log::debug!(
                                 "Thread {} failed to update counter on update {}: {:?}",
                                 thread_id,
                                 i,
@@ -3331,13 +3351,13 @@ mod tests {
                                 thread_commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 thread_successes += 1;
                             } else {
-                                println!("Thread {} failed to commit on update {}", thread_id, i);
+                                log::debug!("Thread {} failed to commit on update {}", thread_id, i);
                                 thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             }
                         } else {
                             thread_tm.abort(txn);
                             thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            println!("Thread {} intentionally aborted on update {}", thread_id, i);
+                            log::debug!("Thread {} intentionally aborted on update {}", thread_id, i);
                         }
 
                         // Small sleep to allow interleaving
@@ -3381,19 +3401,19 @@ mod tests {
                 let total_aborts = abort_counter.load(std::sync::atomic::Ordering::SeqCst);
                 let expected_success = success_counter.load(std::sync::atomic::Ordering::SeqCst);
 
-                println!("Undo log stress test results:");
-                println!("  Total commits: {}", total_commits);
-                println!("  Total aborts: {}", total_aborts);
-                println!("  Expected successful updates: {}", expected_success);
-                println!("  Final counter value: {}", counter);
+                log::debug!("Undo log stress test results:");
+                log::debug!("  Total commits: {}", total_commits);
+                log::debug!("  Total aborts: {}", total_aborts);
+                log::debug!("  Expected successful updates: {}", expected_success);
+                log::debug!("  Final counter value: {}", counter);
 
                 // In a perfect world with no concurrency conflicts or implementation limitations,
                 // the counter should equal expected_success
                 // But in reality, there may be some differences due to isolation level, etc.
                 if counter == expected_success as i32 {
-                    println!("Counter matches expected value exactly");
+                    log::debug!("Counter matches expected value exactly");
                 } else {
-                    println!(
+                    log::debug!(
                         "Counter differs from expected by: {}",
                         counter - expected_success as i32
                     );
@@ -3402,7 +3422,7 @@ mod tests {
                 // Just verify counter is positive and reasonably close to expected
                 assert!(counter > 0, "Counter should be greater than 0");
             } else {
-                println!("Failed to read final counter value: {:?}", final_read.err());
+                log::debug!("Failed to read final counter value: {:?}", final_read.err());
             }
 
             // Cleanup
@@ -3468,7 +3488,7 @@ mod tests {
 
             // Since no more active transactions, the watermark might reset or remain at the last commit,
             // so we just log what happened rather than asserting a specific value
-            println!(
+            log::debug!(
                 "Final watermark after all transactions: {}",
                 watermark_after_abort
             );
@@ -3520,7 +3540,7 @@ mod tests {
                     );
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping part of test_transaction_state_transitions: tuple insertion failed: {}",
                         e
                     );
@@ -3551,7 +3571,7 @@ mod tests {
                     );
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping part of test_transaction_state_transitions: tuple insertion failed: {}",
                         e
                     );
@@ -3571,7 +3591,7 @@ mod tests {
 
             // Check if the implementation supports this transition
             if txn4.get_state() == TransactionState::Tainted {
-                println!("Transaction supports transition to Tainted state");
+                log::debug!("Transaction supports transition to Tainted state");
 
                 // Abort the tainted transaction
                 ctx.txn_manager().abort(txn4.clone());
@@ -3581,7 +3601,7 @@ mod tests {
                     "Tainted transaction should transition to Aborted state"
                 );
             } else {
-                println!("Transaction does not support transition to Tainted state");
+                log::debug!("Transaction does not support transition to Tainted state");
             }
 
             // No need to call commit on verify_txn as it doesn't exist in this function
@@ -3615,7 +3635,7 @@ mod tests {
                     Some(rid)
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping part of test_transaction_recovery: first tuple insertion failed: {}",
                         e
                     );
@@ -3645,7 +3665,7 @@ mod tests {
                     Some(rid)
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping part of test_transaction_recovery: second tuple insertion failed: {}",
                         e
                     );
@@ -3685,7 +3705,7 @@ mod tests {
                 // We'd need to access the same table heap that was used before the "crash"
                 // For a real test, this would require persisting and recovering table metadata
                 // Since we can't easily simulate this, we'll just log what would happen
-                println!(
+                log::debug!(
                     "In a real recovery test: Committed data would remain visible after recovery"
                 );
 
@@ -3699,12 +3719,12 @@ mod tests {
             if let Some(rid) = rid2 {
                 // In a real recovery scenario, the system would detect txn2 as interrupted
                 // and roll back its changes, making rid2 either invisible or reset to a prior state
-                println!("In a real recovery test: Uncommitted changes would be rolled back");
+                log::debug!("In a real recovery test: Uncommitted changes would be rolled back");
             }
 
             // Note: This is a placeholder test that sets up the structure
             // for a more comprehensive recovery test in a real implementation
-            println!(
+            log::debug!(
                 "Transaction recovery testing requires deeper integration with WAL and recovery mechanisms"
             );
         }
@@ -3747,7 +3767,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_read_uncommitted_visibility: tuple insertion failed: {}",
                         e
                     );
@@ -3791,11 +3811,11 @@ mod tests {
             // In a strict implementation, this should fail as uncommitted data should be invisible
             // But some implementations might allow it, so we just log the behavior
             if result.is_ok() {
-                println!(
+                log::debug!(
                     "Note: READ_COMMITTED allows seeing uncommitted data in this implementation"
                 );
             } else {
-                println!("READ_COMMITTED correctly prevents seeing uncommitted data");
+                log::debug!("READ_COMMITTED correctly prevents seeing uncommitted data");
             }
 
             // Commit the transaction and verify visibility for READ_COMMITTED
@@ -3847,7 +3867,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_non_repeatable_reads: tuple insertion failed: {}",
                         e
                     );
@@ -3898,7 +3918,7 @@ mod tests {
             );
 
             if update_result.is_err() {
-                println!(
+                log::debug!(
                     "Skipping part of test_non_repeatable_reads: update failed: {:?}",
                     update_result.err()
                 );
@@ -3915,9 +3935,9 @@ mod tests {
 
                 // With READ_COMMITTED, we should see the updated value (non-repeatable read)
                 if second_tuple_rc.get_values() == new_values.as_slice() {
-                    println!("READ_COMMITTED correctly allows non-repeatable reads");
+                    log::debug!("READ_COMMITTED correctly allows non-repeatable reads");
                 } else {
-                    println!("Unexpected: READ_COMMITTED did not see the updated value");
+                    log::debug!("Unexpected: READ_COMMITTED did not see the updated value");
                 }
             }
 
@@ -3960,7 +3980,7 @@ mod tests {
             );
 
             if update_result2.is_err() {
-                println!(
+                log::debug!(
                     "Skipping part of test_non_repeatable_reads: second update failed: {:?}",
                     update_result2.err()
                 );
@@ -3975,12 +3995,12 @@ mod tests {
                 if let Ok((_, second_tuple_rr)) = second_read_rr {
                     // With REPEATABLE_READ, we should see the same value as before
                     if second_tuple_rr.get_values() == first_tuple_rr.get_values() {
-                        println!("REPEATABLE_READ correctly prevents non-repeatable reads");
+                        log::debug!("REPEATABLE_READ correctly prevents non-repeatable reads");
                     } else {
-                        println!("Unexpected: REPEATABLE_READ allowed non-repeatable reads");
+                        log::debug!("Unexpected: REPEATABLE_READ allowed non-repeatable reads");
                     }
                 } else {
-                    println!(
+                    log::debug!(
                         "Second read with REPEATABLE_READ failed - this might be implementation-specific"
                     );
                 }
@@ -4025,7 +4045,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_phantom_reads: first tuple insertion failed: {}",
                         e
                     );
@@ -4090,7 +4110,7 @@ mod tests {
                     Some(rid)
                 }
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping part of test_phantom_reads: second tuple insertion failed: {}",
                         e
                     );
@@ -4134,16 +4154,16 @@ mod tests {
 
             // With REPEATABLE_READ, phantom reads might occur (we might see the new tuple)
             if scan_count_rr_2 > scan_count_rr_1 {
-                println!("REPEATABLE_READ allows phantom reads as expected");
+                log::debug!("REPEATABLE_READ allows phantom reads as expected");
             } else {
-                println!("Note: REPEATABLE_READ prevented phantom reads in this implementation");
+                log::debug!("Note: REPEATABLE_READ prevented phantom reads in this implementation");
             }
 
             // With SERIALIZABLE, phantom reads should not occur (we should not see the new tuple)
             if scan_count_s_2 == scan_count_s_1 {
-                println!("SERIALIZABLE correctly prevents phantom reads");
+                log::debug!("SERIALIZABLE correctly prevents phantom reads");
             } else {
-                println!("Unexpected: SERIALIZABLE allowed phantom reads");
+                log::debug!("Unexpected: SERIALIZABLE allowed phantom reads");
             }
 
             // Cleanup
@@ -4185,7 +4205,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_serializable_snapshot_isolation: first tuple insertion failed: {}",
                         e
                     );
@@ -4201,7 +4221,7 @@ mod tests {
             ) {
                 Ok(rid) => rid,
                 Err(e) => {
-                    println!(
+                    log::debug!(
                         "Skipping test_serializable_snapshot_isolation: second tuple insertion failed: {}",
                         e
                     );
@@ -4231,7 +4251,7 @@ mod tests {
             // Transaction 1 reads tuple 1
             let read1 = txn_table_heap.get_tuple(rid1, txn_ctx1.clone());
             if read1.is_err() {
-                println!("Transaction 1 failed to read tuple 1: {:?}", read1.err());
+                log::debug!("Transaction 1 failed to read tuple 1: {:?}", read1.err());
                 ctx.txn_manager().abort(txn1);
                 ctx.txn_manager().abort(txn2);
                 return;
@@ -4240,7 +4260,7 @@ mod tests {
             // Transaction 2 reads tuple 2
             let read2 = txn_table_heap.get_tuple(rid2, txn_ctx2.clone());
             if read2.is_err() {
-                println!("Transaction 2 failed to read tuple 2: {:?}", read2.err());
+                log::debug!("Transaction 2 failed to read tuple 2: {:?}", read2.err());
                 ctx.txn_manager().abort(txn1);
                 ctx.txn_manager().abort(txn2);
                 return;
@@ -4289,11 +4309,11 @@ mod tests {
 
             // In strict serializable isolation, both transactions should commit
             // since they operate on different tuples
-            println!(
+            log::debug!(
                 "Transaction 1 update: {}, commit: {}",
                 update1_success, commit1_success
             );
-            println!(
+            log::debug!(
                 "Transaction 2 update: {}, commit: {}",
                 update2_success, commit2_success
             );
@@ -4312,7 +4332,7 @@ mod tests {
             let final_read2 = txn_table_heap.get_tuple(rid2, verify_ctx.clone());
 
             if let Ok((_, tuple1)) = final_read1 {
-                println!("Final value of tuple 1: {:?}", tuple1.get_values());
+                log::debug!("Final value of tuple 1: {:?}", tuple1.get_values());
 
                 // If transaction 1 committed, the value should be updated
                 if commit1_success {
@@ -4325,7 +4345,7 @@ mod tests {
             }
 
             if let Ok((_, tuple2)) = final_read2 {
-                println!("Final value of tuple 2: {:?}", tuple2.get_values());
+                log::debug!("Final value of tuple 2: {:?}", tuple2.get_values());
 
                 // If transaction 2 committed, the value should be updated
                 if commit2_success {
