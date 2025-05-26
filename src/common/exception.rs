@@ -215,6 +215,8 @@ pub enum ArithmeticExpressionError {
     Unknown,
     #[error("Division by zero")]
     DivisionByZero,
+    #[error("Overflow")]
+    Overflow
 }
 
 #[derive(Debug, Error)]
