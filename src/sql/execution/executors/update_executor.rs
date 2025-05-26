@@ -6,6 +6,7 @@ use crate::sql::execution::executors::filter_executor::FilterExecutor;
 use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
@@ -192,11 +193,28 @@ impl AbstractExecutor for UpdateExecutor {
             let mut values = tuple.get_values();
             
             // Handle target expressions
-            // Note: There are two formats the target expressions can be in:
-            // 1. Pairs of [ColumnRef, ValueExpr] - traditional format
-            // 2. Single expressions like Arithmetic(balance - 200) - from SQL parsing
+            // Note: There are three formats the target expressions can be in:
+            // 1. Assignment expressions - new format from planner
+            // 2. Pairs of [ColumnRef, ValueExpr] - traditional format
+            // 3. Single expressions like Arithmetic(balance - 200) - from SQL parsing
             
-            if target_expressions.len() == 1 {
+            // Check if all expressions are Assignment expressions
+            let all_assignments = target_expressions.iter().all(|expr| {
+                matches!(expr.as_ref(), Expression::Assignment(_))
+            });
+            
+            if all_assignments {
+                // Case 1: Assignment expressions
+                for expr in target_expressions.iter() {
+                    if let Expression::Assignment(assignment_expr) = expr.as_ref() {
+                        let col_idx = assignment_expr.get_target_column_index();
+                        let new_value = assignment_expr.get_value_expr()
+                            .evaluate(&tuple, output_schema)
+                            .expect("Failed to evaluate assignment expression");
+                        values[col_idx] = new_value;
+                    }
+                }
+            } else if target_expressions.len() == 1 {
                 // Case 2: Single arithmetic or other expression where the target is embedded
                 let expr = &target_expressions[0];
                 
@@ -244,7 +262,7 @@ impl AbstractExecutor for UpdateExecutor {
                 
                 values[col_idx] = new_value;
             } else {
-                // Case 1: Pairs of expressions
+                // Case 3: Pairs of expressions
                 for (i, expr) in target_expressions.iter().step_by(2).enumerate() {
                     let col_idx = match expr.as_ref() {
                         Expression::ColumnRef(col_ref) => col_ref.get_column_index(),
