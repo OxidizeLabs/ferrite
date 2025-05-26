@@ -579,24 +579,39 @@ impl LogicalPlanBuilder {
                 }
             };
             
-            // Check if column exists in the schema
-            let column_exists = (0..schema.get_column_count())
-                .any(|i| {
-                    if let Some(col) = schema.get_column(i as usize) {
+            // Check if column exists in the schema and get its index
+            let column_index = (0..schema.get_column_count() as usize)
+                .find(|&i| {
+                    if let Some(col) = schema.get_column(i) {
                         col.get_name() == column_name
                     } else {
                         false
                     }
                 });
             
-            if !column_exists {
-                return Err(format!("Column '{}' does not exist in table '{}'", column_name, table_name));
-            }
+            let column_index = column_index.ok_or_else(|| {
+                format!("Column '{}' does not exist in table '{}'", column_name, table_name)
+            })?;
             
-            let value_expr = self
+            // Get the column info
+            let column = schema.get_column(column_index).unwrap().clone();
+            
+            // Create column reference expression for the target column
+            let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+                0, // table index (for single table, it's always 0)
+                column_index,
+                column.clone(),
+                vec![],
+            )));
+            
+            // Parse the value expression
+            let value_expr = Arc::new(self
                 .expression_parser
-                .parse_expression(&assignment.value, &schema)?;
-            update_exprs.push(Arc::new(value_expr));
+                .parse_expression(&assignment.value, &schema)?);
+            
+            // Add both target column and value expression as pairs
+            update_exprs.push(target_col_expr);
+            update_exprs.push(value_expr);
         }
 
         Ok(LogicalPlan::update(
