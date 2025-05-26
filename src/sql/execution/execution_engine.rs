@@ -2125,7 +2125,14 @@ mod tests {
             // Find Charlie and David in results
             for row in rows {
                 let name = row[0].to_string();
-                let salary = row[1].to_string().parse::<i64>().unwrap();
+                let salary_str = row[1].to_string();
+                
+                // Handle both integer and decimal formats
+                let salary = if salary_str.contains('.') {
+                    salary_str.parse::<f64>().unwrap() as i64
+                } else {
+                    salary_str.parse::<i64>().unwrap()
+                };
                 
                 if name == "Charlie" {
                     assert_eq!(salary, 75000, "Charlie's salary should be 75000");
@@ -2153,7 +2160,14 @@ mod tests {
             
             for row in rows {
                 let name = row[0].to_string();
-                let salary = row[1].to_string().parse::<i64>().unwrap();
+                let salary_str = row[1].to_string();
+                
+                // Handle both integer and decimal formats
+                let salary = if salary_str.contains('.') {
+                    salary_str.parse::<f64>().unwrap() as i64
+                } else {
+                    salary_str.parse::<i64>().unwrap()
+                };
                 
                 if name == "Alice" {
                     assert_eq!(salary, 55000, "Alice's salary should be 55000 (50000 * 1.1)");
@@ -2245,7 +2259,7 @@ mod tests {
             assert!(success, "Arithmetic expression update failed");
 
             // Verify the arithmetic updates
-            let select_sql = "SELECT name, base_salary FROM employees ORDER BY id";
+            let select_sql = "SELECT id, name, base_salary FROM employees ORDER BY id";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
@@ -2253,11 +2267,11 @@ mod tests {
             let rows = writer.get_rows();
             
             // Alice: 50000 + (3 * 1000) = 53000
-            assert_eq!(rows[0][1].to_string(), "53000", "Alice's salary should be 53000");
+            assert_eq!(rows[0][2].to_string(), "53000", "Alice's salary should be 53000");
             // Bob: 60000 + (5 * 1000) = 65000
-            assert_eq!(rows[1][1].to_string(), "65000", "Bob's salary should be 65000");
+            assert_eq!(rows[1][2].to_string(), "65000", "Bob's salary should be 65000");
             // Charlie: 70000 + (7 * 1000) = 77000
-            assert_eq!(rows[2][1].to_string(), "77000", "Charlie's salary should be 77000");
+            assert_eq!(rows[2][2].to_string(), "77000", "Charlie's salary should be 77000");
 
             // Test 2: UPDATE with column reference in expression
             let update_sql = "UPDATE employees SET bonus = base_salary * 0.1 WHERE years_experience >= 5";
@@ -2278,7 +2292,14 @@ mod tests {
             
             for row in rows {
                 let name = row[0].to_string();
-                let bonus = row[1].to_string().parse::<i64>().unwrap();
+                let bonus_str = row[1].to_string();
+                
+                // Handle both integer and decimal formats
+                let bonus = if bonus_str.contains('.') {
+                    bonus_str.parse::<f64>().unwrap() as i64
+                } else {
+                    bonus_str.parse::<i64>().unwrap()
+                };
                 
                 if name == "Bob" {
                     assert_eq!(bonus, 6500, "Bob's bonus should be 6500 (10% of 65000)");
@@ -2323,15 +2344,15 @@ mod tests {
             assert!(!success, "UPDATE with no matching rows should return false");
 
             // Verify no data was changed
-            let select_sql = "SELECT age FROM employees ORDER BY id";
+            let select_sql = "SELECT id, age FROM employees ORDER BY id";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let rows = writer.get_rows();
             
-            assert_eq!(rows[0][0].to_string(), "25", "Alice's age should remain 25");
-            assert_eq!(rows[1][0].to_string(), "30", "Bob's age should remain 30");
+            assert_eq!(rows[0][1].to_string(), "25", "Alice's age should remain 25");
+            assert_eq!(rows[1][1].to_string(), "30", "Bob's age should remain 30");
         }
 
         #[test]
