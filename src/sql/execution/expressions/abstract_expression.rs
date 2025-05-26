@@ -6,6 +6,7 @@ use crate::sql::execution::expressions::all_expression::AllExpression;
 use crate::sql::execution::expressions::any_expression::AnyExpression;
 use crate::sql::execution::expressions::arithmetic_expression::ArithmeticExpression;
 use crate::sql::execution::expressions::array_expression::ArrayExpression;
+use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 use crate::sql::execution::expressions::at_timezone_expression::AtTimeZoneExpression;
 use crate::sql::execution::expressions::between_expression::BetweenExpression;
 use crate::sql::execution::expressions::binary_op_expression::BinaryOpExpression;
@@ -69,6 +70,7 @@ pub enum Expression {
     Logic(LogicExpression),
     String(StringExpression),
     Array(ArrayExpression),
+    Assignment(AssignmentExpression),
     Mock(MockExpression),
     Aggregate(AggregateExpression),
     Window(WindowExpression),
@@ -155,6 +157,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.evaluate(tuple, schema),
             Self::String(expr) => expr.evaluate(tuple, schema),
             Self::Array(expr) => expr.evaluate(tuple, schema),
+            Self::Assignment(expr) => expr.evaluate(tuple, schema),
             Self::Mock(expr) => expr.evaluate(tuple, schema),
             Self::Aggregate(expr) => expr.evaluate(tuple, schema),
             Self::Window(expr) => expr.evaluate(tuple, schema),
@@ -225,6 +228,9 @@ impl ExpressionOps for Expression {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
             Self::Array(expr) => {
+                expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            }
+            Self::Assignment(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
             Self::Mock(expr) => {
@@ -304,6 +310,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_child_at(child_idx),
             Self::String(expr) => expr.get_child_at(child_idx),
             Self::Array(expr) => expr.get_child_at(child_idx),
+            Self::Assignment(expr) => expr.get_child_at(child_idx),
             Self::Mock(expr) => expr.get_child_at(child_idx),
             Self::Aggregate(expr) => expr.get_child_at(child_idx),
             Self::Window(expr) => expr.get_child_at(child_idx),
@@ -358,6 +365,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_children(),
             Self::String(expr) => expr.get_children(),
             Self::Array(expr) => expr.get_children(),
+            Self::Assignment(expr) => expr.get_children(),
             Self::Mock(expr) => expr.get_children(),
             Self::Aggregate(expr) => expr.get_children(),
             Self::Window(expr) => expr.get_children(),
@@ -412,6 +420,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.get_return_type(),
             Self::String(expr) => expr.get_return_type(),
             Self::Array(expr) => expr.get_return_type(),
+            Self::Assignment(expr) => expr.get_return_type(),
             Self::Mock(expr) => expr.get_return_type(),
             Self::Aggregate(expr) => expr.get_return_type(),
             Self::Window(expr) => expr.get_return_type(),
@@ -466,6 +475,7 @@ impl ExpressionOps for Expression {
             Self::Logic(expr) => expr.clone_with_children(children),
             Self::String(expr) => expr.clone_with_children(children),
             Self::Array(expr) => expr.clone_with_children(children),
+            Self::Assignment(expr) => expr.clone_with_children(children),
             Self::Mock(expr) => expr.clone_with_children(children),
             Self::Aggregate(expr) => expr.clone_with_children(children),
             Self::Window(expr) => expr.clone_with_children(children),
@@ -584,6 +594,13 @@ impl Display for Expression {
                 }
             }
             Self::Array(expr) => {
+                if f.alternate() {
+                    write!(f, "{:#}", expr)
+                } else {
+                    write!(f, "{}", expr)
+                }
+            }
+            Self::Assignment(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
