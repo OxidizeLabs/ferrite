@@ -66,6 +66,9 @@ impl ArithmeticExpression {
             (TypeId::BigInt, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::BigInt))
             }
+            (TypeId::BigInt, TypeId::Integer) | (TypeId::Integer, TypeId::BigInt) => {
+                Ok(Column::new("arithmetic_result", TypeId::BigInt))
+            }
             (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
             }
@@ -149,6 +152,38 @@ impl ExpressionOps for ArithmeticExpression {
                     }
                 };
                 Ok(Value::from(result))
+            }
+            (Val::BigInt(l), Val::Integer(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r as i64),
+                    ArithmeticOp::Subtract => l.checked_sub(*r as i64),
+                    ArithmeticOp::Multiply => l.checked_mul(*r as i64),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r as i64)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::Integer(l), Val::BigInt(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => (*l as i64).checked_add(*r),
+                    ArithmeticOp::Subtract => (*l as i64).checked_sub(*r),
+                    ArithmeticOp::Multiply => (*l as i64).checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        (*l as i64).checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
             }
             (Val::BigInt(l), Val::Decimal(r)) | (Val::Decimal(r), Val::BigInt(l)) => {
                 let l = *l as f64;
@@ -242,6 +277,38 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 Ok(Value::from(result))
             }
+            (Val::BigInt(l), Val::Integer(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => l.checked_add(*r as i64),
+                    ArithmeticOp::Subtract => l.checked_sub(*r as i64),
+                    ArithmeticOp::Multiply => l.checked_mul(*r as i64),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        l.checked_div(*r as i64)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
+            (Val::Integer(l), Val::BigInt(r)) => {
+                let result = match self.op {
+                    ArithmeticOp::Add => (*l as i64).checked_add(*r),
+                    ArithmeticOp::Subtract => (*l as i64).checked_sub(*r),
+                    ArithmeticOp::Multiply => (*l as i64).checked_mul(*r),
+                    ArithmeticOp::Divide => {
+                        if *r == 0 {
+                            return Err(ExpressionError::ArithmeticError(DivisionByZero));
+                        }
+                        (*l as i64).checked_div(*r)
+                    }
+                };
+                result
+                    .map(Value::from)
+                    .ok_or_else(|| ExpressionError::ArithmeticError(Unknown))
+            }
             (Val::BigInt(l), Val::Decimal(r)) | (Val::Decimal(r), Val::BigInt(l)) => {
                 let l = *l as f64;
                 let r = *r;
@@ -302,6 +369,8 @@ impl ExpressionOps for ArithmeticExpression {
             | (TypeId::Integer, TypeId::Decimal)
             | (TypeId::Decimal, TypeId::Integer)
             | (TypeId::BigInt, TypeId::BigInt)
+            | (TypeId::BigInt, TypeId::Integer)
+            | (TypeId::Integer, TypeId::BigInt)
             | (TypeId::BigInt, TypeId::Decimal)
             | (TypeId::Decimal, TypeId::BigInt) => Ok(()),
             _ => Err(ExpressionError::ArithmeticError(Unknown)),
@@ -735,5 +804,642 @@ mod unit_tests {
 
         assert_eq!(format!("{}", add_expr), "((a * b) + c)");
         assert_eq!(format!("{:#}", add_expr), "((Col#0.0 * Col#0.1) + Col#0.2)");
+    }
+
+    #[test]
+    fn test_bigint_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let bigint_val1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1000000000000i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let bigint_val2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(2000000000000i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        // Test BigInt addition
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![bigint_val1.clone(), bigint_val2.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(3000000000000i64));
+
+        // Test BigInt subtraction
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![bigint_val2.clone(), bigint_val1.clone()],
+        ));
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(1000000000000i64));
+
+        // Test BigInt multiplication
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![bigint_val1.clone(), Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(2i64),
+                Column::new("const", TypeId::BigInt),
+                vec![],
+            )))],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(2000000000000i64));
+
+        // Test BigInt division
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![bigint_val1, Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(2i64),
+                Column::new("const", TypeId::BigInt),
+                vec![],
+            )))],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(500000000000i64));
+    }
+
+    #[test]
+    fn test_bigint_integer_mixed_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let bigint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1000000000000i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(5),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        // Test BigInt + Integer
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![bigint_val.clone(), int_val.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(1000000000005i64));
+
+        // Test Integer + BigInt
+        let add_expr2 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![int_val.clone(), bigint_val.clone()],
+        ));
+        let result = add_expr2.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(1000000000005i64));
+
+        // Test BigInt - Integer
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![bigint_val.clone(), int_val.clone()],
+        ));
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(999999999995i64));
+
+        // Test BigInt * Integer
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![bigint_val.clone(), int_val.clone()],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(5000000000000i64));
+
+        // Test BigInt / Integer
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![bigint_val, int_val],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(200000000000i64));
+    }
+
+    #[test]
+    fn test_bigint_decimal_mixed_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        let bigint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(100i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(2.5),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        // Test BigInt + Decimal
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![bigint_val.clone(), decimal_val.clone()],
+        ));
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(102.5));
+
+        // Test Decimal + BigInt
+        let add_expr2 = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![decimal_val.clone(), bigint_val.clone()],
+        ));
+        let result = add_expr2.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(102.5));
+
+        // Test BigInt * Decimal
+        let mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![bigint_val.clone(), decimal_val.clone()],
+        ));
+        let result = mul_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(250.0));
+
+        // Test BigInt / Decimal
+        let div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![bigint_val, decimal_val],
+        ));
+        let result = div_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(40.0));
+    }
+
+    #[test]
+    fn test_division_by_zero_all_types() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test Integer division by zero
+        let int_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(5),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let int_zero = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let int_div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![int_val, int_zero],
+        ));
+        assert!(matches!(
+            int_div_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(DivisionByZero))
+        ));
+
+        // Test BigInt division by zero
+        let bigint_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(100i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let bigint_zero = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        let bigint_div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![bigint_val, bigint_zero],
+        ));
+        assert!(matches!(
+            bigint_div_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(DivisionByZero))
+        ));
+
+        // Test Decimal division by zero
+        let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(5.5),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+        let decimal_zero = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0.0),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let decimal_div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![decimal_val, decimal_zero],
+        ));
+        assert!(matches!(
+            decimal_div_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(DivisionByZero))
+        ));
+
+        // Test mixed type division by zero (BigInt / Integer zero)
+        let bigint_val2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(100i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let int_zero2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let mixed_div_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![bigint_val2, int_zero2],
+        ));
+        assert!(matches!(
+            mixed_div_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(DivisionByZero))
+        ));
+    }
+
+    #[test]
+    fn test_overflow_conditions() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test integer overflow on multiplication
+        let max_int = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i32::MAX),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let two = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(2),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let overflow_mul_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![max_int.clone(), two.clone()],
+        ));
+        assert!(matches!(
+            overflow_mul_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(Unknown))
+        ));
+
+        // Test integer underflow on subtraction
+        let min_int = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i32::MIN),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let one = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let underflow_sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![min_int, one],
+        ));
+        assert!(matches!(
+            underflow_sub_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(Unknown))
+        ));
+
+        // Test BigInt overflow
+        let max_bigint = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(i64::MAX),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+        let bigint_one = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(1i64),
+            Column::new("const", TypeId::BigInt),
+            vec![],
+        )));
+
+        let bigint_overflow_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![max_bigint, bigint_one],
+        ));
+        assert!(matches!(
+            bigint_overflow_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::ArithmeticError(Unknown))
+        ));
+    }
+
+    #[test]
+    fn test_type_inference_comprehensive() {
+        // Test all valid type combinations
+        let valid_combinations = vec![
+            (TypeId::Integer, TypeId::Integer, TypeId::Integer),
+            (TypeId::Decimal, TypeId::Decimal, TypeId::Decimal),
+            (TypeId::Integer, TypeId::Decimal, TypeId::Decimal),
+            (TypeId::Decimal, TypeId::Integer, TypeId::Decimal),
+            (TypeId::BigInt, TypeId::BigInt, TypeId::BigInt),
+            (TypeId::BigInt, TypeId::Integer, TypeId::BigInt),
+            (TypeId::Integer, TypeId::BigInt, TypeId::BigInt),
+            (TypeId::BigInt, TypeId::Decimal, TypeId::Decimal),
+            (TypeId::Decimal, TypeId::BigInt, TypeId::Decimal),
+        ];
+
+        for (left_type, right_type, expected_type) in valid_combinations {
+            let result = ArithmeticExpression::infer_return_type(
+                &Column::new("left", left_type),
+                &Column::new("right", right_type),
+            );
+            assert!(result.is_ok(), "Failed for {:?} + {:?}", left_type, right_type);
+            assert_eq!(result.unwrap().get_type(), expected_type);
+        }
+
+        // Test invalid combinations
+        let invalid_combinations = vec![
+            (TypeId::VarChar, TypeId::Integer),
+            (TypeId::Integer, TypeId::VarChar),
+            (TypeId::Boolean, TypeId::Integer),
+            (TypeId::VarChar, TypeId::Decimal),
+            (TypeId::Boolean, TypeId::Boolean),
+        ];
+
+        for (left_type, right_type) in invalid_combinations {
+            let result = ArithmeticExpression::infer_return_type(
+                &Column::new("left", left_type),
+                &Column::new("right", right_type),
+            );
+            assert!(result.is_err(), "Should fail for {:?} + {:?}", left_type, right_type);
+        }
+    }
+
+    #[test]
+    fn test_evaluate_join_functionality() {
+        let left_schema = Schema::new(vec![
+            Column::new("left_col", TypeId::Integer),
+        ]);
+        let right_schema = Schema::new(vec![
+            Column::new("right_col", TypeId::Integer),
+        ]);
+
+        let left_tuple = Tuple::new(&[Value::new(10)], &left_schema, RID::new(0, 0));
+        let right_tuple = Tuple::new(&[Value::new(5)], &right_schema, RID::new(0, 0));
+
+        let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            left_schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+        let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            1,
+            0,
+            right_schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+
+        let add_expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![left_col, right_col],
+        );
+
+        let result = add_expr.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+        assert_eq!(result, Value::new(15));
+    }
+
+    #[test]
+    fn test_clone_with_children() {
+        let schema = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::Integer),
+        ]);
+
+        let col_a = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+        let col_b = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
+        )));
+
+        let original_expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![col_a.clone(), col_b.clone()],
+        );
+
+        // Create new children
+        let new_col_a = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(5),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let new_col_b = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(10),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        let cloned_expr = original_expr.clone_with_children(vec![new_col_a, new_col_b]);
+
+        // Verify the cloned expression has the same operation but new children
+        if let Expression::Arithmetic(arith_expr) = cloned_expr.as_ref() {
+            assert_eq!(arith_expr.get_op(), ArithmeticOp::Add);
+            assert_eq!(arith_expr.get_children().len(), 2);
+        } else {
+            panic!("Expected ArithmeticExpression");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ArithmeticExpression requires exactly two children")]
+    fn test_clone_with_wrong_number_of_children() {
+        let schema = Schema::new(vec![Column::new("a", TypeId::Integer)]);
+        let col_a = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+
+        let expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![col_a.clone(), col_a.clone()],
+        );
+
+        // This should panic because we're providing only one child
+        expr.clone_with_children(vec![col_a]);
+    }
+
+    #[test]
+    fn test_get_child_at() {
+        let schema = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::Integer),
+        ]);
+
+        let col_a = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+        let col_b = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
+        )));
+
+        let expr = ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![col_a.clone(), col_b.clone()],
+        );
+
+        assert_eq!(expr.get_child_at(0).as_ref() as *const _, col_a.as_ref() as *const _);
+        assert_eq!(expr.get_child_at(1).as_ref() as *const _, col_b.as_ref() as *const _);
+    }
+
+    #[test]
+    fn test_complex_nested_expressions() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Create ((2 + 3) * 4) - (10 / 2)
+        let two = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(2),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let three = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(3),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let four = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(4),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let ten = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(10),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+
+        // (2 + 3)
+        let add_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![two, three],
+        )));
+
+        // (2 + 3) * 4
+        let mul_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Multiply,
+            vec![add_expr, four.clone()],
+        )));
+
+        // 10 / 2
+        let div_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Divide,
+            vec![ten, Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(2),
+                Column::new("const", TypeId::Integer),
+                vec![],
+            )))],
+        )));
+
+        // ((2 + 3) * 4) - (10 / 2)
+        let final_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![mul_expr, div_expr],
+        ));
+
+        let result = final_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(15)); // (5 * 4) - 5 = 20 - 5 = 15
+    }
+
+    #[test]
+    fn test_arithmetic_operator_display() {
+        assert_eq!(format!("{}", ArithmeticOp::Add), "+");
+        assert_eq!(format!("{}", ArithmeticOp::Subtract), "-");
+        assert_eq!(format!("{}", ArithmeticOp::Multiply), "*");
+        assert_eq!(format!("{}", ArithmeticOp::Divide), "/");
+    }
+
+    #[test]
+    fn test_edge_case_decimal_operations() {
+        let schema = Schema::new(vec![]);
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
+
+        // Test very small decimal numbers
+        let small_decimal1 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0.000001),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+        let small_decimal2 = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(0.000002),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let add_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![small_decimal1, small_decimal2],
+        ));
+
+        let result = add_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(0.000003));
+
+        // Test negative decimal operations
+        let neg_decimal = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(-5.5),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+        let pos_decimal = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(3.2),
+            Column::new("const", TypeId::Decimal),
+            vec![],
+        )));
+
+        let sub_expr = Expression::Arithmetic(ArithmeticExpression::new(
+            ArithmeticOp::Subtract,
+            vec![neg_decimal, pos_decimal],
+        ));
+
+        let result = sub_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(-8.7));
+    }
+
+    #[test]
+    fn test_validation_with_invalid_schema() {
+        let schema = Schema::new(vec![
+            Column::new("valid_col", TypeId::Integer),
+        ]);
+
+        // Create expression referencing non-existent column
+        let invalid_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            5, // Invalid column index
+            Column::new("invalid", TypeId::Integer),
+            vec![],
+        )));
+        let valid_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
+        )));
+
+        let expr = ArithmeticExpression::new(
+            ArithmeticOp::Add,
+            vec![invalid_col, valid_col],
+        );
+
+        // This should fail during validation of the invalid column reference
+        assert!(expr.validate(&schema).is_err());
     }
 }
