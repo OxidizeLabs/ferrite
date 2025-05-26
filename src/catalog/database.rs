@@ -6,6 +6,7 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::index::{IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
+use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use core::fmt;
 use log::{info, warn};
 use parking_lot::RwLock;
@@ -164,6 +165,13 @@ impl Database {
 
         let table_oid = self.next_table_oid;
         let table_heap = Arc::new(TableHeap::new(self.bpm.clone(), table_oid));
+
+        // Create and register transactional table heap with the transaction manager
+        let transactional_table_heap = Arc::new(TransactionalTableHeap::new(
+            table_heap.clone(),
+            table_oid,
+        ));
+        self.txn_manager.register_table(transactional_table_heap);
 
         // Increment table OID
         self.next_table_oid += 1;
