@@ -14,6 +14,7 @@ use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::*;
 use std::sync::Arc;
+use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -596,22 +597,20 @@ impl LogicalPlanBuilder {
             // Get the column info
             let column = schema.get_column(column_index).unwrap().clone();
             
-            // Create column reference expression for the target column
-            let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, // table index (for single table, it's always 0)
+            // Parse the value expression
+            let value_expr = self
+                .expression_parser
+                .parse_expression(&assignment.value, &schema)?;
+            
+            // Create an AssignmentExpression that encapsulates both the target column and value
+            let assignment_expr = Expression::Assignment(AssignmentExpression::new(
                 column_index,
                 column.clone(),
-                vec![],
-            )));
+                Arc::new(value_expr),
+            ));
             
-            // Parse the value expression
-            let value_expr = Arc::new(self
-                .expression_parser
-                .parse_expression(&assignment.value, &schema)?);
-            
-            // Add both target column and value expression as pairs
-            update_exprs.push(target_col_expr);
-            update_exprs.push(value_expr);
+            // Add the single assignment expression
+            update_exprs.push(Arc::new(assignment_expr));
         }
 
         Ok(LogicalPlan::update(

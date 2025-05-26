@@ -4,6 +4,7 @@ pub mod all_expression;
 pub mod any_expression;
 pub mod arithmetic_expression;
 pub mod array_expression;
+pub mod assignment_expression;
 pub mod at_timezone_expression;
 pub mod between_expression;
 pub mod binary_op_expression;
