@@ -212,7 +212,13 @@ impl AbstractExecutor for UpdateExecutor {
                         // Direct column reference
                         col_ref.get_column_index()
                     },
-                    _ => panic!("Unsupported update expression type")
+                    _ => {
+                        // For other expression types (like Constant, Literal, etc.), 
+                        // we need to handle them differently. This case suggests the 
+                        // planner is creating expressions in a different format than expected.
+                        // Let's fall back to the paired expression format.
+                        panic!("Unsupported update expression type: {:?}. Expected either paired expressions [ColumnRef, ValueExpr] or single arithmetic expressions.", expr)
+                    }
                 };
                 
                 let new_value = expr
