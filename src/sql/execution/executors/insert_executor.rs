@@ -2,11 +2,11 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::types_db::value::Value;
 use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -69,6 +69,58 @@ impl InsertExecutor {
             child_executor: None,
         }
     }
+
+    /// Maps values from child schema to full table schema, filling in NULL values for missing columns
+    fn map_values_to_table_schema_static(
+        child_values: &[Value],
+        child_schema: &Schema,
+        table_schema: &Schema,
+    ) -> Vec<Value> {
+        let mut full_values = Vec::with_capacity(table_schema.get_column_count() as usize);
+        
+        // For each column in the table schema
+        for table_col_idx in 0..table_schema.get_column_count() {
+            let table_column = table_schema.get_column(table_col_idx as usize)
+                .expect("Table column should exist");
+            
+            // Find matching column in child schema by name
+            let mut found_value = None;
+            for child_col_idx in 0..child_schema.get_column_count() {
+                let child_column = child_schema.get_column(child_col_idx as usize)
+                    .expect("Child column should exist");
+                if child_column.get_name() == table_column.get_name() {
+                    found_value = Some(child_values[child_col_idx as usize].clone());
+                    break;
+                }
+            }
+            
+            // Use found value or NULL for missing columns
+            match found_value {
+                Some(value) => {
+                    // Cast the value to the target column type if needed
+                    match value.cast_to(table_column.get_type()) {
+                        Ok(casted_value) => full_values.push(casted_value),
+                        Err(_) => {
+                            // If casting fails, use NULL
+                            full_values.push(Value::new_with_type(
+                                crate::types_db::value::Val::Null,
+                                table_column.get_type(),
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    // Column not provided, use NULL
+                    full_values.push(Value::new_with_type(
+                        crate::types_db::value::Val::Null,
+                        table_column.get_type(),
+                    ));
+                }
+            }
+        }
+        
+        full_values
+    }
 }
 
 impl AbstractExecutor for InsertExecutor {
@@ -123,18 +175,30 @@ impl AbstractExecutor for InsertExecutor {
                     context.get_transaction_context().clone()
                 };
 
-                let tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
-                let schema = self.plan.get_output_schema();
+                let _tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
+                
+                // Get the full table schema (target schema)
+                let table_schema = self.plan.get_output_schema();
+                
+                // Get the child schema (VALUES schema - may be partial)
+                let child_schema = child.get_output_schema();
 
-                // Extract values from the tuple
-                let values: Vec<_> = (0..tuple.get_column_count())
+                // Extract values from the child tuple
+                let child_values: Vec<_> = (0..tuple.get_column_count())
                     .map(|i| tuple.get_value(i).clone())
                     .collect();
 
-                // Use insert_tuple_from_values instead of insert_tuple
+                // Create full tuple values by mapping child values to table schema
+                let full_values = Self::map_values_to_table_schema_static(
+                    &child_values, 
+                    child_schema, 
+                    table_schema
+                );
+
+                // Use insert_tuple_from_values with the full table schema
                 match self
                     .txn_table_heap
-                    .insert_tuple_from_values(values, schema, txn_ctx)
+                    .insert_tuple_from_values(full_values, table_schema, txn_ctx)
                 {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
