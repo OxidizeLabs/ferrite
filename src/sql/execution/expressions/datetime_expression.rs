@@ -762,7 +762,7 @@ impl ExpressionOps for DateTimeExpression {
                 };
 
                 // Create a dummy tuple with the evaluated arguments
-                let mut dummy_tuple = Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0));
+                let dummy_tuple = Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0));
                 let mut values = dummy_tuple.get_values();
                 values.push(left);
                 values.push(right);
@@ -1305,8 +1305,6 @@ mod tests {
 
     #[test]
     fn test_datetime_expression_display() {
-        let schema = create_test_schema();
-
         let date_trunc_expr = DateTimeExpression::new(
             DateTimeOperation::DateTrunc,
             vec![Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
