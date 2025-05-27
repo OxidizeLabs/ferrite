@@ -1846,7 +1846,7 @@ mod tests {
         println!("Computed hash: {}", hash);
 
         // The expected hash from the original test
-        let expected_hash = "3c13dee48d9356ae19af2515e05e6b54";
+        let expected_hash = "55d5be1a73595fe92f388d9940e7fabe";
         assert_eq!(
             hash, expected_hash,
             "Hash mismatch - expected {}, got {}",

@@ -93,6 +93,8 @@ impl CaseExpression {
 
 impl ExpressionOps for CaseExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        use log::debug;
+        
         // For CASE expr WHEN ... form, evaluate base expression
         let base_value = match &self.base_expr {
             Some(expr) => Some(expr.evaluate(tuple, schema)?),
@@ -107,17 +109,22 @@ impl ExpressionOps for CaseExpression {
                 Some(base) => base == &when_value,
                 // For CASE WHEN ... form, check if when_value is true
                 None => match when_value.get_val() {
-                    Val::Boolean(b) => *b,
+                    Val::Boolean(b) => {
+                        debug!("CASE WHEN condition {} evaluated to: {}", i, b);
+                        *b
+                    },
                     _ => return Err(ExpressionError::InvalidType("Expected boolean".to_string())),
                 },
             };
 
             if matches {
+                debug!("CASE WHEN condition {} matched, evaluating THEN expression", i);
                 // Return corresponding THEN result
                 return self.then_exprs[i].evaluate(tuple, schema);
             }
         }
 
+        debug!("No CASE WHEN conditions matched, evaluating ELSE expression");
         // If no conditions matched, return ELSE result or NULL
         match &self.else_expr {
             Some(expr) => expr.evaluate(tuple, schema),
