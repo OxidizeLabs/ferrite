@@ -82,33 +82,26 @@ impl AbstractExecutor for InsertExecutor {
             self.plan.get_table_name()
         );
 
-        // Create the child executor from the values plan
-        self.plan
-            .get_children()
-            .iter()
-            .for_each(|child| match child {
-                PlanNode::Values(values_plan) => {
-                    debug!(
-                        "Creating ValuesExecutor for insert with {} rows",
-                        values_plan.get_rows().len()
-                    );
-                    debug!("Values schema: {:?}", values_plan.get_output_schema());
+        // Create the child executor from any child plan
+        if let Some(child_plan) = self.plan.get_children().first() {
+            debug!("Creating child executor for insert operation");
+            debug!("Child plan type: {:?}", child_plan.get_type());
+            debug!("Child schema: {:?}", child_plan.get_output_schema());
 
-                    self.child_executor = Some(Box::new(ValuesExecutor::new(
-                        self.context.clone(),
-                        Arc::new(values_plan.clone()),
-                    )));
-
-                    debug!("Initializing child ValuesExecutor");
-                    if let Some(child) = self.child_executor.as_mut() {
-                        child.init();
-                        debug!("Child ValuesExecutor initialized successfully");
-                    }
+            match child_plan.create_executor(self.context.clone()) {
+                Ok(mut child_executor) => {
+                    debug!("Initializing child executor");
+                    child_executor.init();
+                    self.child_executor = Some(child_executor);
+                    debug!("Child executor initialized successfully");
                 }
-                _ => {
-                    warn!("Unexpected child plan type for InsertExecutor");
+                Err(e) => {
+                    error!("Failed to create child executor: {}", e);
                 }
-            });
+            }
+        } else {
+            warn!("No child plan found for InsertExecutor");
+        }
         self.initialized = true;
         debug!("InsertExecutor initialization completed");
     }
