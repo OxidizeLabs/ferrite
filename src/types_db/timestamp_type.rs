@@ -167,14 +167,8 @@ impl Type for TimestampType {
     fn to_string(&self, val: &Value) -> String {
         match val.get_val() {
             Val::Timestamp(ts) => {
-                let datetime = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(*ts);
-                // Convert to a more readable format that explicitly includes UTC
-                let secs = datetime.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                let seconds = secs % 60;
-                let minutes = (secs / 60) % 60;
-                let hours = (secs / 3600) % 24;
-                let days = secs / 86400;
-                format!("{} days {}:{}:{} UTC", days, hours, minutes, seconds)
+                // Display as Unix timestamp (seconds since epoch)
+                ts.to_string()
             }
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
@@ -291,7 +285,7 @@ mod tests {
         let current = Value::new(now);
         let null = Value::new(Val::Null);
 
-        assert!(timestamp_type.to_string(&current).contains("UTC"));
+        assert_eq!(timestamp_type.to_string(&current), now.to_string());
         assert_eq!(timestamp_type.to_string(&null), "NULL");
     }
 }
