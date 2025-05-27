@@ -733,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    // #[ignore]
     fn test_group_by_column_names() {
         let mut ctx = TestContext::new("test_group_by_column_names");
 
@@ -798,12 +798,9 @@ mod tests {
             }
 
             // Check number of result groups
-            let mut row_count = 0;
-            while writer.get_rows().iter().any(|row| row.len() != 0) {
-                row_count += 1;
-            }
             assert_eq!(
-                row_count, expected_groups,
+                writer.get_rows().len(),
+                expected_groups,
                 "Incorrect number of groups for query: {}",
                 sql
             );
