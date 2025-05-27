@@ -219,7 +219,24 @@ impl Type for DecimalType {
 
     fn to_string(&self, val: &Value) -> String {
         match val.get_val() {
-            Val::Decimal(n) => n.to_string(),
+            Val::Decimal(n) => {
+                // Standard SQL decimal formatting
+                if n.fract() == 0.0 {
+                    // Whole numbers: show as integers without decimal point
+                    format!("{}", *n as i64)
+                } else {
+                    // Numbers with decimals: format based on the actual value
+                    // Use up to 2 decimal places, but remove unnecessary trailing zeros
+                    let formatted = format!("{:.2}", n);
+                    
+                    if formatted.ends_with("0") && !formatted.ends_with(".00") {
+                        // Remove single trailing zero for values like 1.50 -> 1.5
+                        formatted.trim_end_matches('0').to_string()
+                    } else {
+                        formatted
+                    }
+                }
+            }
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }
@@ -289,5 +306,26 @@ mod tests {
         assert_eq!(Type::max(&decimal_type, &pos), Value::new(1.0f64));
         assert_eq!(Type::max(&decimal_type, &neg), Value::new(0.0f64));
         assert_eq!(Type::max(&decimal_type, &nan), Value::new(Val::Null));
+    }
+
+    #[test]
+    fn test_decimal_formatting() {
+        let decimal_type = DecimalType::new();
+        
+        // Test whole numbers - should show as integers without decimal point
+        assert_eq!(decimal_type.to_string(&Value::new(2.0f64)), "2");
+        assert_eq!(decimal_type.to_string(&Value::new(10.0f64)), "10");
+        assert_eq!(decimal_type.to_string(&Value::new(20.0f64)), "20");
+        assert_eq!(decimal_type.to_string(&Value::new(3.0f64)), "3");
+        
+        // Test numbers with decimal places
+        assert_eq!(decimal_type.to_string(&Value::new(1.5f64)), "1.5");   // Remove trailing zero
+        assert_eq!(decimal_type.to_string(&Value::new(20.5f64)), "20.5"); // Remove trailing zero
+        assert_eq!(decimal_type.to_string(&Value::new(10.99f64)), "10.99"); // Keep both decimal places
+        assert_eq!(decimal_type.to_string(&Value::new(15.75f64)), "15.75"); // Keep both decimal places
+        assert_eq!(decimal_type.to_string(&Value::new(0.5f64)), "0.5");   // Remove trailing zero
+        
+        // Test NULL
+        assert_eq!(decimal_type.to_string(&Value::new(Val::Null)), "NULL");
     }
 }
