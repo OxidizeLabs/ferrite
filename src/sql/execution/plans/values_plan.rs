@@ -135,16 +135,23 @@ impl ValueRow {
                     .evaluate(&dummy_tuple, schema)
                     .map_err(|e| ValuesError::ValueEvaluationError(e.to_string()))?;
 
-                // Verify type compatibility
-                if value.get_type_id() != column.get_type() {
-                    return Err(ValuesError::TypeMismatch {
-                        column_name: column.get_name().to_string(),
-                        expected: column.get_type(),
-                        actual: value.get_type_id(),
-                    });
-                }
+                // Try to cast the value to the expected column type if needed
+                let final_value = if value.get_type_id() != column.get_type() {
+                    match value.cast_to(column.get_type()) {
+                        Ok(cast_value) => cast_value,
+                        Err(_) => {
+                            return Err(ValuesError::TypeMismatch {
+                                column_name: column.get_name().to_string(),
+                                expected: column.get_type(),
+                                actual: value.get_type_id(),
+                            });
+                        }
+                    }
+                } else {
+                    value
+                };
 
-                values.push(value);
+                values.push(final_value);
             }
 
             self.evaluated_values = Some(values);
