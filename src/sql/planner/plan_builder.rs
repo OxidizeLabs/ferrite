@@ -495,18 +495,38 @@ impl LogicalPlanBuilder {
             .get_table(&table_name)
             .ok_or_else(|| format!("Table '{}' does not exist", table_name))?;
 
-        let schema = table_info.get_table_schema();
+        let full_schema = table_info.get_table_schema();
         let table_oid = table_info.get_table_oidt();
+
+        // Create schema for VALUES plan based on explicit columns or full table schema
+        let values_schema = if !insert.columns.is_empty() {
+            // If explicit columns are specified, create a schema with only those columns
+            let mut columns = Vec::new();
+            for column_ident in &insert.columns {
+                let column_name = column_ident.value.clone();
+                let column_index = full_schema
+                    .get_column_index(&column_name)
+                    .ok_or_else(|| format!("Column '{}' does not exist in table '{}'", column_name, table_name))?;
+                let column = full_schema
+                    .get_column(column_index)
+                    .ok_or_else(|| format!("Failed to get column '{}' from schema", column_name))?;
+                columns.push(column.clone());
+            }
+            Schema::new(columns)
+        } else {
+            // If no explicit columns, use the full table schema
+            full_schema.clone()
+        };
 
         // Plan the source (VALUES or SELECT)
         let source_plan = match &insert.source {
             Some(query) => match &*query.body {
-                SetExpr::Values(values) => self.build_values_plan(&values.rows, &schema)?,
+                SetExpr::Values(values) => self.build_values_plan(&values.rows, &values_schema)?,
                 SetExpr::Select(select) => {
                     let select_plan = self.build_select_plan(select)?;
                     if !self
                         .schema_manager
-                        .schemas_compatible(&select_plan.get_schema().unwrap(), &schema)
+                        .schemas_compatible(&select_plan.get_schema().unwrap(), &values_schema)
                     {
                         return Err("SELECT schema doesn't match INSERT target".to_string());
                     }
@@ -519,7 +539,7 @@ impl LogicalPlanBuilder {
 
         Ok(LogicalPlan::insert(
             table_name,
-            schema,
+            full_schema,  // Use full schema for the INSERT plan itself
             table_oid,
             source_plan,
         ))
