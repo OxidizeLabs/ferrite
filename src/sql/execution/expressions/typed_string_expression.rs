@@ -90,7 +90,15 @@ impl TypedStringExpression {
 
     // Parse a timestamp string in the format YYYY-MM-DD HH:MM:SS[.SSS] or ISO8601/RFC3339
     fn parse_timestamp(&self, timestamp_str: &str) -> Result<Value, ExpressionError> {
-        // First try ISO8601/RFC3339 format (which includes formats like 2023-01-01T10:00:00Z)
+        // First, try parsing as a Unix timestamp (integer seconds since epoch)
+        if let Ok(unix_timestamp) = timestamp_str.parse::<u64>() {
+            return Ok(Value::new_with_type(
+                Val::Timestamp(unix_timestamp),
+                TypeId::Timestamp,
+            ));
+        }
+
+        // Try ISO8601/RFC3339 format (which includes formats like 2023-01-01T10:00:00Z)
         if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp_str) {
             let utc_dt = dt.with_timezone(&chrono::Utc);
             return Ok(Value::new_with_type(
@@ -245,7 +253,12 @@ impl ExpressionOps for TypedStringExpression {
                 }
             }
             "TIMESTAMP" => {
-                // Try ISO8601/RFC3339 format first
+                // Try Unix timestamp first
+                if self.value.parse::<u64>().is_ok() {
+                    return Ok(());
+                }
+
+                // Try ISO8601/RFC3339 format
                 if DateTime::parse_from_rfc3339(&self.value).is_ok() {
                     return Ok(());
                 }
@@ -266,7 +279,7 @@ impl ExpressionOps for TypedStringExpression {
 
                 if NaiveDateTime::parse_from_str(&self.value, format).is_err() {
                     return Err(ExpressionError::InvalidOperation(format!(
-                        "Invalid TIMESTAMP format: '{}'. Expected YYYY-MM-DD HH:MM:SS[.SSS], ISO8601, or RFC3339",
+                        "Invalid TIMESTAMP format: '{}'. Expected Unix timestamp, YYYY-MM-DD HH:MM:SS[.SSS], ISO8601, or RFC3339",
                         self.value
                     )));
                 }
