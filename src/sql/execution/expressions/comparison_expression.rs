@@ -96,10 +96,6 @@ impl ExpressionOps for ComparisonExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
-        debug!(
-            "Evaluating comparison - lhs: {:?}, rhs: {:?}, comp_type: {:?}",
-            lhs, rhs, self.comp_type
-        );
         let comparison_result = self.perform_comparison(&lhs, &rhs)?;
 
         let result = match comparison_result {
@@ -107,6 +103,11 @@ impl ExpressionOps for ComparisonExpression {
             CmpBool::CmpFalse => Value::new(false),
             CmpBool::CmpNull => Value::new(Null),
         };
+
+        debug!(
+            "Evaluating comparison - lhs: {:?}, rhs: {:?}, comp_type: {:?}, result: {:?}",
+            lhs, rhs, self.comp_type, result
+        );
 
         Ok(result)
     }
