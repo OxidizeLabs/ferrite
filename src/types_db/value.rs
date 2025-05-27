@@ -423,6 +423,13 @@ impl Value {
             (Val::Integer(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
             (Val::Integer(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
             (Val::Integer(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
+            (Val::Integer(i), TypeId::Timestamp) => {
+                if *i >= 0 {
+                    Ok(Value::new_with_type(Val::Timestamp(*i as u64), target_type))
+                } else {
+                    Err(format!("Cannot convert negative integer {} to Timestamp", i))
+                }
+            }
             (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
             (Val::Integer(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
 
@@ -451,6 +458,13 @@ impl Value {
             }
             (Val::BigInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
             (Val::BigInt(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
+            (Val::BigInt(i), TypeId::Timestamp) => {
+                if *i >= 0 {
+                    Ok(Value::new_with_type(Val::Timestamp(*i as u64), target_type))
+                } else {
+                    Err(format!("Cannot convert negative bigint {} to Timestamp", i))
+                }
+            }
             (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
             (Val::BigInt(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
 
@@ -2522,6 +2536,15 @@ mod comprehensive_cast_tests {
         assert_eq!(Value::new("20230101").cast_to(TypeId::Date).unwrap().get_val(), &Val::Date(20230101));
         assert_eq!(Value::new("3600").cast_to(TypeId::Time).unwrap().get_val(), &Val::Time(3600));
         assert_eq!(Value::new("86400").cast_to(TypeId::Interval).unwrap().get_val(), &Val::Interval(86400));
+
+        // Integer/BigInt to Timestamp
+        let int_val = Value::new(2000);
+        let bigint_val = Value::new(3000i64);
+        let negative_int = Value::new(-1000);
+
+        assert_eq!(int_val.cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Timestamp(2000));
+        assert_eq!(bigint_val.cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Timestamp(3000));
+        assert!(negative_int.cast_to(TypeId::Timestamp).is_err());
     }
 
     #[test]
