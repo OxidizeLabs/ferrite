@@ -279,6 +279,9 @@ impl ExecutionEngine {
                 let mut has_results = false;
                 let mut row_count = 0;
 
+                // Clone schema once to avoid borrow conflicts in the loop
+                let schema_clone = schema.clone();
+
                 // Use a non-recursive approach to process results
                 debug!("Starting to process result tuples");
                 loop {
@@ -287,7 +290,9 @@ impl ExecutionEngine {
                             has_results = true;
                             row_count += 1;
                             debug!("Processing result tuple {}", row_count);
-                            writer.write_row(tuple.get_values().to_vec());
+                            
+                            // Use the schema-aware row writer for proper decimal formatting
+                            writer.write_row_with_schema(tuple.get_values().to_vec(), &schema_clone);
                         }
                         None => {
                             debug!("No more result tuples");
@@ -724,6 +729,12 @@ mod tests {
         }
 
         fn write_row(&mut self, values: Vec<Value>) {
+            self.rows.push(values);
+        }
+
+        fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema) {
+            // Store the schema for potential future use
+            self.schema = Some(schema.clone());
             self.rows.push(values);
         }
 

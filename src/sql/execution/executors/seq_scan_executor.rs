@@ -88,12 +88,18 @@ impl AbstractExecutor for SeqScanExecutor {
             start_rid, stop_rid
         );
 
-        // Create new iterator with TransactionalTableHeap
+        // Get transaction context from execution context
+        let txn_ctx = {
+            let context = self.context.read();
+            Some(context.get_transaction_context().clone())
+        };
+
+        // Create new iterator with TransactionalTableHeap and transaction context
         self.iterator = Some(TableIterator::new(
             self.table_heap.clone(), // Pass the TransactionalTableHeap directly
             start_rid,
             stop_rid,
-            None,
+            txn_ctx, // Pass the transaction context for MVCC visibility checks
         ));
         self.initialized = true;
     }

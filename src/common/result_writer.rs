@@ -1,5 +1,6 @@
 use crate::server::QueryResults;
 use crate::types_db::value::Value;
+use crate::catalog::schema::Schema;
 use colored::Colorize;
 use prettytable::{format, Cell, Row, Table};
 use std::sync::{Arc, Mutex};
@@ -8,6 +9,7 @@ use std::sync::{Arc, Mutex};
 pub trait ResultWriter: Send + Sync {
     fn write_schema_header(&mut self, headers: Vec<String>);
     fn write_row(&mut self, values: Vec<Value>);
+    fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema);
     fn write_message(&mut self, message: &str);
 }
 
@@ -93,6 +95,28 @@ impl ResultWriter for CliResultWriter {
         }
     }
 
+    fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema) {
+        self.ensure_table();
+
+        if let Some(table) = self.table.lock().unwrap().as_mut() {
+            let row = Row::new(
+                values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        let formatted_str = if let Some(column) = schema.get_column(i) {
+                            v.format_with_column_context(Some(column))
+                        } else {
+                            v.to_string()
+                        };
+                        Cell::new(&formatted_str)
+                    })
+                    .collect(),
+            );
+            table.add_row(row);
+        }
+    }
+
     fn write_message(&mut self, message: &str) {
         // Flush any existing table
         if let Some(table) = self.table.lock().unwrap().take() {
@@ -114,6 +138,12 @@ impl ResultWriter for NetworkResultWriter {
     }
 
     fn write_row(&mut self, values: Vec<Value>) {
+        self.rows.push(values);
+    }
+
+    fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema) {
+        // For network responses, we still store the original values
+        // but the formatting will be handled when converting to strings
         self.rows.push(values);
     }
 }
