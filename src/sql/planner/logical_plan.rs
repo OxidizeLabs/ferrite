@@ -833,11 +833,9 @@ impl LogicalPlan {
                     });
 
                 column_mappings.push(input_idx);
-            } else {
-                // For expressions that aren't simple column references,
-                // we'll just use a placeholder mapping
-                column_mappings.push(0);
             }
+            // NOTE: No else clause here - we only add mappings for ColumnRef expressions
+            // Computed expressions like CASE, arithmetic, etc. will be evaluated directly
         }
 
         Box::new(Self::new(

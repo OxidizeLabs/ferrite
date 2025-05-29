@@ -843,6 +843,33 @@ impl Value {
         let type_instance = crate::types_db::types::get_instance(self.type_id_);
         type_instance.technical_display(self)
     }
+
+    /// Format value with column context for proper decimal precision/scale
+    pub fn format_with_column_context(&self, column: Option<&crate::catalog::column::Column>) -> String {
+        match self.type_id_ {
+            TypeId::Decimal => {
+                if let Some(col) = column {
+                    if let (Some(precision), Some(scale)) = (col.get_precision(), col.get_scale()) {
+                        return self.format_decimal_with_scale(scale);
+                    }
+                }
+                // Fall back to default formatting
+                ToString::to_string(self)
+            }
+            _ => ToString::to_string(self)
+        }
+    }
+
+    /// Format decimal value with specific scale
+    fn format_decimal_with_scale(&self, scale: u8) -> String {
+        match &self.value_ {
+            Val::Decimal(n) => {
+                format!("{:.1$}", n, scale as usize)
+            }
+            Val::Null => "NULL".to_string(),
+            _ => ToString::to_string(self),
+        }
+    }
 }
 
 impl Type for Value {
@@ -2703,5 +2730,38 @@ mod comprehensive_cast_tests {
         // Both should work with all numeric conversions
         assert_eq!(varchar_val.cast_to(TypeId::Integer).unwrap_err(), "Cannot convert string 'test' to Integer: invalid digit found in string");
         assert_eq!(Value::new("42").cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(42));
+    }
+
+    #[test]
+    fn test_decimal_formatting_with_column_context() {
+        use crate::catalog::column::Column;
+        use crate::types_db::type_id::TypeId;
+        
+        // Create a decimal value
+        let decimal_val = Value::new(123.456789);
+        
+        // Test default formatting (no column context)
+        assert_eq!(format!("{}", decimal_val), "123.46");
+        
+        // Create a column with precision and scale
+        let column = Column::new_decimal("price", Some(10), Some(2));
+        
+        // Test formatting with column context
+        let formatted = decimal_val.format_with_column_context(Some(&column));
+        assert_eq!(formatted, "123.46");
+        
+        // Test with different scale
+        let column_scale_4 = Column::new_decimal("precise_price", Some(15), Some(4));
+        let formatted_precise = decimal_val.format_with_column_context(Some(&column_scale_4));
+        assert_eq!(formatted_precise, "123.4568");
+        
+        // Test without column context (should use default formatting)
+        let formatted_no_context = decimal_val.format_with_column_context(None);
+        assert_eq!(formatted_no_context, "123.46");
+        
+        // Test with non-decimal type (should use default formatting)
+        let int_val = Value::new(42);
+        let formatted_int = int_val.format_with_column_context(Some(&column));
+        assert_eq!(formatted_int, "42");
     }
 }

@@ -495,3 +495,30 @@ mod tests {
         assert!(invalid_sum.validate(&schema).is_err());
     }
 }
+
+#[cfg(test)]
+mod basic_behaviour {}
+
+#[cfg(test)]
+mod edge_cases {}
+
+#[cfg(test)]
+mod count {}
+
+#[cfg(test)]
+mod sum {}
+
+#[cfg(test)]
+mod min {}
+
+#[cfg(test)]
+mod max {}
+
+#[cfg(test)]
+mod avg {}
+
+#[cfg(test)]
+mod stdev {}
+
+#[cfg(test)]
+mod variance {}

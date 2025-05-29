@@ -229,12 +229,39 @@ impl ExpressionParser {
                             (TypeId::Integer, TypeId::Integer)
                             | (TypeId::Decimal, TypeId::Decimal)
                             | (TypeId::BigInt, TypeId::BigInt)
+                            | (TypeId::Float, TypeId::Float)
                             | (TypeId::Integer, TypeId::Decimal)
                             | (TypeId::Decimal, TypeId::Integer)
                             | (TypeId::BigInt, TypeId::Integer)
                             | (TypeId::Integer, TypeId::BigInt)
                             | (TypeId::BigInt, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::BigInt) => {
+                            | (TypeId::Decimal, TypeId::BigInt)
+                            | (TypeId::Float, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::Float)
+                            | (TypeId::Float, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::Float)
+                            | (TypeId::Float, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::Float)
+                            | (TypeId::TinyInt, TypeId::TinyInt)
+                            | (TypeId::SmallInt, TypeId::SmallInt)
+                            | (TypeId::TinyInt, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::TinyInt)
+                            | (TypeId::SmallInt, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::SmallInt)
+                            | (TypeId::TinyInt, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::TinyInt)
+                            | (TypeId::SmallInt, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::SmallInt)
+                            | (TypeId::TinyInt, TypeId::Float)
+                            | (TypeId::Float, TypeId::TinyInt)
+                            | (TypeId::SmallInt, TypeId::Float)
+                            | (TypeId::Float, TypeId::SmallInt) => {
                                 let arith_op = match op {
                                     BinaryOperator::Plus => ArithmeticOp::Add,
                                     BinaryOperator::Minus => ArithmeticOp::Subtract,
@@ -531,17 +558,17 @@ impl ExpressionParser {
                 ..
             } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-                let target_type = match data_type {
-                    DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
-                    DataType::BigInt(_) => TypeId::BigInt,
-                    DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
-                        TypeId::Decimal
-                    }
-                    DataType::Char(_) => TypeId::Char,
-                    DataType::Varchar(_) => TypeId::VarChar,
-                    DataType::Boolean => TypeId::Boolean,
-                    _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
-                };
+                                    let target_type = match data_type {
+                        DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
+                        DataType::BigInt(_) => TypeId::BigInt,
+                        DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
+                            TypeId::Decimal
+                        }
+                        DataType::Char(_) => TypeId::Char,
+                        DataType::Varchar(_) => TypeId::VarChar,
+                        DataType::Boolean => TypeId::Boolean,
+                        _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
+                    };
 
                 let mut cast_expr = CastExpression::new(inner_expr, target_type);
 
@@ -2938,7 +2965,7 @@ impl ExpressionParser {
                     TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                         Ok(Column::new(func_name, TypeId::BigInt))
                     }
-                    TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
+                    TypeId::Decimal | TypeId::Float => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
             }
@@ -2952,7 +2979,8 @@ impl ExpressionParser {
                     | TypeId::BigInt
                     | TypeId::SmallInt
                     | TypeId::TinyInt
-                    | TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
+                    | TypeId::Decimal
+                    | TypeId::Float => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
             }

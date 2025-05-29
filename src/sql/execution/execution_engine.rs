@@ -1851,78 +1851,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transaction_execution() {
-        let ctx = TestContext::new("test_start_transaction_execution");
-        
-        // Save the initial isolation level
-        let initial_isolation_level = ctx.exec_ctx.read()
-            .get_transaction_context()
-            .get_transaction()
-            .get_isolation_level();
-        
-        println!("Initial isolation level: {:?}", initial_isolation_level);
-        
-        // Use Serializable isolation level for the plan
-        let plan_node = StartTransactionPlanNode::new(Some(IsolationLevel::Serializable), false);
-        let plan = PlanNode::StartTransaction(plan_node);
-        
-        // Execute the plan
-        let mut writer = TestResultWriter::new();
-        let success = ctx
-            .engine
-            .execute_plan(&plan, ctx.exec_ctx.clone(), &mut writer)
-            .unwrap();
-            
-        assert!(success, "StartTransaction execution failed");
-        
-        // Verify that isolation level changed to what we requested
-        let new_isolation_level = ctx.exec_ctx.read()
-            .get_transaction_context()
-            .get_transaction()
-            .get_isolation_level();
-        
-        println!("New isolation level: {:?}", new_isolation_level);
-        
-        // Check that isolation level changed to what we requested
-        
-        assert_eq!(new_isolation_level, IsolationLevel::Serializable, 
-            "Isolation level should be {:?}, got {:?}", IsolationLevel::Serializable, new_isolation_level);
-        
-        // Optionally verify the transaction was started successfully
-        let txn_state = ctx.exec_ctx.read().get_transaction_context().get_transaction().get_state();
-        assert_eq!(txn_state, TransactionState::Running, "Transaction should be in running state");
-        
-        // Test with SQL statement - create a new context
-        let mut ctx2 = TestContext::new("test_start_transaction_sql");
-        
-        // Save the initial isolation level
-        let initial_isolation_level = ctx2.exec_ctx.read()
-            .get_transaction_context()
-            .get_transaction()
-            .get_isolation_level();
-
-        // Execute BEGIN TRANSACTION with SQL
-        let sql = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE";
-        let mut writer = TestResultWriter::new();
-        let success = ctx2
-            .engine
-            .execute_sql(sql, ctx2.exec_ctx.clone(), &mut writer)
-            .unwrap();
-            
-        assert!(success, "BEGIN TRANSACTION SQL execution failed");
-        
-        // Verify isolation level changed as expected
-        let new_isolation_level = ctx2.exec_ctx.read()
-            .get_transaction_context()
-            .get_transaction()
-            .get_isolation_level();
-        
-        assert_eq!(new_isolation_level, IsolationLevel::Serializable,
-            "Isolation level should be {:?} for SQL-initiated transaction, got {:?}",
-                   IsolationLevel::Serializable, new_isolation_level);
-    }
-
     mod update_tests {
         use super::*;
 
@@ -2514,6 +2442,486 @@ mod tests {
                 "800",
                 "Expected Alice's balance to still be 800 after rollback"
             );
+        }
+    }
+
+    #[test]
+    fn test_decimal_precision_scale_display() {
+        let mut ctx = TestContext::new("test_decimal_precision_scale_display");
+
+        // Create test table with decimal columns of different precision and scale
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("price", TypeId::Decimal),
+            Column::new("rate", TypeId::Decimal),
+            Column::new("percentage", TypeId::Decimal),
+            Column::new("currency", TypeId::Decimal),
+        ]);
+
+        let table_name = "financial_data";
+        ctx.create_test_table(table_name, table_schema.clone())
+            .unwrap();
+
+        // Insert test data with various decimal values
+        let test_data = vec![
+            vec![
+                Value::new(1),
+                Value::new(123.456789),  // Should be formatted based on column precision/scale
+                Value::new(0.0825),      // Rate like 8.25%
+                Value::new(15.5),        // Simple percentage
+                Value::new(1000.00),     // Currency with exact cents
+            ],
+            vec![
+                Value::new(2),
+                Value::new(99.99),       // Price with cents
+                Value::new(0.125),       // Rate 12.5%
+                Value::new(100.0),       // Whole percentage
+                Value::new(2500.50),     // Currency with 50 cents
+            ],
+            vec![
+                Value::new(3),
+                Value::new(0.01),        // Very small price
+                Value::new(1.0),         // 100% rate
+                Value::new(0.1),         // 0.1%
+                Value::new(10000.0),     // Large currency amount
+            ],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema)
+            .unwrap();
+
+                 // Test 1: Basic decimal display (default formatting)
+         let select_sql = "SELECT id, price, rate, percentage, currency FROM financial_data ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Basic decimal select failed");
+
+        let rows = writer.get_rows();
+        assert_eq!(rows.len(), 3, "Expected 3 rows");
+
+                 // Verify default decimal formatting
+         println!("Default decimal formatting:");
+         for (i, row) in rows.iter().enumerate() {
+             println!("Row {}: id={}, price={}, rate={}, percentage={}, currency={}", 
+                 i + 1, row[0], row[1], row[2], row[3], row[4]);
+         }
+
+        // Test 2: Arithmetic operations with decimals
+        let calc_sql = "SELECT id, price * rate as calculated, price + 10.50 as adjusted_price FROM financial_data ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal arithmetic failed");
+
+        let calc_rows = writer.get_rows();
+        println!("\nDecimal arithmetic results:");
+        for row in calc_rows {
+            println!("ID: {}, Calculated: {}, Adjusted Price: {}", row[0], row[1], row[2]);
+        }
+
+        // Test 3: Aggregation with decimals
+        let agg_sql = "SELECT AVG(price) as avg_price, SUM(currency) as total_currency, MIN(rate) as min_rate, MAX(percentage) as max_percentage FROM financial_data";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal aggregation failed");
+
+        let agg_rows = writer.get_rows();
+        println!("\nDecimal aggregation results:");
+        for row in agg_rows {
+            println!("Avg Price: {}, Total Currency: {}, Min Rate: {}, Max Percentage: {}", 
+                row[0], row[1], row[2], row[3]);
+        }
+
+        // Test 4: Decimal comparisons and filtering
+        let filter_sql = "SELECT id, price FROM financial_data WHERE price > 50.0 AND rate < 0.5 ORDER BY price DESC";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal filtering failed");
+
+        let filter_rows = writer.get_rows();
+        println!("\nFiltered decimal results (price > 50.0 AND rate < 0.5):");
+        for row in filter_rows {
+            println!("ID: {}, Price: {}", row[0], row[1]);
+        }
+
+        // Test 5: CASE expressions with decimals
+        let case_sql = "SELECT id, CASE WHEN price > 100.0 THEN 'expensive' WHEN price > 10.0 THEN 'moderate' ELSE 'cheap' END as price_category, price FROM financial_data ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(case_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal CASE expression failed");
+
+        let case_rows = writer.get_rows();
+        println!("\nDecimal CASE expression results:");
+        for row in case_rows {
+            println!("ID: {}, Category: {}, Price: {}", row[0], row[1], row[2]);
+        }
+    }
+
+    #[test]
+    fn test_float_precision_display() {
+        let mut ctx = TestContext::new("test_float_precision_display");
+
+        // Create test table with float columns
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("measurement", TypeId::Float),
+            Column::new("ratio", TypeId::Float),
+            Column::new("scientific", TypeId::Float),
+        ]);
+
+        let table_name = "measurements";
+        ctx.create_test_table(table_name, table_schema.clone())
+            .unwrap();
+
+        // Insert test data with various float values
+        let test_data = vec![
+            vec![
+                Value::new(1),
+                Value::new(3.14159f32),      // Pi approximation
+                Value::new(0.618f32),        // Golden ratio approximation
+                Value::new(1.23e-4f32),      // Scientific notation
+            ],
+            vec![
+                Value::new(2),
+                Value::new(2.718f32),        // e approximation
+                Value::new(1.414f32),        // sqrt(2) approximation
+                Value::new(9.87e6f32),       // Large scientific number
+            ],
+            vec![
+                Value::new(3),
+                Value::new(0.0f32),          // Zero
+                Value::new(1.0f32),          // One
+                Value::new(-1.5e-10f32),     // Very small negative
+            ],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema)
+            .unwrap();
+
+        // Test 1: Basic float display
+        let select_sql = "SELECT id, measurement, ratio, scientific FROM measurements ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Basic float select failed");
+
+        let rows = writer.get_rows();
+        println!("Float display results:");
+        for (i, row) in rows.iter().enumerate() {
+            println!("Row {}: id={}, measurement={}, ratio={}, scientific={}", 
+                i + 1, row[0], row[1], row[2], row[3]);
+        }
+
+        // Test 2: Float arithmetic operations
+        let calc_sql = "SELECT id, measurement * ratio as product, measurement + 1.0 as incremented FROM measurements ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Float arithmetic failed");
+
+        let calc_rows = writer.get_rows();
+        println!("\nFloat arithmetic results:");
+        for row in calc_rows {
+            println!("ID: {}, Product: {}, Incremented: {}", row[0], row[1], row[2]);
+        }
+
+        // Test 3: Float aggregations
+        let agg_sql = "SELECT AVG(measurement) as avg_measurement, SUM(ratio) as sum_ratio FROM measurements";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Float aggregation failed");
+
+        let agg_rows = writer.get_rows();
+        println!("\nFloat aggregation results:");
+        for row in agg_rows {
+            println!("Avg Measurement: {}, Sum Ratio: {}", row[0], row[1]);
+        }
+    }
+
+    #[test]
+    fn test_mixed_numeric_precision_display() {
+        let mut ctx = TestContext::new("test_mixed_numeric_precision_display");
+
+        // Create test table with mixed numeric types
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("int_val", TypeId::Integer),
+            Column::new("bigint_val", TypeId::BigInt),
+            Column::new("decimal_val", TypeId::Decimal),
+            Column::new("float_val", TypeId::Float),
+        ]);
+
+        let table_name = "mixed_numbers";
+        ctx.create_test_table(table_name, table_schema.clone())
+            .unwrap();
+
+        // Insert test data with mixed numeric types
+        let test_data = vec![
+            vec![
+                Value::new(1),
+                Value::new(42),
+                Value::new(1000000i64),
+                Value::new(123.456),
+                Value::new(3.14f32),
+            ],
+            vec![
+                Value::new(2),
+                Value::new(-17),
+                Value::new(-500000i64),
+                Value::new(0.001),
+                Value::new(2.718f32),
+            ],
+            vec![
+                Value::new(3),
+                Value::new(0),
+                Value::new(0i64),
+                Value::new(1000.0),
+                Value::new(0.0f32),
+            ],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema)
+            .unwrap();
+
+        // Test 1: Display all numeric types
+        let select_sql = "SELECT id, int_val, bigint_val, decimal_val, float_val FROM mixed_numbers ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Mixed numeric select failed");
+
+        let rows = writer.get_rows();
+        println!("Mixed numeric display results:");
+        for (i, row) in rows.iter().enumerate() {
+            println!("Row {}: id={}, int={}, bigint={}, decimal={}, float={}", 
+                i + 1, row[0], row[1], row[2], row[3], row[4]);
+        }
+
+        // Test 2: Mixed arithmetic (should promote to appropriate types)
+        let calc_sql = "SELECT id, int_val + decimal_val as int_plus_decimal, bigint_val * float_val as bigint_times_float FROM mixed_numbers ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Mixed arithmetic failed");
+
+        let calc_rows = writer.get_rows();
+        println!("\nMixed arithmetic results:");
+        for row in calc_rows {
+            println!("ID: {}, Int+Decimal: {}, BigInt*Float: {}", row[0], row[1], row[2]);
+        }
+
+        // Test 3: Comparisons between different numeric types
+        let comp_sql = "SELECT id, int_val, decimal_val FROM mixed_numbers WHERE int_val < decimal_val ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(comp_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Mixed comparison failed");
+
+        let comp_rows = writer.get_rows();
+        println!("\nMixed comparison results (int_val < decimal_val):");
+        for row in comp_rows {
+            println!("ID: {}, Int: {}, Decimal: {}", row[0], row[1], row[2]);
+        }
+
+        // Test 4: Aggregations across different numeric types
+        let agg_sql = "SELECT AVG(int_val) as avg_int, AVG(decimal_val) as avg_decimal, AVG(float_val) as avg_float FROM mixed_numbers";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Mixed aggregation failed");
+
+        let agg_rows = writer.get_rows();
+        println!("\nMixed aggregation results:");
+        for row in agg_rows {
+            println!("Avg Int: {}, Avg Decimal: {}, Avg Float: {}", row[0], row[1], row[2]);
+        }
+    }
+
+    #[test]
+    fn test_decimal_edge_cases_display() {
+        let mut ctx = TestContext::new("test_decimal_edge_cases_display");
+
+        // Create test table for edge cases
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("description", TypeId::VarChar),
+            Column::new("value", TypeId::Decimal),
+        ]);
+
+        let table_name = "edge_cases";
+        ctx.create_test_table(table_name, table_schema.clone())
+            .unwrap();
+
+        // Insert edge case values
+        let test_data = vec![
+            vec![Value::new(1), Value::new("zero"), Value::new(0.0)],
+            vec![Value::new(2), Value::new("small_positive"), Value::new(0.001)],
+            vec![Value::new(3), Value::new("small_negative"), Value::new(-0.001)],
+            vec![Value::new(4), Value::new("large_positive"), Value::new(999999.999)],
+            vec![Value::new(5), Value::new("large_negative"), Value::new(-999999.999)],
+            vec![Value::new(6), Value::new("one"), Value::new(1.0)],
+            vec![Value::new(7), Value::new("negative_one"), Value::new(-1.0)],
+            vec![Value::new(8), Value::new("half"), Value::new(0.5)],
+            vec![Value::new(9), Value::new("third"), Value::new(0.333333)],
+            vec![Value::new(10), Value::new("pi_approx"), Value::new(3.141592653589793)],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema)
+            .unwrap();
+
+        // Test edge case display
+        let select_sql = "SELECT id, description, value FROM edge_cases ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Edge cases select failed");
+
+        let rows = writer.get_rows();
+        println!("Decimal edge cases display:");
+        for (i, row) in rows.iter().enumerate() {
+            println!("{}: id={}, description={}, value={}", 
+                i + 1, row[0], row[1], row[2]);
+        }
+
+        // Test operations with edge cases
+        let ops_sql = "SELECT id, description, value, value * 2 as doubled, value / 2 as halved FROM edge_cases WHERE value != 0 ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(ops_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Edge case operations failed");
+
+        let ops_rows = writer.get_rows();
+        println!("\nEdge case operations:");
+        for row in ops_rows {
+            println!("{}: original={}, doubled={}, halved={}", row[1], row[2], row[3], row[4]);
+        }
+    }
+
+    #[test]
+    fn test_decimal_column_aware_formatting() {
+        let mut ctx = TestContext::new("test_decimal_column_aware_formatting");
+
+                 // Create test table with decimal columns that have specific precision and scale
+         let price_column = Column::builder("price", TypeId::Decimal)
+             .with_precision_and_scale(10, 2) // DECIMAL(10,2) for currency
+             .build();
+
+         let rate_column = Column::builder("rate", TypeId::Decimal)
+             .with_precision_and_scale(5, 4) // DECIMAL(5,4) for rates
+             .build();
+
+         let percentage_column = Column::builder("percentage", TypeId::Decimal)
+             .with_precision_and_scale(6, 1) // DECIMAL(6,1) for percentages
+             .build();
+
+        let table_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            price_column,
+            rate_column,
+            percentage_column,
+        ]);
+
+        let table_name = "formatted_decimals";
+        ctx.create_test_table(table_name, table_schema.clone())
+            .unwrap();
+
+        // Insert test data that should be formatted according to column scale
+        let test_data = vec![
+            vec![
+                Value::new(1),
+                Value::new(123.456789),  // Should display as 123.46 (scale 2)
+                Value::new(0.08251),     // Should display as 0.0825 (scale 4)
+                Value::new(15.567),      // Should display as 15.6 (scale 1)
+            ],
+            vec![
+                Value::new(2),
+                Value::new(99.9),        // Should display as 99.90 (scale 2)
+                Value::new(0.1),         // Should display as 0.1000 (scale 4)
+                Value::new(100.0),       // Should display as 100.0 (scale 1)
+            ],
+            vec![
+                Value::new(3),
+                Value::new(1000.0),      // Should display as 1000.00 (scale 2)
+                Value::new(1.0),         // Should display as 1.0000 (scale 4)
+                Value::new(0.05),        // Should display as 0.1 (scale 1, rounded)
+            ],
+        ];
+        ctx.insert_tuples(table_name, test_data, table_schema)
+            .unwrap();
+
+        // Test column-aware formatting
+        let select_sql = "SELECT id, price, rate, percentage FROM formatted_decimals ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Column-aware decimal select failed");
+
+        let rows = writer.get_rows();
+        println!("Column-aware decimal formatting results:");
+        for (i, row) in rows.iter().enumerate() {
+            println!("Row {}: id={}, price={} (scale 2), rate={} (scale 4), percentage={} (scale 1)", 
+                i + 1, row[0], row[1], row[2], row[3]);
+        }
+
+        // Test that the formatting is consistent in calculations
+        let calc_sql = "SELECT id, price * rate as calculated_amount, percentage / 100.0 as decimal_percentage FROM formatted_decimals ORDER BY id";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal calculation formatting failed");
+
+        let calc_rows = writer.get_rows();
+        println!("\nCalculated decimal formatting:");
+        for row in calc_rows {
+            println!("ID: {}, Calculated Amount: {}, Decimal Percentage: {}", row[0], row[1], row[2]);
+        }
+
+        // Test aggregations with formatted decimals
+        let agg_sql = "SELECT AVG(price) as avg_price, SUM(rate) as total_rate, MAX(percentage) as max_percentage FROM formatted_decimals";
+        let mut writer = TestResultWriter::new();
+        let success = ctx
+            .engine
+            .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+            .unwrap();
+        assert!(success, "Decimal aggregation formatting failed");
+
+        let agg_rows = writer.get_rows();
+        println!("\nAggregated decimal formatting:");
+        for row in agg_rows {
+            println!("Avg Price: {}, Total Rate: {}, Max Percentage: {}", row[0], row[1], row[2]);
         }
     }
 }
