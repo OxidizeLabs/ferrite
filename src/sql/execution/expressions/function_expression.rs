@@ -40,7 +40,7 @@ impl FunctionExpression {
                     TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                         Ok(Column::new(func_name, TypeId::BigInt))
                     }
-                    TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
+                    TypeId::Decimal | TypeId::Float => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
             }

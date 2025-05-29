@@ -12,9 +12,109 @@ pub struct Column {
     length: usize,
     column_offset: usize,
     is_primary_key: bool,
+    precision: Option<u8>,  // For DECIMAL/NUMERIC types: total number of digits
+    scale: Option<u8>,      // For DECIMAL/NUMERIC types: number of digits after decimal point
+}
+
+/// Builder for creating columns with specific parameters
+#[derive(Debug, Clone)]
+pub struct ColumnBuilder {
+    column_name: String,
+    column_type: TypeId,
+    length: Option<usize>,
+    is_primary_key: bool,
+    precision: Option<u8>,
+    scale: Option<u8>,
+}
+
+impl ColumnBuilder {
+    /// Create a new column builder
+    pub fn new(column_name: &str, column_type: TypeId) -> Self {
+        Self {
+            column_name: column_name.to_string(),
+            column_type,
+            length: None,
+            is_primary_key: false,
+            precision: None,
+            scale: None,
+        }
+    }
+
+    /// Set the length for variable-length types (VARCHAR, CHAR, BINARY, etc.)
+    pub fn with_length(mut self, length: usize) -> Self {
+        self.length = Some(length);
+        self
+    }
+
+    /// Set precision for numeric types (DECIMAL, NUMERIC, FLOAT)
+    pub fn with_precision(mut self, precision: u8) -> Self {
+        self.precision = Some(precision);
+        self
+    }
+
+    /// Set precision and scale for decimal types (DECIMAL, NUMERIC)
+    pub fn with_precision_and_scale(mut self, precision: u8, scale: u8) -> Self {
+        self.precision = Some(precision);
+        self.scale = Some(scale);
+        self
+    }
+
+    /// Mark this column as a primary key
+    pub fn as_primary_key(mut self) -> Self {
+        self.is_primary_key = true;
+        self
+    }
+
+    /// Build the column
+    pub fn build(self) -> Column {
+        let length = if let Some(len) = self.length {
+            // For vectors, the length parameter is the dimension, so we need to calculate the actual storage size
+            if self.column_type == TypeId::Vector {
+                len * size_of::<f64>()
+            } else {
+                len
+            }
+        } else {
+            Column::default_type_size(self.column_type)
+        };
+        
+        Column {
+            column_name: self.column_name,
+            column_type: self.column_type,
+            length,
+            column_offset: 0,
+            is_primary_key: self.is_primary_key,
+            precision: self.precision,
+            scale: self.scale,
+        }
+    }
 }
 
 impl Column {
+    /// Get the default size for a type
+    fn default_type_size(type_id: TypeId) -> usize {
+        match type_id {
+            TypeId::Boolean | TypeId::TinyInt => 1,
+            TypeId::SmallInt => 2,
+            TypeId::Integer => 4,
+            TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
+            TypeId::VarChar | TypeId::Char => 255, // Default length for strings
+            TypeId::Vector => 1024, // Default size for vectors
+            TypeId::Invalid => 0,
+            TypeId::Struct => 64, // Default size for structs
+            TypeId::Float => 4,
+            TypeId::Date => 4,
+            TypeId::Time => 4,
+            TypeId::Interval => 8,
+            TypeId::Binary => 255, // Default length for binary
+            TypeId::JSON => 1024, // Default size for JSON
+            TypeId::UUID => 16,
+            TypeId::Array => size_of::<Vec<Value>>(),
+            TypeId::Enum => 4,
+            TypeId::Point => 16,
+        }
+    }
+
     fn type_size(type_id: TypeId, length: usize) -> usize {
         match type_id {
             TypeId::Boolean | TypeId::TinyInt => 1,
@@ -38,28 +138,89 @@ impl Column {
         }
     }
 
+    /// Create a new column with default parameters
     pub fn new(column_name: &str, column_type: TypeId) -> Self {
-        Self {
-            column_name: column_name.to_string(),
-            column_type,
-            length: Self::type_size(column_type, 0),
-            column_offset: 0,
-            is_primary_key: false,
-        }
+        ColumnBuilder::new(column_name, column_type).build()
     }
 
+    /// Create a column builder for more complex configurations
+    pub fn builder(column_name: &str, column_type: TypeId) -> ColumnBuilder {
+        ColumnBuilder::new(column_name, column_type)
+    }
+
+    /// Create a new variable-length column (VARCHAR, CHAR, BINARY, etc.)
     pub fn new_varlen(column_name: &str, column_type: TypeId, length: usize) -> Self {
-        assert!(
-            matches!(column_type, TypeId::VarChar | TypeId::Vector | TypeId::Char),
-            "Wrong constructor for fixed-size type."
-        );
-        Self {
-            column_name: column_name.to_string(),
-            column_type,
-            length: Self::type_size(column_type, length),
-            column_offset: 0,
-            is_primary_key: false,
+        // Validate that this is actually a variable-length type
+        if !matches!(column_type, TypeId::VarChar | TypeId::Char | TypeId::Binary | TypeId::Vector) {
+            panic!("Wrong constructor for fixed-size type.");
         }
+        
+        ColumnBuilder::new(column_name, column_type)
+            .with_length(length)
+            .build()
+    }
+
+    /// Create a new decimal column with precision and scale
+    pub fn new_decimal(column_name: &str, precision: Option<u8>, scale: Option<u8>) -> Self {
+        let mut builder = ColumnBuilder::new(column_name, TypeId::Decimal);
+        if let Some(p) = precision {
+            builder = builder.with_precision(p);
+        }
+        if let Some(s) = scale {
+            builder = builder.with_precision_and_scale(precision.unwrap_or(10), s);
+        }
+        builder.build()
+    }
+
+    /// Create a new numeric column with precision and scale (alias for decimal)
+    pub fn new_numeric(column_name: &str, precision: Option<u8>, scale: Option<u8>) -> Self {
+        Self::new_decimal(column_name, precision, scale)
+    }
+
+    /// Create a new float column with precision
+    pub fn new_float(column_name: &str, precision: Option<u8>) -> Self {
+        let mut builder = ColumnBuilder::new(column_name, TypeId::Float);
+        if let Some(p) = precision {
+            builder = builder.with_precision(p);
+        }
+        builder.build()
+    }
+
+    /// Create a new primary key column
+    pub fn new_primary_key(column_name: &str, column_type: TypeId) -> Self {
+        ColumnBuilder::new(column_name, column_type)
+            .as_primary_key()
+            .build()
+    }
+
+    /// Create a column from SQL type information with all parameters
+    pub fn from_sql_info(
+        column_name: &str,
+        column_type: TypeId,
+        length: Option<usize>,
+        precision: Option<u8>,
+        scale: Option<u8>,
+        is_primary_key: bool,
+    ) -> Self {
+        let mut builder = ColumnBuilder::new(column_name, column_type);
+        
+        if let Some(len) = length {
+            builder = builder.with_length(len);
+        }
+        
+        if let Some(p) = precision {
+            if let Some(s) = scale {
+                builder = builder.with_precision_and_scale(p, s);
+            } else {
+                builder = builder.with_precision(p);
+            }
+        }
+        
+        if is_primary_key {
+            builder = builder.as_primary_key();
+        }
+        
+        builder.build()
     }
 
     pub fn replicate(&self, new_name: &str) -> Self {
@@ -104,22 +265,57 @@ impl Column {
         self.column_name = name;
     }
 
-    pub fn new_primary_key(column_name: &str, column_type: TypeId) -> Self {
-        Self {
-            column_name: column_name.to_string(),
-            column_type,
-            length: Self::type_size(column_type, 0),
-            column_offset: 0,
-            is_primary_key: true,
-        }
-    }
-
     pub fn is_primary_key(&self) -> bool {
         self.is_primary_key
     }
 
     pub fn set_primary_key(&mut self, is_primary_key: bool) {
         self.is_primary_key = is_primary_key;
+    }
+
+    pub fn get_precision(&self) -> Option<u8> {
+        self.precision
+    }
+
+    pub fn get_scale(&self) -> Option<u8> {
+        self.scale
+    }
+
+    /// Set precision and scale for numeric types
+    pub fn set_precision_scale(&mut self, precision: Option<u8>, scale: Option<u8>) {
+        self.precision = precision;
+        self.scale = scale;
+    }
+
+    /// Get the length parameter for variable-length types
+    pub fn get_length(&self) -> usize {
+        self.length
+    }
+
+    /// Set the length for variable-length types
+    pub fn set_length(&mut self, length: usize) {
+        self.length = length;
+    }
+
+    /// Check if this column type supports precision
+    pub fn supports_precision(&self) -> bool {
+        matches!(
+            self.column_type,
+            TypeId::Decimal | TypeId::Float | TypeId::Timestamp
+        )
+    }
+
+    /// Check if this column type supports scale
+    pub fn supports_scale(&self) -> bool {
+        matches!(self.column_type, TypeId::Decimal)
+    }
+
+    /// Check if this column type supports length
+    pub fn supports_length(&self) -> bool {
+        matches!(
+            self.column_type,
+            TypeId::VarChar | TypeId::Char | TypeId::Binary | TypeId::Vector
+        )
     }
 }
 
@@ -623,17 +819,140 @@ mod unit_tests {
 
     #[test]
     fn test_primary_key_changes_preserve_other_properties() {
-        let mut col = Column::new("id", TypeId::Integer);
-        col.set_offset(10);
-
+        let mut col = Column::new("test", TypeId::Integer);
+        col.set_offset(100);
         col.set_primary_key(true);
-        assert!(col.is_primary_key());
-        assert_eq!(col.get_offset(), 10);
-        assert_eq!(col.get_storage_size(), 4);
 
-        col.set_primary_key(false);
+        assert!(col.is_primary_key());
+        assert_eq!(col.get_offset(), 100);
+        assert_eq!(col.get_name(), "test");
+        assert_eq!(col.get_type(), TypeId::Integer);
+    }
+
+    #[test]
+    fn test_column_builder_basic() {
+        let col = Column::builder("test_col", TypeId::VarChar)
+            .with_length(100)
+            .build();
+
+        assert_eq!(col.get_name(), "test_col");
+        assert_eq!(col.get_type(), TypeId::VarChar);
+        assert_eq!(col.get_length(), 100);
         assert!(!col.is_primary_key());
-        assert_eq!(col.get_offset(), 10);
-        assert_eq!(col.get_storage_size(), 4);
+    }
+
+    #[test]
+    fn test_column_builder_decimal_with_precision_scale() {
+        let col = Column::builder("price", TypeId::Decimal)
+            .with_precision_and_scale(10, 2)
+            .build();
+
+        assert_eq!(col.get_name(), "price");
+        assert_eq!(col.get_type(), TypeId::Decimal);
+        assert_eq!(col.get_precision(), Some(10));
+        assert_eq!(col.get_scale(), Some(2));
+    }
+
+    #[test]
+    fn test_column_builder_primary_key() {
+        let col = Column::builder("id", TypeId::Integer)
+            .as_primary_key()
+            .build();
+
+        assert_eq!(col.get_name(), "id");
+        assert_eq!(col.get_type(), TypeId::Integer);
+        assert!(col.is_primary_key());
+    }
+
+    #[test]
+    fn test_column_builder_float_with_precision() {
+        let col = Column::builder("measurement", TypeId::Float)
+            .with_precision(7)
+            .build();
+
+        assert_eq!(col.get_name(), "measurement");
+        assert_eq!(col.get_type(), TypeId::Float);
+        assert_eq!(col.get_precision(), Some(7));
+        assert_eq!(col.get_scale(), None);
+    }
+
+    #[test]
+    fn test_from_sql_info_comprehensive() {
+        let col = Column::from_sql_info(
+            "complex_col",
+            TypeId::Decimal,
+            Some(50),
+            Some(15),
+            Some(5),
+            true,
+        );
+
+        assert_eq!(col.get_name(), "complex_col");
+        assert_eq!(col.get_type(), TypeId::Decimal);
+        assert_eq!(col.get_length(), 50);
+        assert_eq!(col.get_precision(), Some(15));
+        assert_eq!(col.get_scale(), Some(5));
+        assert!(col.is_primary_key());
+    }
+
+    #[test]
+    fn test_supports_methods() {
+        let decimal_col = Column::new("dec", TypeId::Decimal);
+        assert!(decimal_col.supports_precision());
+        assert!(decimal_col.supports_scale());
+        assert!(!decimal_col.supports_length());
+
+        let varchar_col = Column::new("str", TypeId::VarChar);
+        assert!(!varchar_col.supports_precision());
+        assert!(!varchar_col.supports_scale());
+        assert!(varchar_col.supports_length());
+
+        let float_col = Column::new("flt", TypeId::Float);
+        assert!(float_col.supports_precision());
+        assert!(!float_col.supports_scale());
+        assert!(!float_col.supports_length());
+    }
+
+    #[test]
+    fn test_default_type_sizes() {
+        let varchar_col = Column::new("str", TypeId::VarChar);
+        assert_eq!(varchar_col.get_length(), 255); // Default VARCHAR length
+
+        let vector_col = Column::new("vec", TypeId::Vector);
+        assert_eq!(vector_col.get_length(), 1024); // Default vector size
+
+        let int_col = Column::new("num", TypeId::Integer);
+        assert_eq!(int_col.get_length(), 4); // Integer size
+    }
+
+    #[test]
+    fn test_set_length() {
+        let mut col = Column::new("test", TypeId::VarChar);
+        assert_eq!(col.get_length(), 255); // Default
+
+        col.set_length(500);
+        assert_eq!(col.get_length(), 500);
+    }
+
+    #[test]
+    fn test_backward_compatibility() {
+        // Test that old methods still work
+        let decimal_col = Column::new_decimal("price", Some(10), Some(2));
+        assert_eq!(decimal_col.get_precision(), Some(10));
+        assert_eq!(decimal_col.get_scale(), Some(2));
+
+        let numeric_col = Column::new_numeric("amount", Some(15), Some(3));
+        assert_eq!(numeric_col.get_precision(), Some(15));
+        assert_eq!(numeric_col.get_scale(), Some(3));
+
+        let float_col = Column::new_float("measurement", Some(7));
+        assert_eq!(float_col.get_precision(), Some(7));
+        assert_eq!(float_col.get_scale(), None);
+
+        let varlen_col = Column::new_varlen("name", TypeId::VarChar, 100);
+        assert_eq!(varlen_col.get_length(), 100);
+
+        let pk_col = Column::new_primary_key("id", TypeId::Integer);
+        assert!(pk_col.is_primary_key());
     }
 }

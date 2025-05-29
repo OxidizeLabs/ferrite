@@ -44,6 +44,7 @@ pub struct AggregationExecutor {
     group_by_exprs: Vec<Arc<Expression>>,
     aggregate_exprs: Vec<Arc<Expression>>,
     groups: HashMap<GroupKey, AggregateValues>,
+    avg_counts: HashMap<(GroupKey, usize), i64>, // Track counts for AVG aggregates (group_key, agg_index) -> count
     output_schema: Schema,
     exec_ctx: Arc<RwLock<ExecutionContext>>,
     initialized: bool,
@@ -62,6 +63,7 @@ impl AggregationExecutor {
             group_by_exprs: plan.get_group_bys().iter().cloned().collect(),
             aggregate_exprs: plan.get_aggregates().iter().cloned().collect(),
             groups: HashMap::new(),
+            avg_counts: HashMap::new(),
             groups_to_return: Vec::new(),
             output_schema: plan.get_output_schema().clone(),
             initialized: false,
@@ -70,6 +72,7 @@ impl AggregationExecutor {
 
     fn compute_aggregate(
         agg_map: &mut HashMap<GroupKey, AggregateValues>,
+        avg_counts: &mut HashMap<(GroupKey, usize), i64>,
         aggregates: &[Arc<Expression>],
         key: GroupKey,
         tuple: &Tuple,
@@ -78,7 +81,7 @@ impl AggregationExecutor {
         debug!("Computing aggregate for key: {:?}", key);
         debug!("Number of aggregates: {}", aggregates.len());
 
-        let agg_value = agg_map.entry(key).or_insert_with(|| AggregateValues {
+        let agg_value = agg_map.entry(key.clone()).or_insert_with(|| AggregateValues {
             values: vec![Value::from(TypeId::Invalid); aggregates.len()],
         });
 
@@ -135,6 +138,23 @@ impl AggregationExecutor {
                                 }
                             }
                         }
+                        AggregationType::Avg => {
+                            let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
+                            if !arg_val.is_null() {
+                                // Track count for this average
+                                let count_key = (key.clone(), i);
+                                let current_count = avg_counts.entry(count_key).or_insert(0);
+                                *current_count += 1;
+                                
+                                if agg_value.values[i].is_null() {
+                                    // First value - store as sum
+                                    agg_value.values[i] = arg_val;
+                                } else {
+                                    // Add to the sum
+                                    agg_value.values[i] = agg_value.values[i].add(&arg_val)?;
+                                }
+                            }
+                        }
                         _ => {
                             return Err(format!(
                                 "Unsupported aggregate type: {:?}",
@@ -167,6 +187,7 @@ impl AbstractExecutor for AggregationExecutor {
         if !self.initialized {
             self.child.init();
             self.groups.clear();
+            self.avg_counts.clear();
 
             // For empty input with no group by, create a single group with default values
             let mut has_rows = false;
@@ -187,7 +208,7 @@ impl AbstractExecutor for AggregationExecutor {
 
                 // Update aggregates for this group
                 if let Err(e) =
-                    Self::compute_aggregate(&mut self.groups, &aggregates, key, &tuple, schema)
+                    Self::compute_aggregate(&mut self.groups, &mut self.avg_counts, &aggregates, key, &tuple, schema)
                 {
                     error!("Error computing aggregate: {}", e);
                 }
@@ -250,7 +271,30 @@ impl AbstractExecutor for AggregationExecutor {
         }
 
         // Take the next group from the Vec
-        if let Some((key, value)) = self.groups_to_return.pop() {
+        if let Some((key, mut value)) = self.groups_to_return.pop() {
+            // Process Average aggregates: divide sum by count
+            for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
+                if let Expression::Aggregate(agg) = agg_expr.as_ref() {
+                    if let AggregationType::Avg = agg.get_agg_type() {
+                        // Find the count for this average
+                        if let Some(&count) = self.avg_counts.get(&(key.clone(), i)) {
+                            if count > 0 && !value.values[i].is_null() {
+                                // Divide sum by count to get average
+                                let count_value = Value::new(count as f64);
+                                match value.values[i].divide(&count_value) {
+                                    Ok(avg_result) => value.values[i] = avg_result,
+                                    Err(_) => value.values[i] = Value::new(Val::Null),
+                                }
+                            } else {
+                                value.values[i] = Value::new(Val::Null);
+                            }
+                        } else {
+                            value.values[i] = Value::new(Val::Null);
+                        }
+                    }
+                }
+            }
+            
             let mut values = Vec::new();
             values.extend(key.values.iter().cloned());
             values.extend(value.values.iter().cloned());

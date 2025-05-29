@@ -103,27 +103,32 @@ impl ProjectionExecutor {
     ) -> Result<Vec<Value>, ExpressionError> {
         let mut values = Vec::with_capacity(self.plan.get_expressions().len());
         let input_schema = self.child_executor.get_output_schema();
+        let column_mappings = self.plan.get_children_indices();
+        let mut mapping_index = 0; // Track position in column_mappings array
 
-        for (i, expr) in self.plan.get_expressions().iter().enumerate() {
+        for (expr_index, expr) in self.plan.get_expressions().iter().enumerate() {
             match expr.as_ref() {
                 Expression::Aggregate(_) => {
-                    // For aggregate expressions, just pass through the value
-                    values.push(tuple.get_value(i).clone());
+                    // For aggregate expressions, use the tuple index directly
+                    // Aggregates don't use column mappings - they produce their own values
+                    values.push(tuple.get_value(expr_index).clone());
                 }
                 Expression::ColumnRef(_) => {
-                    // Use the pre-computed column mapping
-                    if let Some(idx) = self.plan.get_children_indices().get(i) {
-                        values.push(tuple.get_value(*idx).clone());
+                    // Use the pre-computed column mapping for ColumnRef expressions
+                    if mapping_index < column_mappings.len() {
+                        values.push(tuple.get_value(column_mappings[mapping_index]).clone());
+                        mapping_index += 1;
                     } else {
                         return Err(ExpressionError::InvalidOperation(
-                            "Column mapping not found".to_string(),
+                            "Column mapping not found for ColumnRef".to_string(),
                         ));
                     }
                 }
                 _ => {
-                    // For other expressions, evaluate normally
+                    // For other expressions (CASE, arithmetic, literals, etc.), evaluate normally
                     let value = expr.evaluate(tuple, input_schema)?;
                     values.push(value);
+                    // No increment of mapping_index for non-ColumnRef expressions
                 }
             }
         }

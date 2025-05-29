@@ -4,7 +4,7 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::types_db::type_id::TypeId;
 use log;
 use log::debug;
-use sqlparser::ast::{ColumnDef, DataType, Expr};
+use sqlparser::ast::{ColumnDef, DataType, Expr, ExactNumberInfo};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -87,19 +87,89 @@ impl SchemaManager {
             let column_name = col_def.name.to_string();
             let type_id = self.convert_sql_type(&col_def.data_type)?;
 
-            // Handle VARCHAR/STRING types specifically with length
-            let column = match &col_def.data_type {
-                DataType::Varchar(_) | DataType::String(_) => {
-                    // Default length for variable length types
-                    Column::new_varlen(&column_name, type_id, 255)
-                }
-                _ => Column::new(&column_name, type_id),
-            };
-
+            // Extract type-specific parameters and create column
+            let column = self.create_column_from_sql_type(&column_name, &col_def.data_type, type_id)?;
             columns.push(column);
         }
 
         Ok(columns)
+    }
+
+    /// Create a column from SQL DataType with all parameters
+    fn create_column_from_sql_type(
+        &self,
+        column_name: &str,
+        sql_type: &DataType,
+        type_id: TypeId,
+    ) -> Result<Column, String> {
+        match sql_type {
+            // Decimal/Numeric types with precision and scale
+            DataType::Decimal(exact_info) | DataType::Numeric(exact_info) => {
+                let (precision, scale) = self.extract_precision_scale(exact_info)?;
+                Ok(Column::from_sql_info(column_name, type_id, None, precision, scale, false))
+            }
+            
+            // Float types with precision
+            DataType::Float(precision) => {
+                let prec = precision.map(|p| {
+                    if p > u8::MAX as u64 { u8::MAX } else { p as u8 }
+                });
+                Ok(Column::from_sql_info(column_name, type_id, None, prec, None, false))
+            }
+            
+            // Variable length string types - use default lengths for now
+            DataType::Varchar(_) | DataType::String(_) => {
+                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false))
+            }
+            DataType::Char(_) => {
+                Ok(Column::from_sql_info(column_name, type_id, Some(1), None, None, false))
+            }
+            
+            // Binary types - use default lengths for now
+            DataType::Binary(_) | DataType::Varbinary(_) | DataType::Blob(_) => {
+                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false))
+            }
+            
+            // Integer types with optional display width (we ignore display width for now)
+            DataType::TinyInt(_) | DataType::SmallInt(_) | DataType::Int(_) | 
+            DataType::Integer(_) | DataType::BigInt(_) => {
+                Ok(Column::from_sql_info(column_name, type_id, None, None, None, false))
+            }
+            
+            // Array types
+            DataType::Array(_) => {
+                // Default array size, could be made configurable
+                Ok(Column::from_sql_info(column_name, type_id, Some(1024), None, None, false))
+            }
+            
+            // All other types use default parameters
+            _ => Ok(Column::from_sql_info(column_name, type_id, None, None, None, false)),
+        }
+    }
+
+    /// Extract precision and scale from ExactNumberInfo
+    fn extract_precision_scale(&self, exact_info: &ExactNumberInfo) -> Result<(Option<u8>, Option<u8>), String> {
+        match exact_info {
+            ExactNumberInfo::None => Ok((None, None)),
+            ExactNumberInfo::Precision(precision) => {
+                if *precision > u8::MAX as u64 {
+                    return Err(format!("Precision {} is too large (max {})", precision, u8::MAX));
+                }
+                Ok((Some(*precision as u8), None))
+            }
+            ExactNumberInfo::PrecisionAndScale(precision, scale) => {
+                if *precision > u8::MAX as u64 {
+                    return Err(format!("Precision {} is too large (max {})", precision, u8::MAX));
+                }
+                if *scale > u8::MAX as u64 {
+                    return Err(format!("Scale {} is too large (max {})", scale, u8::MAX));
+                }
+                if *scale > *precision {
+                    return Err(format!("Scale {} cannot be greater than precision {}", scale, precision));
+                }
+                Ok((Some(*precision as u8), Some(*scale as u8)))
+            }
+        }
     }
 
     pub fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
@@ -136,7 +206,8 @@ impl SchemaManager {
             DataType::SmallInt(_) => Ok(TypeId::SmallInt),
             DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
             DataType::BigInt(_) => Ok(TypeId::BigInt),
-            DataType::Decimal(_) | DataType::Float(_) => Ok(TypeId::Decimal),
+            DataType::Decimal(precision_scale) => Ok(TypeId::Decimal),
+            DataType::Float(_) => Ok(TypeId::Float),
             DataType::Varchar(_) | DataType::String(_) | DataType::Text | DataType::Char(_) => {
                 Ok(TypeId::VarChar)
             }
@@ -968,5 +1039,105 @@ mod tests {
         // Test numeric type compatibility
         assert!(!manager.types_compatible(TypeId::Integer, TypeId::BigInt));
         assert!(!manager.types_compatible(TypeId::SmallInt, TypeId::Integer));
+    }
+
+    #[test]
+    fn test_extract_precision_scale() {
+        let schema_manager = SchemaManager::new();
+
+        // Test None case
+        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::None).unwrap();
+        assert_eq!(result, (None, None));
+
+        // Test Precision only
+        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::Precision(10)).unwrap();
+        assert_eq!(result, (Some(10), None));
+
+        // Test Precision and Scale
+        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(15, 5)).unwrap();
+        assert_eq!(result, (Some(15), Some(5)));
+
+        // Test error cases
+        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::Precision(300));
+        assert!(result.is_err());
+
+        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(10, 15));
+        assert!(result.is_err()); // Scale > Precision
+    }
+
+    #[test]
+    fn test_create_column_from_sql_type_decimal() {
+        let schema_manager = SchemaManager::new();
+
+        // Test DECIMAL with precision and scale
+        let decimal_type = DataType::Decimal(ExactNumberInfo::PrecisionAndScale(10, 2));
+        let column = schema_manager.create_column_from_sql_type("price", &decimal_type, TypeId::Decimal).unwrap();
+        
+        assert_eq!(column.get_name(), "price");
+        assert_eq!(column.get_type(), TypeId::Decimal);
+        assert_eq!(column.get_precision(), Some(10));
+        assert_eq!(column.get_scale(), Some(2));
+
+        // Test DECIMAL with precision only
+        let decimal_type = DataType::Decimal(ExactNumberInfo::Precision(8));
+        let column = schema_manager.create_column_from_sql_type("amount", &decimal_type, TypeId::Decimal).unwrap();
+        
+        assert_eq!(column.get_name(), "amount");
+        assert_eq!(column.get_type(), TypeId::Decimal);
+        assert_eq!(column.get_precision(), Some(8));
+        assert_eq!(column.get_scale(), None);
+
+        // Test DECIMAL with no precision/scale
+        let decimal_type = DataType::Decimal(ExactNumberInfo::None);
+        let column = schema_manager.create_column_from_sql_type("value", &decimal_type, TypeId::Decimal).unwrap();
+        
+        assert_eq!(column.get_name(), "value");
+        assert_eq!(column.get_type(), TypeId::Decimal);
+        assert_eq!(column.get_precision(), None);
+        assert_eq!(column.get_scale(), None);
+    }
+
+    #[test]
+    fn test_create_column_from_sql_type_varchar() {
+        let schema_manager = SchemaManager::new();
+
+        // Test VARCHAR (uses default length for now)
+        let varchar_type = DataType::Varchar(None);
+        let column = schema_manager.create_column_from_sql_type("name", &varchar_type, TypeId::VarChar).unwrap();
+        
+        assert_eq!(column.get_name(), "name");
+        assert_eq!(column.get_type(), TypeId::VarChar);
+        assert_eq!(column.get_length(), 255); // Default length
+
+        // Test CHAR (uses default length for now)
+        let char_type = DataType::Char(None);
+        let column = schema_manager.create_column_from_sql_type("code", &char_type, TypeId::Char).unwrap();
+        
+        assert_eq!(column.get_name(), "code");
+        assert_eq!(column.get_type(), TypeId::Char);
+        assert_eq!(column.get_length(), 1); // Default length
+    }
+
+    #[test]
+    fn test_create_column_from_sql_type_float() {
+        let schema_manager = SchemaManager::new();
+
+        // Test FLOAT with precision
+        let float_type = DataType::Float(Some(7));
+        let column = schema_manager.create_column_from_sql_type("measurement", &float_type, TypeId::Float).unwrap();
+        
+        assert_eq!(column.get_name(), "measurement");
+        assert_eq!(column.get_type(), TypeId::Float);
+        assert_eq!(column.get_precision(), Some(7));
+        assert_eq!(column.get_scale(), None);
+
+        // Test FLOAT without precision
+        let float_type = DataType::Float(None);
+        let column = schema_manager.create_column_from_sql_type("ratio", &float_type, TypeId::Float).unwrap();
+        
+        assert_eq!(column.get_name(), "ratio");
+        assert_eq!(column.get_type(), TypeId::Float);
+        assert_eq!(column.get_precision(), None);
+        assert_eq!(column.get_scale(), None);
     }
 }
