@@ -7,6 +7,7 @@ use tkdb::common::exception::DBError;
 use tkdb::common::result_writer::ResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::types_db::value::Value;
+use tkdb::catalog::schema::Schema;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -125,6 +126,7 @@ impl TKDBTest {
 struct TestResultWriter {
     column_names: Vec<String>,
     rows: Vec<Vec<Value>>,
+    schema: Option<Schema>,
 }
 
 impl TestResultWriter {
@@ -132,6 +134,7 @@ impl TestResultWriter {
         Self {
             column_names: Vec::new(),
             rows: Vec::new(),
+            schema: None,
         }
     }
 }
@@ -142,6 +145,11 @@ impl ResultWriter for TestResultWriter {
     }
 
     fn write_row(&mut self, values: Vec<Value>) {
+        self.rows.push(values);
+    }
+
+    fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema) {
+        self.schema = Some(schema.clone());
         self.rows.push(values);
     }
 
@@ -172,7 +180,24 @@ impl DB for TKDBTest {
                         let rows: Vec<Vec<String>> = writer
                             .rows
                             .into_iter()
-                            .map(|row| row.into_iter().map(|v| v.to_string()).collect())
+                            .map(|row| {
+                                if let Some(ref schema) = writer.schema {
+                                    // Use schema-aware formatting
+                                    row.into_iter()
+                                        .enumerate()
+                                        .map(|(i, v)| {
+                                            if let Some(column) = schema.get_column(i) {
+                                                v.format_with_column_context(Some(column))
+                                            } else {
+                                                v.to_string()
+                                            }
+                                        })
+                                        .collect()
+                                } else {
+                                    // Fallback to default formatting
+                                    row.into_iter().map(|v| v.to_string()).collect()
+                                }
+                            })
                             .collect();
 
                         DBOutput::Rows {
