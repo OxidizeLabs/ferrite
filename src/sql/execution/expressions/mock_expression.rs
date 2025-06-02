@@ -165,7 +165,7 @@ mod tests {
             (TypeId::Integer, "42"),
             (TypeId::BigInt, "42"),
             (TypeId::Decimal, "42"),
-            (TypeId::Timestamp, "0 days 0:0:42 UTC"),
+            (TypeId::Timestamp, "42"),
             (TypeId::VarChar, "test"),
             (TypeId::Vector, "[1, 2, 3]"),
             (TypeId::Struct, "{field1: 42, field2: test}"),
