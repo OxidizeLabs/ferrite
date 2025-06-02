@@ -2,6 +2,7 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
 use log;
 use log::debug;
 use sqlparser::ast::{ColumnDef, DataType, Expr, ExactNumberInfo};
@@ -22,6 +23,21 @@ impl SchemaManager {
         agg_exprs: &[Arc<Expression>],
         has_group_by: bool,
     ) -> Schema {
+        self.create_aggregation_output_schema_with_alias_mapping(
+            group_by_exprs,
+            agg_exprs,
+            has_group_by,
+            None,
+        )
+    }
+
+    pub fn create_aggregation_output_schema_with_alias_mapping(
+        &self,
+        group_by_exprs: &[&Expression],
+        agg_exprs: &[Arc<Expression>],
+        has_group_by: bool,
+        alias_mapping: Option<&std::collections::HashMap<String, String>>,
+    ) -> Schema {
         debug!("Creating aggregation schema:");
         debug!("  Group by expressions: {:?}", group_by_exprs);
         debug!("  Aggregate expressions: {:?}", agg_exprs);
@@ -33,9 +49,17 @@ impl SchemaManager {
         // Add group by columns first if we have them
         if has_group_by {
             for expr in group_by_exprs {
-                let col_name = expr.get_return_type().get_name().to_string();
+                let original_name = expr.get_return_type().get_name().to_string();
+                let col_name = if let Some(mapping) = alias_mapping {
+                    mapping.get(&original_name).cloned().unwrap_or(original_name.clone())
+                } else {
+                    original_name
+                };
+                
                 if seen_columns.insert(col_name.clone()) {
-                    columns.push(expr.get_return_type().clone());
+                    let mut column = expr.get_return_type().clone();
+                    column.set_name(col_name.as_str().parse().unwrap());
+                    columns.push(column);
                 }
             }
         }
@@ -106,7 +130,7 @@ impl SchemaManager {
             // Decimal/Numeric types with precision and scale
             DataType::Decimal(exact_info) | DataType::Numeric(exact_info) => {
                 let (precision, scale) = self.extract_precision_scale(exact_info)?;
-                Ok(Column::from_sql_info(column_name, type_id, None, precision, scale, false))
+                Ok(Column::from_sql_info(column_name, type_id, None, precision, scale, false, false, false, None, None, None))
             }
             
             // Float types with precision
@@ -114,36 +138,36 @@ impl SchemaManager {
                 let prec = precision.map(|p| {
                     if p > u8::MAX as u64 { u8::MAX } else { p as u8 }
                 });
-                Ok(Column::from_sql_info(column_name, type_id, None, prec, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, None, prec, None, false, false, false, None, None, None))
             }
             
             // Variable length string types - use default lengths for now
             DataType::Varchar(_) | DataType::String(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false, false, false, None, None, None))
             }
             DataType::Char(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(1), None, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, Some(1), None, None, false, false, false, None, None, None))
             }
             
             // Binary types - use default lengths for now
             DataType::Binary(_) | DataType::Varbinary(_) | DataType::Blob(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false, false, false, None, None, None))
             }
             
             // Integer types with optional display width (we ignore display width for now)
             DataType::TinyInt(_) | DataType::SmallInt(_) | DataType::Int(_) | 
             DataType::Integer(_) | DataType::BigInt(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, None, None, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, None, None, None, false, false, false, None, None, None))
             }
             
             // Array types
             DataType::Array(_) => {
                 // Default array size, could be made configurable
-                Ok(Column::from_sql_info(column_name, type_id, Some(1024), None, None, false))
+                Ok(Column::from_sql_info(column_name, type_id, Some(1024), None, None, false, false, false, None, None, None))
             }
             
             // All other types use default parameters
-            _ => Ok(Column::from_sql_info(column_name, type_id, None, None, None, false)),
+            _ => Ok(Column::from_sql_info(column_name, type_id, None, None, None, false, false, false, None, None, None)),
         }
     }
 
@@ -423,6 +447,286 @@ impl SchemaManager {
                 ))
             }
             _ => Err(format!("Unknown table alias: {}", table_alias)),
+        }
+    }
+
+    pub fn create_aggregation_output_schema_with_aliases(
+        &self,
+        group_by_exprs: &[&Expression],
+        agg_exprs: &[Arc<Expression>],
+        has_group_by: bool,
+        select_items: &[sqlparser::ast::SelectItem],
+    ) -> Schema {
+        debug!("Creating aggregation schema with aliases:");
+        debug!("  Group by expressions: {:?}", group_by_exprs);
+        debug!("  Aggregate expressions: {:?}", agg_exprs);
+        debug!("  Has GROUP BY: {}", has_group_by);
+
+        let mut columns = Vec::new();
+        let mut seen_columns = HashSet::new();
+
+        // Add group by columns first if we have them
+        if has_group_by {
+            for expr in group_by_exprs {
+                let original_name = expr.get_return_type().get_name();
+                let col_name = self.map_to_alias(original_name, select_items);
+                
+                if seen_columns.insert(col_name.clone()) {
+                    let mut column = expr.get_return_type().clone();
+                    column.set_name(col_name);
+                    columns.push(column);
+                }
+            }
+        }
+
+        // Add aggregate columns
+        for agg_expr in agg_exprs {
+            match agg_expr.as_ref() {
+                Expression::Aggregate(agg) => {
+                    // Use the alias if provided, otherwise generate a name
+                    let col_name = agg.get_column_name();
+                    if seen_columns.insert(col_name.clone()) {
+                        let mut column = agg.get_return_type().clone();
+                        column.set_name(col_name);
+                        columns.push(column);
+                    }
+                }
+                _ => {
+                    let col_name = agg_expr.get_return_type().get_name().to_string();
+                    if seen_columns.insert(col_name.clone()) {
+                        columns.push(agg_expr.get_return_type().clone());
+                    }
+                }
+            }
+        }
+
+        Schema::new(columns)
+    }
+
+    /// Helper method to map original column names to their aliases from the SELECT projection
+    fn map_to_alias(&self, original_name: &str, select_items: &[sqlparser::ast::SelectItem]) -> String {
+        use sqlparser::ast::{SelectItem, Expr};
+        
+        // Try to find the corresponding alias in the SELECT projection
+        for item in select_items {
+            match item {
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    // Check if this projection expression matches our original name
+                    match expr {
+                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                            let qualified_name = format!("{}.{}", parts[0].value, parts[1].value);
+                            if qualified_name == original_name {
+                                return alias.value.clone();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                SelectItem::UnnamedExpr(expr) => {
+                    // Check if this projection expression matches our original name
+                    match expr {
+                        Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                            let qualified_name = format!("{}.{}", parts[0].value, parts[1].value);
+                            if qualified_name == original_name {
+                                // For unnamed expressions, return the original name
+                                return original_name.to_string();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // If no alias found, return the original name
+        original_name.to_string()
+    }
+
+    // Helper method to map qualified column names to their aliases in the SELECT projection
+    pub fn create_column_alias_mapping(
+        &self,
+        select_items: &[sqlparser::ast::SelectItem],
+        group_by_exprs: &[&Expression],
+    ) -> std::collections::HashMap<String, String> {
+        debug!("Creating column alias mapping");
+        let mut alias_map = std::collections::HashMap::new();
+        
+        for item in select_items {
+            match item {
+                sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
+                    // Handle direct aliases like "e.name AS employee"
+                    if let sqlparser::ast::Expr::CompoundIdentifier(idents) = expr {
+                        if idents.len() == 2 {
+                            let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
+                            alias_map.insert(qualified_name, alias.value.clone());
+                        }
+                    }
+                }
+                sqlparser::ast::SelectItem::UnnamedExpr(expr) => {
+                    // For expressions without explicit aliases, check if they match GROUP BY expressions
+                    if let sqlparser::ast::Expr::CompoundIdentifier(idents) = expr {
+                        if idents.len() == 2 {
+                            let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
+                            
+                            // Check if this matches any GROUP BY expression
+                            for group_expr in group_by_exprs {
+                                if let Expression::ColumnRef(col_ref) = group_expr {
+                                    let group_col_name = col_ref.get_return_type().get_name();
+                                    if group_col_name == qualified_name {
+                                        // Use a simplified alias based on the column name
+                                        let simple_name = idents[1].value.clone();
+                                        alias_map.insert(qualified_name, simple_name);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        debug!("Created alias mapping: {:?}", alias_map);
+        alias_map
+    }
+
+    /// Maps values from a source schema to a target schema
+    /// 
+    /// This method handles both name-based and positional mapping:
+    /// - If any column names match between schemas, uses name-based mapping
+    /// - Otherwise, uses positional mapping
+    /// - Fills missing columns with NULL values
+    /// - Performs type casting when necessary
+    pub fn map_values_to_schema(
+        &self,
+        source_values: &[Value],
+        source_schema: &Schema,
+        target_schema: &Schema,
+    ) -> Vec<Value> {
+        let mut target_values = Vec::with_capacity(target_schema.get_column_count() as usize);
+        
+        // If the source schema has fewer columns, use positional mapping
+        if source_schema.get_column_count() < target_schema.get_column_count() {
+            for i in 0..target_schema.get_column_count() {
+                if (i as usize) < source_values.len() {
+                    // Cast value to target type if needed
+                    let target_type = target_schema.get_column(i as usize).unwrap().get_type();
+                    target_values.push(self.cast_value_to_type(&source_values[i as usize], target_type));
+                } else {
+                    // Fill with NULLs for missing columns
+                    let target_type = target_schema.get_column(i as usize).unwrap().get_type();
+                    target_values.push(Value::new_with_type(crate::types_db::value::Val::Null, target_type));
+                }
+            }
+        } else {
+            // First, detect if we should use name-based mapping by checking if any column names match
+            let should_use_name_mapping = self.detect_name_based_mapping(source_schema, target_schema);
+            
+            if should_use_name_mapping {
+                // Use name-based mapping
+                for target_col_idx in 0..target_schema.get_column_count() {
+                    let target_column = target_schema.get_column(target_col_idx as usize)
+                        .expect("Target column should exist");
+                    
+                    // Find matching column in source schema by name
+                    let mapped_value = self.find_value_by_name(
+                        target_column.get_name(),
+                        source_values,
+                        source_schema,
+                        target_column.get_type()
+                    );
+                    
+                    target_values.push(mapped_value);
+                }
+            } else {
+                // Use positional mapping
+                for target_col_idx in 0..target_schema.get_column_count() {
+                    let target_column = target_schema.get_column(target_col_idx as usize)
+                        .expect("Target column should exist");
+                    
+                    let mapped_value = if (target_col_idx as usize) < source_values.len() {
+                        // We have a value at this position - cast it to target type
+                        let source_value = &source_values[target_col_idx as usize];
+                        self.cast_value_to_type(source_value, target_column.get_type())
+                    } else {
+                        // No value at this position, use NULL
+                        Value::new_with_type(
+                            crate::types_db::value::Val::Null,
+                            target_column.get_type(),
+                        )
+                    };
+                    
+                    target_values.push(mapped_value);
+                }
+            }
+        }
+        
+        target_values
+    }
+
+    /// Detects whether name-based mapping should be used by checking for column name matches
+    fn detect_name_based_mapping(&self, source_schema: &Schema, target_schema: &Schema) -> bool {
+        let source_count = source_schema.get_column_count();
+        let mut matching_count = 0;
+        
+        // Count how many source columns have exact matches in target schema
+        for source_col_idx in 0..source_count {
+            let source_column = source_schema.get_column(source_col_idx as usize)
+                .expect("Source column should exist");
+            
+            // Check if this source column name exists in target schema
+            for target_col_idx in 0..target_schema.get_column_count() {
+                let target_column = target_schema.get_column(target_col_idx as usize)
+                    .expect("Target column should exist");
+                if source_column.get_name() == target_column.get_name() {
+                    matching_count += 1;
+                    break; // Found a match, don't double-count
+                }
+            }
+        }
+        
+        // Use name-based mapping only if ALL source columns have matches
+        // This prevents positional mapping being broken by partial matches
+        matching_count == source_count && source_count > 0
+    }
+
+    /// Finds a value by column name in the source schema
+    fn find_value_by_name(
+        &self,
+        target_column_name: &str,
+        source_values: &[Value],
+        source_schema: &Schema,
+        target_type: TypeId,
+    ) -> Value {
+        for source_col_idx in 0..source_schema.get_column_count() {
+            let source_column = source_schema.get_column(source_col_idx as usize)
+                .expect("Source column should exist");
+            if source_column.get_name() == target_column_name {
+                let source_value = &source_values[source_col_idx as usize];
+                return self.cast_value_to_type(source_value, target_type);
+            }
+        }
+        
+        // Column not found, use NULL
+        Value::new_with_type(
+            crate::types_db::value::Val::Null,
+            target_type,
+        )
+    }
+
+    /// Casts a value to the target type, returning NULL if casting fails
+    fn cast_value_to_type(&self, value: &Value, target_type: TypeId) -> Value {
+        match value.cast_to(target_type) {
+            Ok(casted_value) => casted_value,
+            Err(_) => {
+                // If casting fails, use NULL
+                Value::new_with_type(
+                    crate::types_db::value::Val::Null,
+                    target_type,
+                )
+            }
         }
     }
 }
@@ -1139,5 +1443,44 @@ mod tests {
         assert_eq!(column.get_type(), TypeId::Float);
         assert_eq!(column.get_precision(), None);
         assert_eq!(column.get_scale(), None);
+    }
+
+    #[test]
+    fn test_map_values_to_schema_partial_columns() {
+        let manager = SchemaManager::new();
+
+        // Target schema (table): id, name, email, age, salary, active
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("email", TypeId::VarChar),
+            Column::new("age", TypeId::Integer),
+            Column::new("salary", TypeId::BigInt),
+            Column::new("active", TypeId::Boolean),
+        ]);
+
+        // Source schema (SELECT): user_id, user_name, calculated_pay
+        let source_schema = Schema::new(vec![
+            Column::new("user_id", TypeId::Integer),
+            Column::new("user_name", TypeId::VarChar),
+            Column::new("calculated_pay", TypeId::BigInt),
+        ]);
+
+        // Source values: 1, "Alice", 50000
+        let source_values = vec![
+            crate::types_db::value::Value::from(1),
+            crate::types_db::value::Value::from("Alice"),
+            crate::types_db::value::Value::from(50000i64),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should map positionally: id=1, name="Alice", email="50000" (cast from BigInt), age=NULL, salary=NULL, active=NULL
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(1));
+        assert_eq!(mapped[1], crate::types_db::value::Value::from("Alice"));
+        assert_eq!(mapped[2], crate::types_db::value::Value::from("50000")); // Cast BigInt to VarChar
+        assert!(mapped[3].is_null()); // age = NULL
+        assert!(mapped[4].is_null()); // salary = NULL  
+        assert!(mapped[5].is_null()); // active = NULL
     }
 }
