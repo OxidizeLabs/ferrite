@@ -98,7 +98,7 @@ impl ExpressionParser {
                 debug!("Parsing identifier: {}", ident.value);
                 // Look up column in the provided schema
                 let column_idx = schema
-                    .get_column_index(&ident.value)
+                    .get_qualified_column_index(&ident.value)
                     .ok_or_else(|| format!("Column {} not found in schema", ident.value))?;
 
                 let column = schema
@@ -2683,6 +2683,44 @@ impl ExpressionParser {
             expressions.push(Arc::new(parsed_expr));
         }
         Ok(expressions)
+    }
+
+    /// Parse expression that can reference either projection aliases or original columns
+    /// This is useful for ORDER BY clauses that can reference both SELECT list aliases 
+    /// and original column expressions
+    pub fn parse_expression_with_fallback(
+        &self,
+        expr: &Expr,
+        projection_schema: &Schema,
+        original_schema: &Schema,
+    ) -> Result<Expression, String> {
+        debug!("Parsing expression with fallback: {:?}", expr);
+        
+        // First try to parse against the projection schema (for aliases)
+        match self.parse_expression(expr, projection_schema) {
+            Ok(parsed_expr) => {
+                debug!("Successfully parsed expression against projection schema");
+                Ok(parsed_expr)
+            }
+            Err(projection_error) => {
+                debug!("Failed to parse against projection schema: {}", projection_error);
+                // If that fails, try the original schema (for original column references)
+                match self.parse_expression(expr, original_schema) {
+                    Ok(parsed_expr) => {
+                        debug!("Successfully parsed expression against original schema");
+                        Ok(parsed_expr)
+                    }
+                    Err(original_error) => {
+                        debug!("Failed to parse against original schema: {}", original_error);
+                        // Return the more descriptive error
+                        Err(format!(
+                            "Column not found. Tried projection schema: {}. Tried original schema: {}",
+                            projection_error, original_error
+                        ))
+                    }
+                }
+            }
+        }
     }
 
     fn parse_function_arguments(
