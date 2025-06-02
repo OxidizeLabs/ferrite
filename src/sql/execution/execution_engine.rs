@@ -1862,600 +1862,6 @@ mod tests {
         );
     }
 
-    mod update_tests {
-        use super::*;
-
-        #[test]
-        fn test_update_basic_operations() {
-            let mut ctx = TestContext::new("test_update_basic_operations");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("age", TypeId::Integer),
-                Column::new("salary", TypeId::BigInt),
-                Column::new("active", TypeId::Boolean),
-            ]);
-
-            let table_name = "employees";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![
-                    Value::new(1),
-                    Value::new("Alice"),
-                    Value::new(25),
-                    Value::new(50000i64),
-                    Value::new(true),
-                ],
-                vec![
-                    Value::new(2),
-                    Value::new("Bob"),
-                    Value::new(30),
-                    Value::new(60000i64),
-                    Value::new(true),
-                ],
-                vec![
-                    Value::new(3),
-                    Value::new("Charlie"),
-                    Value::new(35),
-                    Value::new(70000i64),
-                    Value::new(false),
-                ],
-                vec![
-                    Value::new(4),
-                    Value::new("David"),
-                    Value::new(40),
-                    Value::new(80000i64),
-                    Value::new(true),
-                ],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Test 1: Basic UPDATE with single column
-            let update_sql = "UPDATE employees SET age = 26 WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Basic update operation failed");
-
-            // Verify the update
-            let select_sql = "SELECT age FROM employees WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "26",
-                "Age should be updated to 26"
-            );
-
-            // Test 2: UPDATE multiple columns
-            let update_sql = "UPDATE employees SET name = 'Alice Smith', salary = 55000 WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Multi-column update operation failed");
-
-            // Verify the multi-column update
-            let select_sql = "SELECT name, salary FROM employees WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let row = &writer.get_rows()[0];
-            assert_eq!(row[0].to_string(), "Alice Smith", "Name should be updated");
-            assert_eq!(row[1].to_string(), "55000", "Salary should be updated");
-
-            // Test 3: UPDATE with boolean value
-            let update_sql = "UPDATE employees SET active = false WHERE id = 2";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Boolean update operation failed");
-
-            // Verify boolean update
-            let select_sql = "SELECT active FROM employees WHERE id = 2";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "false",
-                "Active status should be updated to false"
-            );
-        }
-
-        #[test]
-        fn test_update_with_conditions() {
-            let mut ctx = TestContext::new("test_update_with_conditions");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("age", TypeId::Integer),
-                Column::new("salary", TypeId::BigInt),
-                Column::new("department", TypeId::VarChar),
-            ]);
-
-            let table_name = "employees";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![
-                    Value::new(1),
-                    Value::new("Alice"),
-                    Value::new(25),
-                    Value::new(50000i64),
-                    Value::new("Engineering"),
-                ],
-                vec![
-                    Value::new(2),
-                    Value::new("Bob"),
-                    Value::new(30),
-                    Value::new(60000i64),
-                    Value::new("Sales"),
-                ],
-                vec![
-                    Value::new(3),
-                    Value::new("Charlie"),
-                    Value::new(35),
-                    Value::new(70000i64),
-                    Value::new("Engineering"),
-                ],
-                vec![
-                    Value::new(4),
-                    Value::new("David"),
-                    Value::new(40),
-                    Value::new(80000i64),
-                    Value::new("Marketing"),
-                ],
-                vec![
-                    Value::new(5),
-                    Value::new("Eve"),
-                    Value::new(28),
-                    Value::new(55000i64),
-                    Value::new("Sales"),
-                ],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Test 1: UPDATE with range condition
-            let update_sql = "UPDATE employees SET salary = salary + 5000 WHERE age > 30";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Range condition update failed");
-
-            // Verify employees over 30 got salary increase
-            let select_sql = "SELECT name, salary FROM employees WHERE age > 30 ORDER BY name";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            // Charlie (age 35) and David (age 40) should have increased salaries
-            assert_eq!(rows.len(), 2, "Should have 2 employees over 30");
-            
-            // Find Charlie and David in results
-            for row in rows {
-                let name = row[0].to_string();
-                let salary_str = row[1].to_string();
-                
-                // Handle both integer and decimal formats
-                let salary = if salary_str.contains('.') {
-                    salary_str.parse::<f64>().unwrap() as i64
-                } else {
-                    salary_str.parse::<i64>().unwrap()
-                };
-                
-                if name == "Charlie" {
-                    assert_eq!(salary, 75000, "Charlie's salary should be 75000");
-                } else if name == "David" {
-                    assert_eq!(salary, 85000, "David's salary should be 85000");
-                }
-            }
-
-            // Test 2: UPDATE with string condition
-            let update_sql = "UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering'";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "String condition update failed");
-
-            // Verify Engineering employees got 10% raise
-            let select_sql = "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            for row in rows {
-                let name = row[0].to_string();
-                let salary_str = row[1].to_string();
-                
-                // Handle both integer and decimal formats
-                let salary = if salary_str.contains('.') {
-                    salary_str.parse::<f64>().unwrap() as i64
-                } else {
-                    salary_str.parse::<i64>().unwrap()
-                };
-                
-                if name == "Alice" {
-                    assert_eq!(salary, 55000, "Alice's salary should be 55000 (50000 * 1.1)");
-                } else if name == "Charlie" {
-                    assert_eq!(salary, 82500, "Charlie's salary should be 82500 (75000 * 1.1)");
-                }
-            }
-
-            // Test 3: UPDATE with multiple conditions (AND)
-            let update_sql = "UPDATE employees SET age = age + 1 WHERE department = 'Sales' AND age < 35";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Multiple condition update failed");
-
-            // Verify only Bob and Eve (Sales, age < 35) got age increment
-            let select_sql = "SELECT name, age FROM employees WHERE department = 'Sales' ORDER BY name";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            for row in rows {
-                let name = row[0].to_string();
-                let age = row[1].to_string().parse::<i32>().unwrap();
-                
-                if name == "Bob" {
-                    assert_eq!(age, 31, "Bob's age should be 31");
-                } else if name == "Eve" {
-                    assert_eq!(age, 29, "Eve's age should be 29");
-                }
-            }
-        }
-
-        #[test]
-        fn test_update_with_expressions() {
-            let mut ctx = TestContext::new("test_update_with_expressions");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("base_salary", TypeId::BigInt),
-                Column::new("bonus", TypeId::BigInt),
-                Column::new("years_experience", TypeId::Integer),
-            ]);
-
-            let table_name = "employees";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![
-                    Value::new(1),
-                    Value::new("Alice"),
-                    Value::new(50000i64),
-                    Value::new(5000i64),
-                    Value::new(3),
-                ],
-                vec![
-                    Value::new(2),
-                    Value::new("Bob"),
-                    Value::new(60000i64),
-                    Value::new(8000i64),
-                    Value::new(5),
-                ],
-                vec![
-                    Value::new(3),
-                    Value::new("Charlie"),
-                    Value::new(70000i64),
-                    Value::new(10000i64),
-                    Value::new(7),
-                ],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Test 1: UPDATE with arithmetic expression
-            let update_sql = "UPDATE employees SET base_salary = base_salary + (years_experience * 1000)";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Arithmetic expression update failed");
-
-            // Verify the arithmetic updates
-            let select_sql = "SELECT id, name, base_salary FROM employees ORDER BY id";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            // Alice: 50000 + (3 * 1000) = 53000
-            assert_eq!(rows[0][2].to_string(), "53000", "Alice's salary should be 53000");
-            // Bob: 60000 + (5 * 1000) = 65000
-            assert_eq!(rows[1][2].to_string(), "65000", "Bob's salary should be 65000");
-            // Charlie: 70000 + (7 * 1000) = 77000
-            assert_eq!(rows[2][2].to_string(), "77000", "Charlie's salary should be 77000");
-
-            // Test 2: UPDATE with column reference in expression
-            let update_sql = "UPDATE employees SET bonus = base_salary * 0.1 WHERE years_experience >= 5";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Column reference expression update failed");
-
-            // Verify bonus updates for employees with 5+ years experience
-            let select_sql = "SELECT name, bonus FROM employees WHERE years_experience >= 5 ORDER BY name";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            for row in rows {
-                let name = row[0].to_string();
-                let bonus_str = row[1].to_string();
-                
-                // Handle both integer and decimal formats
-                let bonus = if bonus_str.contains('.') {
-                    bonus_str.parse::<f64>().unwrap() as i64
-                } else {
-                    bonus_str.parse::<i64>().unwrap()
-                };
-                
-                if name == "Bob" {
-                    assert_eq!(bonus, 6500, "Bob's bonus should be 6500 (10% of 65000)");
-                } else if name == "Charlie" {
-                    assert_eq!(bonus, 7700, "Charlie's bonus should be 7700 (10% of 77000)");
-                }
-            }
-        }
-
-        #[test]
-        fn test_update_no_rows_affected() {
-            let mut ctx = TestContext::new("test_update_no_rows_affected");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("age", TypeId::Integer),
-            ]);
-
-            let table_name = "employees";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(25)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(30)],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Test UPDATE with condition that matches no rows
-            let update_sql = "UPDATE employees SET age = 35 WHERE id = 999";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            
-            // Should return false since no rows were affected
-            assert!(!success, "UPDATE with no matching rows should return false");
-
-            // Verify no data was changed
-            let select_sql = "SELECT id, age FROM employees ORDER BY id";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            assert_eq!(rows[0][1].to_string(), "25", "Alice's age should remain 25");
-            assert_eq!(rows[1][1].to_string(), "30", "Bob's age should remain 30");
-        }
-
-        #[test]
-        fn test_update_all_rows() {
-            let mut ctx = TestContext::new("test_update_all_rows");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("status", TypeId::VarChar),
-            ]);
-
-            let table_name = "employees";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new("active")],
-                vec![Value::new(2), Value::new("Bob"), Value::new("inactive")],
-                vec![Value::new(3), Value::new("Charlie"), Value::new("pending")],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Test UPDATE without WHERE clause (affects all rows)
-            let update_sql = "UPDATE employees SET status = 'updated'";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "UPDATE all rows should succeed");
-
-            // Commit the transaction to make changes visible
-            ctx.commit_current_transaction().unwrap();
-
-            // Verify all rows were updated
-            let select_sql = "SELECT status FROM employees";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rows = writer.get_rows();
-            
-            assert_eq!(rows.len(), 3, "Should have 3 rows");
-            for row in rows {
-                assert_eq!(row[0].to_string(), "updated", "All statuses should be 'updated'");
-            }
-        }
-
-        #[test]
-        fn test_update_in_transaction() {
-            let mut ctx = TestContext::new("test_update_in_transaction");
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("balance", TypeId::BigInt),
-            ]);
-
-            let table_name = "accounts";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert test data
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(1000i64)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(500i64)],
-            ];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            // Commit initial data
-            ctx.commit_current_transaction().unwrap();
-
-            // Test 1: UPDATE in transaction with commit
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-
-            // Transfer money from Alice to Bob
-            let update_sql1 = "UPDATE accounts SET balance = balance - 200 WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql1, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "First update in transaction failed");
-
-            let update_sql2 = "UPDATE accounts SET balance = balance + 200 WHERE id = 2";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql2, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Second update in transaction failed");
-
-            // Commit transaction
-            let commit_sql = "COMMIT";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-
-            // Verify changes were committed
-            let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "800",
-                "Expected Alice's balance to be 800"
-            );
-
-            let select_sql = "SELECT balance FROM accounts WHERE id = 2";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "700",
-                "Expected Bob's balance to be 700"
-            );
-
-            // Test 2: UPDATE in transaction with rollback
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-
-            // Try to transfer more money
-            let update_sql = "UPDATE accounts SET balance = balance - 500 WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert!(success, "Update in transaction failed");
-
-            // Rollback transaction
-            let rollback_sql = "ROLLBACK";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-
-            // Verify changes were rolled back
-            let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let mut writer = TestResultWriter::new();
-            ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "800",
-                "Expected Alice's balance to still be 800 after rollback"
-            );
-        }
-    }
-
     #[test]
     fn test_decimal_precision_scale_display() {
         let mut ctx = TestContext::new("test_decimal_precision_scale_display");
@@ -2933,6 +2339,600 @@ mod tests {
         println!("\nAggregated decimal formatting:");
         for row in agg_rows {
             println!("Avg Price: {}, Total Rate: {}, Max Percentage: {}", row[0], row[1], row[2]);
+        }
+    }
+
+    mod update_tests {
+        use super::*;
+
+        #[test]
+        fn test_update_basic_operations() {
+            let mut ctx = TestContext::new("test_update_basic_operations");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+                Column::new("salary", TypeId::BigInt),
+                Column::new("active", TypeId::Boolean),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(25),
+                    Value::new(50000i64),
+                    Value::new(true),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(30),
+                    Value::new(60000i64),
+                    Value::new(true),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(35),
+                    Value::new(70000i64),
+                    Value::new(false),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("David"),
+                    Value::new(40),
+                    Value::new(80000i64),
+                    Value::new(true),
+                ],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test 1: Basic UPDATE with single column
+            let update_sql = "UPDATE employees SET age = 26 WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Basic update operation failed");
+
+            // Verify the update
+            let select_sql = "SELECT age FROM employees WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "26",
+                "Age should be updated to 26"
+            );
+
+            // Test 2: UPDATE multiple columns
+            let update_sql = "UPDATE employees SET name = 'Alice Smith', salary = 55000 WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Multi-column update operation failed");
+
+            // Verify the multi-column update
+            let select_sql = "SELECT name, salary FROM employees WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let row = &writer.get_rows()[0];
+            assert_eq!(row[0].to_string(), "Alice Smith", "Name should be updated");
+            assert_eq!(row[1].to_string(), "55000", "Salary should be updated");
+
+            // Test 3: UPDATE with boolean value
+            let update_sql = "UPDATE employees SET active = false WHERE id = 2";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Boolean update operation failed");
+
+            // Verify boolean update
+            let select_sql = "SELECT active FROM employees WHERE id = 2";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "false",
+                "Active status should be updated to false"
+            );
+        }
+
+        #[test]
+        fn test_update_with_conditions() {
+            let mut ctx = TestContext::new("test_update_with_conditions");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+                Column::new("salary", TypeId::BigInt),
+                Column::new("department", TypeId::VarChar),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(25),
+                    Value::new(50000i64),
+                    Value::new("Engineering"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(30),
+                    Value::new(60000i64),
+                    Value::new("Sales"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(35),
+                    Value::new(70000i64),
+                    Value::new("Engineering"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("David"),
+                    Value::new(40),
+                    Value::new(80000i64),
+                    Value::new("Marketing"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Eve"),
+                    Value::new(28),
+                    Value::new(55000i64),
+                    Value::new("Sales"),
+                ],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test 1: UPDATE with range condition
+            let update_sql = "UPDATE employees SET salary = salary + 5000 WHERE age > 30";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Range condition update failed");
+
+            // Verify employees over 30 got salary increase
+            let select_sql = "SELECT name, salary FROM employees WHERE age > 30 ORDER BY name";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            // Charlie (age 35) and David (age 40) should have increased salaries
+            assert_eq!(rows.len(), 2, "Should have 2 employees over 30");
+
+            // Find Charlie and David in results
+            for row in rows {
+                let name = row[0].to_string();
+                let salary_str = row[1].to_string();
+
+                // Handle both integer and decimal formats
+                let salary = if salary_str.contains('.') {
+                    salary_str.parse::<f64>().unwrap() as i64
+                } else {
+                    salary_str.parse::<i64>().unwrap()
+                };
+
+                if name == "Charlie" {
+                    assert_eq!(salary, 75000, "Charlie's salary should be 75000");
+                } else if name == "David" {
+                    assert_eq!(salary, 85000, "David's salary should be 85000");
+                }
+            }
+
+            // Test 2: UPDATE with string condition
+            let update_sql = "UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering'";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "String condition update failed");
+
+            // Verify Engineering employees got 10% raise
+            let select_sql = "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            for row in rows {
+                let name = row[0].to_string();
+                let salary_str = row[1].to_string();
+
+                // Handle both integer and decimal formats
+                let salary = if salary_str.contains('.') {
+                    salary_str.parse::<f64>().unwrap() as i64
+                } else {
+                    salary_str.parse::<i64>().unwrap()
+                };
+
+                if name == "Alice" {
+                    assert_eq!(salary, 55000, "Alice's salary should be 55000 (50000 * 1.1)");
+                } else if name == "Charlie" {
+                    assert_eq!(salary, 82500, "Charlie's salary should be 82500 (75000 * 1.1)");
+                }
+            }
+
+            // Test 3: UPDATE with multiple conditions (AND)
+            let update_sql = "UPDATE employees SET age = age + 1 WHERE department = 'Sales' AND age < 35";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Multiple condition update failed");
+
+            // Verify only Bob and Eve (Sales, age < 35) got age increment
+            let select_sql = "SELECT name, age FROM employees WHERE department = 'Sales' ORDER BY name";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            for row in rows {
+                let name = row[0].to_string();
+                let age = row[1].to_string().parse::<i32>().unwrap();
+
+                if name == "Bob" {
+                    assert_eq!(age, 31, "Bob's age should be 31");
+                } else if name == "Eve" {
+                    assert_eq!(age, 29, "Eve's age should be 29");
+                }
+            }
+        }
+
+        #[test]
+        fn test_update_with_expressions() {
+            let mut ctx = TestContext::new("test_update_with_expressions");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("base_salary", TypeId::BigInt),
+                Column::new("bonus", TypeId::BigInt),
+                Column::new("years_experience", TypeId::Integer),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(50000i64),
+                    Value::new(5000i64),
+                    Value::new(3),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(60000i64),
+                    Value::new(8000i64),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(70000i64),
+                    Value::new(10000i64),
+                    Value::new(7),
+                ],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test 1: UPDATE with arithmetic expression
+            let update_sql = "UPDATE employees SET base_salary = base_salary + (years_experience * 1000)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Arithmetic expression update failed");
+
+            // Verify the arithmetic updates
+            let select_sql = "SELECT id, name, base_salary FROM employees ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            // Alice: 50000 + (3 * 1000) = 53000
+            assert_eq!(rows[0][2].to_string(), "53000", "Alice's salary should be 53000");
+            // Bob: 60000 + (5 * 1000) = 65000
+            assert_eq!(rows[1][2].to_string(), "65000", "Bob's salary should be 65000");
+            // Charlie: 70000 + (7 * 1000) = 77000
+            assert_eq!(rows[2][2].to_string(), "77000", "Charlie's salary should be 77000");
+
+            // Test 2: UPDATE with column reference in expression
+            let update_sql = "UPDATE employees SET bonus = base_salary * 0.1 WHERE years_experience >= 5";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Column reference expression update failed");
+
+            // Verify bonus updates for employees with 5+ years experience
+            let select_sql = "SELECT name, bonus FROM employees WHERE years_experience >= 5 ORDER BY name";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            for row in rows {
+                let name = row[0].to_string();
+                let bonus_str = row[1].to_string();
+
+                // Handle both integer and decimal formats
+                let bonus = if bonus_str.contains('.') {
+                    bonus_str.parse::<f64>().unwrap() as i64
+                } else {
+                    bonus_str.parse::<i64>().unwrap()
+                };
+
+                if name == "Bob" {
+                    assert_eq!(bonus, 6500, "Bob's bonus should be 6500 (10% of 65000)");
+                } else if name == "Charlie" {
+                    assert_eq!(bonus, 7700, "Charlie's bonus should be 7700 (10% of 77000)");
+                }
+            }
+        }
+
+        #[test]
+        fn test_update_no_rows_affected() {
+            let mut ctx = TestContext::new("test_update_no_rows_affected");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new(25)],
+                vec![Value::new(2), Value::new("Bob"), Value::new(30)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test UPDATE with condition that matches no rows
+            let update_sql = "UPDATE employees SET age = 35 WHERE id = 999";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            // Should return false since no rows were affected
+            assert!(!success, "UPDATE with no matching rows should return false");
+
+            // Verify no data was changed
+            let select_sql = "SELECT id, age FROM employees ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            assert_eq!(rows[0][1].to_string(), "25", "Alice's age should remain 25");
+            assert_eq!(rows[1][1].to_string(), "30", "Bob's age should remain 30");
+        }
+
+        #[test]
+        fn test_update_all_rows() {
+            let mut ctx = TestContext::new("test_update_all_rows");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("status", TypeId::VarChar),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new("active")],
+                vec![Value::new(2), Value::new("Bob"), Value::new("inactive")],
+                vec![Value::new(3), Value::new("Charlie"), Value::new("pending")],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test UPDATE without WHERE clause (affects all rows)
+            let update_sql = "UPDATE employees SET status = 'updated'";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "UPDATE all rows should succeed");
+
+            // Commit the transaction to make changes visible
+            ctx.commit_current_transaction().unwrap();
+
+            // Verify all rows were updated
+            let select_sql = "SELECT status FROM employees";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            let rows = writer.get_rows();
+
+            assert_eq!(rows.len(), 3, "Should have 3 rows");
+            for row in rows {
+                assert_eq!(row[0].to_string(), "updated", "All statuses should be 'updated'");
+            }
+        }
+
+        #[test]
+        fn test_update_in_transaction() {
+            let mut ctx = TestContext::new("test_update_in_transaction");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("balance", TypeId::BigInt),
+            ]);
+
+            let table_name = "accounts";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new(1000i64)],
+                vec![Value::new(2), Value::new("Bob"), Value::new(500i64)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Commit initial data
+            ctx.commit_current_transaction().unwrap();
+
+            // Test 1: UPDATE in transaction with commit
+            let begin_sql = "BEGIN";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            // Transfer money from Alice to Bob
+            let update_sql1 = "UPDATE accounts SET balance = balance - 200 WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "First update in transaction failed");
+
+            let update_sql2 = "UPDATE accounts SET balance = balance + 200 WHERE id = 2";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Second update in transaction failed");
+
+            // Commit transaction
+            let commit_sql = "COMMIT";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            // Verify changes were committed
+            let select_sql = "SELECT balance FROM accounts WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "800",
+                "Expected Alice's balance to be 800"
+            );
+
+            let select_sql = "SELECT balance FROM accounts WHERE id = 2";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "700",
+                "Expected Bob's balance to be 700"
+            );
+
+            // Test 2: UPDATE in transaction with rollback
+            let begin_sql = "BEGIN";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            // Try to transfer more money
+            let update_sql = "UPDATE accounts SET balance = balance - 500 WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Update in transaction failed");
+
+            // Rollback transaction
+            let rollback_sql = "ROLLBACK";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            // Verify changes were rolled back
+            let select_sql = "SELECT balance FROM accounts WHERE id = 1";
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "800",
+                "Expected Alice's balance to still be 800 after rollback"
+            );
         }
     }
 }
