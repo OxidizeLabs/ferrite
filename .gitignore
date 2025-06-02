@@ -26,6 +26,9 @@ Cargo.lock
 *.sql
 *.log
 
+# Test temporary files
+tests/temp/
+
 # Benchmarking results
 benches/results/
 
