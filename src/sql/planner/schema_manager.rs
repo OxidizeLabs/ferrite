@@ -5,7 +5,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log;
 use log::debug;
-use sqlparser::ast::{ColumnDef, DataType, Expr, ExactNumberInfo};
+use sqlparser::ast::{ColumnDef, DataType, Expr, ExactNumberInfo, Ident};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -738,7 +738,7 @@ mod tests {
         AggregateExpression, AggregationType,
     };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use sqlparser::ast::{ColumnDef, DataType, Ident, Value};
+    use sqlparser::ast::{ColumnDef, DataType, Ident, StructBracketKind, Value};
     use sqlparser::tokenizer::{Location, Span};
 
     #[test]
@@ -1446,41 +1446,938 @@ mod tests {
     }
 
     #[test]
-    fn test_map_values_to_schema_partial_columns() {
+    fn test_map_values_to_schema_exact_match() {
         let manager = SchemaManager::new();
 
-        // Target schema (table): id, name, email, age, salary, active
-        let target_schema = Schema::new(vec![
+        // Schemas with exact same size and types
+        let source_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-            Column::new("email", TypeId::VarChar),
-            Column::new("age", TypeId::Integer),
-            Column::new("salary", TypeId::BigInt),
-            Column::new("active", TypeId::Boolean),
         ]);
 
-        // Source schema (SELECT): user_id, user_name, calculated_pay
-        let source_schema = Schema::new(vec![
+        let target_schema = Schema::new(vec![
             Column::new("user_id", TypeId::Integer),
             Column::new("user_name", TypeId::VarChar),
-            Column::new("calculated_pay", TypeId::BigInt),
         ]);
 
-        // Source values: 1, "Alice", 50000
         let source_values = vec![
-            crate::types_db::value::Value::from(1),
+            crate::types_db::value::Value::from(42),
             crate::types_db::value::Value::from("Alice"),
-            crate::types_db::value::Value::from(50000i64),
         ];
 
         let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
 
-        // Should map positionally: id=1, name="Alice", email="50000" (cast from BigInt), age=NULL, salary=NULL, active=NULL
-        assert_eq!(mapped[0], crate::types_db::value::Value::from(1));
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(42));
         assert_eq!(mapped[1], crate::types_db::value::Value::from("Alice"));
-        assert_eq!(mapped[2], crate::types_db::value::Value::from("50000")); // Cast BigInt to VarChar
-        assert!(mapped[3].is_null()); // age = NULL
-        assert!(mapped[4].is_null()); // salary = NULL  
-        assert!(mapped[5].is_null()); // active = NULL
+    }
+
+    #[test]
+    fn test_map_values_to_schema_name_based_mapping() {
+        let manager = SchemaManager::new();
+
+        // Source and target with matching column names
+        let source_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),
+            Column::new("id", TypeId::Integer),
+            Column::new("email", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("email", TypeId::VarChar),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from("Bob"),      // name
+            crate::types_db::value::Value::from(123),        // id
+            crate::types_db::value::Value::from("bob@test.com"), // email
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should map by name: id=123, name="Bob", email="bob@test.com"
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(123));     // id
+        assert_eq!(mapped[1], crate::types_db::value::Value::from("Bob"));   // name
+        assert_eq!(mapped[2], crate::types_db::value::Value::from("bob@test.com")); // email
+    }
+
+    #[test]
+    fn test_map_values_to_schema_type_casting() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("number", TypeId::Integer),
+            Column::new("text", TypeId::VarChar),
+            Column::new("flag", TypeId::Boolean),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("string_num", TypeId::VarChar),    // Cast Integer to VarChar
+            Column::new("num_from_text", TypeId::Integer), // This will fail casting and become NULL
+            Column::new("bool_flag", TypeId::Boolean),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from(42),
+            crate::types_db::value::Value::from("not_a_number"),
+            crate::types_db::value::Value::from(true),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        assert_eq!(mapped[0], crate::types_db::value::Value::from("42")); // Integer cast to VarChar
+        assert!(mapped[1].is_null()); // Failed cast should be NULL
+        assert_eq!(mapped[2], crate::types_db::value::Value::from(true));
+    }
+
+    #[test]
+    fn test_detect_name_based_mapping_all_match() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("name", TypeId::VarChar),
+            Column::new("id", TypeId::Integer),
+            Column::new("extra", TypeId::VarChar),
+        ]);
+
+        // All source columns have matches in target
+        assert!(manager.detect_name_based_mapping(&source_schema, &target_schema));
+    }
+
+    #[test]
+    fn test_detect_name_based_mapping_partial_match() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("unknown", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // Only some source columns match - should use positional
+        assert!(!manager.detect_name_based_mapping(&source_schema, &target_schema));
+    }
+
+    #[test]
+    fn test_detect_name_based_mapping_no_match() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("user_id", TypeId::Integer),
+            Column::new("user_name", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // No source columns match - should use positional
+        assert!(!manager.detect_name_based_mapping(&source_schema, &target_schema));
+    }
+
+    #[test]
+    fn test_detect_name_based_mapping_empty_source() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![]);
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // Empty source should return false
+        assert!(!manager.detect_name_based_mapping(&source_schema, &target_schema));
+    }
+
+    #[test]
+    fn test_find_value_by_name_found() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("first", TypeId::VarChar),
+            Column::new("second", TypeId::Integer),
+            Column::new("third", TypeId::Boolean),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from("hello"),
+            crate::types_db::value::Value::from(42),
+            crate::types_db::value::Value::from(true),
+        ];
+
+        let result = manager.find_value_by_name("second", &source_values, &source_schema, TypeId::Integer);
+        assert_eq!(result, crate::types_db::value::Value::from(42));
+    }
+
+    #[test]
+    fn test_find_value_by_name_not_found() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("first", TypeId::VarChar),
+            Column::new("second", TypeId::Integer),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from("hello"),
+            crate::types_db::value::Value::from(42),
+        ];
+
+        let result = manager.find_value_by_name("missing", &source_values, &source_schema, TypeId::VarChar);
+        assert!(result.is_null());
+        assert_eq!(result.get_type_id(), TypeId::VarChar);
+    }
+
+    #[test]
+    fn test_cast_value_to_type_success() {
+        let manager = SchemaManager::new();
+
+        let int_value = crate::types_db::value::Value::from(42);
+        let result = manager.cast_value_to_type(&int_value, TypeId::VarChar);
+        assert_eq!(result, crate::types_db::value::Value::from("42"));
+    }
+
+    #[test]
+    fn test_cast_value_to_type_failure() {
+        let manager = SchemaManager::new();
+
+        let text_value = crate::types_db::value::Value::from("not_a_number");
+        let result = manager.cast_value_to_type(&text_value, TypeId::Integer);
+        assert!(result.is_null());
+        assert_eq!(result.get_type_id(), TypeId::Integer);
+    }
+
+    #[test]
+    fn test_map_values_to_schema_source_larger_than_target() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::VarChar),
+            Column::new("c", TypeId::Boolean),
+            Column::new("d", TypeId::Decimal),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("x", TypeId::Integer),
+            Column::new("y", TypeId::VarChar),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from(1),
+            crate::types_db::value::Value::from("test"),
+            crate::types_db::value::Value::from(true),
+            crate::types_db::value::Value::from(99.9),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should only map first 2 values positionally
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(1));
+        assert_eq!(mapped[1], crate::types_db::value::Value::from("test"));
+    }
+
+    #[test]
+    fn test_map_values_to_schema_empty_source() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![]);
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let source_values = vec![];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should fill all with NULLs
+        assert_eq!(mapped.len(), 2);
+        assert!(mapped[0].is_null());
+        assert!(mapped[1].is_null());
+        assert_eq!(mapped[0].get_type_id(), TypeId::Integer);
+        assert_eq!(mapped[1].get_type_id(), TypeId::VarChar);
+    }
+
+    #[test]
+    fn test_map_values_to_schema_empty_target() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from(1),
+            crate::types_db::value::Value::from("test"),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should return empty vector
+        assert_eq!(mapped.len(), 0);
+    }
+
+    #[test]
+    fn test_schemas_compatible_different_counts() {
+        let manager = SchemaManager::new();
+
+        let schema1 = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+        ]);
+
+        let schema2 = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        assert!(!manager.schemas_compatible(&schema1, &schema2));
+        assert!(!manager.schemas_compatible(&schema2, &schema1));
+    }
+
+    #[test]
+    fn test_schemas_compatible_same_types_different_names() {
+        let manager = SchemaManager::new();
+
+        let schema1 = Schema::new(vec![
+            Column::new("user_id", TypeId::Integer),
+            Column::new("user_name", TypeId::VarChar),
+        ]);
+
+        let schema2 = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // Same types, different names should be compatible
+        assert!(manager.schemas_compatible(&schema1, &schema2));
+    }
+
+    #[test]
+    fn test_schemas_compatible_empty_schemas() {
+        let manager = SchemaManager::new();
+
+        let schema1 = Schema::new(vec![]);
+        let schema2 = Schema::new(vec![]);
+
+        assert!(manager.schemas_compatible(&schema1, &schema2));
+    }
+
+    #[test]
+    fn test_create_join_schema_empty_schemas() {
+        let manager = SchemaManager::new();
+
+        let left_schema = Schema::new(vec![]);
+        let right_schema = Schema::new(vec![]);
+
+        let joined = manager.create_join_schema(&left_schema, &right_schema);
+        assert_eq!(joined.get_column_count(), 0);
+    }
+
+    #[test]
+    fn test_create_join_schema_one_empty() {
+        let manager = SchemaManager::new();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let right_schema = Schema::new(vec![]);
+
+        let joined = manager.create_join_schema(&left_schema, &right_schema);
+        assert_eq!(joined.get_column_count(), 2);
+        assert_eq!(joined.get_column(0).unwrap().get_name(), "id");
+        assert_eq!(joined.get_column(1).unwrap().get_name(), "name");
+    }
+
+    #[test]
+    fn test_resolve_qualified_column_invalid_alias() {
+        let manager = SchemaManager::new();
+
+        let left_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("age", TypeId::Integer),
+            Column::new("email", TypeId::VarChar),
+        ]);
+
+        // Test with invalid table alias
+        let result = manager.resolve_qualified_column("t3", "id", &left_schema, &right_schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown table alias"));
+    }
+
+    #[test]
+    fn test_create_aggregation_output_schema_duplicate_columns() {
+        let manager = SchemaManager::new();
+
+        // Create expressions that would result in duplicate column names
+        let group_by_col = Column::new("category", TypeId::VarChar);
+        let group_by_expr = Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, group_by_col, vec![],
+        ));
+
+        // Create aggregate with same name as group by
+        let agg_col = Column::new("category", TypeId::Integer); // Same name!
+        let agg_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, agg_col.clone(), vec![],
+        )));
+
+        let agg_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Count,
+            vec![agg_arg],
+            agg_col,
+            "COUNT".to_string(),
+        ));
+
+        let schema = manager.create_aggregation_output_schema(
+            &[&group_by_expr],
+            &[Arc::new(agg_expr)],
+            true,
+        );
+
+        // Should only have one column due to duplicate name handling
+        assert_eq!(schema.get_column_count(), 1);
+        assert_eq!(schema.get_column(0).unwrap().get_name(), "category");
+    }
+
+    #[test]
+    fn test_extract_precision_scale_edge_cases() {
+        let manager = SchemaManager::new();
+
+        // Test maximum values
+        let result = manager.extract_precision_scale(&ExactNumberInfo::Precision(255)).unwrap();
+        assert_eq!(result, (Some(255), None));
+
+        let result = manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(255, 255)).unwrap();
+        assert_eq!(result, (Some(255), Some(255)));
+
+        // Test error: precision too large
+        let result = manager.extract_precision_scale(&ExactNumberInfo::Precision(256));
+        assert!(result.is_err());
+
+        // Test error: scale too large
+        let result = manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(10, 256));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_sql_type_edge_cases() {
+        let manager = SchemaManager::new();
+
+        // Test various unsigned integer types
+        assert_eq!(
+            manager.convert_sql_type(&DataType::UInt32).unwrap(),
+            TypeId::Integer
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::UInt64).unwrap(),
+            TypeId::BigInt
+        );
+
+        // Test various text types
+        assert_eq!(
+            manager.convert_sql_type(&DataType::TinyText).unwrap(),
+            TypeId::VarChar
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::MediumText).unwrap(),
+            TypeId::VarChar
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::LongText).unwrap(),
+            TypeId::VarChar
+        );
+
+        // Test JSON types
+        assert_eq!(
+            manager.convert_sql_type(&DataType::JSON).unwrap(),
+            TypeId::JSON
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::JSONB).unwrap(),
+            TypeId::JSON
+        );
+
+        // Test UUID
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Uuid).unwrap(),
+            TypeId::UUID
+        );
+
+        // Test custom VECTOR type
+        let custom_vector = DataType::Custom(sqlparser::ast::ObjectName(vec![
+            sqlparser::ast::ObjectNamePart::Identifier(Ident::new("VECTOR"))
+        ]), vec![]);
+        assert_eq!(
+            manager.convert_sql_type(&custom_vector).unwrap(),
+            TypeId::Vector
+        );
+
+        // Test unknown custom type
+        let custom_unknown = DataType::Custom(sqlparser::ast::ObjectName(vec![
+            sqlparser::ast::ObjectNamePart::Identifier(Ident::new("UNKNOWN"))
+        ]), vec![]);
+        assert!(manager.convert_sql_type(&custom_unknown).is_err());
+    }
+
+    #[test]
+    fn test_create_column_from_sql_type_all_types() {
+        let manager = SchemaManager::new();
+
+        // Test integer types
+        let int_column = manager.create_column_from_sql_type(
+            "test_int", 
+            &DataType::Integer(None), 
+            TypeId::Integer
+        ).unwrap();
+        assert_eq!(int_column.get_name(), "test_int");
+        assert_eq!(int_column.get_type(), TypeId::Integer);
+        assert_eq!(int_column.get_precision(), None);
+        assert_eq!(int_column.get_scale(), None);
+
+        // Test array type
+        let array_column = manager.create_column_from_sql_type(
+            "test_array",
+            &DataType::Array(sqlparser::ast::ArrayElemTypeDef::None),
+            TypeId::Vector
+        ).unwrap();
+        assert_eq!(array_column.get_name(), "test_array");
+        assert_eq!(array_column.get_type(), TypeId::Vector);
+        assert_eq!(array_column.get_length(), 8192); // Default array size
+
+        // Test binary types
+        let binary_column = manager.create_column_from_sql_type(
+            "test_binary",
+            &DataType::Binary(None),
+            TypeId::Binary
+        ).unwrap();
+        assert_eq!(binary_column.get_name(), "test_binary");
+        assert_eq!(binary_column.get_type(), TypeId::Binary);
+        assert_eq!(binary_column.get_length(), 255); // Default binary length
+    }
+
+    #[test]
+    fn test_create_values_schema_inconsistent_types() {
+        let manager = SchemaManager::new();
+
+        // Test with different expression types that might cause issues
+        let values = vec![vec![
+            Expr::Value(sqlparser::ast::ValueWithSpan {
+                value: Value::Number("1".to_string(), false),
+                span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+            }),
+            Expr::BinaryOp {
+                left: Box::new(Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::Number("1".to_string(), false),
+                    span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+                })),
+                op: sqlparser::ast::BinaryOperator::Plus,
+                right: Box::new(Expr::Value(sqlparser::ast::ValueWithSpan {
+                    value: Value::Number("2".to_string(), false),
+                    span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+                })),
+            },
+        ]];
+
+        let schema = manager.create_values_schema(&values).unwrap();
+        assert_eq!(schema.get_column_count(), 2);
+        assert_eq!(schema.get_column(0).unwrap().get_type(), TypeId::Integer);
+        assert_eq!(schema.get_column(1).unwrap().get_type(), TypeId::Invalid); // Complex expression
+    }
+
+    #[test]
+    fn test_types_compatible_with_invalid_type() {
+        let manager = SchemaManager::new();
+
+        // Test Invalid type compatibility
+        assert!(manager.types_compatible(TypeId::Invalid, TypeId::Invalid));
+        assert!(!manager.types_compatible(TypeId::Invalid, TypeId::Integer));
+        assert!(!manager.types_compatible(TypeId::Integer, TypeId::Invalid));
+
+        // Test all basic type self-compatibility
+        let types = [
+            TypeId::Boolean, TypeId::TinyInt, TypeId::SmallInt, 
+            TypeId::Integer, TypeId::BigInt, TypeId::Decimal,
+            TypeId::Float, TypeId::VarChar, TypeId::Char,
+            TypeId::Vector, TypeId::Timestamp, TypeId::JSON,
+        ];
+
+        for type_id in types {
+            assert!(manager.types_compatible(type_id, type_id), "Type {:?} should be compatible with itself", type_id);
+        }
+    }
+
+    #[test]
+    fn test_map_values_to_schema_mixed_scenarios() {
+        let manager = SchemaManager::new();
+
+        // Test scenario: partial name match (only some columns match)
+        let source_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),      // matches target
+            Column::new("unknown", TypeId::VarChar), // doesn't match target
+            Column::new("active", TypeId::Boolean),  // matches target
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("active", TypeId::Boolean),
+            Column::new("extra", TypeId::Decimal),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from(1),
+            crate::types_db::value::Value::from("mystery"),
+            crate::types_db::value::Value::from(true),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        // Should use positional mapping since not ALL source columns match
+        assert_eq!(mapped.len(), 4);
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(1));        // id -> id
+        assert_eq!(mapped[1], crate::types_db::value::Value::from("mystery")); // unknown -> name
+        assert_eq!(mapped[2], crate::types_db::value::Value::from(true));     // active -> active (but positionally)
+        assert!(mapped[3].is_null());                                          // extra = NULL
+    }
+
+    #[test]
+    fn test_create_aggregation_output_schema_with_complex_expressions() {
+        let manager = SchemaManager::new();
+
+        // Create complex expressions that might have conflicts
+        let group_col1 = Column::new("t1.category", TypeId::VarChar);
+        let group_expr1 = Expression::ColumnRef(ColumnRefExpression::new(
+            0, 0, group_col1, vec![],
+        ));
+
+        let group_col2 = Column::new("t2.region", TypeId::VarChar);
+        let group_expr2 = Expression::ColumnRef(ColumnRefExpression::new(
+            0, 1, group_col2, vec![],
+        ));
+
+        // Create multiple aggregates
+        let sum_col = Column::new("SUM(sales)", TypeId::Decimal);
+        let sum_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 2, Column::new("sales", TypeId::Decimal), vec![],
+        )));
+        let sum_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Sum,
+            vec![sum_arg],
+            sum_col,
+            "SUM".to_string(),
+        ));
+
+        let count_col = Column::new("COUNT(*)", TypeId::BigInt);
+        let count_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
+            0, 3, Column::new("*", TypeId::BigInt), vec![],
+        )));
+        let count_expr = Expression::Aggregate(AggregateExpression::new(
+            AggregationType::Count,
+            vec![count_arg],
+            count_col,
+            "COUNT".to_string(),
+        ));
+
+        let schema = manager.create_aggregation_output_schema(
+            &[&group_expr1, &group_expr2],
+            &[Arc::new(sum_expr), Arc::new(count_expr)],
+            true,
+        );
+
+        assert_eq!(schema.get_column_count(), 4);
+        assert_eq!(schema.get_column(0).unwrap().get_name(), "t1.category");
+        assert_eq!(schema.get_column(1).unwrap().get_name(), "t2.region");
+        assert_eq!(schema.get_column(2).unwrap().get_name(), "SUM(sales)");
+        assert_eq!(schema.get_column(3).unwrap().get_name(), "COUNT(*)");
+    }
+
+    #[test]
+    fn test_map_values_to_schema_with_null_values() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("nullable_text", TypeId::VarChar),
+            Column::new("flag", TypeId::Boolean),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("user_id", TypeId::Integer),
+            Column::new("description", TypeId::VarChar),
+            Column::new("active", TypeId::Boolean),
+            Column::new("extra", TypeId::Decimal),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from(42),
+            crate::types_db::value::Value::new_with_type(crate::types_db::value::Val::Null, TypeId::VarChar),
+            crate::types_db::value::Value::from(false),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        assert_eq!(mapped.len(), 4);
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(42));
+        assert!(mapped[1].is_null());
+        assert_eq!(mapped[2], crate::types_db::value::Value::from(false));
+        assert!(mapped[3].is_null());
+    }
+
+    #[test]
+    fn test_convert_sql_type_comprehensive_coverage() {
+        let manager = SchemaManager::new();
+
+        // Test more data types for comprehensive coverage
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Date).unwrap(),
+            TypeId::Date
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Time(None, sqlparser::ast::TimezoneInfo::None)).unwrap(),
+            TypeId::Time
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Interval).unwrap(),
+            TypeId::Interval
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Enum(vec![], None)).unwrap(),
+            TypeId::Enum
+        );
+        assert_eq!(
+            manager.convert_sql_type(&DataType::Struct(vec![], StructBracketKind::Parentheses)).unwrap(),
+            TypeId::Struct
+        );
+
+        // Test types that should error
+        assert!(manager.convert_sql_type(&DataType::Regclass).is_err());
+        assert!(manager.convert_sql_type(&DataType::AnyType).is_err());
+        assert!(manager.convert_sql_type(&DataType::Trigger).is_err());
+        assert!(manager.convert_sql_type(&DataType::Unspecified).is_err());
+    }
+
+    #[test]
+    fn test_infer_expression_type_comprehensive() {
+        let manager = SchemaManager::new();
+
+        // Test double quoted string
+        let double_quoted = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::DoubleQuotedString("test".to_string()),
+            span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+        });
+        assert_eq!(manager.infer_expression_type(&double_quoted).unwrap(), TypeId::VarChar);
+
+        // Test boolean false
+        let bool_false = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Boolean(false),
+            span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+        });
+        assert_eq!(manager.infer_expression_type(&bool_false).unwrap(), TypeId::Boolean);
+
+        // Test decimal number
+        let decimal = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Number("3.14".to_string(), false),
+            span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+        });
+        assert_eq!(manager.infer_expression_type(&decimal).unwrap(), TypeId::Integer); // Still treated as integer
+
+        // Test large number
+        let large_num = Expr::Value(sqlparser::ast::ValueWithSpan {
+            value: Value::Number("9223372036854775807".to_string(), false),
+            span: Span::new(Location::new(0, 0), Location::new(0, 0)),
+        });
+        assert_eq!(manager.infer_expression_type(&large_num).unwrap(), TypeId::Integer);
+    }
+
+    #[test]
+    fn test_extract_table_alias_edge_cases() {
+        let manager = SchemaManager::new();
+
+        // Test schema with no qualified column names
+        let schema_no_alias = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+        let alias = manager.extract_table_alias_from_schema(&schema_no_alias);
+        assert!(alias.is_none());
+
+        // Test schema with mixed qualified and unqualified names
+        let schema_mixed = Schema::new(vec![
+            Column::new("t1.id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("t1.age", TypeId::Integer),
+        ]);
+        let alias = manager.extract_table_alias_from_schema(&schema_mixed);
+        assert_eq!(alias, Some("t1".to_string()));
+
+        // Test schema with multiple aliases (should return most common)
+        let schema_multi = Schema::new(vec![
+            Column::new("t1.id", TypeId::Integer),
+            Column::new("t2.name", TypeId::VarChar),
+            Column::new("t2.age", TypeId::Integer),
+            Column::new("t2.email", TypeId::VarChar),
+        ]);
+        let alias = manager.extract_table_alias_from_schema(&schema_multi);
+        assert_eq!(alias, Some("t2".to_string())); // t2 appears 3 times, t1 appears 1 time
+    }
+
+    #[test]
+    fn test_create_join_schema_with_qualified_names() {
+        let manager = SchemaManager::new();
+
+        let left_schema = Schema::new(vec![
+            Column::new("t1.id", TypeId::Integer),
+            Column::new("t1.name", TypeId::VarChar),
+        ]);
+
+        let right_schema = Schema::new(vec![
+            Column::new("t2.id", TypeId::Integer),
+            Column::new("t2.email", TypeId::VarChar),
+        ]);
+
+        let joined = manager.create_join_schema(&left_schema, &right_schema);
+
+        assert_eq!(joined.get_column_count(), 4);
+        assert_eq!(joined.get_column(0).unwrap().get_name(), "t1.id");
+        assert_eq!(joined.get_column(1).unwrap().get_name(), "t1.name");
+        assert_eq!(joined.get_column(2).unwrap().get_name(), "t2.id");
+        assert_eq!(joined.get_column(3).unwrap().get_name(), "t2.email");
+    }
+
+    #[test]
+    fn test_map_values_with_type_coercion_edge_cases() {
+        let manager = SchemaManager::new();
+
+        let source_schema = Schema::new(vec![
+            Column::new("str_number", TypeId::VarChar),
+            Column::new("bool_val", TypeId::Boolean),
+            Column::new("null_val", TypeId::VarChar),
+        ]);
+
+        let target_schema = Schema::new(vec![
+            Column::new("int_from_str", TypeId::Integer),
+            Column::new("str_from_bool", TypeId::VarChar),
+            Column::new("any_from_null", TypeId::BigInt),
+        ]);
+
+        let source_values = vec![
+            crate::types_db::value::Value::from("123"),
+            crate::types_db::value::Value::from(true),
+            crate::types_db::value::Value::new_with_type(crate::types_db::value::Val::Null, TypeId::VarChar),
+        ];
+
+        let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
+
+        assert_eq!(mapped.len(), 3);
+        // Note: These assertions depend on the actual casting implementation
+        // The string "123" might successfully cast to integer 123, or might fail and become NULL
+        // The boolean true might cast to string "true", or might fail
+        // NULL values when cast should remain NULL but with the target type
+        
+        // Check that we got the right number of values and right types
+        assert_eq!(mapped[0].get_type_id(), TypeId::Integer);
+        assert_eq!(mapped[1].get_type_id(), TypeId::VarChar);
+        assert_eq!(mapped[2].get_type_id(), TypeId::BigInt);
+        assert!(mapped[2].is_null()); // NULL should remain NULL
+    }
+
+    #[test]
+    fn test_schema_compatibility_comprehensive() {
+        let manager = SchemaManager::new();
+
+        // Test with all same types
+        let schema_ints = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::Integer),
+            Column::new("c", TypeId::Integer),
+        ]);
+        let schema_ints2 = Schema::new(vec![
+            Column::new("x", TypeId::Integer),
+            Column::new("y", TypeId::Integer),
+            Column::new("z", TypeId::Integer),
+        ]);
+        assert!(manager.schemas_compatible(&schema_ints, &schema_ints2));
+
+        // Test with mixed types that are the same
+        let schema_mixed1 = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::VarChar),
+            Column::new("c", TypeId::Boolean),
+            Column::new("d", TypeId::Decimal),
+        ]);
+        let schema_mixed2 = Schema::new(vec![
+            Column::new("w", TypeId::Integer),
+            Column::new("x", TypeId::VarChar),
+            Column::new("y", TypeId::Boolean),
+            Column::new("z", TypeId::Decimal),
+        ]);
+        assert!(manager.schemas_compatible(&schema_mixed1, &schema_mixed2));
+
+        // Test with one type different
+        let schema_diff = Schema::new(vec![
+            Column::new("a", TypeId::Integer),
+            Column::new("b", TypeId::VarChar),
+            Column::new("c", TypeId::Integer), // Different from boolean above
+            Column::new("d", TypeId::Decimal),
+        ]);
+        assert!(!manager.schemas_compatible(&schema_mixed1, &schema_diff));
+    }
+
+    #[test]
+    fn test_large_schema_operations() {
+        let manager = SchemaManager::new();
+
+        // Create large schemas to test performance and correctness
+        let mut large_source_cols = Vec::new();
+        let mut large_target_cols = Vec::new();
+        let mut source_values = Vec::new();
+
+        for i in 0..50 {
+            large_source_cols.push(Column::new(&format!("col_{}", i), TypeId::Integer));
+            large_target_cols.push(Column::new(&format!("target_col_{}", i), TypeId::Integer));
+            source_values.push(crate::types_db::value::Value::from(i as i32));
+        }
+
+        let large_source_schema = Schema::new(large_source_cols);
+        let large_target_schema = Schema::new(large_target_cols);
+
+        // Test mapping with large schemas
+        let mapped = manager.map_values_to_schema(&source_values, &large_source_schema, &large_target_schema);
+        
+        assert_eq!(mapped.len(), 50);
+        for i in 0..50 {
+            assert_eq!(mapped[i], crate::types_db::value::Value::from(i as i32));
+        }
+
+        // Test schema compatibility with large schemas
+        let large_compatible_schema = Schema::new(
+            (0..50).map(|i| Column::new(&format!("another_col_{}", i), TypeId::Integer)).collect()
+        );
+        assert!(manager.schemas_compatible(&large_source_schema, &large_compatible_schema));
+
+        // Test join with large schemas
+        let joined = manager.create_join_schema(&large_source_schema, &large_target_schema);
+        assert_eq!(joined.get_column_count(), 100);
     }
 }
