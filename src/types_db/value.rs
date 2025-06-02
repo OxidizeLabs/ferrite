@@ -368,7 +368,7 @@ impl Value {
 
         match (&self.value_, target_type) {
             // ===== BOOLEAN CONVERSIONS =====
-Lint            (Val::Boolean(b), TypeId::TinyInt) => Ok(Value::new_with_type(
+            (Val::Boolean(b), TypeId::TinyInt) => Ok(Value::new_with_type(
                 Val::TinyInt(if *b { 1 } else { 0 }),
                 target_type,
             )),
