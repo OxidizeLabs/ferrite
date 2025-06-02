@@ -221,7 +221,7 @@ impl TablePage {
         if new_size <= current_size {
             // Update the tuple metadata
             self.tuple_info[tuple_id].2 = meta.clone();
-            
+
             // Update the size to reflect the actual new size
             self.tuple_info[tuple_id].1 = new_size;
 
@@ -230,7 +230,7 @@ impl TablePage {
             let end = start + new_size as usize;
             if end <= self.data.len() {
                 self.data[start..end].copy_from_slice(&tuple_data);
-                
+
                 // Clear any remaining bytes if the new tuple is smaller
                 if new_size < current_size {
                     let clear_start = end;
@@ -239,7 +239,7 @@ impl TablePage {
                         self.data[clear_start..clear_end].fill(0);
                     }
                 }
-                
+
                 self.is_dirty = true;
                 Ok(())
             } else {
@@ -248,13 +248,15 @@ impl TablePage {
         } else {
             // If new tuple is larger, we need to find a new location
             // Calculate the minimum offset considering all existing tuples except the one being updated
-            let min_offset = self.tuple_info.iter()
+            let min_offset = self
+                .tuple_info
+                .iter()
                 .enumerate()
                 .filter(|(i, _)| *i != tuple_id) // Exclude the tuple being updated
                 .map(|(_, (offset, _, _))| *offset)
                 .min()
                 .unwrap_or(DB_PAGE_SIZE as u16);
-            
+
             let new_offset = min_offset.saturating_sub(new_size);
             let header_and_tuple_info_size = self.get_header_size() + self.tuple_info_size();
 
@@ -1710,7 +1712,7 @@ mod serialization_tests {
             let updated_values = vec![
                 current_tuple.get_value(0).clone(), // Keep same ID
                 current_tuple.get_value(1).clone(), // Keep same name
-                Value::from("updated"), // Change status
+                Value::from("updated"),             // Change status
             ];
             let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
@@ -1727,7 +1729,11 @@ mod serialization_tests {
         let deserialized_result = TablePage::deserialize(&serialized_after_update);
 
         // With the bug fix, this should succeed
-        assert!(deserialized_result.is_ok(), "Deserialization failed after update: {:?}", deserialized_result.err());
+        assert!(
+            deserialized_result.is_ok(),
+            "Deserialization failed after update: {:?}",
+            deserialized_result.err()
+        );
 
         let final_page = deserialized_result.unwrap();
 
@@ -1775,7 +1781,11 @@ mod serialization_tests {
 
         // This update changes the tuple size significantly
         let result = page.update_tuple(&meta, &updated_tuple, rid);
-        assert!(result.is_ok(), "Failed to update tuple with size change: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Failed to update tuple with size change: {:?}",
+            result
+        );
 
         // Check that the size was updated correctly
         let new_size = page.tuple_info[0].1;
@@ -1785,14 +1795,21 @@ mod serialization_tests {
         let serialized = page.serialize();
         let deserialized_result = TablePage::deserialize(&serialized);
 
-        assert!(deserialized_result.is_ok(), "Deserialization failed after size change: {:?}", deserialized_result.err());
+        assert!(
+            deserialized_result.is_ok(),
+            "Deserialization failed after size change: {:?}",
+            deserialized_result.err()
+        );
 
         let final_page = deserialized_result.unwrap();
         let (_, final_tuple) = final_page.get_tuple(&rid).unwrap();
 
         // Verify the updated data is correct
         assert_eq!(final_tuple.get_value(0), Value::from(1));
-        assert_eq!(final_tuple.get_value(1), Value::from("this is a much longer string that should cause size issues"));
+        assert_eq!(
+            final_tuple.get_value(1),
+            Value::from("this is a much longer string that should cause size issues")
+        );
     }
 
     #[test]
@@ -1826,13 +1843,21 @@ mod serialization_tests {
 
         // This update makes the tuple smaller - this was causing corruption
         let result = page.update_tuple(&meta, &updated_tuple, rid);
-        assert!(result.is_ok(), "Failed to update tuple with smaller size: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Failed to update tuple with smaller size: {:?}",
+            result
+        );
 
         // Serialize and deserialize to check for corruption
         let serialized = page.serialize();
         let deserialized_result = TablePage::deserialize(&serialized);
 
-        assert!(deserialized_result.is_ok(), "Deserialization failed after size reduction: {:?}", deserialized_result.err());
+        assert!(
+            deserialized_result.is_ok(),
+            "Deserialization failed after size reduction: {:?}",
+            deserialized_result.err()
+        );
 
         let final_page = deserialized_result.unwrap();
         let (_, final_tuple) = final_page.get_tuple(&rid).unwrap();

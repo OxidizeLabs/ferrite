@@ -2,12 +2,12 @@ use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 use crate::storage::table::tuple::Tuple;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 
 /// Executor for rolling back transactions
 pub struct RollbackTransactionExecutor {
@@ -43,16 +43,19 @@ impl AbstractExecutor for RollbackTransactionExecutor {
         // Get transaction information from the context
         let txn_context = self.context.read().get_transaction_context();
         let transaction_id = txn_context.get_transaction_id();
-        
+
         // Log whether this is a chained rollback
         if self.plan.is_chain() {
             debug!("Transaction {} rollback with chain option", transaction_id);
         }
-        
+
         // Log whether this is a partial rollback to a savepoint
         if let Some(savepoint) = self.plan.get_savepoint() {
-            debug!("Transaction {} rollback to savepoint '{}'", transaction_id, savepoint);
-            
+            debug!(
+                "Transaction {} rollback to savepoint '{}'",
+                transaction_id, savepoint
+            );
+
             // TODO: Implement partial rollback to savepoint
             // This would require savepoint functionality in the transaction system
             warn!("Partial rollback to savepoint not yet implemented");
@@ -61,7 +64,7 @@ impl AbstractExecutor for RollbackTransactionExecutor {
         }
 
         info!("Transaction {} rollback operation prepared", transaction_id);
-        
+
         // The actual abort will be performed by the execution engine
         // We just need to prepare for potential chaining after rollback
         if self.plan.is_chain() {
@@ -70,7 +73,7 @@ impl AbstractExecutor for RollbackTransactionExecutor {
             let mut context_write = self.context.write();
             context_write.set_chain_after_transaction(true);
         }
-        
+
         // Return None as transaction operations don't produce tuples
         None
     }
@@ -92,16 +95,15 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::Transaction;
-    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::concurrency::transaction::IsolationLevel;
+    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use parking_lot::RwLock;
-    use tempfile::TempDir;
     use std::thread;
     use std::time::Duration;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -147,7 +149,9 @@ mod tests {
             let lock_manager = Arc::new(LockManager::new());
 
             // Use the transaction manager to create a transaction instead of hardcoding ID 0
-            let transaction = transaction_manager.begin(IsolationLevel::ReadUncommitted).unwrap();
+            let transaction = transaction_manager
+                .begin(IsolationLevel::ReadUncommitted)
+                .unwrap();
             let transaction_context = Arc::new(TransactionContext::new(
                 transaction,
                 lock_manager.clone(),
@@ -168,7 +172,7 @@ mod tests {
                 self.bpm.clone(),
                 self.transaction_manager.clone(),
             )));
-            
+
             Arc::new(RwLock::new(ExecutionContext::new(
                 self.bpm.clone(),
                 catalog,
@@ -181,27 +185,36 @@ mod tests {
     fn test_rollback_transaction_executor() {
         let test_context = TestContext::new("rollback_transaction_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Store the original transaction ID
-        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        
+        let original_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+
         // Create a rollback transaction plan without chain or savepoint
         let plan = RollbackTransactionPlanNode::new(false, None);
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Initialize and execute
         executor.init();
         let result = executor.next();
-        
+
         // Should return None (no output data)
         assert!(result.is_none());
-        
+
         // Verify that the transaction ID remains the same (rollback doesn't change transaction ID)
-        let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same during rollback");
-        
+        let current_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+        assert_eq!(
+            current_txn_id, original_txn_id,
+            "Transaction ID should remain the same during rollback"
+        );
+
         // Execute again - should return None as it's already executed
         let result = executor.next();
         assert!(result.is_none());
@@ -211,27 +224,36 @@ mod tests {
     fn test_rollback_transaction_with_chain() {
         let test_context = TestContext::new("rollback_transaction_chain_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Store the original transaction ID
-        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        
+        let original_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+
         // Create a rollback transaction plan with chain flag
         let plan = RollbackTransactionPlanNode::new(true, None);
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Initialize and execute
         executor.init();
         let result = executor.next();
-        
+
         // Should return None (no output data)
         assert!(result.is_none());
-        
+
         // Verify that the transaction ID remains the same
-        let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same during rollback");
-        
+        let current_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+        assert_eq!(
+            current_txn_id, original_txn_id,
+            "Transaction ID should remain the same during rollback"
+        );
+
         // Verify that chain flag was set in the context
         let chain_flag = exec_context.read().should_chain_after_transaction();
         assert!(chain_flag, "Chain flag should be set in execution context");
@@ -241,118 +263,149 @@ mod tests {
     fn test_rollback_transaction_with_savepoint() {
         let test_context = TestContext::new("rollback_transaction_savepoint_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Store the original transaction ID
-        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        
+        let original_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+
         // Create a rollback transaction plan with savepoint
         let savepoint_name = "test_savepoint".to_string();
         let plan = RollbackTransactionPlanNode::new(false, Some(savepoint_name.clone()));
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Initialize and execute
         executor.init();
         let result = executor.next();
-        
+
         // Should return None (no output data)
         assert!(result.is_none());
-        
+
         // Verify that the transaction ID remains the same
-        let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same during rollback");
-        
+        let current_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+        assert_eq!(
+            current_txn_id, original_txn_id,
+            "Transaction ID should remain the same during rollback"
+        );
+
         // Verify that chain flag is not set (since chain was false)
         let chain_flag = exec_context.read().should_chain_after_transaction();
-        assert!(!chain_flag, "Chain flag should not be set when chain is false");
+        assert!(
+            !chain_flag,
+            "Chain flag should not be set when chain is false"
+        );
     }
 
     #[test]
     fn test_rollback_transaction_with_savepoint_and_chain() {
         let test_context = TestContext::new("rollback_transaction_savepoint_chain_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Store the original transaction ID
-        let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        
+        let original_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+
         // Create a rollback transaction plan with both savepoint and chain
         let savepoint_name = "test_savepoint".to_string();
         let plan = RollbackTransactionPlanNode::new(true, Some(savepoint_name.clone()));
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Initialize and execute
         executor.init();
         let result = executor.next();
-        
+
         // Should return None (no output data)
         assert!(result.is_none());
-        
+
         // Verify that the transaction ID remains the same
-        let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-        assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same during rollback");
-        
+        let current_txn_id = exec_context
+            .read()
+            .get_transaction_context()
+            .get_transaction_id();
+        assert_eq!(
+            current_txn_id, original_txn_id,
+            "Transaction ID should remain the same during rollback"
+        );
+
         // Verify that chain flag was set in the context
         let chain_flag = exec_context.read().should_chain_after_transaction();
-        assert!(chain_flag, "Chain flag should be set in execution context when chain is true");
+        assert!(
+            chain_flag,
+            "Chain flag should be set in execution context when chain is true"
+        );
     }
 
     #[test]
     fn test_rollback_executor_output_schema() {
         let test_context = TestContext::new("rollback_executor_schema_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Create a rollback transaction plan
         let plan = RollbackTransactionPlanNode::new(false, None);
-        
+
         // Create the executor
         let executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Verify output schema is empty
         let schema = executor.get_output_schema();
-        assert_eq!(schema.get_columns().len(), 0, "Rollback executor should have empty output schema");
+        assert_eq!(
+            schema.get_columns().len(),
+            0,
+            "Rollback executor should have empty output schema"
+        );
     }
 
     #[test]
     fn test_rollback_executor_context() {
         let test_context = TestContext::new("rollback_executor_context_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Create a rollback transaction plan
         let plan = RollbackTransactionPlanNode::new(false, None);
-        
+
         // Create the executor
         let executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Verify executor context is the same as the one passed in
         let executor_context = executor.get_executor_context();
-        assert!(Arc::ptr_eq(&exec_context, &executor_context), "Executor context should be the same as input context");
+        assert!(
+            Arc::ptr_eq(&exec_context, &executor_context),
+            "Executor context should be the same as input context"
+        );
     }
 
     #[test]
     fn test_multiple_rollback_executions() {
         let test_context = TestContext::new("multiple_rollback_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Create a rollback transaction plan
         let plan = RollbackTransactionPlanNode::new(false, None);
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Initialize
         executor.init();
-        
+
         // First execution should work
         let result1 = executor.next();
         assert!(result1.is_none(), "First execution should return None");
-        
+
         // Second execution should also return None (already executed)
         let result2 = executor.next();
         assert!(result2.is_none(), "Second execution should return None");
-        
+
         // Third execution should also return None
         let result3 = executor.next();
         assert!(result3.is_none(), "Third execution should return None");
@@ -368,28 +421,43 @@ mod tests {
         ];
 
         for savepoint_name in savepoint_names {
-            let test_context = TestContext::new(&format!("rollback_savepoint_{}_test", savepoint_name));
+            let test_context =
+                TestContext::new(&format!("rollback_savepoint_{}_test", savepoint_name));
             let exec_context = test_context.create_execution_context();
-            
+
             // Store the original transaction ID
-            let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-            
+            let original_txn_id = exec_context
+                .read()
+                .get_transaction_context()
+                .get_transaction_id();
+
             // Create a rollback transaction plan with this savepoint
             let plan = RollbackTransactionPlanNode::new(false, Some(savepoint_name.clone()));
-            
+
             // Create the executor
             let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-            
+
             // Initialize and execute
             executor.init();
             let result = executor.next();
-            
+
             // Should return None (no output data)
-            assert!(result.is_none(), "Rollback to savepoint '{}' should return None", savepoint_name);
-            
+            assert!(
+                result.is_none(),
+                "Rollback to savepoint '{}' should return None",
+                savepoint_name
+            );
+
             // Verify that the transaction ID remains the same
-            let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-            assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same for savepoint '{}'", savepoint_name);
+            let current_txn_id = exec_context
+                .read()
+                .get_transaction_context()
+                .get_transaction_id();
+            assert_eq!(
+                current_txn_id, original_txn_id,
+                "Transaction ID should remain the same for savepoint '{}'",
+                savepoint_name
+            );
         }
     }
 
@@ -404,35 +472,56 @@ mod tests {
         ];
 
         for (chain, savepoint) in test_cases {
-            let test_name = format!("rollback_combo_chain_{}_savepoint_{}_test", 
-                                  chain, 
-                                  savepoint.as_ref().map_or("none", |s| s));
+            let test_name = format!(
+                "rollback_combo_chain_{}_savepoint_{}_test",
+                chain,
+                savepoint.as_ref().map_or("none", |s| s)
+            );
             let test_context = TestContext::new(&test_name);
             let exec_context = test_context.create_execution_context();
-            
+
             // Store the original transaction ID
-            let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-            
+            let original_txn_id = exec_context
+                .read()
+                .get_transaction_context()
+                .get_transaction_id();
+
             // Create a rollback transaction plan with these parameters
             let plan = RollbackTransactionPlanNode::new(chain, savepoint.clone());
-            
+
             // Create the executor
             let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-            
+
             // Initialize and execute
             executor.init();
             let result = executor.next();
-            
+
             // Should return None (no output data)
-            assert!(result.is_none(), "Rollback with chain={}, savepoint={:?} should return None", chain, savepoint);
-            
+            assert!(
+                result.is_none(),
+                "Rollback with chain={}, savepoint={:?} should return None",
+                chain,
+                savepoint
+            );
+
             // Verify that the transaction ID remains the same
-            let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-            assert_eq!(current_txn_id, original_txn_id, "Transaction ID should remain the same for chain={}, savepoint={:?}", chain, savepoint);
-            
+            let current_txn_id = exec_context
+                .read()
+                .get_transaction_context()
+                .get_transaction_id();
+            assert_eq!(
+                current_txn_id, original_txn_id,
+                "Transaction ID should remain the same for chain={}, savepoint={:?}",
+                chain, savepoint
+            );
+
             // Verify chain flag in context
             let chain_flag = exec_context.read().should_chain_after_transaction();
-            assert_eq!(chain_flag, chain, "Chain flag should match input for chain={}, savepoint={:?}", chain, savepoint);
+            assert_eq!(
+                chain_flag, chain,
+                "Chain flag should match input for chain={}, savepoint={:?}",
+                chain, savepoint
+            );
         }
     }
 
@@ -440,69 +529,94 @@ mod tests {
     fn test_concurrent_rollback_executions() {
         // This test verifies that multiple rollback executors can run concurrently
         let test_context = TestContext::new("concurrent_rollback_test");
-        
+
         // Number of threads to create
         const NUM_THREADS: usize = 5;
-        
+
         // Create a barrier to synchronize thread start
         let barrier = Arc::new(std::sync::Barrier::new(NUM_THREADS));
-        
+
         // Create multiple threads, each executing a rollback
         let mut handles = Vec::with_capacity(NUM_THREADS);
         let results = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(NUM_THREADS)));
-        
+
         for i in 0..NUM_THREADS {
             let thread_barrier = barrier.clone();
             let thread_results = results.clone();
-            let thread_test_context = TestContext::new(&format!("concurrent_rollback_thread_{}_test", i));
-            
+            let thread_test_context =
+                TestContext::new(&format!("concurrent_rollback_thread_{}_test", i));
+
             let handle = thread::spawn(move || {
                 // Wait for all threads to be ready
                 thread_barrier.wait();
-                
+
                 let exec_context = thread_test_context.create_execution_context();
-                let original_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
-                
+                let original_txn_id = exec_context
+                    .read()
+                    .get_transaction_context()
+                    .get_transaction_id();
+
                 // Create a rollback plan with different parameters for each thread
                 let chain = i % 2 == 0;
-                let savepoint = if i % 3 == 0 { Some(format!("sp_{}", i)) } else { None };
+                let savepoint = if i % 3 == 0 {
+                    Some(format!("sp_{}", i))
+                } else {
+                    None
+                };
                 let plan = RollbackTransactionPlanNode::new(chain, savepoint);
-                
+
                 // Create and execute the rollback
                 let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
                 executor.init();
                 let result = executor.next();
-                
+
                 // Small sleep to simulate some work
                 thread::sleep(Duration::from_millis(10));
-                
+
                 // Record the result
-                let current_txn_id = exec_context.read().get_transaction_context().get_transaction_id();
+                let current_txn_id = exec_context
+                    .read()
+                    .get_transaction_context()
+                    .get_transaction_id();
                 let chain_flag = exec_context.read().should_chain_after_transaction();
-                
+
                 thread_results.lock().push((
                     result.is_none(),
                     original_txn_id == current_txn_id,
                     chain_flag == chain,
                 ));
             });
-            
+
             handles.push(handle);
         }
-        
+
         // Wait for all threads to complete
         for handle in handles {
             handle.join().unwrap();
         }
-        
+
         // Verify all results
         let final_results = results.lock().clone();
-        assert_eq!(final_results.len(), NUM_THREADS, "All threads should have completed");
-        
-        for (i, (returned_none, txn_id_unchanged, chain_flag_correct)) in final_results.iter().enumerate() {
+        assert_eq!(
+            final_results.len(),
+            NUM_THREADS,
+            "All threads should have completed"
+        );
+
+        for (i, (returned_none, txn_id_unchanged, chain_flag_correct)) in
+            final_results.iter().enumerate()
+        {
             assert!(returned_none, "Thread {} should have returned None", i);
-            assert!(txn_id_unchanged, "Thread {} should have unchanged transaction ID", i);
-            assert!(chain_flag_correct, "Thread {} should have correct chain flag", i);
+            assert!(
+                txn_id_unchanged,
+                "Thread {} should have unchanged transaction ID",
+                i
+            );
+            assert!(
+                chain_flag_correct,
+                "Thread {} should have correct chain flag",
+                i
+            );
         }
     }
 
@@ -510,41 +624,51 @@ mod tests {
     fn test_rollback_executor_initialization() {
         let test_context = TestContext::new("rollback_executor_init_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Create a rollback transaction plan
         let plan = RollbackTransactionPlanNode::new(true, Some("test_sp".to_string()));
-        
+
         // Create the executor
         let mut executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Before initialization, next() should still work (init is optional)
         let result_before_init = executor.next();
-        assert!(result_before_init.is_none(), "Should return None even before explicit init");
-        
+        assert!(
+            result_before_init.is_none(),
+            "Should return None even before explicit init"
+        );
+
         // After execution, init should not change behavior
         executor.init();
         let result_after_init = executor.next();
-        assert!(result_after_init.is_none(), "Should return None after init when already executed");
+        assert!(
+            result_after_init.is_none(),
+            "Should return None after init when already executed"
+        );
     }
 
     #[test]
     fn test_rollback_executor_plan_access() {
         let test_context = TestContext::new("rollback_executor_plan_access_test");
         let exec_context = test_context.create_execution_context();
-        
+
         // Create a rollback transaction plan with specific parameters
         let chain = true;
         let savepoint = Some("access_test_sp".to_string());
         let plan = RollbackTransactionPlanNode::new(chain, savepoint.clone());
-        
+
         // Create the executor
         let executor = RollbackTransactionExecutor::new(exec_context.clone(), plan);
-        
+
         // Access the plan through the executor's schema (indirect access)
         let schema = executor.get_output_schema();
-        assert_eq!(schema.get_columns().len(), 0, "Schema should be empty for transaction operations");
-        
+        assert_eq!(
+            schema.get_columns().len(),
+            0,
+            "Schema should be empty for transaction operations"
+        );
+
         // The executor should maintain the plan's properties internally
         // (We can't directly access the plan from the executor, but we can test its behavior)
     }
-} 
+}

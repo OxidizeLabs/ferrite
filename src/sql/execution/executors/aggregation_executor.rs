@@ -81,9 +81,11 @@ impl AggregationExecutor {
         debug!("Computing aggregate for key: {:?}", key);
         debug!("Number of aggregates: {}", aggregates.len());
 
-        let agg_value = agg_map.entry(key.clone()).or_insert_with(|| AggregateValues {
-            values: vec![Value::from(TypeId::Invalid); aggregates.len()],
-        });
+        let agg_value = agg_map
+            .entry(key.clone())
+            .or_insert_with(|| AggregateValues {
+                values: vec![Value::from(TypeId::Invalid); aggregates.len()],
+            });
 
         debug!("Current aggregate values: {:?}", agg_value.values);
 
@@ -145,7 +147,7 @@ impl AggregationExecutor {
                                 let count_key = (key.clone(), i);
                                 let current_count = avg_counts.entry(count_key).or_insert(0);
                                 *current_count += 1;
-                                
+
                                 if agg_value.values[i].is_null() {
                                     // First value - store as sum
                                     agg_value.values[i] = arg_val;
@@ -207,9 +209,14 @@ impl AbstractExecutor for AggregationExecutor {
                 let key = GroupKey { values: key_values };
 
                 // Update aggregates for this group
-                if let Err(e) =
-                    Self::compute_aggregate(&mut self.groups, &mut self.avg_counts, &aggregates, key, &tuple, schema)
-                {
+                if let Err(e) = Self::compute_aggregate(
+                    &mut self.groups,
+                    &mut self.avg_counts,
+                    &aggregates,
+                    key,
+                    &tuple,
+                    schema,
+                ) {
                     error!("Error computing aggregate: {}", e);
                 }
             }
@@ -294,7 +301,7 @@ impl AbstractExecutor for AggregationExecutor {
                     }
                 }
             }
-            
+
             let mut values = Vec::new();
             values.extend(key.values.iter().cloned());
             values.extend(value.values.iter().cloned());

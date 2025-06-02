@@ -136,44 +136,53 @@ impl ExecutionEngine {
             }
             PlanNode::StartTransaction(_) => {
                 debug!("Executing start transaction statement");
-                
+
                 // StartTransaction doesn't generate any result tuples
                 // Just execute next() once to trigger the transaction creation
                 root_executor.next();
-                
+
                 // Get transaction information from the executor's context
                 let exec_context = root_executor.get_executor_context();
                 let txn_context = exec_context.read().get_transaction_context();
                 let txn_id = txn_context.get_transaction_id();
                 let isolation_level = txn_context.get_transaction().get_isolation_level();
-                
-                info!("Transaction {} started successfully with isolation level {:?}", txn_id, isolation_level);
+
+                info!(
+                    "Transaction {} started successfully with isolation level {:?}",
+                    txn_id, isolation_level
+                );
                 Ok(true)
             }
             PlanNode::CommitTransaction(_) => {
                 debug!("Executing commit transaction statement");
-                
+
                 // Execute the commit executor to log the operation
                 root_executor.next();
-                
+
                 // Get transaction context from execution context
                 let exec_context = root_executor.get_executor_context();
                 let txn_context = exec_context.read().get_transaction_context();
-                
+
                 // Perform the actual commit
                 match self.commit_transaction(txn_context.clone()) {
                     Ok(true) => {
-                        info!("Transaction {} committed successfully", txn_context.get_transaction_id());
-                        
+                        info!(
+                            "Transaction {} committed successfully",
+                            txn_context.get_transaction_id()
+                        );
+
                         // Chain a new transaction if needed
                         if let Err(e) = self.chain_transaction(txn_context, exec_context.clone()) {
                             error!("Error chaining transaction: {}", e);
                         }
-                        
+
                         Ok(true)
                     }
                     Ok(false) => {
-                        error!("Transaction {} failed to commit", txn_context.get_transaction_id());
+                        error!(
+                            "Transaction {} failed to commit",
+                            txn_context.get_transaction_id()
+                        );
                         Err(DBError::Execution("Transaction commit failed".to_string()))
                     }
                     Err(e) => {
@@ -184,28 +193,34 @@ impl ExecutionEngine {
             }
             PlanNode::RollbackTransaction(_) => {
                 debug!("Executing rollback transaction statement");
-                
+
                 // Execute the rollback executor to log the operation
                 root_executor.next();
-                
+
                 // Get transaction context from execution context
                 let exec_context = root_executor.get_executor_context();
                 let txn_context = exec_context.read().get_transaction_context();
-                
+
                 // Perform the actual abort
                 match self.abort_transaction(txn_context.clone()) {
                     Ok(true) => {
-                        info!("Transaction {} aborted successfully", txn_context.get_transaction_id());
-                        
+                        info!(
+                            "Transaction {} aborted successfully",
+                            txn_context.get_transaction_id()
+                        );
+
                         // Chain a new transaction if needed
                         if let Err(e) = self.chain_transaction(txn_context, exec_context.clone()) {
                             error!("Error chaining transaction: {}", e);
                         }
-                        
+
                         Ok(true)
                     }
                     Ok(false) => {
-                        error!("Transaction {} failed to abort", txn_context.get_transaction_id());
+                        error!(
+                            "Transaction {} failed to abort",
+                            txn_context.get_transaction_id()
+                        );
                         Err(DBError::Execution("Transaction abort failed".to_string()))
                     }
                     Err(e) => {
@@ -216,28 +231,27 @@ impl ExecutionEngine {
             }
             PlanNode::CommandResult(cmd) => {
                 debug!("Executing command: {}", cmd);
-                
+
                 // Let the CommandExecutor handle the command
                 let mut has_results = false;
-                
+
                 // Process all tuples from the executor
                 while let Some(_) = root_executor.next() {
                     has_results = true;
                 }
-                
-                    // For other commands, just return success based on whether the executor produced results
+
+                // For other commands, just return success based on whether the executor produced results
                 Ok(has_results)
-                
             }
             PlanNode::Update(_) => {
                 debug!("Executing update statement");
                 let mut has_results = false;
-                
+
                 // Process all tuples from the executor
                 while let Some(_) = root_executor.next() {
                     has_results = true;
                 }
-                
+
                 if has_results {
                     info!("Update executed successfully");
                     Ok(true)
@@ -249,12 +263,12 @@ impl ExecutionEngine {
             PlanNode::Delete(_) => {
                 debug!("Executing delete statement");
                 let mut has_results = false;
-                
+
                 // Process all tuples from the executor
                 while let Some(_) = root_executor.next() {
                     has_results = true;
                 }
-                
+
                 if has_results {
                     info!("Delete executed successfully");
                     Ok(true)
@@ -290,9 +304,10 @@ impl ExecutionEngine {
                             has_results = true;
                             row_count += 1;
                             debug!("Processing result tuple {}", row_count);
-                            
+
                             // Use the schema-aware row writer for proper decimal formatting
-                            writer.write_row_with_schema(tuple.get_values().to_vec(), &schema_clone);
+                            writer
+                                .write_row_with_schema(tuple.get_values().to_vec(), &schema_clone);
                         }
                         None => {
                             debug!("No more result tuples");
@@ -437,11 +452,15 @@ impl ExecutionEngine {
 
         // Write commit record to WAL
         let transaction = txn_ctx.get_transaction();
-        
+
         // Debug: Log the write set before commit
         let write_set = transaction.get_write_set();
-        debug!("Transaction {} write set before commit: {:?}", txn_ctx.get_transaction_id(), write_set);
-        
+        debug!(
+            "Transaction {} write set before commit: {:?}",
+            txn_ctx.get_transaction_id(),
+            write_set
+        );
+
         let lsn = self.wal_manager.write_commit_record(transaction.as_ref());
 
         // Update transaction's LSN
@@ -461,26 +480,29 @@ impl ExecutionEngine {
     }
 
     fn chain_transaction(
-        &self, 
-        txn_ctx: Arc<TransactionContext>, 
-        exec_ctx: Arc<RwLock<ExecutionContext>>
+        &self,
+        txn_ctx: Arc<TransactionContext>,
+        exec_ctx: Arc<RwLock<ExecutionContext>>,
     ) -> Result<bool, DBError> {
         debug!("Checking if transaction should be chained");
-        
+
         // Only proceed if chaining is requested
         if !exec_ctx.read().should_chain_after_transaction() {
             return Ok(false);
         }
-        
+
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        
+
         // Get isolation level from previous transaction
         let isolation_level = txn_ctx.get_transaction().get_isolation_level();
         let lock_manager = txn_ctx.get_lock_manager();
-        
-        debug!("Chaining transaction with isolation level {:?}", isolation_level);
-        
+
+        debug!(
+            "Chaining transaction with isolation level {:?}",
+            isolation_level
+        );
+
         // Start a new transaction with the same isolation level
         match txn_manager.begin(isolation_level) {
             Ok(new_txn) => {
@@ -490,20 +512,20 @@ impl ExecutionEngine {
                     lock_manager,
                     txn_manager.clone(),
                 ));
-                
+
                 debug!(
                     "Started new chained transaction {} with isolation level {:?}",
                     new_txn_context.get_transaction_id(),
                     isolation_level
                 );
-                
+
                 // Update the executor context with the new transaction context
                 let mut context = exec_ctx.write();
                 context.set_transaction_context(new_txn_context);
-                
+
                 // Reset the chain flag
                 context.set_chain_after_transaction(false);
-                
+
                 Ok(true)
             }
             Err(err) => {
@@ -518,7 +540,10 @@ impl ExecutionEngine {
 
         // Get transaction manager
         let txn_manager = self.transaction_factory.get_transaction_manager();
-        debug!("Got transaction manager from factory: {:p}", txn_manager.as_ref());
+        debug!(
+            "Got transaction manager from factory: {:p}",
+            txn_manager.as_ref()
+        );
 
         // Write abort record to WAL
         let transaction = txn_ctx.get_transaction();
@@ -528,7 +553,10 @@ impl ExecutionEngine {
         transaction.set_prev_lsn(lsn);
 
         // Attempt to abort
-        debug!("About to call txn_manager.abort() on transaction {}", transaction.get_transaction_id());
+        debug!(
+            "About to call txn_manager.abort() on transaction {}",
+            transaction.get_transaction_id()
+        );
         txn_manager.abort(transaction);
         debug!("Transaction aborted successfully");
         Ok(true)
@@ -543,22 +571,19 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableInfo;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val::Null;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::storage::table::tuple::TupleMeta;
-    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-    use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
 
     struct TestContext {
         engine: ExecutionEngine,
@@ -623,7 +648,8 @@ mod tests {
             )));
 
             // Create a transaction using the factory's transaction manager
-            let transaction_context = transaction_factory.begin_transaction(IsolationLevel::ReadUncommitted);
+            let transaction_context =
+                transaction_factory.begin_transaction(IsolationLevel::ReadUncommitted);
 
             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
                 bpm.clone(),
@@ -669,10 +695,8 @@ mod tests {
             let table_heap = table.get_table_heap();
 
             // Create a transactional wrapper around the table heap
-            let transactional_table_heap = TransactionalTableHeap::new(
-                table_heap.clone(), 
-                table.get_table_oidt()
-            );
+            let transactional_table_heap =
+                TransactionalTableHeap::new(table_heap.clone(), table.get_table_oidt());
 
             // Use the current transaction context instead of hardcoded transaction ID
             let txn_ctx = self.exec_ctx.read().get_transaction_context();
@@ -1417,9 +1441,9 @@ mod tests {
             .engine
             .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
             .unwrap();
-            
+
         assert!(success, "Begin transaction failed");
-        
+
         // Update Alice's balance
         let update_sql = "UPDATE accounts SET balance = balance - 200 WHERE id = 1";
         let mut writer = TestResultWriter::new();
@@ -1883,31 +1907,32 @@ mod tests {
         let test_data = vec![
             vec![
                 Value::new(1),
-                Value::new(123.456789),  // Should be formatted based on column precision/scale
-                Value::new(0.0825),      // Rate like 8.25%
-                Value::new(15.5),        // Simple percentage
-                Value::new(1000.00),     // Currency with exact cents
+                Value::new(123.456789), // Should be formatted based on column precision/scale
+                Value::new(0.0825),     // Rate like 8.25%
+                Value::new(15.5),       // Simple percentage
+                Value::new(1000.00),    // Currency with exact cents
             ],
             vec![
                 Value::new(2),
-                Value::new(99.99),       // Price with cents
-                Value::new(0.125),       // Rate 12.5%
-                Value::new(100.0),       // Whole percentage
-                Value::new(2500.50),     // Currency with 50 cents
+                Value::new(99.99),   // Price with cents
+                Value::new(0.125),   // Rate 12.5%
+                Value::new(100.0),   // Whole percentage
+                Value::new(2500.50), // Currency with 50 cents
             ],
             vec![
                 Value::new(3),
-                Value::new(0.01),        // Very small price
-                Value::new(1.0),         // 100% rate
-                Value::new(0.1),         // 0.1%
-                Value::new(10000.0),     // Large currency amount
+                Value::new(0.01),    // Very small price
+                Value::new(1.0),     // 100% rate
+                Value::new(0.1),     // 0.1%
+                Value::new(10000.0), // Large currency amount
             ],
         ];
         ctx.insert_tuples(table_name, test_data, table_schema)
             .unwrap();
 
-                 // Test 1: Basic decimal display (default formatting)
-         let select_sql = "SELECT id, price, rate, percentage, currency FROM financial_data ORDER BY id";
+        // Test 1: Basic decimal display (default formatting)
+        let select_sql =
+            "SELECT id, price, rate, percentage, currency FROM financial_data ORDER BY id";
         let mut writer = TestResultWriter::new();
         let success = ctx
             .engine
@@ -1918,12 +1943,19 @@ mod tests {
         let rows = writer.get_rows();
         assert_eq!(rows.len(), 3, "Expected 3 rows");
 
-                 // Verify default decimal formatting
-         println!("Default decimal formatting:");
-         for (i, row) in rows.iter().enumerate() {
-             println!("Row {}: id={}, price={}, rate={}, percentage={}, currency={}", 
-                 i + 1, row[0], row[1], row[2], row[3], row[4]);
-         }
+        // Verify default decimal formatting
+        println!("Default decimal formatting:");
+        for (i, row) in rows.iter().enumerate() {
+            println!(
+                "Row {}: id={}, price={}, rate={}, percentage={}, currency={}",
+                i + 1,
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4]
+            );
+        }
 
         // Test 2: Arithmetic operations with decimals
         let calc_sql = "SELECT id, price * rate as calculated, price + 10.50 as adjusted_price FROM financial_data ORDER BY id";
@@ -1937,7 +1969,10 @@ mod tests {
         let calc_rows = writer.get_rows();
         println!("\nDecimal arithmetic results:");
         for row in calc_rows {
-            println!("ID: {}, Calculated: {}, Adjusted Price: {}", row[0], row[1], row[2]);
+            println!(
+                "ID: {}, Calculated: {}, Adjusted Price: {}",
+                row[0], row[1], row[2]
+            );
         }
 
         // Test 3: Aggregation with decimals
@@ -1952,8 +1987,10 @@ mod tests {
         let agg_rows = writer.get_rows();
         println!("\nDecimal aggregation results:");
         for row in agg_rows {
-            println!("Avg Price: {}, Total Currency: {}, Min Rate: {}, Max Percentage: {}", 
-                row[0], row[1], row[2], row[3]);
+            println!(
+                "Avg Price: {}, Total Currency: {}, Min Rate: {}, Max Percentage: {}",
+                row[0], row[1], row[2], row[3]
+            );
         }
 
         // Test 4: Decimal comparisons and filtering
@@ -2007,21 +2044,21 @@ mod tests {
         let test_data = vec![
             vec![
                 Value::new(1),
-                Value::new(3.14159f32),      // Pi approximation
-                Value::new(0.618f32),        // Golden ratio approximation
-                Value::new(1.23e-4f32),      // Scientific notation
+                Value::new(3.14159f32), // Pi approximation
+                Value::new(0.618f32),   // Golden ratio approximation
+                Value::new(1.23e-4f32), // Scientific notation
             ],
             vec![
                 Value::new(2),
-                Value::new(2.718f32),        // e approximation
-                Value::new(1.414f32),        // sqrt(2) approximation
-                Value::new(9.87e6f32),       // Large scientific number
+                Value::new(2.718f32),  // e approximation
+                Value::new(1.414f32),  // sqrt(2) approximation
+                Value::new(9.87e6f32), // Large scientific number
             ],
             vec![
                 Value::new(3),
-                Value::new(0.0f32),          // Zero
-                Value::new(1.0f32),          // One
-                Value::new(-1.5e-10f32),     // Very small negative
+                Value::new(0.0f32),      // Zero
+                Value::new(1.0f32),      // One
+                Value::new(-1.5e-10f32), // Very small negative
             ],
         ];
         ctx.insert_tuples(table_name, test_data, table_schema)
@@ -2039,8 +2076,14 @@ mod tests {
         let rows = writer.get_rows();
         println!("Float display results:");
         for (i, row) in rows.iter().enumerate() {
-            println!("Row {}: id={}, measurement={}, ratio={}, scientific={}", 
-                i + 1, row[0], row[1], row[2], row[3]);
+            println!(
+                "Row {}: id={}, measurement={}, ratio={}, scientific={}",
+                i + 1,
+                row[0],
+                row[1],
+                row[2],
+                row[3]
+            );
         }
 
         // Test 2: Float arithmetic operations
@@ -2055,11 +2098,15 @@ mod tests {
         let calc_rows = writer.get_rows();
         println!("\nFloat arithmetic results:");
         for row in calc_rows {
-            println!("ID: {}, Product: {}, Incremented: {}", row[0], row[1], row[2]);
+            println!(
+                "ID: {}, Product: {}, Incremented: {}",
+                row[0], row[1], row[2]
+            );
         }
 
         // Test 3: Float aggregations
-        let agg_sql = "SELECT AVG(measurement) as avg_measurement, SUM(ratio) as sum_ratio FROM measurements";
+        let agg_sql =
+            "SELECT AVG(measurement) as avg_measurement, SUM(ratio) as sum_ratio FROM measurements";
         let mut writer = TestResultWriter::new();
         let success = ctx
             .engine
@@ -2119,7 +2166,8 @@ mod tests {
             .unwrap();
 
         // Test 1: Display all numeric types
-        let select_sql = "SELECT id, int_val, bigint_val, decimal_val, float_val FROM mixed_numbers ORDER BY id";
+        let select_sql =
+            "SELECT id, int_val, bigint_val, decimal_val, float_val FROM mixed_numbers ORDER BY id";
         let mut writer = TestResultWriter::new();
         let success = ctx
             .engine
@@ -2130,8 +2178,15 @@ mod tests {
         let rows = writer.get_rows();
         println!("Mixed numeric display results:");
         for (i, row) in rows.iter().enumerate() {
-            println!("Row {}: id={}, int={}, bigint={}, decimal={}, float={}", 
-                i + 1, row[0], row[1], row[2], row[3], row[4]);
+            println!(
+                "Row {}: id={}, int={}, bigint={}, decimal={}, float={}",
+                i + 1,
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4]
+            );
         }
 
         // Test 2: Mixed arithmetic (should promote to appropriate types)
@@ -2146,7 +2201,10 @@ mod tests {
         let calc_rows = writer.get_rows();
         println!("\nMixed arithmetic results:");
         for row in calc_rows {
-            println!("ID: {}, Int+Decimal: {}, BigInt*Float: {}", row[0], row[1], row[2]);
+            println!(
+                "ID: {}, Int+Decimal: {}, BigInt*Float: {}",
+                row[0], row[1], row[2]
+            );
         }
 
         // Test 3: Comparisons between different numeric types
@@ -2176,7 +2234,10 @@ mod tests {
         let agg_rows = writer.get_rows();
         println!("\nMixed aggregation results:");
         for row in agg_rows {
-            println!("Avg Int: {}, Avg Decimal: {}, Avg Float: {}", row[0], row[1], row[2]);
+            println!(
+                "Avg Int: {}, Avg Decimal: {}, Avg Float: {}",
+                row[0], row[1], row[2]
+            );
         }
     }
 
@@ -2198,15 +2259,35 @@ mod tests {
         // Insert edge case values
         let test_data = vec![
             vec![Value::new(1), Value::new("zero"), Value::new(0.0)],
-            vec![Value::new(2), Value::new("small_positive"), Value::new(0.001)],
-            vec![Value::new(3), Value::new("small_negative"), Value::new(-0.001)],
-            vec![Value::new(4), Value::new("large_positive"), Value::new(999999.999)],
-            vec![Value::new(5), Value::new("large_negative"), Value::new(-999999.999)],
+            vec![
+                Value::new(2),
+                Value::new("small_positive"),
+                Value::new(0.001),
+            ],
+            vec![
+                Value::new(3),
+                Value::new("small_negative"),
+                Value::new(-0.001),
+            ],
+            vec![
+                Value::new(4),
+                Value::new("large_positive"),
+                Value::new(999999.999),
+            ],
+            vec![
+                Value::new(5),
+                Value::new("large_negative"),
+                Value::new(-999999.999),
+            ],
             vec![Value::new(6), Value::new("one"), Value::new(1.0)],
             vec![Value::new(7), Value::new("negative_one"), Value::new(-1.0)],
             vec![Value::new(8), Value::new("half"), Value::new(0.5)],
             vec![Value::new(9), Value::new("third"), Value::new(0.333333)],
-            vec![Value::new(10), Value::new("pi_approx"), Value::new(3.141592653589793)],
+            vec![
+                Value::new(10),
+                Value::new("pi_approx"),
+                Value::new(3.141592653589793),
+            ],
         ];
         ctx.insert_tuples(table_name, test_data, table_schema)
             .unwrap();
@@ -2223,8 +2304,13 @@ mod tests {
         let rows = writer.get_rows();
         println!("Decimal edge cases display:");
         for (i, row) in rows.iter().enumerate() {
-            println!("{}: id={}, description={}, value={}", 
-                i + 1, row[0], row[1], row[2]);
+            println!(
+                "{}: id={}, description={}, value={}",
+                i + 1,
+                row[0],
+                row[1],
+                row[2]
+            );
         }
 
         // Test operations with edge cases
@@ -2239,7 +2325,10 @@ mod tests {
         let ops_rows = writer.get_rows();
         println!("\nEdge case operations:");
         for row in ops_rows {
-            println!("{}: original={}, doubled={}, halved={}", row[1], row[2], row[3], row[4]);
+            println!(
+                "{}: original={}, doubled={}, halved={}",
+                row[1], row[2], row[3], row[4]
+            );
         }
     }
 
@@ -2247,18 +2336,18 @@ mod tests {
     fn test_decimal_column_aware_formatting() {
         let mut ctx = TestContext::new("test_decimal_column_aware_formatting");
 
-                 // Create test table with decimal columns that have specific precision and scale
-         let price_column = Column::builder("price", TypeId::Decimal)
-             .with_precision_and_scale(10, 2) // DECIMAL(10,2) for currency
-             .build();
+        // Create test table with decimal columns that have specific precision and scale
+        let price_column = Column::builder("price", TypeId::Decimal)
+            .with_precision_and_scale(10, 2) // DECIMAL(10,2) for currency
+            .build();
 
-         let rate_column = Column::builder("rate", TypeId::Decimal)
-             .with_precision_and_scale(5, 4) // DECIMAL(5,4) for rates
-             .build();
+        let rate_column = Column::builder("rate", TypeId::Decimal)
+            .with_precision_and_scale(5, 4) // DECIMAL(5,4) for rates
+            .build();
 
-         let percentage_column = Column::builder("percentage", TypeId::Decimal)
-             .with_precision_and_scale(6, 1) // DECIMAL(6,1) for percentages
-             .build();
+        let percentage_column = Column::builder("percentage", TypeId::Decimal)
+            .with_precision_and_scale(6, 1) // DECIMAL(6,1) for percentages
+            .build();
 
         let table_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -2275,21 +2364,21 @@ mod tests {
         let test_data = vec![
             vec![
                 Value::new(1),
-                Value::new(123.456789),  // Should display as 123.46 (scale 2)
-                Value::new(0.08251),     // Should display as 0.0825 (scale 4)
-                Value::new(15.567),      // Should display as 15.6 (scale 1)
+                Value::new(123.456789), // Should display as 123.46 (scale 2)
+                Value::new(0.08251),    // Should display as 0.0825 (scale 4)
+                Value::new(15.567),     // Should display as 15.6 (scale 1)
             ],
             vec![
                 Value::new(2),
-                Value::new(99.9),        // Should display as 99.90 (scale 2)
-                Value::new(0.1),         // Should display as 0.1000 (scale 4)
-                Value::new(100.0),       // Should display as 100.0 (scale 1)
+                Value::new(99.9),  // Should display as 99.90 (scale 2)
+                Value::new(0.1),   // Should display as 0.1000 (scale 4)
+                Value::new(100.0), // Should display as 100.0 (scale 1)
             ],
             vec![
                 Value::new(3),
-                Value::new(1000.0),      // Should display as 1000.00 (scale 2)
-                Value::new(1.0),         // Should display as 1.0000 (scale 4)
-                Value::new(0.05),        // Should display as 0.1 (scale 1, rounded)
+                Value::new(1000.0), // Should display as 1000.00 (scale 2)
+                Value::new(1.0),    // Should display as 1.0000 (scale 4)
+                Value::new(0.05),   // Should display as 0.1 (scale 1, rounded)
             ],
         ];
         ctx.insert_tuples(table_name, test_data, table_schema)
@@ -2307,8 +2396,14 @@ mod tests {
         let rows = writer.get_rows();
         println!("Column-aware decimal formatting results:");
         for (i, row) in rows.iter().enumerate() {
-            println!("Row {}: id={}, price={} (scale 2), rate={} (scale 4), percentage={} (scale 1)", 
-                i + 1, row[0], row[1], row[2], row[3]);
+            println!(
+                "Row {}: id={}, price={} (scale 2), rate={} (scale 4), percentage={} (scale 1)",
+                i + 1,
+                row[0],
+                row[1],
+                row[2],
+                row[3]
+            );
         }
 
         // Test that the formatting is consistent in calculations
@@ -2323,7 +2418,10 @@ mod tests {
         let calc_rows = writer.get_rows();
         println!("\nCalculated decimal formatting:");
         for row in calc_rows {
-            println!("ID: {}, Calculated Amount: {}, Decimal Percentage: {}", row[0], row[1], row[2]);
+            println!(
+                "ID: {}, Calculated Amount: {}, Decimal Percentage: {}",
+                row[0], row[1], row[2]
+            );
         }
 
         // Test aggregations with formatted decimals
@@ -2338,7 +2436,10 @@ mod tests {
         let agg_rows = writer.get_rows();
         println!("\nAggregated decimal formatting:");
         for row in agg_rows {
-            println!("Avg Price: {}, Total Rate: {}, Max Percentage: {}", row[0], row[1], row[2]);
+            println!(
+                "Avg Price: {}, Total Rate: {}, Max Percentage: {}",
+                row[0], row[1], row[2]
+            );
         }
     }
 
@@ -2418,7 +2519,8 @@ mod tests {
             );
 
             // Test 2: UPDATE multiple columns
-            let update_sql = "UPDATE employees SET name = 'Alice Smith', salary = 55000 WHERE id = 1";
+            let update_sql =
+                "UPDATE employees SET name = 'Alice Smith', salary = 55000 WHERE id = 1";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2556,7 +2658,8 @@ mod tests {
             }
 
             // Test 2: UPDATE with string condition
-            let update_sql = "UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering'";
+            let update_sql =
+                "UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering'";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2565,7 +2668,8 @@ mod tests {
             assert!(success, "String condition update failed");
 
             // Verify Engineering employees got 10% raise
-            let select_sql = "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
+            let select_sql =
+                "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
@@ -2584,14 +2688,21 @@ mod tests {
                 };
 
                 if name == "Alice" {
-                    assert_eq!(salary, 55000, "Alice's salary should be 55000 (50000 * 1.1)");
+                    assert_eq!(
+                        salary, 55000,
+                        "Alice's salary should be 55000 (50000 * 1.1)"
+                    );
                 } else if name == "Charlie" {
-                    assert_eq!(salary, 82500, "Charlie's salary should be 82500 (75000 * 1.1)");
+                    assert_eq!(
+                        salary, 82500,
+                        "Charlie's salary should be 82500 (75000 * 1.1)"
+                    );
                 }
             }
 
             // Test 3: UPDATE with multiple conditions (AND)
-            let update_sql = "UPDATE employees SET age = age + 1 WHERE department = 'Sales' AND age < 35";
+            let update_sql =
+                "UPDATE employees SET age = age + 1 WHERE department = 'Sales' AND age < 35";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2600,7 +2711,8 @@ mod tests {
             assert!(success, "Multiple condition update failed");
 
             // Verify only Bob and Eve (Sales, age < 35) got age increment
-            let select_sql = "SELECT name, age FROM employees WHERE department = 'Sales' ORDER BY name";
+            let select_sql =
+                "SELECT name, age FROM employees WHERE department = 'Sales' ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
@@ -2664,7 +2776,8 @@ mod tests {
                 .unwrap();
 
             // Test 1: UPDATE with arithmetic expression
-            let update_sql = "UPDATE employees SET base_salary = base_salary + (years_experience * 1000)";
+            let update_sql =
+                "UPDATE employees SET base_salary = base_salary + (years_experience * 1000)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2681,14 +2794,27 @@ mod tests {
             let rows = writer.get_rows();
 
             // Alice: 50000 + (3 * 1000) = 53000
-            assert_eq!(rows[0][2].to_string(), "53000", "Alice's salary should be 53000");
+            assert_eq!(
+                rows[0][2].to_string(),
+                "53000",
+                "Alice's salary should be 53000"
+            );
             // Bob: 60000 + (5 * 1000) = 65000
-            assert_eq!(rows[1][2].to_string(), "65000", "Bob's salary should be 65000");
+            assert_eq!(
+                rows[1][2].to_string(),
+                "65000",
+                "Bob's salary should be 65000"
+            );
             // Charlie: 70000 + (7 * 1000) = 77000
-            assert_eq!(rows[2][2].to_string(), "77000", "Charlie's salary should be 77000");
+            assert_eq!(
+                rows[2][2].to_string(),
+                "77000",
+                "Charlie's salary should be 77000"
+            );
 
             // Test 2: UPDATE with column reference in expression
-            let update_sql = "UPDATE employees SET bonus = base_salary * 0.1 WHERE years_experience >= 5";
+            let update_sql =
+                "UPDATE employees SET bonus = base_salary * 0.1 WHERE years_experience >= 5";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2697,7 +2823,8 @@ mod tests {
             assert!(success, "Column reference expression update failed");
 
             // Verify bonus updates for employees with 5+ years experience
-            let select_sql = "SELECT name, bonus FROM employees WHERE years_experience >= 5 ORDER BY name";
+            let select_sql =
+                "SELECT name, bonus FROM employees WHERE years_experience >= 5 ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
@@ -2815,7 +2942,11 @@ mod tests {
 
             assert_eq!(rows.len(), 3, "Should have 3 rows");
             for row in rows {
-                assert_eq!(row[0].to_string(), "updated", "All statuses should be 'updated'");
+                assert_eq!(
+                    row[0].to_string(),
+                    "updated",
+                    "All statuses should be 'updated'"
+                );
             }
         }
 

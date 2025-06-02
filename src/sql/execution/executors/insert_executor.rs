@@ -127,10 +127,10 @@ impl AbstractExecutor for InsertExecutor {
                 };
 
                 let _tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
-                
+
                 // Get the full table schema (target schema)
                 let table_schema = self.plan.get_output_schema();
-                
+
                 // Get the child schema (VALUES schema - may be partial)
                 let child_schema = child.get_output_schema();
 
@@ -141,19 +141,20 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Create full tuple values by mapping child values to table schema
                 let full_values = self.schema_manager.map_values_to_schema(
-                    &child_values, 
-                    child_schema, 
-                    table_schema
+                    &child_values,
+                    child_schema,
+                    table_schema,
                 );
 
                 // Use insert_tuple_from_values with the full table schema
-                match self
-                    .txn_table_heap
-                    .insert_tuple_from_values(full_values.clone(), table_schema, txn_ctx)
-                {
+                match self.txn_table_heap.insert_tuple_from_values(
+                    full_values.clone(),
+                    table_schema,
+                    txn_ctx,
+                ) {
                     Ok(rid) => {
                         debug!("Successfully inserted tuple with RID {:?}", rid);
-                        
+
                         // Create a new tuple with the full table schema values to return
                         let full_tuple = Arc::new(Tuple::new(&full_values, table_schema, rid));
                         Some((full_tuple, rid))
@@ -475,7 +476,7 @@ mod tests {
 
         // Execute insert
         executor.init();
-        
+
         // Should return None immediately since there are no values
         assert!(executor.next().is_none());
     }
@@ -633,7 +634,7 @@ mod tests {
         for i in 0..100 {
             let result = executor.next();
             assert!(result.is_some(), "Expected tuple {}", i);
-            
+
             let (tuple, _) = result.unwrap();
             assert_eq!(tuple.get_value(0), Value::from(i));
             assert_eq!(tuple.get_value(1), Value::from(format!("value_{}", i)));
@@ -795,11 +796,7 @@ mod tests {
 
         // Create values
         let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(
-                Value::new(123),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ),
+            ConstantExpression::new(Value::new(123), Column::new("id", TypeId::Integer), vec![]),
         ))]];
 
         let values_node = Arc::new(ValuesNode::new(
@@ -1067,13 +1064,18 @@ mod tests {
 
         // Insert users data manually using VALUES expressions
         for user_data in users_data {
-            let expressions = vec![user_data.into_iter().map(|val| {
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    val.clone(),
-                    Column::new("temp", val.get_type_id()),
-                    vec![],
-                )))
-            }).collect()];
+            let expressions = vec![
+                user_data
+                    .into_iter()
+                    .map(|val| {
+                        Arc::new(Expression::Constant(ConstantExpression::new(
+                            val.clone(),
+                            Column::new("temp", val.get_type_id()),
+                            vec![],
+                        )))
+                    })
+                    .collect(),
+            ];
 
             let values_node = Arc::new(ValuesNode::new(
                 users_schema.clone(),
@@ -1104,14 +1106,14 @@ mod tests {
         }
 
         // Now test INSERT...SELECT with explicit columns
-        // This should map: [id, name, 10.00, age, 1.00, email] 
+        // This should map: [id, name, 10.00, age, 1.00, email]
         // to columns:     [id, name, price, quantity, weight, category]
         // positionally, not by name
-        
+
         // Create the SELECT part manually since we need to simulate the problematic scenario
         // The SELECT produces: id, name, 10.00, age, 1.00, email
         // These should map positionally to: id, name, price, quantity, weight, category
-        
+
         let select_expressions = vec![
             // id -> id
             Arc::new(Expression::Constant(ConstantExpression::new(
@@ -1156,9 +1158,9 @@ mod tests {
         let select_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-            Column::new("10.00", TypeId::Decimal),  // Literal column name
+            Column::new("10.00", TypeId::Decimal), // Literal column name
             Column::new("age", TypeId::Integer),
-            Column::new("1.00", TypeId::Decimal),   // Literal column name
+            Column::new("1.00", TypeId::Decimal), // Literal column name
             Column::new("email", TypeId::VarChar),
         ]);
 
@@ -1197,11 +1199,31 @@ mod tests {
 
         // The first 3 values should be mapped positionally, the rest should be NULL
         assert_eq!(tuple.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(tuple.get_value(1), Value::from("Alice"), "Name should be mapped");
-        assert_eq!(tuple.get_value(2), Value::from(10.00), "Price should be 10.00 (positional mapping)");
-        assert_eq!(tuple.get_value(3), Value::from(25), "Quantity should be 25 (age value)");
-        assert_eq!(tuple.get_value(4), Value::from(1.00), "Weight should be 1.00 (positional mapping)");
-        assert_eq!(tuple.get_value(5), Value::from("alice@example.com"), "Category should be email value");
+        assert_eq!(
+            tuple.get_value(1),
+            Value::from("Alice"),
+            "Name should be mapped"
+        );
+        assert_eq!(
+            tuple.get_value(2),
+            Value::from(10.00),
+            "Price should be 10.00 (positional mapping)"
+        );
+        assert_eq!(
+            tuple.get_value(3),
+            Value::from(25),
+            "Quantity should be 25 (age value)"
+        );
+        assert_eq!(
+            tuple.get_value(4),
+            Value::from(1.00),
+            "Weight should be 1.00 (positional mapping)"
+        );
+        assert_eq!(
+            tuple.get_value(5),
+            Value::from("alice@example.com"),
+            "Category should be email value"
+        );
 
         // Verify no more tuples
         assert!(executor.next().is_none());
@@ -1321,7 +1343,9 @@ mod tests {
         let exec_ctx2 = test_ctx.create_executor_context();
         let mut select_executor = InsertExecutor::new(exec_ctx2, select_insert_plan);
         select_executor.init();
-        let select_result = select_executor.next().expect("SELECT-style insert should work");
+        let select_result = select_executor
+            .next()
+            .expect("SELECT-style insert should work");
 
         println!("INSERT...SELECT simulation result:");
         for i in 0..select_result.0.get_column_count() {
@@ -1330,9 +1354,21 @@ mod tests {
 
         // With the current bug, this will fail because column names don't match
         // and the mapping function uses name-based matching instead of positional
-        assert_eq!(select_result.0.get_value(0), Value::from(2), "ID should be mapped positionally");
-        assert_eq!(select_result.0.get_value(1), Value::from("Bob"), "Name should be mapped positionally");
-        assert_eq!(select_result.0.get_value(2), Value::from(87.3), "Score should be mapped positionally");
+        assert_eq!(
+            select_result.0.get_value(0),
+            Value::from(2),
+            "ID should be mapped positionally"
+        );
+        assert_eq!(
+            select_result.0.get_value(1),
+            Value::from("Bob"),
+            "Name should be mapped positionally"
+        );
+        assert_eq!(
+            select_result.0.get_value(2),
+            Value::from(87.3),
+            "Score should be mapped positionally"
+        );
     }
 
     #[test]
@@ -1359,7 +1395,7 @@ mod tests {
 
         // Test INSERT with only some columns specified
         // This simulates: INSERT INTO employees (id, name, salary) SELECT user_id, user_name, calculated_pay FROM ...
-        
+
         // Create schema that represents SELECT output with different column names
         let select_schema = Schema::new(vec![
             Column::new("user_id", TypeId::Integer),
@@ -1420,8 +1456,16 @@ mod tests {
 
         // The first 3 values should be mapped positionally, the rest should be NULL
         assert_eq!(result.0.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(result.0.get_value(1), Value::from("Alice"), "Name should be mapped");
-        assert_eq!(result.0.get_value(2), Value::from("50000"), "Email should get calculated_pay cast to VarChar"); // BigInt 50000 cast to VarChar becomes "50000"
+        assert_eq!(
+            result.0.get_value(1),
+            Value::from("Alice"),
+            "Name should be mapped"
+        );
+        assert_eq!(
+            result.0.get_value(2),
+            Value::from("50000"),
+            "Email should get calculated_pay cast to VarChar"
+        ); // BigInt 50000 cast to VarChar becomes "50000"
         assert!(result.0.get_value(3).is_null(), "Age should be NULL");
         assert!(result.0.get_value(4).is_null(), "Salary should be NULL"); // No 4th source value, so NULL
         assert!(result.0.get_value(5).is_null(), "Active should be NULL");
@@ -1454,9 +1498,9 @@ mod tests {
         let select_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
-            Column::new("99.99", TypeId::Decimal),        // Literal
-            Column::new("age * 2", TypeId::Integer),      // Expression
-            Column::new("'ACTIVE'", TypeId::VarChar),     // String literal
+            Column::new("99.99", TypeId::Decimal),    // Literal
+            Column::new("age * 2", TypeId::Integer),  // Expression
+            Column::new("'ACTIVE'", TypeId::VarChar), // String literal
         ]);
 
         let select_expressions = vec![vec![
@@ -1513,7 +1557,9 @@ mod tests {
         let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
 
         executor.init();
-        let result = executor.next().expect("Literal/expression insert should work");
+        let result = executor
+            .next()
+            .expect("Literal/expression insert should work");
 
         println!("Literal/expression INSERT result:");
         for i in 0..result.0.get_column_count() {
@@ -1522,10 +1568,26 @@ mod tests {
 
         // These should be mapped positionally
         assert_eq!(result.0.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(result.0.get_value(1), Value::from("Alice"), "Name should be mapped");
-        assert_eq!(result.0.get_value(2), Value::from(99.99), "Fixed value should be mapped");
-        assert_eq!(result.0.get_value(3), Value::from(50), "Computed value should be mapped");
-        assert_eq!(result.0.get_value(4), Value::from("ACTIVE"), "Constant text should be mapped");
+        assert_eq!(
+            result.0.get_value(1),
+            Value::from("Alice"),
+            "Name should be mapped"
+        );
+        assert_eq!(
+            result.0.get_value(2),
+            Value::from(99.99),
+            "Fixed value should be mapped"
+        );
+        assert_eq!(
+            result.0.get_value(3),
+            Value::from(50),
+            "Computed value should be mapped"
+        );
+        assert_eq!(
+            result.0.get_value(4),
+            Value::from("ACTIVE"),
+            "Constant text should be mapped"
+        );
     }
 
     #[test]
@@ -1597,7 +1659,9 @@ mod tests {
         let exec_ctx1 = test_ctx.create_executor_context();
         let mut matching_executor = InsertExecutor::new(exec_ctx1, matching_plan);
         matching_executor.init();
-        let matching_result = matching_executor.next().expect("Matching names should work");
+        let matching_result = matching_executor
+            .next()
+            .expect("Matching names should work");
 
         // Test Case 2: Column names don't match (should use positional mapping)
         let non_matching_schema = Schema::new(vec![
@@ -1641,7 +1705,9 @@ mod tests {
         let exec_ctx2 = test_ctx.create_executor_context();
         let mut non_matching_executor = InsertExecutor::new(exec_ctx2, non_matching_plan);
         non_matching_executor.init();
-        let non_matching_result = non_matching_executor.next().expect("Non-matching names should use positional mapping");
+        let non_matching_result = non_matching_executor
+            .next()
+            .expect("Non-matching names should use positional mapping");
 
         println!("Matching names result:");
         for i in 0..matching_result.0.get_column_count() {

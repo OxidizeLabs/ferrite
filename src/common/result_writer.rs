@@ -1,6 +1,6 @@
+use crate::catalog::schema::Schema;
 use crate::server::QueryResults;
 use crate::types_db::value::Value;
-use crate::catalog::schema::Schema;
 use colored::Colorize;
 use prettytable::{format, Cell, Row, Table};
 use std::sync::{Arc, Mutex};

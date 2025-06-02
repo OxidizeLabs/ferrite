@@ -224,7 +224,12 @@ impl Type for DecimalType {
 
 impl DecimalType {
     /// Format decimal with specific precision and scale
-    fn to_string_with_precision(&self, val: &Value, precision: Option<u8>, scale: Option<u8>) -> String {
+    fn to_string_with_precision(
+        &self,
+        val: &Value,
+        precision: Option<u8>,
+        scale: Option<u8>,
+    ) -> String {
         match val.get_val() {
             Val::Decimal(n) => {
                 if let Some(scale_val) = scale {
@@ -239,7 +244,10 @@ impl DecimalType {
                         // Numbers with decimals: format with appropriate precision
                         let formatted = format!("{:.6}", n);
                         // Remove trailing zeros but keep at least one decimal place if needed
-                        formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+                        formatted
+                            .trim_end_matches('0')
+                            .trim_end_matches('.')
+                            .to_string()
                     }
                 }
             }
@@ -255,11 +263,18 @@ impl DecimalType {
     }
 
     /// Create a decimal value with precision and scale enforcement
-    pub fn create_decimal_with_precision(value: f64, precision: Option<u8>, scale: Option<u8>) -> Result<Value, String> {
+    pub fn create_decimal_with_precision(
+        value: f64,
+        precision: Option<u8>,
+        scale: Option<u8>,
+    ) -> Result<Value, String> {
         // Validate precision and scale
         if let (Some(p), Some(s)) = (precision, scale) {
             if s > p {
-                return Err(format!("Scale {} cannot be greater than precision {}", s, p));
+                return Err(format!(
+                    "Scale {} cannot be greater than precision {}",
+                    s, p
+                ));
             }
             if p > 38 {
                 return Err(format!("Precision {} exceeds maximum of 38", p));
@@ -278,7 +293,10 @@ impl DecimalType {
         if let Some(precision_val) = precision {
             let total_digits = Self::count_total_digits(adjusted_value);
             if total_digits > precision_val {
-                return Err(format!("Value {} exceeds precision {}", adjusted_value, precision_val));
+                return Err(format!(
+                    "Value {} exceeds precision {}",
+                    adjusted_value, precision_val
+                ));
             }
         }
 
@@ -290,90 +308,107 @@ impl DecimalType {
         if value == 0.0 {
             return 1;
         }
-        
+
         let abs_value = value.abs();
         let integer_part = abs_value.trunc();
         let fractional_part = abs_value.fract();
-        
+
         // Count integer digits
         let integer_digits = if integer_part == 0.0 {
             1
         } else {
             (integer_part.log10().floor() + 1.0) as u8
         };
-        
+
         // Count fractional digits (up to 15 for f64 precision)
         let fractional_digits = if fractional_part == 0.0 {
             0
         } else {
             let frac_str = format!("{:.15}", fractional_part);
             let trimmed = frac_str.trim_end_matches('0');
-            if trimmed.len() > 2 { // "0." prefix
+            if trimmed.len() > 2 {
+                // "0." prefix
                 (trimmed.len() - 2) as u8
             } else {
                 0
             }
         };
-        
+
         integer_digits + fractional_digits
     }
 
     /// Perform arithmetic with precision and scale preservation
     pub fn add_with_precision(
-        left: &Value, 
-        right: &Value, 
-        result_precision: Option<u8>, 
-        result_scale: Option<u8>
+        left: &Value,
+        right: &Value,
+        result_precision: Option<u8>,
+        result_scale: Option<u8>,
     ) -> Result<Value, String> {
-        let left_val = left.as_decimal().map_err(|e| format!("Left operand error: {}", e))?;
-        let right_val = right.as_decimal().map_err(|e| format!("Right operand error: {}", e))?;
-        
+        let left_val = left
+            .as_decimal()
+            .map_err(|e| format!("Left operand error: {}", e))?;
+        let right_val = right
+            .as_decimal()
+            .map_err(|e| format!("Right operand error: {}", e))?;
+
         let result = left_val + right_val;
         Self::create_decimal_with_precision(result, result_precision, result_scale)
     }
 
     /// Perform subtraction with precision and scale preservation
     pub fn subtract_with_precision(
-        left: &Value, 
-        right: &Value, 
-        result_precision: Option<u8>, 
-        result_scale: Option<u8>
+        left: &Value,
+        right: &Value,
+        result_precision: Option<u8>,
+        result_scale: Option<u8>,
     ) -> Result<Value, String> {
-        let left_val = left.as_decimal().map_err(|e| format!("Left operand error: {}", e))?;
-        let right_val = right.as_decimal().map_err(|e| format!("Right operand error: {}", e))?;
-        
+        let left_val = left
+            .as_decimal()
+            .map_err(|e| format!("Left operand error: {}", e))?;
+        let right_val = right
+            .as_decimal()
+            .map_err(|e| format!("Right operand error: {}", e))?;
+
         let result = left_val - right_val;
         Self::create_decimal_with_precision(result, result_precision, result_scale)
     }
 
     /// Perform multiplication with precision and scale preservation
     pub fn multiply_with_precision(
-        left: &Value, 
-        right: &Value, 
-        result_precision: Option<u8>, 
-        result_scale: Option<u8>
+        left: &Value,
+        right: &Value,
+        result_precision: Option<u8>,
+        result_scale: Option<u8>,
     ) -> Result<Value, String> {
-        let left_val = left.as_decimal().map_err(|e| format!("Left operand error: {}", e))?;
-        let right_val = right.as_decimal().map_err(|e| format!("Right operand error: {}", e))?;
-        
+        let left_val = left
+            .as_decimal()
+            .map_err(|e| format!("Left operand error: {}", e))?;
+        let right_val = right
+            .as_decimal()
+            .map_err(|e| format!("Right operand error: {}", e))?;
+
         let result = left_val * right_val;
         Self::create_decimal_with_precision(result, result_precision, result_scale)
     }
 
     /// Perform division with precision and scale preservation
     pub fn divide_with_precision(
-        left: &Value, 
-        right: &Value, 
-        result_precision: Option<u8>, 
-        result_scale: Option<u8>
+        left: &Value,
+        right: &Value,
+        result_precision: Option<u8>,
+        result_scale: Option<u8>,
     ) -> Result<Value, String> {
-        let left_val = left.as_decimal().map_err(|e| format!("Left operand error: {}", e))?;
-        let right_val = right.as_decimal().map_err(|e| format!("Right operand error: {}", e))?;
-        
+        let left_val = left
+            .as_decimal()
+            .map_err(|e| format!("Left operand error: {}", e))?;
+        let right_val = right
+            .as_decimal()
+            .map_err(|e| format!("Right operand error: {}", e))?;
+
         if right_val == 0.0 {
             return Err("Division by zero".to_string());
         }
-        
+
         let result = left_val / right_val;
         Self::create_decimal_with_precision(result, result_precision, result_scale)
     }
@@ -447,19 +482,19 @@ mod tests {
     #[test]
     fn test_decimal_formatting() {
         let decimal_type = DecimalType::new();
-        
+
         // Test whole numbers - should format as integers for backward compatibility
         assert_eq!(decimal_type.to_string(&Value::new(2.0f64)), "2");
         assert_eq!(decimal_type.to_string(&Value::new(10.0f64)), "10");
         assert_eq!(decimal_type.to_string(&Value::new(20.0f64)), "20");
         assert_eq!(decimal_type.to_string(&Value::new(3.0f64)), "3");
-        
+
         // Test numbers with decimal places - preserve precision
         assert_eq!(decimal_type.to_string(&Value::new(1.5f64)), "1.5");
         assert_eq!(decimal_type.to_string(&Value::new(20.5f64)), "20.5");
         assert_eq!(decimal_type.to_string(&Value::new(0.123f64)), "0.123");
         assert_eq!(decimal_type.to_string(&Value::new(99.99f64)), "99.99");
-        
+
         // Test edge cases
         assert_eq!(decimal_type.to_string(&Value::new(0.0f64)), "0");
         assert_eq!(decimal_type.to_string(&Value::new(-5.0f64)), "-5");

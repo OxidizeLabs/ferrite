@@ -29,7 +29,7 @@ impl AssignmentExpression {
         value_expr: Arc<Expression>,
     ) -> Self {
         let children = vec![value_expr.clone()];
-        
+
         Self {
             target_column_index,
             target_column,
@@ -65,7 +65,8 @@ impl ExpressionOps for AssignmentExpression {
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
         // Evaluate the value expression in join context
-        self.value_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+        self.value_expr
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
@@ -96,7 +97,9 @@ impl ExpressionOps for AssignmentExpression {
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Validate that the target column index is within bounds
         if self.target_column_index >= schema.get_column_count() as usize {
-            return Err(ExpressionError::InvalidColumnIndex(self.target_column_index));
+            return Err(ExpressionError::InvalidColumnIndex(
+                self.target_column_index,
+            ));
         }
 
         // Validate the value expression
@@ -297,7 +300,7 @@ mod tests {
         )));
 
         let cloned = assignment.clone_with_children(vec![new_value_expr]);
-        
+
         // Verify the cloned expression is different
         if let Expression::Assignment(cloned_assignment) = cloned.as_ref() {
             assert_eq!(cloned_assignment.get_target_column_index(), 2);
@@ -388,10 +391,7 @@ mod tests {
         ]);
 
         let left_tuple = create_test_tuple();
-        let right_values = vec![
-            Value::new(100),
-            Value::new("Engineering".to_string()),
-        ];
+        let right_values = vec![Value::new(100), Value::new("Engineering".to_string())];
         let right_tuple = Tuple::new(&right_values, &right_schema, RID::new(1, 0));
 
         let target_column = left_schema.get_column(2).unwrap().clone(); // age column
@@ -403,7 +403,9 @@ mod tests {
 
         let assignment = AssignmentExpression::new(2, target_column.clone(), value_expr);
 
-        let result = assignment.evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema).unwrap();
+        let result = assignment
+            .evaluate_join(&left_tuple, &left_schema, &right_tuple, &right_schema)
+            .unwrap();
         assert_eq!(result, Value::new(35));
     }
 
@@ -471,7 +473,13 @@ mod tests {
         let cloned = assignment.clone();
 
         assert_eq!(assignment, cloned);
-        assert_eq!(assignment.get_target_column_index(), cloned.get_target_column_index());
-        assert_eq!(assignment.get_target_column().get_name(), cloned.get_target_column().get_name());
+        assert_eq!(
+            assignment.get_target_column_index(),
+            cloned.get_target_column_index()
+        );
+        assert_eq!(
+            assignment.get_target_column().get_name(),
+            cloned.get_target_column().get_name()
+        );
     }
-} 
+}

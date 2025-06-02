@@ -1396,7 +1396,10 @@ mod tests {
             7,
             "Should find all 7 rows since avg salary > 50000"
         );
-        assert_eq!(results, vec![0.0, 0.0, 50000.0, 65000.0, 75000.0, 85000.0, 100000.0]);
+        assert_eq!(
+            results,
+            vec![0.0, 0.0, 50000.0, 65000.0, 75000.0, 85000.0, 100000.0]
+        );
 
         // Verify cleanup
         drop(executor);

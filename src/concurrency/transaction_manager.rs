@@ -216,7 +216,11 @@ impl TransactionManager {
                         if meta.get_creator_txn_id() == txn.get_transaction_id() {
                             meta.set_commit_timestamp(commit_ts);
                             if let Err(e) = page.update_tuple_meta(&meta, &rid) {
-                                log::error!("Failed to update tuple metadata for RID {:?}: {}", rid, e);
+                                log::error!(
+                                    "Failed to update tuple metadata for RID {:?}: {}",
+                                    rid,
+                                    e
+                                );
                                 return false;
                             }
                             log::debug!(
@@ -265,8 +269,14 @@ impl TransactionManager {
     /// # Parameters
     /// - `txn`: The transaction to abort.
     pub fn abort(&self, txn: Arc<Transaction>) {
-        log::debug!("ABORT: Starting abort for transaction {}", txn.get_transaction_id());
-        log::debug!("Starting abort for transaction {}", txn.get_transaction_id());
+        log::debug!(
+            "ABORT: Starting abort for transaction {}",
+            txn.get_transaction_id()
+        );
+        log::debug!(
+            "Starting abort for transaction {}",
+            txn.get_transaction_id()
+        );
         let current_state = txn.get_state();
         if current_state != TransactionState::Running && current_state != TransactionState::Tainted
         {
@@ -277,15 +287,37 @@ impl TransactionManager {
         let write_set = txn.get_write_set();
 
         // Roll back changes using undo logs
-        log::debug!("ABORT: Rolling back {} write operations for transaction {}", write_set.len(), txn.get_transaction_id());
-        log::debug!("Rolling back {} write operations for transaction {}", write_set.len(), txn.get_transaction_id());
+        log::debug!(
+            "ABORT: Rolling back {} write operations for transaction {}",
+            write_set.len(),
+            txn.get_transaction_id()
+        );
+        log::debug!(
+            "Rolling back {} write operations for transaction {}",
+            write_set.len(),
+            txn.get_transaction_id()
+        );
         for (table_oid, rid) in write_set {
-            log::debug!("ABORT: Processing write operation for table_oid={}, rid={:?}", table_oid, rid);
+            log::debug!(
+                "ABORT: Processing write operation for table_oid={}, rid={:?}",
+                table_oid,
+                rid
+            );
             if let Some(table_heap) = self.get_table_heap(table_oid) {
                 log::debug!("ABORT: Found table heap for table_oid={}", table_oid);
                 if let Some(undo_link) = self.get_undo_link(rid) {
-                    log::debug!("ABORT: Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}", rid, undo_link.prev_txn, undo_link.prev_log_idx);
-                    log::debug!("Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}", rid, undo_link.prev_txn, undo_link.prev_log_idx);
+                    log::debug!(
+                        "ABORT: Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}",
+                        rid,
+                        undo_link.prev_txn,
+                        undo_link.prev_log_idx
+                    );
+                    log::debug!(
+                        "Found undo link for RID {:?}: prev_txn={}, prev_log_idx={}",
+                        rid,
+                        undo_link.prev_txn,
+                        undo_link.prev_log_idx
+                    );
                     // Get the undo log
                     let undo_log = self.get_undo_log(undo_link.clone());
 
@@ -296,14 +328,18 @@ impl TransactionManager {
                     meta.set_undo_log_idx(undo_link.prev_log_idx);
 
                     // Use a reference to the Arc<Tuple> without cloning
-                    log::debug!("Rolling back tuple at RID {:?} with data: {:?}", rid, undo_log.tuple);
+                    log::debug!(
+                        "Rolling back tuple at RID {:?} with data: {:?}",
+                        rid,
+                        undo_log.tuple
+                    );
                     if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid)
                     {
                         log::error!("Failed to rollback tuple: {}", e);
                     } else {
                         log::debug!("Successfully rolled back tuple at RID {:?}", rid);
                     }
-                    
+
                     // Update the undo link to point to the previous version
                     let prev_version_link = if undo_log.prev_version.prev_txn != 0 {
                         Some(undo_log.prev_version.clone())
@@ -312,7 +348,10 @@ impl TransactionManager {
                     };
                     self.update_undo_link(rid, prev_version_link, None);
                 } else {
-                    log::debug!("ABORT: No undo link found for RID {:?} - marking as deleted", rid);
+                    log::debug!(
+                        "ABORT: No undo link found for RID {:?} - marking as deleted",
+                        rid
+                    );
                     // If no undo link exists, this was a newly inserted tuple
                     // Mark it as deleted since it was part of an aborted transaction
                     let mut meta = TupleMeta::new(txn.get_transaction_id());
@@ -1690,7 +1729,9 @@ mod tests {
                             Err(e) => {
                                 log::debug!(
                                     "Thread {} failed to begin transaction on attempt {}: {}",
-                                    i, attempt, e
+                                    i,
+                                    attempt,
+                                    e
                                 );
                                 continue;
                             }
@@ -1725,7 +1766,8 @@ mod tests {
                                 Err(_) => {
                                     log::debug!(
                                         "Thread {} couldn't extract counter value on attempt {}",
-                                        i, attempt
+                                        i,
+                                        attempt
                                     );
                                     updater_txn_manager.abort(txn);
                                     continue;
@@ -1734,7 +1776,8 @@ mod tests {
                             None => {
                                 log::debug!(
                                     "Thread {} couldn't extract counter value on attempt {}",
-                                    i, attempt
+                                    i,
+                                    attempt
                                 );
                                 updater_txn_manager.abort(txn);
                                 continue;
@@ -1771,7 +1814,8 @@ mod tests {
                         } else {
                             log::debug!(
                                 "Thread {} failed to commit transaction on attempt {}",
-                                i, attempt
+                                i,
+                                attempt
                             );
                         }
 
@@ -1836,7 +1880,8 @@ mod tests {
 
                 log::debug!(
                     "Final counter value: {}, Expected at least: {}",
-                    final_counter, total_successful_updates
+                    final_counter,
+                    total_successful_updates
                 );
 
                 // Verify that some updates succeeded and the counter reflects the number of successful updates
@@ -2784,7 +2829,8 @@ mod tests {
 
                 log::debug!(
                     "Final tuple value: {}, Expected: {}",
-                    actual_value, expected_value
+                    actual_value,
+                    expected_value
                 );
                 assert_eq!(
                     actual_value, expected_value,
@@ -2962,7 +3008,9 @@ mod tests {
 
                     log::debug!(
                         "Tuple {} final value: {}, Expected: {}",
-                        i, value, expected_value
+                        i,
+                        value,
+                        expected_value
                     );
                     assert_eq!(
                         value, expected_value,
@@ -3149,7 +3197,9 @@ mod tests {
                     update_result3.err()
                 );
             } else {
-                log::debug!("Case 3: Successfully updated uncommitted tuple from another transaction");
+                log::debug!(
+                    "Case 3: Successfully updated uncommitted tuple from another transaction"
+                );
             }
 
             // Abort the first transaction
@@ -3266,7 +3316,9 @@ mod tests {
                             Err(e) => {
                                 log::debug!(
                                     "Thread {} failed to begin transaction on update {}: {}",
-                                    thread_id, i, e
+                                    thread_id,
+                                    i,
+                                    e
                                 );
                                 continue;
                             }
@@ -3302,7 +3354,8 @@ mod tests {
                                 Err(_) => {
                                     log::debug!(
                                         "Thread {} failed to extract counter value on update {}",
-                                        thread_id, i
+                                        thread_id,
+                                        i
                                     );
                                     thread_tm.abort(txn);
                                     thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -3312,7 +3365,8 @@ mod tests {
                             None => {
                                 log::debug!(
                                     "Thread {} failed to get counter value on update {}",
-                                    thread_id, i
+                                    thread_id,
+                                    i
                                 );
                                 thread_tm.abort(txn);
                                 thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -3353,13 +3407,21 @@ mod tests {
                                 thread_commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 thread_successes += 1;
                             } else {
-                                log::debug!("Thread {} failed to commit on update {}", thread_id, i);
+                                log::debug!(
+                                    "Thread {} failed to commit on update {}",
+                                    thread_id,
+                                    i
+                                );
                                 thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             }
                         } else {
                             thread_tm.abort(txn);
                             thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            log::debug!("Thread {} intentionally aborted on update {}", thread_id, i);
+                            log::debug!(
+                                "Thread {} intentionally aborted on update {}",
+                                thread_id,
+                                i
+                            );
                         }
 
                         // Small sleep to allow interleaving
@@ -4313,11 +4375,13 @@ mod tests {
             // since they operate on different tuples
             log::debug!(
                 "Transaction 1 update: {}, commit: {}",
-                update1_success, commit1_success
+                update1_success,
+                commit1_success
             );
             log::debug!(
                 "Transaction 2 update: {}, commit: {}",
-                update2_success, commit2_success
+                update2_success,
+                commit2_success
             );
 
             // Verify final values

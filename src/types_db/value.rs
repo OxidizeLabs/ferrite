@@ -368,28 +368,72 @@ impl Value {
 
         match (&self.value_, target_type) {
             // ===== BOOLEAN CONVERSIONS =====
-            (Val::Boolean(b), TypeId::TinyInt) => Ok(Value::new_with_type(Val::TinyInt(if *b { 1 } else { 0 }), target_type)),
-            (Val::Boolean(b), TypeId::SmallInt) => Ok(Value::new_with_type(Val::SmallInt(if *b { 1 } else { 0 }), target_type)),
-            (Val::Boolean(b), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(if *b { 1 } else { 0 }), target_type)),
-            (Val::Boolean(b), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(if *b { 1 } else { 0 }), target_type)),
-            (Val::Boolean(b), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(if *b { 1.0 } else { 0.0 }), target_type)),
-            (Val::Boolean(b), TypeId::Float) => Ok(Value::new_with_type(Val::Float(if *b { 1.0 } else { 0.0 }), target_type)),
-            (Val::Boolean(b), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(b.to_string()), target_type)),
-            (Val::Boolean(b), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(b.to_string()), target_type)),
+Lint            (Val::Boolean(b), TypeId::TinyInt) => Ok(Value::new_with_type(
+                Val::TinyInt(if *b { 1 } else { 0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::SmallInt) => Ok(Value::new_with_type(
+                Val::SmallInt(if *b { 1 } else { 0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::Integer) => Ok(Value::new_with_type(
+                Val::Integer(if *b { 1 } else { 0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::BigInt) => Ok(Value::new_with_type(
+                Val::BigInt(if *b { 1 } else { 0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::Decimal) => Ok(Value::new_with_type(
+                Val::Decimal(if *b { 1.0 } else { 0.0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::Float) => Ok(Value::new_with_type(
+                Val::Float(if *b { 1.0 } else { 0.0 }),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(b.to_string()),
+                target_type,
+            )),
+            (Val::Boolean(b), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(b.to_string()),
+                target_type,
+            )),
 
             // ===== NUMERIC CONVERSIONS =====
             // TinyInt conversions
-            (Val::TinyInt(i), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type)),
-            (Val::TinyInt(i), TypeId::SmallInt) => Ok(Value::new_with_type(Val::SmallInt(*i as i16), target_type)),
-            (Val::TinyInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
-            (Val::TinyInt(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
-            (Val::TinyInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::TinyInt(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
-            (Val::TinyInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::TinyInt(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
+            (Val::TinyInt(i), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type))
+            }
+            (Val::TinyInt(i), TypeId::SmallInt) => {
+                Ok(Value::new_with_type(Val::SmallInt(*i as i16), target_type))
+            }
+            (Val::TinyInt(i), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
+            }
+            (Val::TinyInt(i), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type))
+            }
+            (Val::TinyInt(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::TinyInt(i), TypeId::Float) => {
+                Ok(Value::new_with_type(Val::Float(*i as f32), target_type))
+            }
+            (Val::TinyInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::TinyInt(i), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(i.to_string()),
+                target_type,
+            )),
 
             // SmallInt conversions
-            (Val::SmallInt(i), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type)),
+            (Val::SmallInt(i), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type))
+            }
             (Val::SmallInt(i), TypeId::TinyInt) => {
                 if *i >= i8::MIN as i16 && *i <= i8::MAX as i16 {
                     Ok(Value::new_with_type(Val::TinyInt(*i as i8), target_type))
@@ -397,15 +441,31 @@ impl Value {
                     Err(format!("SmallInt value {} out of range for TinyInt", i))
                 }
             }
-            (Val::SmallInt(i), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*i as i32), target_type)),
-            (Val::SmallInt(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
-            (Val::SmallInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::SmallInt(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
-            (Val::SmallInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::SmallInt(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
+            (Val::SmallInt(i), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
+            }
+            (Val::SmallInt(i), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type))
+            }
+            (Val::SmallInt(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::SmallInt(i), TypeId::Float) => {
+                Ok(Value::new_with_type(Val::Float(*i as f32), target_type))
+            }
+            (Val::SmallInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::SmallInt(i), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(i.to_string()),
+                target_type,
+            )),
 
             // Integer conversions
-            (Val::Integer(i), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type)),
+            (Val::Integer(i), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type))
+            }
             (Val::Integer(i), TypeId::TinyInt) => {
                 if *i >= i8::MIN as i32 && *i <= i8::MAX as i32 {
                     Ok(Value::new_with_type(Val::TinyInt(*i as i8), target_type))
@@ -420,21 +480,38 @@ impl Value {
                     Err(format!("Integer value {} out of range for SmallInt", i))
                 }
             }
-            (Val::Integer(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type)),
-            (Val::Integer(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::Integer(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
+            (Val::Integer(i), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*i as i64), target_type))
+            }
+            (Val::Integer(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::Integer(i), TypeId::Float) => {
+                Ok(Value::new_with_type(Val::Float(*i as f32), target_type))
+            }
             (Val::Integer(i), TypeId::Timestamp) => {
                 if *i >= 0 {
                     Ok(Value::new_with_type(Val::Timestamp(*i as u64), target_type))
                 } else {
-                    Err(format!("Cannot convert negative integer {} to Timestamp", i))
+                    Err(format!(
+                        "Cannot convert negative integer {} to Timestamp",
+                        i
+                    ))
                 }
             }
-            (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::Integer(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
+            (Val::Integer(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::Integer(i), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(i.to_string()),
+                target_type,
+            )),
 
             // BigInt conversions
-            (Val::BigInt(i), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type)),
+            (Val::BigInt(i), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*i != 0), target_type))
+            }
             (Val::BigInt(i), TypeId::TinyInt) => {
                 if *i >= i8::MIN as i64 && *i <= i8::MAX as i64 {
                     Ok(Value::new_with_type(Val::TinyInt(*i as i8), target_type))
@@ -456,8 +533,12 @@ impl Value {
                     Err(format!("BigInt value {} out of range for Integer", i))
                 }
             }
-            (Val::BigInt(i), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type)),
-            (Val::BigInt(i), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*i as f32), target_type)),
+            (Val::BigInt(i), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*i as f64), target_type))
+            }
+            (Val::BigInt(i), TypeId::Float) => {
+                Ok(Value::new_with_type(Val::Float(*i as f32), target_type))
+            }
             (Val::BigInt(i), TypeId::Timestamp) => {
                 if *i >= 0 {
                     Ok(Value::new_with_type(Val::Timestamp(*i as u64), target_type))
@@ -465,138 +546,210 @@ impl Value {
                     Err(format!("Cannot convert negative bigint {} to Timestamp", i))
                 }
             }
-            (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::BigInt(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
+            (Val::BigInt(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::BigInt(i), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(i.to_string()),
+                target_type,
+            )),
 
             // Decimal conversions
-            (Val::Decimal(f), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*f != 0.0), target_type)),
-            (Val::Decimal(f), TypeId::TinyInt) => Ok(Value::new_with_type(Val::TinyInt(*f as i8), target_type)),
-            (Val::Decimal(f), TypeId::SmallInt) => Ok(Value::new_with_type(Val::SmallInt(*f as i16), target_type)),
-            (Val::Decimal(f), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*f as i32), target_type)),
-            (Val::Decimal(f), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type)),
-            (Val::Decimal(f), TypeId::Float) => Ok(Value::new_with_type(Val::Float(*f as f32), target_type)),
-            (Val::Decimal(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
-            (Val::Decimal(f), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(f.to_string()), target_type)),
+            (Val::Decimal(f), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*f != 0.0), target_type))
+            }
+            (Val::Decimal(f), TypeId::TinyInt) => {
+                Ok(Value::new_with_type(Val::TinyInt(*f as i8), target_type))
+            }
+            (Val::Decimal(f), TypeId::SmallInt) => {
+                Ok(Value::new_with_type(Val::SmallInt(*f as i16), target_type))
+            }
+            (Val::Decimal(f), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*f as i32), target_type))
+            }
+            (Val::Decimal(f), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type))
+            }
+            (Val::Decimal(f), TypeId::Float) => {
+                Ok(Value::new_with_type(Val::Float(*f as f32), target_type))
+            }
+            (Val::Decimal(f), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(f.to_string()),
+                target_type,
+            )),
+            (Val::Decimal(f), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(f.to_string()),
+                target_type,
+            )),
 
             // Float conversions
-            (Val::Float(f), TypeId::Boolean) => Ok(Value::new_with_type(Val::Boolean(*f != 0.0), target_type)),
-            (Val::Float(f), TypeId::TinyInt) => Ok(Value::new_with_type(Val::TinyInt(*f as i8), target_type)),
-            (Val::Float(f), TypeId::SmallInt) => Ok(Value::new_with_type(Val::SmallInt(*f as i16), target_type)),
-            (Val::Float(f), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*f as i32), target_type)),
-            (Val::Float(f), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type)),
-            (Val::Float(f), TypeId::Decimal) => Ok(Value::new_with_type(Val::Decimal(*f as f64), target_type)),
-            (Val::Float(f), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(f.to_string()), target_type)),
-            (Val::Float(f), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(f.to_string()), target_type)),
+            (Val::Float(f), TypeId::Boolean) => {
+                Ok(Value::new_with_type(Val::Boolean(*f != 0.0), target_type))
+            }
+            (Val::Float(f), TypeId::TinyInt) => {
+                Ok(Value::new_with_type(Val::TinyInt(*f as i8), target_type))
+            }
+            (Val::Float(f), TypeId::SmallInt) => {
+                Ok(Value::new_with_type(Val::SmallInt(*f as i16), target_type))
+            }
+            (Val::Float(f), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*f as i32), target_type))
+            }
+            (Val::Float(f), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*f as i64), target_type))
+            }
+            (Val::Float(f), TypeId::Decimal) => {
+                Ok(Value::new_with_type(Val::Decimal(*f as f64), target_type))
+            }
+            (Val::Float(f), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(f.to_string()),
+                target_type,
+            )),
+            (Val::Float(f), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(f.to_string()),
+                target_type,
+            )),
 
             // ===== STRING CONVERSIONS =====
-            (Val::VarLen(s), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type)),
-            (Val::VarLen(s), TypeId::Boolean) => {
-                match s.to_lowercase().as_str() {
-                    "true" | "t" | "1" | "yes" | "y" => Ok(Value::new_with_type(Val::Boolean(true), target_type)),
-                    "false" | "f" | "0" | "no" | "n" | "" => Ok(Value::new_with_type(Val::Boolean(false), target_type)),
-                    _ => Err(format!("Cannot convert string '{}' to Boolean", s))
+            (Val::VarLen(s), TypeId::Char) => {
+                Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type))
+            }
+            (Val::VarLen(s), TypeId::Boolean) => match s.to_lowercase().as_str() {
+                "true" | "t" | "1" | "yes" | "y" => {
+                    Ok(Value::new_with_type(Val::Boolean(true), target_type))
                 }
+                "false" | "f" | "0" | "no" | "n" | "" => {
+                    Ok(Value::new_with_type(Val::Boolean(false), target_type))
+                }
+                _ => Err(format!("Cannot convert string '{}' to Boolean", s)),
+            },
+            (Val::VarLen(s), TypeId::TinyInt) => s
+                .parse::<i8>()
+                .map(|i| Value::new_with_type(Val::TinyInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to TinyInt: {}", s, e)),
+            (Val::VarLen(s), TypeId::SmallInt) => s
+                .parse::<i16>()
+                .map(|i| Value::new_with_type(Val::SmallInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to SmallInt: {}", s, e)),
+            (Val::VarLen(s), TypeId::Integer) => s
+                .parse::<i32>()
+                .map(|i| Value::new_with_type(Val::Integer(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Integer: {}", s, e)),
+            (Val::VarLen(s), TypeId::BigInt) => s
+                .parse::<i64>()
+                .map(|i| Value::new_with_type(Val::BigInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to BigInt: {}", s, e)),
+            (Val::VarLen(s), TypeId::Decimal) => s
+                .parse::<f64>()
+                .map(|f| Value::new_with_type(Val::Decimal(f), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Decimal: {}", s, e)),
+            (Val::VarLen(s), TypeId::Float) => s
+                .parse::<f32>()
+                .map(|f| Value::new_with_type(Val::Float(f), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e)),
+            (Val::VarLen(s), TypeId::Timestamp) => s
+                .parse::<u64>()
+                .map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e)),
+            (Val::VarLen(s), TypeId::Date) => s
+                .parse::<i32>()
+                .map(|d| Value::new_with_type(Val::Date(d), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e)),
+            (Val::VarLen(s), TypeId::Time) => s
+                .parse::<i32>()
+                .map(|t| Value::new_with_type(Val::Time(t), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e)),
+            (Val::VarLen(s), TypeId::Interval) => s
+                .parse::<i64>()
+                .map(|i| Value::new_with_type(Val::Interval(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Interval: {}", s, e)),
+            (Val::VarLen(s), TypeId::Binary) => Ok(Value::new_with_type(
+                Val::Binary(s.as_bytes().to_vec()),
+                target_type,
+            )),
+            (Val::VarLen(s), TypeId::JSON) => {
+                Ok(Value::new_with_type(Val::JSON(s.clone()), target_type))
             }
-            (Val::VarLen(s), TypeId::TinyInt) => {
-                s.parse::<i8>().map(|i| Value::new_with_type(Val::TinyInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to TinyInt: {}", s, e))
+            (Val::VarLen(s), TypeId::UUID) => {
+                Ok(Value::new_with_type(Val::UUID(s.clone()), target_type))
             }
-            (Val::VarLen(s), TypeId::SmallInt) => {
-                s.parse::<i16>().map(|i| Value::new_with_type(Val::SmallInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to SmallInt: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Integer) => {
-                s.parse::<i32>().map(|i| Value::new_with_type(Val::Integer(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Integer: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::BigInt) => {
-                s.parse::<i64>().map(|i| Value::new_with_type(Val::BigInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to BigInt: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Decimal) => {
-                s.parse::<f64>().map(|f| Value::new_with_type(Val::Decimal(f), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Decimal: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Float) => {
-                s.parse::<f32>().map(|f| Value::new_with_type(Val::Float(f), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Timestamp) => {
-                s.parse::<u64>().map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Date) => {
-                s.parse::<i32>().map(|d| Value::new_with_type(Val::Date(d), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Time) => {
-                s.parse::<i32>().map(|t| Value::new_with_type(Val::Time(t), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Interval) => {
-                s.parse::<i64>().map(|i| Value::new_with_type(Val::Interval(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Interval: {}", s, e))
-            }
-            (Val::VarLen(s), TypeId::Binary) => Ok(Value::new_with_type(Val::Binary(s.as_bytes().to_vec()), target_type)),
-            (Val::VarLen(s), TypeId::JSON) => Ok(Value::new_with_type(Val::JSON(s.clone()), target_type)),
-            (Val::VarLen(s), TypeId::UUID) => Ok(Value::new_with_type(Val::UUID(s.clone()), target_type)),
 
-            (Val::ConstLen(s), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type)),
-            (Val::ConstLen(s), TypeId::Boolean) => {
-                match s.to_lowercase().as_str() {
-                    "true" | "t" | "1" | "yes" | "y" => Ok(Value::new_with_type(Val::Boolean(true), target_type)),
-                    "false" | "f" | "0" | "no" | "n" | "" => Ok(Value::new_with_type(Val::Boolean(false), target_type)),
-                    _ => Err(format!("Cannot convert string '{}' to Boolean", s))
+            (Val::ConstLen(s), TypeId::VarChar) => {
+                Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type))
+            }
+            (Val::ConstLen(s), TypeId::Boolean) => match s.to_lowercase().as_str() {
+                "true" | "t" | "1" | "yes" | "y" => {
+                    Ok(Value::new_with_type(Val::Boolean(true), target_type))
                 }
+                "false" | "f" | "0" | "no" | "n" | "" => {
+                    Ok(Value::new_with_type(Val::Boolean(false), target_type))
+                }
+                _ => Err(format!("Cannot convert string '{}' to Boolean", s)),
+            },
+            (Val::ConstLen(s), TypeId::TinyInt) => s
+                .parse::<i8>()
+                .map(|i| Value::new_with_type(Val::TinyInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to TinyInt: {}", s, e)),
+            (Val::ConstLen(s), TypeId::SmallInt) => s
+                .parse::<i16>()
+                .map(|i| Value::new_with_type(Val::SmallInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to SmallInt: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Integer) => s
+                .parse::<i32>()
+                .map(|i| Value::new_with_type(Val::Integer(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Integer: {}", s, e)),
+            (Val::ConstLen(s), TypeId::BigInt) => s
+                .parse::<i64>()
+                .map(|i| Value::new_with_type(Val::BigInt(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to BigInt: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Decimal) => s
+                .parse::<f64>()
+                .map(|f| Value::new_with_type(Val::Decimal(f), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Decimal: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Float) => s
+                .parse::<f32>()
+                .map(|f| Value::new_with_type(Val::Float(f), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Timestamp) => s
+                .parse::<u64>()
+                .map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Date) => s
+                .parse::<i32>()
+                .map(|d| Value::new_with_type(Val::Date(d), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Time) => s
+                .parse::<i32>()
+                .map(|t| Value::new_with_type(Val::Time(t), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Interval) => s
+                .parse::<i64>()
+                .map(|i| Value::new_with_type(Val::Interval(i), target_type))
+                .map_err(|e| format!("Cannot convert string '{}' to Interval: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Binary) => Ok(Value::new_with_type(
+                Val::Binary(s.as_bytes().to_vec()),
+                target_type,
+            )),
+            (Val::ConstLen(s), TypeId::JSON) => {
+                Ok(Value::new_with_type(Val::JSON(s.clone()), target_type))
             }
-            (Val::ConstLen(s), TypeId::TinyInt) => {
-                s.parse::<i8>().map(|i| Value::new_with_type(Val::TinyInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to TinyInt: {}", s, e))
+            (Val::ConstLen(s), TypeId::UUID) => {
+                Ok(Value::new_with_type(Val::UUID(s.clone()), target_type))
             }
-            (Val::ConstLen(s), TypeId::SmallInt) => {
-                s.parse::<i16>().map(|i| Value::new_with_type(Val::SmallInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to SmallInt: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Integer) => {
-                s.parse::<i32>().map(|i| Value::new_with_type(Val::Integer(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Integer: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::BigInt) => {
-                s.parse::<i64>().map(|i| Value::new_with_type(Val::BigInt(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to BigInt: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Decimal) => {
-                s.parse::<f64>().map(|f| Value::new_with_type(Val::Decimal(f), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Decimal: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Float) => {
-                s.parse::<f32>().map(|f| Value::new_with_type(Val::Float(f), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Timestamp) => {
-                s.parse::<u64>().map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Date) => {
-                s.parse::<i32>().map(|d| Value::new_with_type(Val::Date(d), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Time) => {
-                s.parse::<i32>().map(|t| Value::new_with_type(Val::Time(t), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Interval) => {
-                s.parse::<i64>().map(|i| Value::new_with_type(Val::Interval(i), target_type))
-                    .map_err(|e| format!("Cannot convert string '{}' to Interval: {}", s, e))
-            }
-            (Val::ConstLen(s), TypeId::Binary) => Ok(Value::new_with_type(Val::Binary(s.as_bytes().to_vec()), target_type)),
-            (Val::ConstLen(s), TypeId::JSON) => Ok(Value::new_with_type(Val::JSON(s.clone()), target_type)),
-            (Val::ConstLen(s), TypeId::UUID) => Ok(Value::new_with_type(Val::UUID(s.clone()), target_type)),
 
             // ===== TEMPORAL TYPE CONVERSIONS =====
-            (Val::Timestamp(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
-            (Val::Timestamp(t), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(t.to_string()), target_type)),
-            (Val::Timestamp(t), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*t as i64), target_type)),
+            (Val::Timestamp(t), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(t.to_string()),
+                target_type,
+            )),
+            (Val::Timestamp(t), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(t.to_string()),
+                target_type,
+            )),
+            (Val::Timestamp(t), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*t as i64), target_type))
+            }
             (Val::Timestamp(t), TypeId::Integer) => {
                 if *t <= i32::MAX as u64 {
                     Ok(Value::new_with_type(Val::Integer(*t as i32), target_type))
@@ -605,19 +758,47 @@ impl Value {
                 }
             }
 
-            (Val::Date(d), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(d.to_string()), target_type)),
-            (Val::Date(d), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(d.to_string()), target_type)),
-            (Val::Date(d), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*d), target_type)),
-            (Val::Date(d), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*d as i64), target_type)),
+            (Val::Date(d), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(d.to_string()),
+                target_type,
+            )),
+            (Val::Date(d), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(d.to_string()),
+                target_type,
+            )),
+            (Val::Date(d), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*d), target_type))
+            }
+            (Val::Date(d), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*d as i64), target_type))
+            }
 
-            (Val::Time(t), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(t.to_string()), target_type)),
-            (Val::Time(t), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(t.to_string()), target_type)),
-            (Val::Time(t), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*t), target_type)),
-            (Val::Time(t), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*t as i64), target_type)),
+            (Val::Time(t), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(t.to_string()),
+                target_type,
+            )),
+            (Val::Time(t), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(t.to_string()),
+                target_type,
+            )),
+            (Val::Time(t), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*t), target_type))
+            }
+            (Val::Time(t), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*t as i64), target_type))
+            }
 
-            (Val::Interval(i), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(i.to_string()), target_type)),
-            (Val::Interval(i), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(i.to_string()), target_type)),
-            (Val::Interval(i), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*i), target_type)),
+            (Val::Interval(i), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(i.to_string()),
+                target_type,
+            )),
+            (Val::Interval(i), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(i.to_string()),
+                target_type,
+            )),
+            (Val::Interval(i), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*i), target_type))
+            }
             (Val::Interval(i), TypeId::Integer) => {
                 if *i >= i32::MIN as i64 && *i <= i32::MAX as i64 {
                     Ok(Value::new_with_type(Val::Integer(*i as i32), target_type))
@@ -627,40 +808,62 @@ impl Value {
             }
 
             // ===== BINARY CONVERSIONS =====
-            (Val::Binary(b), TypeId::VarChar) => {
-                match String::from_utf8(b.clone()) {
-                    Ok(s) => Ok(Value::new_with_type(Val::VarLen(s), target_type)),
-                    Err(_) => Err("Cannot convert binary data to string: invalid UTF-8".to_string())
-                }
-            }
-            (Val::Binary(b), TypeId::Char) => {
-                match String::from_utf8(b.clone()) {
-                    Ok(s) => Ok(Value::new_with_type(Val::ConstLen(s), target_type)),
-                    Err(_) => Err("Cannot convert binary data to string: invalid UTF-8".to_string())
-                }
-            }
+            (Val::Binary(b), TypeId::VarChar) => match String::from_utf8(b.clone()) {
+                Ok(s) => Ok(Value::new_with_type(Val::VarLen(s), target_type)),
+                Err(_) => Err("Cannot convert binary data to string: invalid UTF-8".to_string()),
+            },
+            (Val::Binary(b), TypeId::Char) => match String::from_utf8(b.clone()) {
+                Ok(s) => Ok(Value::new_with_type(Val::ConstLen(s), target_type)),
+                Err(_) => Err("Cannot convert binary data to string: invalid UTF-8".to_string()),
+            },
 
             // ===== JSON CONVERSIONS =====
-            (Val::JSON(j), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(j.clone()), target_type)),
-            (Val::JSON(j), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(j.clone()), target_type)),
+            (Val::JSON(j), TypeId::VarChar) => {
+                Ok(Value::new_with_type(Val::VarLen(j.clone()), target_type))
+            }
+            (Val::JSON(j), TypeId::Char) => {
+                Ok(Value::new_with_type(Val::ConstLen(j.clone()), target_type))
+            }
 
             // ===== UUID CONVERSIONS =====
-            (Val::UUID(u), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(u.clone()), target_type)),
-            (Val::UUID(u), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(u.clone()), target_type)),
+            (Val::UUID(u), TypeId::VarChar) => {
+                Ok(Value::new_with_type(Val::VarLen(u.clone()), target_type))
+            }
+            (Val::UUID(u), TypeId::Char) => {
+                Ok(Value::new_with_type(Val::ConstLen(u.clone()), target_type))
+            }
 
             // ===== ENUM CONVERSIONS =====
-            (Val::Enum(id, s), TypeId::Integer) => Ok(Value::new_with_type(Val::Integer(*id), target_type)),
-            (Val::Enum(id, s), TypeId::BigInt) => Ok(Value::new_with_type(Val::BigInt(*id as i64), target_type)),
-            (Val::Enum(id, s), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type)),
-            (Val::Enum(id, s), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type)),
+            (Val::Enum(id, s), TypeId::Integer) => {
+                Ok(Value::new_with_type(Val::Integer(*id), target_type))
+            }
+            (Val::Enum(id, s), TypeId::BigInt) => {
+                Ok(Value::new_with_type(Val::BigInt(*id as i64), target_type))
+            }
+            (Val::Enum(id, s), TypeId::VarChar) => {
+                Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type))
+            }
+            (Val::Enum(id, s), TypeId::Char) => {
+                Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type))
+            }
 
             // ===== POINT CONVERSIONS =====
-            (Val::Point(x, y), TypeId::VarChar) => Ok(Value::new_with_type(Val::VarLen(format!("({}, {})", x, y)), target_type)),
-            (Val::Point(x, y), TypeId::Char) => Ok(Value::new_with_type(Val::ConstLen(format!("({}, {})", x, y)), target_type)),
+            (Val::Point(x, y), TypeId::VarChar) => Ok(Value::new_with_type(
+                Val::VarLen(format!("({}, {})", x, y)),
+                target_type,
+            )),
+            (Val::Point(x, y), TypeId::Char) => Ok(Value::new_with_type(
+                Val::ConstLen(format!("({}, {})", x, y)),
+                target_type,
+            )),
 
             // ===== VECTOR/ARRAY CONVERSIONS =====
-            (Val::Vector(v), TypeId::Array) => Ok(Value::new_with_type(Val::Array(v.clone()), target_type)),
-            (Val::Array(a), TypeId::Vector) => Ok(Value::new_with_type(Val::Vector(a.clone()), target_type)),
+            (Val::Vector(v), TypeId::Array) => {
+                Ok(Value::new_with_type(Val::Array(v.clone()), target_type))
+            }
+            (Val::Array(a), TypeId::Vector) => {
+                Ok(Value::new_with_type(Val::Vector(a.clone()), target_type))
+            }
 
             // ===== NULL HANDLING =====
             (Val::Null, _) => Ok(Value::new_with_type(Val::Null, target_type)),
@@ -668,17 +871,50 @@ impl Value {
             // ===== UNSUPPORTED CONVERSIONS =====
             // These conversions are not supported and will return errors
             (Val::Struct, _) => Err(format!("Cannot cast Struct to {:?}", target_type)),
-            (Val::Vector(_), _) => Err(format!("Cannot cast Vector to {:?} (only Array is supported)", target_type)),
-            (Val::Array(_), _) => Err(format!("Cannot cast Array to {:?} (only Vector is supported)", target_type)),
-            (Val::Binary(_), _) => Err(format!("Cannot cast Binary to {:?} (only string types are supported)", target_type)),
-            (Val::JSON(_), _) => Err(format!("Cannot cast JSON to {:?} (only string types are supported)", target_type)),
-            (Val::UUID(_), _) => Err(format!("Cannot cast UUID to {:?} (only string types are supported)", target_type)),
-            (Val::Enum(_, _), _) => Err(format!("Cannot cast Enum to {:?} (only Integer, BigInt, and string types are supported)", target_type)),
-            (Val::Point(_, _), _) => Err(format!("Cannot cast Point to {:?} (only string types are supported)", target_type)),
-            (Val::Timestamp(_), _) => Err(format!("Cannot cast Timestamp to {:?} (only string and integer types are supported)", target_type)),
-            (Val::Date(_), _) => Err(format!("Cannot cast Date to {:?} (only string and integer types are supported)", target_type)),
-            (Val::Time(_), _) => Err(format!("Cannot cast Time to {:?} (only string and integer types are supported)", target_type)),
-            (Val::Interval(_), _) => Err(format!("Cannot cast Interval to {:?} (only string and integer types are supported)", target_type)),
+            (Val::Vector(_), _) => Err(format!(
+                "Cannot cast Vector to {:?} (only Array is supported)",
+                target_type
+            )),
+            (Val::Array(_), _) => Err(format!(
+                "Cannot cast Array to {:?} (only Vector is supported)",
+                target_type
+            )),
+            (Val::Binary(_), _) => Err(format!(
+                "Cannot cast Binary to {:?} (only string types are supported)",
+                target_type
+            )),
+            (Val::JSON(_), _) => Err(format!(
+                "Cannot cast JSON to {:?} (only string types are supported)",
+                target_type
+            )),
+            (Val::UUID(_), _) => Err(format!(
+                "Cannot cast UUID to {:?} (only string types are supported)",
+                target_type
+            )),
+            (Val::Enum(_, _), _) => Err(format!(
+                "Cannot cast Enum to {:?} (only Integer, BigInt, and string types are supported)",
+                target_type
+            )),
+            (Val::Point(_, _), _) => Err(format!(
+                "Cannot cast Point to {:?} (only string types are supported)",
+                target_type
+            )),
+            (Val::Timestamp(_), _) => Err(format!(
+                "Cannot cast Timestamp to {:?} (only string and integer types are supported)",
+                target_type
+            )),
+            (Val::Date(_), _) => Err(format!(
+                "Cannot cast Date to {:?} (only string and integer types are supported)",
+                target_type
+            )),
+            (Val::Time(_), _) => Err(format!(
+                "Cannot cast Time to {:?} (only string and integer types are supported)",
+                target_type
+            )),
+            (Val::Interval(_), _) => Err(format!(
+                "Cannot cast Interval to {:?} (only string and integer types are supported)",
+                target_type
+            )),
 
             // Catch-all for any other type combinations
             (val, typ) => Err(format!("Cannot cast {:?} to {:?}", val, typ)),
@@ -845,7 +1081,10 @@ impl Value {
     }
 
     /// Format value with column context for proper decimal precision/scale
-    pub fn format_with_column_context(&self, column: Option<&crate::catalog::column::Column>) -> String {
+    pub fn format_with_column_context(
+        &self,
+        column: Option<&crate::catalog::column::Column>,
+    ) -> String {
         match self.type_id_ {
             TypeId::Decimal => {
                 if let Some(col) = column {
@@ -856,7 +1095,7 @@ impl Value {
                 // Fall back to default formatting
                 ToString::to_string(self)
             }
-            _ => ToString::to_string(self)
+            _ => ToString::to_string(self),
         }
     }
 
@@ -2470,46 +2709,112 @@ mod comprehensive_cast_tests {
         let false_val = Value::new(false);
 
         // Boolean to numeric types
-        assert_eq!(true_val.cast_to(TypeId::TinyInt).unwrap().get_val(), &Val::TinyInt(1));
-        assert_eq!(false_val.cast_to(TypeId::TinyInt).unwrap().get_val(), &Val::TinyInt(0));
-        assert_eq!(true_val.cast_to(TypeId::SmallInt).unwrap().get_val(), &Val::SmallInt(1));
-        assert_eq!(true_val.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(1));
-        assert_eq!(true_val.cast_to(TypeId::BigInt).unwrap().get_val(), &Val::BigInt(1));
-        assert_eq!(true_val.cast_to(TypeId::Decimal).unwrap().get_val(), &Val::Decimal(1.0));
-        assert_eq!(true_val.cast_to(TypeId::Float).unwrap().get_val(), &Val::Float(1.0));
+        assert_eq!(
+            true_val.cast_to(TypeId::TinyInt).unwrap().get_val(),
+            &Val::TinyInt(1)
+        );
+        assert_eq!(
+            false_val.cast_to(TypeId::TinyInt).unwrap().get_val(),
+            &Val::TinyInt(0)
+        );
+        assert_eq!(
+            true_val.cast_to(TypeId::SmallInt).unwrap().get_val(),
+            &Val::SmallInt(1)
+        );
+        assert_eq!(
+            true_val.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(1)
+        );
+        assert_eq!(
+            true_val.cast_to(TypeId::BigInt).unwrap().get_val(),
+            &Val::BigInt(1)
+        );
+        assert_eq!(
+            true_val.cast_to(TypeId::Decimal).unwrap().get_val(),
+            &Val::Decimal(1.0)
+        );
+        assert_eq!(
+            true_val.cast_to(TypeId::Float).unwrap().get_val(),
+            &Val::Float(1.0)
+        );
 
         // Boolean to string types
-        assert_eq!(true_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("true".to_string()));
-        assert_eq!(false_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen("false".to_string()));
+        assert_eq!(
+            true_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("true".to_string())
+        );
+        assert_eq!(
+            false_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen("false".to_string())
+        );
     }
 
     #[test]
     fn test_numeric_to_boolean_casts() {
         // Non-zero values should cast to true
-        assert_eq!(Value::new(42i32).cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
-        assert_eq!(Value::new(-1i8).cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
-        assert_eq!(Value::new(3.14f64).cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
+        assert_eq!(
+            Value::new(42i32)
+                .cast_to(TypeId::Boolean)
+                .unwrap()
+                .get_val(),
+            &Val::Boolean(true)
+        );
+        assert_eq!(
+            Value::new(-1i8).cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(true)
+        );
+        assert_eq!(
+            Value::new(3.14f64)
+                .cast_to(TypeId::Boolean)
+                .unwrap()
+                .get_val(),
+            &Val::Boolean(true)
+        );
 
         // Zero values should cast to false
-        assert_eq!(Value::new(0i32).cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(false));
-        assert_eq!(Value::new(0.0f64).cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(false));
+        assert_eq!(
+            Value::new(0i32).cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(false)
+        );
+        assert_eq!(
+            Value::new(0.0f64)
+                .cast_to(TypeId::Boolean)
+                .unwrap()
+                .get_val(),
+            &Val::Boolean(false)
+        );
     }
 
     #[test]
     fn test_numeric_cross_casts() {
         let int_val = Value::new(42i32);
-        
+
         // Integer to other numeric types
-        assert_eq!(int_val.cast_to(TypeId::TinyInt).unwrap().get_val(), &Val::TinyInt(42));
-        assert_eq!(int_val.cast_to(TypeId::SmallInt).unwrap().get_val(), &Val::SmallInt(42));
-        assert_eq!(int_val.cast_to(TypeId::BigInt).unwrap().get_val(), &Val::BigInt(42));
-        assert_eq!(int_val.cast_to(TypeId::Decimal).unwrap().get_val(), &Val::Decimal(42.0));
-        assert_eq!(int_val.cast_to(TypeId::Float).unwrap().get_val(), &Val::Float(42.0));
+        assert_eq!(
+            int_val.cast_to(TypeId::TinyInt).unwrap().get_val(),
+            &Val::TinyInt(42)
+        );
+        assert_eq!(
+            int_val.cast_to(TypeId::SmallInt).unwrap().get_val(),
+            &Val::SmallInt(42)
+        );
+        assert_eq!(
+            int_val.cast_to(TypeId::BigInt).unwrap().get_val(),
+            &Val::BigInt(42)
+        );
+        assert_eq!(
+            int_val.cast_to(TypeId::Decimal).unwrap().get_val(),
+            &Val::Decimal(42.0)
+        );
+        assert_eq!(
+            int_val.cast_to(TypeId::Float).unwrap().get_val(),
+            &Val::Float(42.0)
+        );
 
         // Test range checking
         let large_int = Value::new(300i32);
         assert!(large_int.cast_to(TypeId::TinyInt).is_err()); // Out of range for i8
-        
+
         let small_int = Value::new(100i32);
         assert!(small_int.cast_to(TypeId::TinyInt).is_ok()); // Within range for i8
     }
@@ -2522,16 +2827,43 @@ mod comprehensive_cast_tests {
         let bool_str_false = Value::new("false");
 
         // String to numeric types
-        assert_eq!(int_str.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(42));
-        assert_eq!(float_str.cast_to(TypeId::Decimal).unwrap().get_val(), &Val::Decimal(3.14));
-        assert_eq!(bool_str_true.cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
-        assert_eq!(bool_str_false.cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(false));
+        assert_eq!(
+            int_str.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(42)
+        );
+        assert_eq!(
+            float_str.cast_to(TypeId::Decimal).unwrap().get_val(),
+            &Val::Decimal(3.14)
+        );
+        assert_eq!(
+            bool_str_true.cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(true)
+        );
+        assert_eq!(
+            bool_str_false.cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(false)
+        );
 
         // Test various boolean string representations
-        assert_eq!(Value::new("1").cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
-        assert_eq!(Value::new("0").cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(false));
-        assert_eq!(Value::new("yes").cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(true));
-        assert_eq!(Value::new("no").cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Boolean(false));
+        assert_eq!(
+            Value::new("1").cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(true)
+        );
+        assert_eq!(
+            Value::new("0").cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(false)
+        );
+        assert_eq!(
+            Value::new("yes")
+                .cast_to(TypeId::Boolean)
+                .unwrap()
+                .get_val(),
+            &Val::Boolean(true)
+        );
+        assert_eq!(
+            Value::new("no").cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Boolean(false)
+        );
 
         // Invalid conversions should fail
         assert!(Value::new("not_a_number").cast_to(TypeId::Integer).is_err());
@@ -2546,66 +2878,147 @@ mod comprehensive_cast_tests {
         let interval = Value::new_with_type(Val::Interval(86400), TypeId::Interval);
 
         // Temporal to string
-        assert_eq!(timestamp.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("1000".to_string()));
-        assert_eq!(date.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("20230101".to_string()));
-        assert_eq!(time.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("3600".to_string()));
-        assert_eq!(interval.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("86400".to_string()));
+        assert_eq!(
+            timestamp.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("1000".to_string())
+        );
+        assert_eq!(
+            date.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("20230101".to_string())
+        );
+        assert_eq!(
+            time.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("3600".to_string())
+        );
+        assert_eq!(
+            interval.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("86400".to_string())
+        );
 
         // Temporal to integer types
-        assert_eq!(timestamp.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(1000));
-        assert_eq!(timestamp.cast_to(TypeId::BigInt).unwrap().get_val(), &Val::BigInt(1000));
-        assert_eq!(date.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(20230101));
-        assert_eq!(time.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(3600));
-        assert_eq!(interval.cast_to(TypeId::BigInt).unwrap().get_val(), &Val::BigInt(86400));
+        assert_eq!(
+            timestamp.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(1000)
+        );
+        assert_eq!(
+            timestamp.cast_to(TypeId::BigInt).unwrap().get_val(),
+            &Val::BigInt(1000)
+        );
+        assert_eq!(
+            date.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(20230101)
+        );
+        assert_eq!(
+            time.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(3600)
+        );
+        assert_eq!(
+            interval.cast_to(TypeId::BigInt).unwrap().get_val(),
+            &Val::BigInt(86400)
+        );
 
         // String to temporal types
-        assert_eq!(Value::new("1000").cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Timestamp(1000));
-        assert_eq!(Value::new("20230101").cast_to(TypeId::Date).unwrap().get_val(), &Val::Date(20230101));
-        assert_eq!(Value::new("3600").cast_to(TypeId::Time).unwrap().get_val(), &Val::Time(3600));
-        assert_eq!(Value::new("86400").cast_to(TypeId::Interval).unwrap().get_val(), &Val::Interval(86400));
+        assert_eq!(
+            Value::new("1000")
+                .cast_to(TypeId::Timestamp)
+                .unwrap()
+                .get_val(),
+            &Val::Timestamp(1000)
+        );
+        assert_eq!(
+            Value::new("20230101")
+                .cast_to(TypeId::Date)
+                .unwrap()
+                .get_val(),
+            &Val::Date(20230101)
+        );
+        assert_eq!(
+            Value::new("3600").cast_to(TypeId::Time).unwrap().get_val(),
+            &Val::Time(3600)
+        );
+        assert_eq!(
+            Value::new("86400")
+                .cast_to(TypeId::Interval)
+                .unwrap()
+                .get_val(),
+            &Val::Interval(86400)
+        );
 
         // Integer/BigInt to Timestamp
         let int_val = Value::new(2000);
         let bigint_val = Value::new(3000i64);
         let negative_int = Value::new(-1000);
 
-        assert_eq!(int_val.cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Timestamp(2000));
-        assert_eq!(bigint_val.cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Timestamp(3000));
+        assert_eq!(
+            int_val.cast_to(TypeId::Timestamp).unwrap().get_val(),
+            &Val::Timestamp(2000)
+        );
+        assert_eq!(
+            bigint_val.cast_to(TypeId::Timestamp).unwrap().get_val(),
+            &Val::Timestamp(3000)
+        );
         assert!(negative_int.cast_to(TypeId::Timestamp).is_err());
     }
 
     #[test]
     fn test_binary_casts() {
         let text = "Hello, World!";
-        let binary_val = Value::new_with_type(Val::Binary(text.as_bytes().to_vec()), TypeId::Binary);
+        let binary_val =
+            Value::new_with_type(Val::Binary(text.as_bytes().to_vec()), TypeId::Binary);
 
         // Binary to string (valid UTF-8)
-        assert_eq!(binary_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen(text.to_string()));
-        assert_eq!(binary_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen(text.to_string()));
+        assert_eq!(
+            binary_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen(text.to_string())
+        );
+        assert_eq!(
+            binary_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen(text.to_string())
+        );
 
         // String to binary
         let string_val = Value::new(text);
-        assert_eq!(string_val.cast_to(TypeId::Binary).unwrap().get_val(), &Val::Binary(text.as_bytes().to_vec()));
+        assert_eq!(
+            string_val.cast_to(TypeId::Binary).unwrap().get_val(),
+            &Val::Binary(text.as_bytes().to_vec())
+        );
 
         // Invalid UTF-8 should fail
-        let invalid_utf8 = Value::new_with_type(Val::Binary(vec![0xFF, 0xFE, 0xFD]), TypeId::Binary);
+        let invalid_utf8 =
+            Value::new_with_type(Val::Binary(vec![0xFF, 0xFE, 0xFD]), TypeId::Binary);
         assert!(invalid_utf8.cast_to(TypeId::VarChar).is_err());
     }
 
     #[test]
     fn test_json_uuid_casts() {
-        let json_val = Value::new_with_type(Val::JSON("{\"key\": \"value\"}".to_string()), TypeId::JSON);
-        let uuid_val = Value::new_with_type(Val::UUID("550e8400-e29b-41d4-a716-446655440000".to_string()), TypeId::UUID);
+        let json_val =
+            Value::new_with_type(Val::JSON("{\"key\": \"value\"}".to_string()), TypeId::JSON);
+        let uuid_val = Value::new_with_type(
+            Val::UUID("550e8400-e29b-41d4-a716-446655440000".to_string()),
+            TypeId::UUID,
+        );
 
         // JSON/UUID to string
-        assert_eq!(json_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("{\"key\": \"value\"}".to_string()));
-        assert_eq!(uuid_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen("550e8400-e29b-41d4-a716-446655440000".to_string()));
+        assert_eq!(
+            json_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("{\"key\": \"value\"}".to_string())
+        );
+        assert_eq!(
+            uuid_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen("550e8400-e29b-41d4-a716-446655440000".to_string())
+        );
 
         // String to JSON/UUID
         let json_str = Value::new("{\"test\": true}");
         let uuid_str = Value::new("123e4567-e89b-12d3-a456-426614174000");
-        assert_eq!(json_str.cast_to(TypeId::JSON).unwrap().get_val(), &Val::JSON("{\"test\": true}".to_string()));
-        assert_eq!(uuid_str.cast_to(TypeId::UUID).unwrap().get_val(), &Val::UUID("123e4567-e89b-12d3-a456-426614174000".to_string()));
+        assert_eq!(
+            json_str.cast_to(TypeId::JSON).unwrap().get_val(),
+            &Val::JSON("{\"test\": true}".to_string())
+        );
+        assert_eq!(
+            uuid_str.cast_to(TypeId::UUID).unwrap().get_val(),
+            &Val::UUID("123e4567-e89b-12d3-a456-426614174000".to_string())
+        );
     }
 
     #[test]
@@ -2613,12 +3026,24 @@ mod comprehensive_cast_tests {
         let enum_val = Value::new_with_type(Val::Enum(1, "ACTIVE".to_string()), TypeId::Enum);
 
         // Enum to integer types
-        assert_eq!(enum_val.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(1));
-        assert_eq!(enum_val.cast_to(TypeId::BigInt).unwrap().get_val(), &Val::BigInt(1));
+        assert_eq!(
+            enum_val.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(1)
+        );
+        assert_eq!(
+            enum_val.cast_to(TypeId::BigInt).unwrap().get_val(),
+            &Val::BigInt(1)
+        );
 
         // Enum to string types
-        assert_eq!(enum_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("ACTIVE".to_string()));
-        assert_eq!(enum_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen("ACTIVE".to_string()));
+        assert_eq!(
+            enum_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("ACTIVE".to_string())
+        );
+        assert_eq!(
+            enum_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen("ACTIVE".to_string())
+        );
     }
 
     #[test]
@@ -2626,14 +3051,23 @@ mod comprehensive_cast_tests {
         let point_val = Value::new_with_type(Val::Point(3.14, 2.71), TypeId::Point);
 
         // Point to string
-        assert_eq!(point_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("(3.14, 2.71)".to_string()));
-        assert_eq!(point_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen("(3.14, 2.71)".to_string()));
+        assert_eq!(
+            point_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("(3.14, 2.71)".to_string())
+        );
+        assert_eq!(
+            point_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen("(3.14, 2.71)".to_string())
+        );
     }
 
     #[test]
     fn test_vector_array_casts() {
         let vector_val = Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]);
-        let array_val = Value::new_with_type(Val::Array(vec![Value::new(4), Value::new(5)]), TypeId::Array);
+        let array_val = Value::new_with_type(
+            Val::Array(vec![Value::new(4), Value::new(5)]),
+            TypeId::Array,
+        );
 
         // Vector to Array
         if let Val::Array(arr) = vector_val.cast_to(TypeId::Array).unwrap().get_val() {
@@ -2655,14 +3089,32 @@ mod comprehensive_cast_tests {
         let null_val = Value::new(Val::Null);
 
         // NULL can be cast to any type and remains NULL
-        assert_eq!(null_val.cast_to(TypeId::Integer).unwrap().get_val(), &Val::Null);
-        assert_eq!(null_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::Null);
-        assert_eq!(null_val.cast_to(TypeId::Boolean).unwrap().get_val(), &Val::Null);
-        assert_eq!(null_val.cast_to(TypeId::Timestamp).unwrap().get_val(), &Val::Null);
+        assert_eq!(
+            null_val.cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Null
+        );
+        assert_eq!(
+            null_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::Null
+        );
+        assert_eq!(
+            null_val.cast_to(TypeId::Boolean).unwrap().get_val(),
+            &Val::Null
+        );
+        assert_eq!(
+            null_val.cast_to(TypeId::Timestamp).unwrap().get_val(),
+            &Val::Null
+        );
 
         // Type should be updated correctly
-        assert_eq!(null_val.cast_to(TypeId::Integer).unwrap().get_type_id(), TypeId::Integer);
-        assert_eq!(null_val.cast_to(TypeId::VarChar).unwrap().get_type_id(), TypeId::VarChar);
+        assert_eq!(
+            null_val.cast_to(TypeId::Integer).unwrap().get_type_id(),
+            TypeId::Integer
+        );
+        assert_eq!(
+            null_val.cast_to(TypeId::VarChar).unwrap().get_type_id(),
+            TypeId::VarChar
+        );
     }
 
     #[test]
@@ -2722,43 +3174,54 @@ mod comprehensive_cast_tests {
         let char_val = Value::new_with_type(Val::ConstLen("test".to_string()), TypeId::Char);
 
         // VarChar to Char
-        assert_eq!(varchar_val.cast_to(TypeId::Char).unwrap().get_val(), &Val::ConstLen("test".to_string()));
-        
+        assert_eq!(
+            varchar_val.cast_to(TypeId::Char).unwrap().get_val(),
+            &Val::ConstLen("test".to_string())
+        );
+
         // Char to VarChar
-        assert_eq!(char_val.cast_to(TypeId::VarChar).unwrap().get_val(), &Val::VarLen("test".to_string()));
+        assert_eq!(
+            char_val.cast_to(TypeId::VarChar).unwrap().get_val(),
+            &Val::VarLen("test".to_string())
+        );
 
         // Both should work with all numeric conversions
-        assert_eq!(varchar_val.cast_to(TypeId::Integer).unwrap_err(), "Cannot convert string 'test' to Integer: invalid digit found in string");
-        assert_eq!(Value::new("42").cast_to(TypeId::Integer).unwrap().get_val(), &Val::Integer(42));
+        assert_eq!(
+            varchar_val.cast_to(TypeId::Integer).unwrap_err(),
+            "Cannot convert string 'test' to Integer: invalid digit found in string"
+        );
+        assert_eq!(
+            Value::new("42").cast_to(TypeId::Integer).unwrap().get_val(),
+            &Val::Integer(42)
+        );
     }
 
     #[test]
     fn test_decimal_formatting_with_column_context() {
         use crate::catalog::column::Column;
-        use crate::types_db::type_id::TypeId;
-        
+
         // Create a decimal value
         let decimal_val = Value::new(123.456789);
-        
-        // Test default formatting (no column context)
-        assert_eq!(format!("{}", decimal_val), "123.46");
-        
+
+        // Test default formatting (no column context) - should show full precision
+        assert_eq!(format!("{}", decimal_val), "123.456789");
+
         // Create a column with precision and scale
         let column = Column::new_decimal("price", Some(10), Some(2));
-        
+
         // Test formatting with column context
         let formatted = decimal_val.format_with_column_context(Some(&column));
         assert_eq!(formatted, "123.46");
-        
+
         // Test with different scale
         let column_scale_4 = Column::new_decimal("precise_price", Some(15), Some(4));
         let formatted_precise = decimal_val.format_with_column_context(Some(&column_scale_4));
         assert_eq!(formatted_precise, "123.4568");
-        
-        // Test without column context (should use default formatting)
+
+        // Test without column context (should use default formatting - full precision)
         let formatted_no_context = decimal_val.format_with_column_context(None);
-        assert_eq!(formatted_no_context, "123.46");
-        
+        assert_eq!(formatted_no_context, "123.456789");
+
         // Test with non-decimal type (should use default formatting)
         let int_val = Value::new(42);
         let formatted_int = int_val.format_with_column_context(Some(&column));

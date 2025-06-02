@@ -5,7 +5,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log;
 use log::debug;
-use sqlparser::ast::{ColumnDef, DataType, Expr, ExactNumberInfo, Ident};
+use sqlparser::ast::{ColumnDef, DataType, ExactNumberInfo, Expr, Ident};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -51,11 +51,14 @@ impl SchemaManager {
             for expr in group_by_exprs {
                 let original_name = expr.get_return_type().get_name().to_string();
                 let col_name = if let Some(mapping) = alias_mapping {
-                    mapping.get(&original_name).cloned().unwrap_or(original_name.clone())
+                    mapping
+                        .get(&original_name)
+                        .cloned()
+                        .unwrap_or(original_name.clone())
                 } else {
                     original_name
                 };
-                
+
                 if seen_columns.insert(col_name.clone()) {
                     let mut column = expr.get_return_type().clone();
                     column.set_name(col_name.as_str().parse().unwrap());
@@ -112,7 +115,8 @@ impl SchemaManager {
             let type_id = self.convert_sql_type(&col_def.data_type)?;
 
             // Extract type-specific parameters and create column
-            let column = self.create_column_from_sql_type(&column_name, &col_def.data_type, type_id)?;
+            let column =
+                self.create_column_from_sql_type(&column_name, &col_def.data_type, type_id)?;
             columns.push(column);
         }
 
@@ -130,66 +134,171 @@ impl SchemaManager {
             // Decimal/Numeric types with precision and scale
             DataType::Decimal(exact_info) | DataType::Numeric(exact_info) => {
                 let (precision, scale) = self.extract_precision_scale(exact_info)?;
-                Ok(Column::from_sql_info(column_name, type_id, None, precision, scale, false, false, false, None, None, None))
+                Ok(Column::from_sql_info(
+                    column_name,
+                    type_id,
+                    None,
+                    precision,
+                    scale,
+                    false,
+                    false,
+                    false,
+                    None,
+                    None,
+                    None,
+                ))
             }
-            
+
             // Float types with precision
             DataType::Float(precision) => {
-                let prec = precision.map(|p| {
-                    if p > u8::MAX as u64 { u8::MAX } else { p as u8 }
-                });
-                Ok(Column::from_sql_info(column_name, type_id, None, prec, None, false, false, false, None, None, None))
+                let prec = precision.map(|p| if p > u8::MAX as u64 { u8::MAX } else { p as u8 });
+                Ok(Column::from_sql_info(
+                    column_name,
+                    type_id,
+                    None,
+                    prec,
+                    None,
+                    false,
+                    false,
+                    false,
+                    None,
+                    None,
+                    None,
+                ))
             }
-            
+
             // Variable length string types - use default lengths for now
-            DataType::Varchar(_) | DataType::String(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false, false, false, None, None, None))
-            }
-            DataType::Char(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(1), None, None, false, false, false, None, None, None))
-            }
-            
+            DataType::Varchar(_) | DataType::String(_) => Ok(Column::from_sql_info(
+                column_name,
+                type_id,
+                Some(255),
+                None,
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )),
+            DataType::Char(_) => Ok(Column::from_sql_info(
+                column_name,
+                type_id,
+                Some(1),
+                None,
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )),
+
             // Binary types - use default lengths for now
             DataType::Binary(_) | DataType::Varbinary(_) | DataType::Blob(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, Some(255), None, None, false, false, false, None, None, None))
+                Ok(Column::from_sql_info(
+                    column_name,
+                    type_id,
+                    Some(255),
+                    None,
+                    None,
+                    false,
+                    false,
+                    false,
+                    None,
+                    None,
+                    None,
+                ))
             }
-            
+
             // Integer types with optional display width (we ignore display width for now)
-            DataType::TinyInt(_) | DataType::SmallInt(_) | DataType::Int(_) | 
-            DataType::Integer(_) | DataType::BigInt(_) => {
-                Ok(Column::from_sql_info(column_name, type_id, None, None, None, false, false, false, None, None, None))
-            }
-            
+            DataType::TinyInt(_)
+            | DataType::SmallInt(_)
+            | DataType::Int(_)
+            | DataType::Integer(_)
+            | DataType::BigInt(_) => Ok(Column::from_sql_info(
+                column_name,
+                type_id,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )),
+
             // Array types
             DataType::Array(_) => {
                 // Default array size, could be made configurable
-                Ok(Column::from_sql_info(column_name, type_id, Some(1024), None, None, false, false, false, None, None, None))
+                Ok(Column::from_sql_info(
+                    column_name,
+                    type_id,
+                    Some(1024),
+                    None,
+                    None,
+                    false,
+                    false,
+                    false,
+                    None,
+                    None,
+                    None,
+                ))
             }
-            
+
             // All other types use default parameters
-            _ => Ok(Column::from_sql_info(column_name, type_id, None, None, None, false, false, false, None, None, None)),
+            _ => Ok(Column::from_sql_info(
+                column_name,
+                type_id,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )),
         }
     }
 
     /// Extract precision and scale from ExactNumberInfo
-    fn extract_precision_scale(&self, exact_info: &ExactNumberInfo) -> Result<(Option<u8>, Option<u8>), String> {
+    fn extract_precision_scale(
+        &self,
+        exact_info: &ExactNumberInfo,
+    ) -> Result<(Option<u8>, Option<u8>), String> {
         match exact_info {
             ExactNumberInfo::None => Ok((None, None)),
             ExactNumberInfo::Precision(precision) => {
                 if *precision > u8::MAX as u64 {
-                    return Err(format!("Precision {} is too large (max {})", precision, u8::MAX));
+                    return Err(format!(
+                        "Precision {} is too large (max {})",
+                        precision,
+                        u8::MAX
+                    ));
                 }
                 Ok((Some(*precision as u8), None))
             }
             ExactNumberInfo::PrecisionAndScale(precision, scale) => {
                 if *precision > u8::MAX as u64 {
-                    return Err(format!("Precision {} is too large (max {})", precision, u8::MAX));
+                    return Err(format!(
+                        "Precision {} is too large (max {})",
+                        precision,
+                        u8::MAX
+                    ));
                 }
                 if *scale > u8::MAX as u64 {
                     return Err(format!("Scale {} is too large (max {})", scale, u8::MAX));
                 }
                 if *scale > *precision {
-                    return Err(format!("Scale {} cannot be greater than precision {}", scale, precision));
+                    return Err(format!(
+                        "Scale {} cannot be greater than precision {}",
+                        scale, precision
+                    ));
                 }
                 Ok((Some(*precision as u8), Some(*scale as u8)))
             }
@@ -470,7 +579,7 @@ impl SchemaManager {
             for expr in group_by_exprs {
                 let original_name = expr.get_return_type().get_name();
                 let col_name = self.map_to_alias(original_name, select_items);
-                
+
                 if seen_columns.insert(col_name.clone()) {
                     let mut column = expr.get_return_type().clone();
                     column.set_name(col_name);
@@ -504,9 +613,13 @@ impl SchemaManager {
     }
 
     /// Helper method to map original column names to their aliases from the SELECT projection
-    fn map_to_alias(&self, original_name: &str, select_items: &[sqlparser::ast::SelectItem]) -> String {
-        use sqlparser::ast::{SelectItem, Expr};
-        
+    fn map_to_alias(
+        &self,
+        original_name: &str,
+        select_items: &[sqlparser::ast::SelectItem],
+    ) -> String {
+        use sqlparser::ast::{Expr, SelectItem};
+
         // Try to find the corresponding alias in the SELECT projection
         for item in select_items {
             match item {
@@ -538,7 +651,7 @@ impl SchemaManager {
                 _ => {}
             }
         }
-        
+
         // If no alias found, return the original name
         original_name.to_string()
     }
@@ -551,7 +664,7 @@ impl SchemaManager {
     ) -> std::collections::HashMap<String, String> {
         debug!("Creating column alias mapping");
         let mut alias_map = std::collections::HashMap::new();
-        
+
         for item in select_items {
             match item {
                 sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
@@ -568,7 +681,7 @@ impl SchemaManager {
                     if let sqlparser::ast::Expr::CompoundIdentifier(idents) = expr {
                         if idents.len() == 2 {
                             let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
-                            
+
                             // Check if this matches any GROUP BY expression
                             for group_expr in group_by_exprs {
                                 if let Expression::ColumnRef(col_ref) = group_expr {
@@ -587,13 +700,13 @@ impl SchemaManager {
                 _ => {}
             }
         }
-        
+
         debug!("Created alias mapping: {:?}", alias_map);
         alias_map
     }
 
     /// Maps values from a source schema to a target schema
-    /// 
+    ///
     /// This method handles both name-based and positional mapping:
     /// - If any column names match between schemas, uses name-based mapping
     /// - Otherwise, uses positional mapping
@@ -606,46 +719,53 @@ impl SchemaManager {
         target_schema: &Schema,
     ) -> Vec<Value> {
         let mut target_values = Vec::with_capacity(target_schema.get_column_count() as usize);
-        
+
         // If the source schema has fewer columns, use positional mapping
         if source_schema.get_column_count() < target_schema.get_column_count() {
             for i in 0..target_schema.get_column_count() {
                 if (i as usize) < source_values.len() {
                     // Cast value to target type if needed
                     let target_type = target_schema.get_column(i as usize).unwrap().get_type();
-                    target_values.push(self.cast_value_to_type(&source_values[i as usize], target_type));
+                    target_values
+                        .push(self.cast_value_to_type(&source_values[i as usize], target_type));
                 } else {
                     // Fill with NULLs for missing columns
                     let target_type = target_schema.get_column(i as usize).unwrap().get_type();
-                    target_values.push(Value::new_with_type(crate::types_db::value::Val::Null, target_type));
+                    target_values.push(Value::new_with_type(
+                        crate::types_db::value::Val::Null,
+                        target_type,
+                    ));
                 }
             }
         } else {
             // First, detect if we should use name-based mapping by checking if any column names match
-            let should_use_name_mapping = self.detect_name_based_mapping(source_schema, target_schema);
-            
+            let should_use_name_mapping =
+                self.detect_name_based_mapping(source_schema, target_schema);
+
             if should_use_name_mapping {
                 // Use name-based mapping
                 for target_col_idx in 0..target_schema.get_column_count() {
-                    let target_column = target_schema.get_column(target_col_idx as usize)
+                    let target_column = target_schema
+                        .get_column(target_col_idx as usize)
                         .expect("Target column should exist");
-                    
+
                     // Find matching column in source schema by name
                     let mapped_value = self.find_value_by_name(
                         target_column.get_name(),
                         source_values,
                         source_schema,
-                        target_column.get_type()
+                        target_column.get_type(),
                     );
-                    
+
                     target_values.push(mapped_value);
                 }
             } else {
                 // Use positional mapping
                 for target_col_idx in 0..target_schema.get_column_count() {
-                    let target_column = target_schema.get_column(target_col_idx as usize)
+                    let target_column = target_schema
+                        .get_column(target_col_idx as usize)
                         .expect("Target column should exist");
-                    
+
                     let mapped_value = if (target_col_idx as usize) < source_values.len() {
                         // We have a value at this position - cast it to target type
                         let source_value = &source_values[target_col_idx as usize];
@@ -657,12 +777,12 @@ impl SchemaManager {
                             target_column.get_type(),
                         )
                     };
-                    
+
                     target_values.push(mapped_value);
                 }
             }
         }
-        
+
         target_values
     }
 
@@ -670,15 +790,17 @@ impl SchemaManager {
     fn detect_name_based_mapping(&self, source_schema: &Schema, target_schema: &Schema) -> bool {
         let source_count = source_schema.get_column_count();
         let mut matching_count = 0;
-        
+
         // Count how many source columns have exact matches in target schema
         for source_col_idx in 0..source_count {
-            let source_column = source_schema.get_column(source_col_idx as usize)
+            let source_column = source_schema
+                .get_column(source_col_idx as usize)
                 .expect("Source column should exist");
-            
+
             // Check if this source column name exists in target schema
             for target_col_idx in 0..target_schema.get_column_count() {
-                let target_column = target_schema.get_column(target_col_idx as usize)
+                let target_column = target_schema
+                    .get_column(target_col_idx as usize)
                     .expect("Target column should exist");
                 if source_column.get_name() == target_column.get_name() {
                     matching_count += 1;
@@ -686,7 +808,7 @@ impl SchemaManager {
                 }
             }
         }
-        
+
         // Use name-based mapping only if ALL source columns have matches
         // This prevents positional mapping being broken by partial matches
         matching_count == source_count && source_count > 0
@@ -701,19 +823,17 @@ impl SchemaManager {
         target_type: TypeId,
     ) -> Value {
         for source_col_idx in 0..source_schema.get_column_count() {
-            let source_column = source_schema.get_column(source_col_idx as usize)
+            let source_column = source_schema
+                .get_column(source_col_idx as usize)
                 .expect("Source column should exist");
             if source_column.get_name() == target_column_name {
                 let source_value = &source_values[source_col_idx as usize];
                 return self.cast_value_to_type(source_value, target_type);
             }
         }
-        
+
         // Column not found, use NULL
-        Value::new_with_type(
-            crate::types_db::value::Val::Null,
-            target_type,
-        )
+        Value::new_with_type(crate::types_db::value::Val::Null, target_type)
     }
 
     /// Casts a value to the target type, returning NULL if casting fails
@@ -722,10 +842,7 @@ impl SchemaManager {
             Ok(casted_value) => casted_value,
             Err(_) => {
                 // If casting fails, use NULL
-                Value::new_with_type(
-                    crate::types_db::value::Val::Null,
-                    target_type,
-                )
+                Value::new_with_type(crate::types_db::value::Val::Null, target_type)
             }
         }
     }
@@ -1350,22 +1467,29 @@ mod tests {
         let schema_manager = SchemaManager::new();
 
         // Test None case
-        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::None).unwrap();
+        let result = schema_manager
+            .extract_precision_scale(&ExactNumberInfo::None)
+            .unwrap();
         assert_eq!(result, (None, None));
 
         // Test Precision only
-        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::Precision(10)).unwrap();
+        let result = schema_manager
+            .extract_precision_scale(&ExactNumberInfo::Precision(10))
+            .unwrap();
         assert_eq!(result, (Some(10), None));
 
         // Test Precision and Scale
-        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(15, 5)).unwrap();
+        let result = schema_manager
+            .extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(15, 5))
+            .unwrap();
         assert_eq!(result, (Some(15), Some(5)));
 
         // Test error cases
         let result = schema_manager.extract_precision_scale(&ExactNumberInfo::Precision(300));
         assert!(result.is_err());
 
-        let result = schema_manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(10, 15));
+        let result =
+            schema_manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(10, 15));
         assert!(result.is_err()); // Scale > Precision
     }
 
@@ -1375,8 +1499,10 @@ mod tests {
 
         // Test DECIMAL with precision and scale
         let decimal_type = DataType::Decimal(ExactNumberInfo::PrecisionAndScale(10, 2));
-        let column = schema_manager.create_column_from_sql_type("price", &decimal_type, TypeId::Decimal).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("price", &decimal_type, TypeId::Decimal)
+            .unwrap();
+
         assert_eq!(column.get_name(), "price");
         assert_eq!(column.get_type(), TypeId::Decimal);
         assert_eq!(column.get_precision(), Some(10));
@@ -1384,8 +1510,10 @@ mod tests {
 
         // Test DECIMAL with precision only
         let decimal_type = DataType::Decimal(ExactNumberInfo::Precision(8));
-        let column = schema_manager.create_column_from_sql_type("amount", &decimal_type, TypeId::Decimal).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("amount", &decimal_type, TypeId::Decimal)
+            .unwrap();
+
         assert_eq!(column.get_name(), "amount");
         assert_eq!(column.get_type(), TypeId::Decimal);
         assert_eq!(column.get_precision(), Some(8));
@@ -1393,8 +1521,10 @@ mod tests {
 
         // Test DECIMAL with no precision/scale
         let decimal_type = DataType::Decimal(ExactNumberInfo::None);
-        let column = schema_manager.create_column_from_sql_type("value", &decimal_type, TypeId::Decimal).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("value", &decimal_type, TypeId::Decimal)
+            .unwrap();
+
         assert_eq!(column.get_name(), "value");
         assert_eq!(column.get_type(), TypeId::Decimal);
         assert_eq!(column.get_precision(), None);
@@ -1407,16 +1537,20 @@ mod tests {
 
         // Test VARCHAR (uses default length for now)
         let varchar_type = DataType::Varchar(None);
-        let column = schema_manager.create_column_from_sql_type("name", &varchar_type, TypeId::VarChar).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("name", &varchar_type, TypeId::VarChar)
+            .unwrap();
+
         assert_eq!(column.get_name(), "name");
         assert_eq!(column.get_type(), TypeId::VarChar);
         assert_eq!(column.get_length(), 255); // Default length
 
         // Test CHAR (uses default length for now)
         let char_type = DataType::Char(None);
-        let column = schema_manager.create_column_from_sql_type("code", &char_type, TypeId::Char).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("code", &char_type, TypeId::Char)
+            .unwrap();
+
         assert_eq!(column.get_name(), "code");
         assert_eq!(column.get_type(), TypeId::Char);
         assert_eq!(column.get_length(), 1); // Default length
@@ -1428,8 +1562,10 @@ mod tests {
 
         // Test FLOAT with precision
         let float_type = DataType::Float(Some(7));
-        let column = schema_manager.create_column_from_sql_type("measurement", &float_type, TypeId::Float).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("measurement", &float_type, TypeId::Float)
+            .unwrap();
+
         assert_eq!(column.get_name(), "measurement");
         assert_eq!(column.get_type(), TypeId::Float);
         assert_eq!(column.get_precision(), Some(7));
@@ -1437,8 +1573,10 @@ mod tests {
 
         // Test FLOAT without precision
         let float_type = DataType::Float(None);
-        let column = schema_manager.create_column_from_sql_type("ratio", &float_type, TypeId::Float).unwrap();
-        
+        let column = schema_manager
+            .create_column_from_sql_type("ratio", &float_type, TypeId::Float)
+            .unwrap();
+
         assert_eq!(column.get_name(), "ratio");
         assert_eq!(column.get_type(), TypeId::Float);
         assert_eq!(column.get_precision(), None);
@@ -1490,17 +1628,20 @@ mod tests {
         ]);
 
         let source_values = vec![
-            crate::types_db::value::Value::from("Bob"),      // name
-            crate::types_db::value::Value::from(123),        // id
+            crate::types_db::value::Value::from("Bob"), // name
+            crate::types_db::value::Value::from(123),   // id
             crate::types_db::value::Value::from("bob@test.com"), // email
         ];
 
         let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
 
         // Should map by name: id=123, name="Bob", email="bob@test.com"
-        assert_eq!(mapped[0], crate::types_db::value::Value::from(123));     // id
-        assert_eq!(mapped[1], crate::types_db::value::Value::from("Bob"));   // name
-        assert_eq!(mapped[2], crate::types_db::value::Value::from("bob@test.com")); // email
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(123)); // id
+        assert_eq!(mapped[1], crate::types_db::value::Value::from("Bob")); // name
+        assert_eq!(
+            mapped[2],
+            crate::types_db::value::Value::from("bob@test.com")
+        ); // email
     }
 
     #[test]
@@ -1514,7 +1655,7 @@ mod tests {
         ]);
 
         let target_schema = Schema::new(vec![
-            Column::new("string_num", TypeId::VarChar),    // Cast Integer to VarChar
+            Column::new("string_num", TypeId::VarChar), // Cast Integer to VarChar
             Column::new("num_from_text", TypeId::Integer), // This will fail casting and become NULL
             Column::new("bool_flag", TypeId::Boolean),
         ]);
@@ -1617,7 +1758,8 @@ mod tests {
             crate::types_db::value::Value::from(true),
         ];
 
-        let result = manager.find_value_by_name("second", &source_values, &source_schema, TypeId::Integer);
+        let result =
+            manager.find_value_by_name("second", &source_values, &source_schema, TypeId::Integer);
         assert_eq!(result, crate::types_db::value::Value::from(42));
     }
 
@@ -1635,7 +1777,8 @@ mod tests {
             crate::types_db::value::Value::from(42),
         ];
 
-        let result = manager.find_value_by_name("missing", &source_values, &source_schema, TypeId::VarChar);
+        let result =
+            manager.find_value_by_name("missing", &source_values, &source_schema, TypeId::VarChar);
         assert!(result.is_null());
         assert_eq!(result.get_type_id(), TypeId::VarChar);
     }
@@ -1738,9 +1881,7 @@ mod tests {
     fn test_schemas_compatible_different_counts() {
         let manager = SchemaManager::new();
 
-        let schema1 = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-        ]);
+        let schema1 = Schema::new(vec![Column::new("id", TypeId::Integer)]);
 
         let schema2 = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -1832,14 +1973,16 @@ mod tests {
 
         // Create expressions that would result in duplicate column names
         let group_by_col = Column::new("category", TypeId::VarChar);
-        let group_by_expr = Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, group_by_col, vec![],
-        ));
+        let group_by_expr =
+            Expression::ColumnRef(ColumnRefExpression::new(0, 0, group_by_col, vec![]));
 
         // Create aggregate with same name as group by
         let agg_col = Column::new("category", TypeId::Integer); // Same name!
         let agg_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, agg_col.clone(), vec![],
+            0,
+            1,
+            agg_col.clone(),
+            vec![],
         )));
 
         let agg_expr = Expression::Aggregate(AggregateExpression::new(
@@ -1865,10 +2008,14 @@ mod tests {
         let manager = SchemaManager::new();
 
         // Test maximum values
-        let result = manager.extract_precision_scale(&ExactNumberInfo::Precision(255)).unwrap();
+        let result = manager
+            .extract_precision_scale(&ExactNumberInfo::Precision(255))
+            .unwrap();
         assert_eq!(result, (Some(255), None));
 
-        let result = manager.extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(255, 255)).unwrap();
+        let result = manager
+            .extract_precision_scale(&ExactNumberInfo::PrecisionAndScale(255, 255))
+            .unwrap();
         assert_eq!(result, (Some(255), Some(255)));
 
         // Test error: precision too large
@@ -1925,18 +2072,24 @@ mod tests {
         );
 
         // Test custom VECTOR type
-        let custom_vector = DataType::Custom(sqlparser::ast::ObjectName(vec![
-            sqlparser::ast::ObjectNamePart::Identifier(Ident::new("VECTOR"))
-        ]), vec![]);
+        let custom_vector = DataType::Custom(
+            sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
+                Ident::new("VECTOR"),
+            )]),
+            vec![],
+        );
         assert_eq!(
             manager.convert_sql_type(&custom_vector).unwrap(),
             TypeId::Vector
         );
 
         // Test unknown custom type
-        let custom_unknown = DataType::Custom(sqlparser::ast::ObjectName(vec![
-            sqlparser::ast::ObjectNamePart::Identifier(Ident::new("UNKNOWN"))
-        ]), vec![]);
+        let custom_unknown = DataType::Custom(
+            sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
+                Ident::new("UNKNOWN"),
+            )]),
+            vec![],
+        );
         assert!(manager.convert_sql_type(&custom_unknown).is_err());
     }
 
@@ -1945,32 +2098,30 @@ mod tests {
         let manager = SchemaManager::new();
 
         // Test integer types
-        let int_column = manager.create_column_from_sql_type(
-            "test_int", 
-            &DataType::Integer(None), 
-            TypeId::Integer
-        ).unwrap();
+        let int_column = manager
+            .create_column_from_sql_type("test_int", &DataType::Integer(None), TypeId::Integer)
+            .unwrap();
         assert_eq!(int_column.get_name(), "test_int");
         assert_eq!(int_column.get_type(), TypeId::Integer);
         assert_eq!(int_column.get_precision(), None);
         assert_eq!(int_column.get_scale(), None);
 
         // Test array type
-        let array_column = manager.create_column_from_sql_type(
-            "test_array",
-            &DataType::Array(sqlparser::ast::ArrayElemTypeDef::None),
-            TypeId::Vector
-        ).unwrap();
+        let array_column = manager
+            .create_column_from_sql_type(
+                "test_array",
+                &DataType::Array(sqlparser::ast::ArrayElemTypeDef::None),
+                TypeId::Vector,
+            )
+            .unwrap();
         assert_eq!(array_column.get_name(), "test_array");
         assert_eq!(array_column.get_type(), TypeId::Vector);
         assert_eq!(array_column.get_length(), 8192); // Default array size
 
         // Test binary types
-        let binary_column = manager.create_column_from_sql_type(
-            "test_binary",
-            &DataType::Binary(None),
-            TypeId::Binary
-        ).unwrap();
+        let binary_column = manager
+            .create_column_from_sql_type("test_binary", &DataType::Binary(None), TypeId::Binary)
+            .unwrap();
         assert_eq!(binary_column.get_name(), "test_binary");
         assert_eq!(binary_column.get_type(), TypeId::Binary);
         assert_eq!(binary_column.get_length(), 255); // Default binary length
@@ -2016,14 +2167,26 @@ mod tests {
 
         // Test all basic type self-compatibility
         let types = [
-            TypeId::Boolean, TypeId::TinyInt, TypeId::SmallInt, 
-            TypeId::Integer, TypeId::BigInt, TypeId::Decimal,
-            TypeId::Float, TypeId::VarChar, TypeId::Char,
-            TypeId::Vector, TypeId::Timestamp, TypeId::JSON,
+            TypeId::Boolean,
+            TypeId::TinyInt,
+            TypeId::SmallInt,
+            TypeId::Integer,
+            TypeId::BigInt,
+            TypeId::Decimal,
+            TypeId::Float,
+            TypeId::VarChar,
+            TypeId::Char,
+            TypeId::Vector,
+            TypeId::Timestamp,
+            TypeId::JSON,
         ];
 
         for type_id in types {
-            assert!(manager.types_compatible(type_id, type_id), "Type {:?} should be compatible with itself", type_id);
+            assert!(
+                manager.types_compatible(type_id, type_id),
+                "Type {:?} should be compatible with itself",
+                type_id
+            );
         }
     }
 
@@ -2055,10 +2218,10 @@ mod tests {
 
         // Should use positional mapping since not ALL source columns match
         assert_eq!(mapped.len(), 4);
-        assert_eq!(mapped[0], crate::types_db::value::Value::from(1));        // id -> id
+        assert_eq!(mapped[0], crate::types_db::value::Value::from(1)); // id -> id
         assert_eq!(mapped[1], crate::types_db::value::Value::from("mystery")); // unknown -> name
-        assert_eq!(mapped[2], crate::types_db::value::Value::from(true));     // active -> active (but positionally)
-        assert!(mapped[3].is_null());                                          // extra = NULL
+        assert_eq!(mapped[2], crate::types_db::value::Value::from(true)); // active -> active (but positionally)
+        assert!(mapped[3].is_null()); // extra = NULL
     }
 
     #[test]
@@ -2067,19 +2230,18 @@ mod tests {
 
         // Create complex expressions that might have conflicts
         let group_col1 = Column::new("t1.category", TypeId::VarChar);
-        let group_expr1 = Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, group_col1, vec![],
-        ));
+        let group_expr1 = Expression::ColumnRef(ColumnRefExpression::new(0, 0, group_col1, vec![]));
 
         let group_col2 = Column::new("t2.region", TypeId::VarChar);
-        let group_expr2 = Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, group_col2, vec![],
-        ));
+        let group_expr2 = Expression::ColumnRef(ColumnRefExpression::new(0, 1, group_col2, vec![]));
 
         // Create multiple aggregates
         let sum_col = Column::new("SUM(sales)", TypeId::Decimal);
         let sum_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2, Column::new("sales", TypeId::Decimal), vec![],
+            0,
+            2,
+            Column::new("sales", TypeId::Decimal),
+            vec![],
         )));
         let sum_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Sum,
@@ -2090,7 +2252,10 @@ mod tests {
 
         let count_col = Column::new("COUNT(*)", TypeId::BigInt);
         let count_arg = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 3, Column::new("*", TypeId::BigInt), vec![],
+            0,
+            3,
+            Column::new("*", TypeId::BigInt),
+            vec![],
         )));
         let count_expr = Expression::Aggregate(AggregateExpression::new(
             AggregationType::Count,
@@ -2131,7 +2296,10 @@ mod tests {
 
         let source_values = vec![
             crate::types_db::value::Value::from(42),
-            crate::types_db::value::Value::new_with_type(crate::types_db::value::Val::Null, TypeId::VarChar),
+            crate::types_db::value::Value::new_with_type(
+                crate::types_db::value::Val::Null,
+                TypeId::VarChar,
+            ),
             crate::types_db::value::Value::from(false),
         ];
 
@@ -2154,7 +2322,9 @@ mod tests {
             TypeId::Date
         );
         assert_eq!(
-            manager.convert_sql_type(&DataType::Time(None, sqlparser::ast::TimezoneInfo::None)).unwrap(),
+            manager
+                .convert_sql_type(&DataType::Time(None, sqlparser::ast::TimezoneInfo::None))
+                .unwrap(),
             TypeId::Time
         );
         assert_eq!(
@@ -2162,11 +2332,15 @@ mod tests {
             TypeId::Interval
         );
         assert_eq!(
-            manager.convert_sql_type(&DataType::Enum(vec![], None)).unwrap(),
+            manager
+                .convert_sql_type(&DataType::Enum(vec![], None))
+                .unwrap(),
             TypeId::Enum
         );
         assert_eq!(
-            manager.convert_sql_type(&DataType::Struct(vec![], StructBracketKind::Parentheses)).unwrap(),
+            manager
+                .convert_sql_type(&DataType::Struct(vec![], StructBracketKind::Parentheses))
+                .unwrap(),
             TypeId::Struct
         );
 
@@ -2186,28 +2360,40 @@ mod tests {
             value: Value::DoubleQuotedString("test".to_string()),
             span: Span::new(Location::new(0, 0), Location::new(0, 0)),
         });
-        assert_eq!(manager.infer_expression_type(&double_quoted).unwrap(), TypeId::VarChar);
+        assert_eq!(
+            manager.infer_expression_type(&double_quoted).unwrap(),
+            TypeId::VarChar
+        );
 
         // Test boolean false
         let bool_false = Expr::Value(sqlparser::ast::ValueWithSpan {
             value: Value::Boolean(false),
             span: Span::new(Location::new(0, 0), Location::new(0, 0)),
         });
-        assert_eq!(manager.infer_expression_type(&bool_false).unwrap(), TypeId::Boolean);
+        assert_eq!(
+            manager.infer_expression_type(&bool_false).unwrap(),
+            TypeId::Boolean
+        );
 
         // Test decimal number
         let decimal = Expr::Value(sqlparser::ast::ValueWithSpan {
             value: Value::Number("3.14".to_string(), false),
             span: Span::new(Location::new(0, 0), Location::new(0, 0)),
         });
-        assert_eq!(manager.infer_expression_type(&decimal).unwrap(), TypeId::Integer); // Still treated as integer
+        assert_eq!(
+            manager.infer_expression_type(&decimal).unwrap(),
+            TypeId::Integer
+        ); // Still treated as integer
 
         // Test large number
         let large_num = Expr::Value(sqlparser::ast::ValueWithSpan {
             value: Value::Number("9223372036854775807".to_string(), false),
             span: Span::new(Location::new(0, 0), Location::new(0, 0)),
         });
-        assert_eq!(manager.infer_expression_type(&large_num).unwrap(), TypeId::Integer);
+        assert_eq!(
+            manager.infer_expression_type(&large_num).unwrap(),
+            TypeId::Integer
+        );
     }
 
     #[test]
@@ -2284,7 +2470,10 @@ mod tests {
         let source_values = vec![
             crate::types_db::value::Value::from("123"),
             crate::types_db::value::Value::from(true),
-            crate::types_db::value::Value::new_with_type(crate::types_db::value::Val::Null, TypeId::VarChar),
+            crate::types_db::value::Value::new_with_type(
+                crate::types_db::value::Val::Null,
+                TypeId::VarChar,
+            ),
         ];
 
         let mapped = manager.map_values_to_schema(&source_values, &source_schema, &target_schema);
@@ -2294,7 +2483,7 @@ mod tests {
         // The string "123" might successfully cast to integer 123, or might fail and become NULL
         // The boolean true might cast to string "true", or might fail
         // NULL values when cast should remain NULL but with the target type
-        
+
         // Check that we got the right number of values and right types
         assert_eq!(mapped[0].get_type_id(), TypeId::Integer);
         assert_eq!(mapped[1].get_type_id(), TypeId::VarChar);
@@ -2363,8 +2552,12 @@ mod tests {
         let large_target_schema = Schema::new(large_target_cols);
 
         // Test mapping with large schemas
-        let mapped = manager.map_values_to_schema(&source_values, &large_source_schema, &large_target_schema);
-        
+        let mapped = manager.map_values_to_schema(
+            &source_values,
+            &large_source_schema,
+            &large_target_schema,
+        );
+
         assert_eq!(mapped.len(), 50);
         for i in 0..50 {
             assert_eq!(mapped[i], crate::types_db::value::Value::from(i as i32));
@@ -2372,7 +2565,9 @@ mod tests {
 
         // Test schema compatibility with large schemas
         let large_compatible_schema = Schema::new(
-            (0..50).map(|i| Column::new(&format!("another_col_{}", i), TypeId::Integer)).collect()
+            (0..50)
+                .map(|i| Column::new(&format!("another_col_{}", i), TypeId::Integer))
+                .collect(),
         );
         assert!(manager.schemas_compatible(&large_source_schema, &large_compatible_schema));
 

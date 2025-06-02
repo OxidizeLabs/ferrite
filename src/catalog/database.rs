@@ -167,10 +167,8 @@ impl Database {
         let table_heap = Arc::new(TableHeap::new(self.bpm.clone(), table_oid));
 
         // Create and register transactional table heap with the transaction manager
-        let transactional_table_heap = Arc::new(TransactionalTableHeap::new(
-            table_heap.clone(),
-            table_oid,
-        ));
+        let transactional_table_heap =
+            Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
         self.txn_manager.register_table(transactional_table_heap);
 
         // Increment table OID

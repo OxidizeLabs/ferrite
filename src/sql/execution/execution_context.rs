@@ -105,12 +105,12 @@ impl ExecutionContext {
     pub fn set_transaction_context(&mut self, txn_ctx: Arc<TransactionContext>) {
         self.transaction_context = txn_ctx;
     }
-    
+
     /// Gets whether transaction should be chained after commit/rollback
     pub fn should_chain_after_transaction(&self) -> bool {
         self.chain_after_transaction
     }
-    
+
     /// Sets whether transaction should be chained after commit/rollback
     pub fn set_chain_after_transaction(&mut self, chain: bool) {
         self.chain_after_transaction = chain;
