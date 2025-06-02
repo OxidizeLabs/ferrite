@@ -1,6 +1,7 @@
 use sqllogictest::{DBOutput, DefaultColumnType, DB};
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
@@ -8,6 +9,9 @@ use tkdb::common::result_writer::ResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::types_db::value::Value;
 use tkdb::catalog::schema::Schema;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+use sqllogictest::Runner;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -16,7 +20,7 @@ const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[34m";
 const RESET: &str = "\x1b[0m";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TestStats {
     files_run: usize,
     statements_run: usize,
@@ -43,14 +47,22 @@ impl TestStats {
             "  {}Success:          {} ({:.1}%){}",
             GREEN,
             self.successful_statements,
-            (self.successful_statements as f32 / self.statements_run as f32 * 100.0).max(0.0),
+            if self.statements_run > 0 {
+                self.successful_statements as f32 / self.statements_run as f32 * 100.0
+            } else {
+                0.0
+            },
             RESET
         );
         println!(
             "  {}Failed:           {} ({:.1}%){}",
             RED,
             self.failed_statements,
-            (self.failed_statements as f32 / self.statements_run as f32 * 100.0).max(0.0),
+            if self.statements_run > 0 {
+                self.failed_statements as f32 / self.statements_run as f32 * 100.0
+            } else {
+                0.0
+            },
             RESET
         );
         println!("Queries executed:   {}", self.queries_run);
@@ -58,14 +70,22 @@ impl TestStats {
             "  {}Success:          {} ({:.1}%){}",
             GREEN,
             self.successful_queries,
-            (self.successful_queries as f32 / self.queries_run as f32 * 100.0).max(0.0),
+            if self.queries_run > 0 {
+                self.successful_queries as f32 / self.queries_run as f32 * 100.0
+            } else {
+                0.0
+            },
             RESET
         );
         println!(
             "  {}Failed:           {} ({:.1}%){}",
             RED,
             self.failed_queries,
-            (self.failed_queries as f32 / self.queries_run as f32 * 100.0).max(0.0),
+            if self.queries_run > 0 {
+                self.failed_queries as f32 / self.queries_run as f32 * 100.0
+            } else {
+                0.0
+            },
             RESET
         );
         println!(
@@ -73,53 +93,119 @@ impl TestStats {
             YELLOW, self.errors_caught, RESET
         );
         println!("Total duration:     {:.2?}", self.duration);
-        println!(
-            "Average time/file:  {:.2?}",
-            self.duration.div_f32(self.files_run as f32)
-        );
+        if self.files_run > 0 {
+            println!(
+                "Average time/file:  {:.2?}",
+                self.duration.div_f32(self.files_run as f32)
+            );
+        } else {
+            println!("Average time/file:  N/A (no files executed)");
+        }
         println!("-------------\n");
+    }
+}
+
+/// Generate unique temporary file paths for test isolation
+fn generate_temp_db_config() -> DBConfig {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let thread_id = std::thread::current().id();
+    
+    // Create temp directory if it doesn't exist
+    let temp_dir = PathBuf::from("tests/temp");
+    fs::create_dir_all(&temp_dir).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to create temp directory: {}", e);
+    });
+    
+    let db_filename = temp_dir.join(format!("test_{}_{:?}.db", timestamp, thread_id));
+    let log_filename = temp_dir.join(format!("test_{}_{:?}.log", timestamp, thread_id));
+    
+    DBConfig {
+        db_filename: db_filename.to_string_lossy().to_string(),
+        db_log_filename: log_filename.to_string_lossy().to_string(),
+        buffer_pool_size: 512, // Smaller buffer pool for tests
+        enable_logging: true,
+        enable_managed_transactions: true,
+        lru_k: 10,
+        lru_sample_size: 7,
+        server_enabled: false,
+        server_host: "127.0.0.1".to_string(),
+        server_port: 5432,
+        max_connections: 100,
+        connection_timeout: 30,
+    }
+}
+
+/// Clean up temporary database files
+fn cleanup_temp_files(config: &DBConfig) {
+    let _ = fs::remove_file(&config.db_filename);
+    let _ = fs::remove_file(&config.db_log_filename);
+}
+
+/// Clean up the entire temp directory after tests
+fn cleanup_temp_directory() {
+    let temp_dir = PathBuf::from("tests/temp");
+    if temp_dir.exists() {
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
 
 pub struct TKDBTest {
     instance: DBInstance,
-    stats: TestStats,
+    config: DBConfig, // Store config for cleanup
+    stats: Arc<Mutex<TestStats>>, // Add shared statistics tracking
 }
 
 impl TKDBTest {
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let config = DBConfig::default();
-        let instance = DBInstance::new(config)?;
+        let config = generate_temp_db_config();
+        Self::new_with_config(config)
+    }
+
+    pub fn new_with_config(config: DBConfig) -> Result<Self, Box<dyn Error>> {
+        let instance = DBInstance::new(config.clone())?;
         Ok(Self {
             instance,
-            stats: TestStats::new(),
+            config,
+            stats: Arc::new(Mutex::new(TestStats::new())),
         })
     }
 
     fn update_stats(&mut self, output: &DBOutput<DefaultColumnType>, success: bool) {
+        let mut stats = self.stats.lock().unwrap();
         match output {
             DBOutput::StatementComplete(_) => {
-                self.stats.statements_run += 1;
+                stats.statements_run += 1;
                 if success {
-                    self.stats.successful_statements += 1;
+                    stats.successful_statements += 1;
                 } else {
-                    self.stats.failed_statements += 1;
+                    stats.failed_statements += 1;
                 }
             }
             DBOutput::Rows { .. } => {
-                self.stats.queries_run += 1;
+                stats.queries_run += 1;
                 if success {
-                    self.stats.successful_queries += 1;
+                    stats.successful_queries += 1;
                 } else {
-                    self.stats.failed_queries += 1;
+                    stats.failed_queries += 1;
                 }
             }
-            _ => (), // Handle any future variants
+            _ => {
+                // For any other output type, we don't track statistics
+            }
         }
     }
 
-    fn get_stats(&self) -> &TestStats {
-        &self.stats
+    fn get_stats(&self) -> TestStats {
+        self.stats.lock().unwrap().clone()
+    }
+}
+
+impl Drop for TKDBTest {
+    fn drop(&mut self) {
+        cleanup_temp_files(&self.config);
     }
 }
 
@@ -214,7 +300,7 @@ impl DB for TKDBTest {
                 }
             }
             Err(e) => {
-                self.stats.errors_caught += 1;
+                // Note: Error counting is not currently tracked in this simplified approach
                 self.update_stats(&DBOutput::StatementComplete(0), false);
                 Err(e)
             }
@@ -251,28 +337,64 @@ mod tests {
     }
 
     fn run_test_file(path: &Path) -> Result<TestStats, Box<dyn Error>> {
-        let config = DBConfig::default();
         let start_time = Instant::now();
-
-        let db = TKDBTest::new()?;
+        
+        println!("  Running {}", path.display());
+        
+        // Use the simple runner approach 
+        let config = generate_temp_db_config();
+        let config_clone = config.clone();
+        
+        // Create shared stats that will be used by all DB instances
+        let shared_stats = Arc::new(Mutex::new(TestStats::new()));
+        let shared_stats_clone = shared_stats.clone();
+        
         let mut runner = Runner::new(move || {
+            let config = generate_temp_db_config(); // Generate fresh config for each connection
             let instance = match DBInstance::new(config.clone()) {
                 Ok(instance) => instance,
                 Err(e) => return std::future::ready(Err(e)),
             };
-            std::future::ready(Ok(TKDBTest {
-                instance,
-                stats: TestStats::new(),
-            }))
+            let mut db = match TKDBTest::new_with_config(config) {
+                Ok(db) => db,
+                Err(e) => return std::future::ready(Err(DBError::SqlError(format!("Failed to create test DB: {}", e)))),
+            };
+            // Replace the DB's stats with our shared stats
+            db.stats = shared_stats_clone.clone();
+            std::future::ready(Ok(db))
         });
-
-        println!("  Running {}", path.display());
-        runner.run_file(path)?;
-
+        
+        let result = runner.run_file(path);
+        
+        // Clean up
+        cleanup_temp_files(&config_clone);
+        
+        // Create stats for the file that was attempted to be run
         let mut stats = TestStats::new();
-        stats.files_run = 1;
+        stats.files_run = 1; // We attempted to run one file
         stats.duration = start_time.elapsed();
-        Ok(stats)
+        
+        // Get the statistics from the shared stats
+        let shared_stats = shared_stats.lock().unwrap();
+        stats.statements_run = shared_stats.statements_run;
+        stats.queries_run = shared_stats.queries_run;
+        stats.errors_caught = shared_stats.errors_caught;
+        stats.successful_statements = shared_stats.successful_statements;
+        stats.failed_statements = shared_stats.failed_statements;
+        stats.successful_queries = shared_stats.successful_queries;
+        stats.failed_queries = shared_stats.failed_queries;
+        
+        match result {
+            Ok(_) => {
+                // Test file ran successfully (all tests passed)
+                Ok(stats)
+            }
+            Err(e) => {
+                // Test file ran but some tests failed - this is still a "file execution"
+                // but we need to propagate the error for reporting
+                Err(e.into())
+            }
+        }
     }
 
     fn run_test_directory(
@@ -280,17 +402,55 @@ mod tests {
         suite_stats: &mut TestSuiteStats,
     ) -> Result<(), Box<dyn Error>> {
         let entries = fs::read_dir(dir)?;
+        let mut any_failures = false;
+        let mut first_error: Option<Box<dyn Error>> = None;
 
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "slt") {
-                let file_stats = run_test_file(&path)?;
-                suite_stats.stats.files_run += file_stats.files_run;
-                suite_stats.stats.statements_run += file_stats.statements_run;
-                suite_stats.stats.queries_run += file_stats.queries_run;
-                suite_stats.stats.errors_caught += file_stats.errors_caught;
+                match run_test_file(&path) {
+                    Ok(file_stats) => {
+                        // Test file succeeded, add to statistics
+                        suite_stats.stats.files_run += file_stats.files_run;
+                        suite_stats.stats.statements_run += file_stats.statements_run;
+                        suite_stats.stats.queries_run += file_stats.queries_run;
+                        suite_stats.stats.errors_caught += file_stats.errors_caught;
+                        suite_stats.stats.successful_statements += file_stats.successful_statements;
+                        suite_stats.stats.failed_statements += file_stats.failed_statements;
+                        suite_stats.stats.successful_queries += file_stats.successful_queries;
+                        suite_stats.stats.failed_queries += file_stats.failed_queries;
+                        suite_stats.stats.duration += file_stats.duration;
+                    }
+                    Err(e) => {
+                        // Test file failed, but we still count it as executed
+                        // We create a basic stats entry with files_run = 1
+                        suite_stats.stats.files_run += 1;
+                        // Duration is already tracked in the failed run, but we don't have access to it
+                        // so we'll set a minimal duration
+                        suite_stats.stats.duration += Duration::from_millis(1);
+                        
+                        any_failures = true;
+                        if first_error.is_none() {
+                            first_error = Some(e);
+                        }
+                    }
+                }
+            } else if path.is_dir() {
+                if let Err(e) = run_test_directory(&path, suite_stats) {
+                    any_failures = true;
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        // Return error if any tests failed, but after collecting all statistics
+        if any_failures {
+            if let Some(error) = first_error {
+                return Err(error);
             }
         }
 
@@ -300,25 +460,28 @@ mod tests {
     #[test]
     fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
         let mut stats = TestSuiteStats::new("DDL Tests");
-        run_test_directory(Path::new("tests/sql/ddl"), &mut stats)?;
+        let result = run_test_directory(Path::new("tests/sql/ddl"), &mut stats);
         stats.finish();
-        Ok(())
+        cleanup_temp_directory();
+        result
     }
 
     #[test]
     fn run_dml_tests() -> Result<(), Box<dyn Error>> {
         let mut stats = TestSuiteStats::new("DML Tests");
-        run_test_directory(Path::new("tests/sql/dml"), &mut stats)?;
+        let result = run_test_directory(Path::new("tests/sql/dml"), &mut stats);
         stats.finish();
-        Ok(())
+        cleanup_temp_directory();
+        result
     }
 
     #[test]
     fn run_query_tests() -> Result<(), Box<dyn Error>> {
         let mut stats = TestSuiteStats::new("Query Tests");
-        run_test_directory(Path::new("tests/sql/queries"), &mut stats)?;
+        let result = run_test_directory(Path::new("tests/sql/queries"), &mut stats);
         stats.finish();
-        Ok(())
+        cleanup_temp_directory();
+        result
     }
 
     #[test]
@@ -360,6 +523,9 @@ mod tests {
         println!("\n{}Overall Test Results:{}", BLUE, RESET);
         println!("====================");
         total_stats.print_summary();
+
+        // Clean up all temporary files
+        cleanup_temp_directory();
 
         Ok(())
     }
@@ -404,6 +570,9 @@ mod tests {
         println!("=================================");
         total_stats.print_summary();
 
+        // Clean up all temporary files
+        cleanup_temp_directory();
+
         Ok(())
     }
 
@@ -435,6 +604,9 @@ mod tests {
         println!("\n{}Combined Query Optimization Results:{}", BLUE, RESET);
         println!("==================================");
         total_stats.print_summary();
+
+        // Clean up all temporary files
+        cleanup_temp_directory();
 
         Ok(())
     }
