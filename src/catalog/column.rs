@@ -12,8 +12,32 @@ pub struct Column {
     length: usize,
     column_offset: usize,
     is_primary_key: bool,
-    precision: Option<u8>,  // For DECIMAL/NUMERIC types: total number of digits
-    scale: Option<u8>,      // For DECIMAL/NUMERIC types: number of digits after decimal point
+    is_not_null: bool,                         // NOT NULL constraint
+    is_unique: bool,                           // UNIQUE constraint
+    check_constraint: Option<String>,          // CHECK constraint expression
+    default_value: Option<Value>,              // DEFAULT value
+    foreign_key: Option<ForeignKeyConstraint>, // FOREIGN KEY constraint
+    precision: Option<u8>,                     // For DECIMAL/NUMERIC types: total number of digits
+    scale: Option<u8>, // For DECIMAL/NUMERIC types: number of digits after decimal point
+}
+
+/// Foreign key constraint information
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForeignKeyConstraint {
+    pub referenced_table: String,
+    pub referenced_column: String,
+    pub on_delete: Option<ReferentialAction>,
+    pub on_update: Option<ReferentialAction>,
+}
+
+/// Referential actions for foreign key constraints
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ReferentialAction {
+    Cascade,
+    SetNull,
+    SetDefault,
+    Restrict,
+    NoAction,
 }
 
 /// Builder for creating columns with specific parameters
@@ -23,6 +47,11 @@ pub struct ColumnBuilder {
     column_type: TypeId,
     length: Option<usize>,
     is_primary_key: bool,
+    is_not_null: bool,
+    is_unique: bool,
+    check_constraint: Option<String>,
+    default_value: Option<Value>,
+    foreign_key: Option<ForeignKeyConstraint>,
     precision: Option<u8>,
     scale: Option<u8>,
 }
@@ -35,6 +64,11 @@ impl ColumnBuilder {
             column_type,
             length: None,
             is_primary_key: false,
+            is_not_null: false,
+            is_unique: false,
+            check_constraint: None,
+            default_value: None,
+            foreign_key: None,
             precision: None,
             scale: None,
         }
@@ -65,6 +99,36 @@ impl ColumnBuilder {
         self
     }
 
+    /// Mark this column as NOT NULL
+    pub fn as_not_null(mut self) -> Self {
+        self.is_not_null = true;
+        self
+    }
+
+    /// Mark this column as UNIQUE
+    pub fn as_unique(mut self) -> Self {
+        self.is_unique = true;
+        self
+    }
+
+    /// Set a CHECK constraint expression
+    pub fn with_check_constraint(mut self, constraint: String) -> Self {
+        self.check_constraint = Some(constraint);
+        self
+    }
+
+    /// Set a default value
+    pub fn with_default_value(mut self, value: Value) -> Self {
+        self.default_value = Some(value);
+        self
+    }
+
+    /// Set a foreign key constraint
+    pub fn with_foreign_key(mut self, constraint: ForeignKeyConstraint) -> Self {
+        self.foreign_key = Some(constraint);
+        self
+    }
+
     /// Build the column
     pub fn build(self) -> Column {
         let length = if let Some(len) = self.length {
@@ -77,13 +141,18 @@ impl ColumnBuilder {
         } else {
             Column::default_type_size(self.column_type)
         };
-        
+
         Column {
             column_name: self.column_name,
             column_type: self.column_type,
             length,
             column_offset: 0,
             is_primary_key: self.is_primary_key,
+            is_not_null: self.is_not_null,
+            is_unique: self.is_unique,
+            check_constraint: self.check_constraint,
+            default_value: self.default_value,
+            foreign_key: self.foreign_key,
             precision: self.precision,
             scale: self.scale,
         }
@@ -99,7 +168,7 @@ impl Column {
             TypeId::Integer => 4,
             TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
             TypeId::VarChar | TypeId::Char => 255, // Default length for strings
-            TypeId::Vector => 1024, // Default size for vectors
+            TypeId::Vector => 1024,                // Default size for vectors
             TypeId::Invalid => 0,
             TypeId::Struct => 64, // Default size for structs
             TypeId::Float => 4,
@@ -107,7 +176,7 @@ impl Column {
             TypeId::Time => 4,
             TypeId::Interval => 8,
             TypeId::Binary => 255, // Default length for binary
-            TypeId::JSON => 1024, // Default size for JSON
+            TypeId::JSON => 1024,  // Default size for JSON
             TypeId::UUID => 16,
             TypeId::Array => size_of::<Vec<Value>>(),
             TypeId::Enum => 4,
@@ -151,10 +220,13 @@ impl Column {
     /// Create a new variable-length column (VARCHAR, CHAR, BINARY, etc.)
     pub fn new_varlen(column_name: &str, column_type: TypeId, length: usize) -> Self {
         // Validate that this is actually a variable-length type
-        if !matches!(column_type, TypeId::VarChar | TypeId::Char | TypeId::Binary | TypeId::Vector) {
+        if !matches!(
+            column_type,
+            TypeId::VarChar | TypeId::Char | TypeId::Binary | TypeId::Vector
+        ) {
             panic!("Wrong constructor for fixed-size type.");
         }
-        
+
         ColumnBuilder::new(column_name, column_type)
             .with_length(length)
             .build()
@@ -201,13 +273,18 @@ impl Column {
         precision: Option<u8>,
         scale: Option<u8>,
         is_primary_key: bool,
+        is_not_null: bool,
+        is_unique: bool,
+        check_constraint: Option<String>,
+        default_value: Option<Value>,
+        foreign_key: Option<ForeignKeyConstraint>,
     ) -> Self {
         let mut builder = ColumnBuilder::new(column_name, column_type);
-        
+
         if let Some(len) = length {
             builder = builder.with_length(len);
         }
-        
+
         if let Some(p) = precision {
             if let Some(s) = scale {
                 builder = builder.with_precision_and_scale(p, s);
@@ -215,25 +292,65 @@ impl Column {
                 builder = builder.with_precision(p);
             }
         }
-        
+
         if is_primary_key {
             builder = builder.as_primary_key();
         }
-        
+
+        if is_not_null {
+            builder = builder.as_not_null();
+        }
+
+        if is_unique {
+            builder = builder.as_unique();
+        }
+
+        if let Some(constraint) = check_constraint {
+            builder = builder.with_check_constraint(constraint);
+        }
+
+        if let Some(value) = default_value {
+            builder = builder.with_default_value(value);
+        }
+
+        if let Some(fk) = foreign_key {
+            builder = builder.with_foreign_key(fk);
+        }
+
         builder.build()
     }
 
     pub fn replicate(&self, new_name: &str) -> Self {
         Self {
             column_name: new_name.to_string(),
-            ..*self
+            column_type: self.column_type,
+            length: self.length,
+            column_offset: self.column_offset,
+            is_primary_key: self.is_primary_key,
+            is_not_null: self.is_not_null,
+            is_unique: self.is_unique,
+            check_constraint: self.check_constraint.clone(),
+            default_value: self.default_value.clone(),
+            foreign_key: self.foreign_key.clone(),
+            precision: self.precision,
+            scale: self.scale,
         }
     }
 
     pub fn with_name(&self, new_name: &str) -> Self {
         Self {
             column_name: new_name.to_string(),
-            ..*self
+            column_type: self.column_type,
+            length: self.length,
+            column_offset: self.column_offset,
+            is_primary_key: self.is_primary_key,
+            is_not_null: self.is_not_null,
+            is_unique: self.is_unique,
+            check_constraint: self.check_constraint.clone(),
+            default_value: self.default_value.clone(),
+            foreign_key: self.foreign_key.clone(),
+            precision: self.precision,
+            scale: self.scale,
         }
     }
 
@@ -316,6 +433,46 @@ impl Column {
             self.column_type,
             TypeId::VarChar | TypeId::Char | TypeId::Binary | TypeId::Vector
         )
+    }
+
+    pub fn is_not_null(&self) -> bool {
+        self.is_not_null
+    }
+
+    pub fn set_not_null(&mut self, is_not_null: bool) {
+        self.is_not_null = is_not_null;
+    }
+
+    pub fn is_unique(&self) -> bool {
+        self.is_unique
+    }
+
+    pub fn set_unique(&mut self, is_unique: bool) {
+        self.is_unique = is_unique;
+    }
+
+    pub fn get_check_constraint(&self) -> &Option<String> {
+        &self.check_constraint
+    }
+
+    pub fn set_check_constraint(&mut self, constraint: Option<String>) {
+        self.check_constraint = constraint;
+    }
+
+    pub fn get_default_value(&self) -> &Option<Value> {
+        &self.default_value
+    }
+
+    pub fn set_default_value(&mut self, value: Option<Value>) {
+        self.default_value = value;
+    }
+
+    pub fn get_foreign_key(&self) -> &Option<ForeignKeyConstraint> {
+        &self.foreign_key
+    }
+
+    pub fn set_foreign_key(&mut self, constraint: Option<ForeignKeyConstraint>) {
+        self.foreign_key = constraint;
     }
 }
 
@@ -885,6 +1042,16 @@ mod unit_tests {
             Some(15),
             Some(5),
             true,
+            true,
+            true,
+            Some("CHECK constraint".to_string()),
+            Some(Value::from(123.45)),
+            Some(ForeignKeyConstraint {
+                referenced_table: "referenced_table".to_string(),
+                referenced_column: "referenced_column".to_string(),
+                on_delete: Some(ReferentialAction::Cascade),
+                on_update: Some(ReferentialAction::SetNull),
+            }),
         );
 
         assert_eq!(col.get_name(), "complex_col");
@@ -893,6 +1060,22 @@ mod unit_tests {
         assert_eq!(col.get_precision(), Some(15));
         assert_eq!(col.get_scale(), Some(5));
         assert!(col.is_primary_key());
+        assert!(col.is_not_null());
+        assert!(col.is_unique());
+        assert_eq!(
+            col.get_check_constraint(),
+            &Some("CHECK constraint".to_string())
+        );
+        assert_eq!(col.get_default_value(), &Some(Value::from(123.45)));
+        assert_eq!(
+            col.get_foreign_key(),
+            &Some(ForeignKeyConstraint {
+                referenced_table: "referenced_table".to_string(),
+                referenced_column: "referenced_column".to_string(),
+                on_delete: Some(ReferentialAction::Cascade),
+                on_update: Some(ReferentialAction::SetNull),
+            })
+        );
     }
 
     #[test]
