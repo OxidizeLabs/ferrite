@@ -558,17 +558,17 @@ impl ExpressionParser {
                 ..
             } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
-                                    let target_type = match data_type {
-                        DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
-                        DataType::BigInt(_) => TypeId::BigInt,
-                        DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
-                            TypeId::Decimal
-                        }
-                        DataType::Char(_) => TypeId::Char,
-                        DataType::Varchar(_) => TypeId::VarChar,
-                        DataType::Boolean => TypeId::Boolean,
-                        _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
-                    };
+                let target_type = match data_type {
+                    DataType::Int(_) | DataType::Integer(_) => TypeId::Integer,
+                    DataType::BigInt(_) => TypeId::BigInt,
+                    DataType::Float(_) | DataType::Double(_) | DataType::Decimal(_) => {
+                        TypeId::Decimal
+                    }
+                    DataType::Char(_) => TypeId::Char,
+                    DataType::Varchar(_) => TypeId::VarChar,
+                    DataType::Boolean => TypeId::Boolean,
+                    _ => return Err(format!("Unsupported cast target type: {:?}", data_type)),
+                };
 
                 let mut cast_expr = CastExpression::new(inner_expr, target_type);
 
@@ -2686,7 +2686,7 @@ impl ExpressionParser {
     }
 
     /// Parse expression that can reference either projection aliases or original columns
-    /// This is useful for ORDER BY clauses that can reference both SELECT list aliases 
+    /// This is useful for ORDER BY clauses that can reference both SELECT list aliases
     /// and original column expressions
     pub fn parse_expression_with_fallback(
         &self,
@@ -2695,7 +2695,7 @@ impl ExpressionParser {
         original_schema: &Schema,
     ) -> Result<Expression, String> {
         debug!("Parsing expression with fallback: {:?}", expr);
-        
+
         // First try to parse against the projection schema (for aliases)
         match self.parse_expression(expr, projection_schema) {
             Ok(parsed_expr) => {
@@ -2703,7 +2703,10 @@ impl ExpressionParser {
                 Ok(parsed_expr)
             }
             Err(projection_error) => {
-                debug!("Failed to parse against projection schema: {}", projection_error);
+                debug!(
+                    "Failed to parse against projection schema: {}",
+                    projection_error
+                );
                 // If that fails, try the original schema (for original column references)
                 match self.parse_expression(expr, original_schema) {
                     Ok(parsed_expr) => {
@@ -2711,7 +2714,10 @@ impl ExpressionParser {
                         Ok(parsed_expr)
                     }
                     Err(original_error) => {
-                        debug!("Failed to parse against original schema: {}", original_error);
+                        debug!(
+                            "Failed to parse against original schema: {}",
+                            original_error
+                        );
                         // Return the more descriptive error
                         Err(format!(
                             "Column not found. Tried projection schema: {}. Tried original schema: {}",

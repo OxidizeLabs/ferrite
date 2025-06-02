@@ -128,12 +128,7 @@ mod tests {
     #[test]
     fn test_all_parameter_combinations() {
         // Test all combinations of parameters
-        let test_cases = vec![
-            (false, false),
-            (false, true),
-            (true, false),
-            (true, true),
-        ];
+        let test_cases = vec![(false, false), (false, true), (true, false), (true, true)];
 
         for (chain, end) in test_cases {
             let plan_node = CommitTransactionPlanNode::new(chain, end);
@@ -316,4 +311,4 @@ mod tests {
         assert!(!detailed_end.contains("Chain:"));
         assert!(detailed_end.contains("End: true"));
     }
-} 
+}

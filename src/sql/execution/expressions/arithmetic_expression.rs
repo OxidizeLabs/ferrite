@@ -1019,7 +1019,7 @@ mod basic_functionality {
         let result = mul_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(12.5));
     }
-    
+
     #[test]
     fn test_nested_arithmetic() {
         let schema = Schema::new(vec![]);
@@ -1163,10 +1163,7 @@ mod basic_functionality {
             ArithmeticOp::Add,
             vec![sub1, four],
         )));
-        let final_expr = ArithmeticExpression::new(
-            ArithmeticOp::Subtract,
-            vec![add2, five],
-        );
+        let final_expr = ArithmeticExpression::new(ArithmeticOp::Subtract, vec![add2, five]);
 
         let result = final_expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
@@ -1209,16 +1206,12 @@ mod basic_functionality {
             ArithmeticOp::Divide,
             vec![mul1, six],
         )));
-        let final_expr = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![div1, four],
-        );
+        let final_expr = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![div1, four]);
 
         let result = final_expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::new(4)); // 2 * 3 / 6 * 4 = 4
     }
-
 
     #[test]
     fn test_clone_with_children() {
@@ -1338,10 +1331,10 @@ mod display_and_formatting {
         ArithmeticExpression, ArithmeticOp,
     };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::types_db::type_id::TypeId;
-    use std::sync::Arc;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+    use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
+    use std::sync::Arc;
 
     #[test]
     fn test_display_formatting() {
@@ -1397,13 +1390,16 @@ mod display_and_formatting {
             vec![],
         )));
 
-        let add_expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![left.clone(), right.clone()]);
+        let add_expr =
+            ArithmeticExpression::new(ArithmeticOp::Add, vec![left.clone(), right.clone()]);
         assert_eq!(format!("{}", add_expr), "(1 + 2)");
 
-        let sub_expr = ArithmeticExpression::new(ArithmeticOp::Subtract, vec![left.clone(), right.clone()]);
+        let sub_expr =
+            ArithmeticExpression::new(ArithmeticOp::Subtract, vec![left.clone(), right.clone()]);
         assert_eq!(format!("{}", sub_expr), "(1 - 2)");
 
-        let mul_expr = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![left.clone(), right.clone()]);
+        let mul_expr =
+            ArithmeticExpression::new(ArithmeticOp::Multiply, vec![left.clone(), right.clone()]);
         assert_eq!(format!("{}", mul_expr), "(1 * 2)");
 
         let div_expr = ArithmeticExpression::new(ArithmeticOp::Divide, vec![left, right]);
@@ -1918,7 +1914,6 @@ mod mixed_type_operations {
         let result = div_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(40.0));
     }
-
 }
 
 #[cfg(test)]
@@ -2136,17 +2131,19 @@ mod invalid_operations {
 
 #[cfg(test)]
 mod type_inference {
-    use std::sync::Arc;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-    use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
+    use crate::sql::execution::expressions::arithmetic_expression::{
+        ArithmeticExpression, ArithmeticOp,
+    };
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::type_id::TypeId::{BigInt, SmallInt};
     use crate::types_db::value::{Val, Value};
+    use std::sync::Arc;
 
     #[test]
     fn test_type_inference_comprehensive() {
@@ -2296,10 +2293,7 @@ mod type_inference {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Add,
-            vec![tinyint, integer],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![tinyint, integer]);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
@@ -2317,10 +2311,7 @@ mod type_inference {
             vec![],
         )));
 
-        let expr2 = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![smallint, bigint],
-        );
+        let expr2 = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![smallint, bigint]);
 
         let result2 = expr2.evaluate(&tuple, &schema);
         assert!(result2.is_ok());
@@ -2351,15 +2342,12 @@ mod type_inference {
             ArithmeticOp::Add,
             vec![int_val, bigint_val],
         )));
-        let outer_expr = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![inner_expr, decimal_val],
-        );
+        let outer_expr =
+            ArithmeticExpression::new(ArithmeticOp::Multiply, vec![inner_expr, decimal_val]);
 
         let return_type = outer_expr.get_return_type().get_type();
         assert_eq!(return_type, TypeId::Decimal);
     }
-
 }
 
 #[cfg(test)]
@@ -2371,12 +2359,12 @@ mod edge_cases {
     use crate::sql::execution::expressions::arithmetic_expression::{
         ArithmeticExpression, ArithmeticOp,
     };
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use std::sync::Arc;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
     #[test]
     fn test_edge_case_decimal_operations() {
@@ -2535,15 +2523,11 @@ mod edge_cases {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Add,
-            vec![int_col, bool_col],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![int_col, bool_col]);
 
         let result = expr.validate(&schema);
         assert!(result.is_err());
     }
-
 
     #[test]
     fn test_division_with_remainder() {
@@ -2562,16 +2546,12 @@ mod edge_cases {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Divide,
-            vec![dividend, divisor],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Divide, vec![dividend, divisor]);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::new(2)); // 7 / 3 = 2 (integer division)
     }
-
 }
 
 #[cfg(test)]
@@ -2587,20 +2567,21 @@ mod performance_tests {
         let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         // Create a deeply nested expression with smaller numbers to avoid overflow
-        // ((((1 + 1) + 1) + 1) + 1)... 
+        // ((((1 + 1) + 1) + 1) + 1)...
         let mut expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(1),
             Column::new("const", TypeId::Integer),
             vec![],
         )));
 
-        for _i in 2..=15 { // Reduced depth to avoid overflow
+        for _i in 2..=15 {
+            // Reduced depth to avoid overflow
             let next_val = Arc::new(Expression::Constant(ConstantExpression::new(
                 Value::new(1), // Use 1 to avoid overflow
                 Column::new("const", TypeId::Integer),
                 vec![],
             )));
-            
+
             // Only use addition to avoid overflow
             expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
                 ArithmeticOp::Add,
@@ -2622,15 +2603,10 @@ mod performance_tests {
         let schema = Schema::new(vec![]);
         let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
-        let large_numbers = vec![
-            i64::MAX / 2,
-            i64::MAX / 3,
-            i64::MAX / 5,
-            i64::MAX / 7,
-        ];
+        let large_numbers = vec![i64::MAX / 2, i64::MAX / 3, i64::MAX / 5, i64::MAX / 7];
 
         let start = Instant::now();
-        
+
         for &num in &large_numbers {
             let val1 = Arc::new(Expression::Constant(ConstantExpression::new(
                 Value::new(num),
@@ -2670,11 +2646,20 @@ mod boundary_conditions {
 
         // Test zero with all numeric types
         let zero_values = vec![
-            (Value::new_with_type(Val::TinyInt(0), TypeId::TinyInt), TypeId::TinyInt),
-            (Value::new_with_type(Val::SmallInt(0), TypeId::SmallInt), TypeId::SmallInt),
+            (
+                Value::new_with_type(Val::TinyInt(0), TypeId::TinyInt),
+                TypeId::TinyInt,
+            ),
+            (
+                Value::new_with_type(Val::SmallInt(0), TypeId::SmallInt),
+                TypeId::SmallInt,
+            ),
             (Value::new(0), TypeId::Integer),
             (Value::new(0i64), TypeId::BigInt),
-            (Value::new_with_type(Val::Float(0.0), TypeId::Float), TypeId::Float),
+            (
+                Value::new_with_type(Val::Float(0.0), TypeId::Float),
+                TypeId::Float,
+            ),
             (Value::new(0.0), TypeId::Decimal),
         ];
 
@@ -2742,11 +2727,20 @@ mod boundary_conditions {
 
         // Test multiplication and division by one
         let test_values = vec![
-            (Value::new_with_type(Val::TinyInt(42), TypeId::TinyInt), TypeId::TinyInt),
-            (Value::new_with_type(Val::SmallInt(1000), TypeId::SmallInt), TypeId::SmallInt),
+            (
+                Value::new_with_type(Val::TinyInt(42), TypeId::TinyInt),
+                TypeId::TinyInt,
+            ),
+            (
+                Value::new_with_type(Val::SmallInt(1000), TypeId::SmallInt),
+                TypeId::SmallInt,
+            ),
             (Value::new(12345), TypeId::Integer),
             (Value::new(987654321i64), TypeId::BigInt),
-            (Value::new_with_type(Val::Float(3.14), TypeId::Float), TypeId::Float),
+            (
+                Value::new_with_type(Val::Float(3.14), TypeId::Float),
+                TypeId::Float,
+            ),
             (Value::new(2.718), TypeId::Decimal),
         ];
 
@@ -3034,14 +3028,14 @@ mod special_numeric_values {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Add,
-            vec![large1, small_val],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![large1, small_val]);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::new(Val::BigInt(9223372036854775801)));
+        assert_eq!(
+            result.unwrap(),
+            Value::new(Val::BigInt(9223372036854775801))
+        );
     }
 
     #[test]
@@ -3061,20 +3055,25 @@ mod special_numeric_values {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Add,
-            vec![decimal1, decimal2],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![decimal1, decimal2]);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         let result_val = result.unwrap();
-        
+
         // Use approximate comparison for floating point precision
-        if let Value { value_: Val::Decimal(actual), .. } = result_val {
+        if let Value {
+            value_: Val::Decimal(actual),
+            ..
+        } = result_val
+        {
             let expected = 0.3;
-            assert!((actual - expected).abs() < 1e-10, 
-                   "Expected approximately {}, got {}", expected, actual);
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "Expected approximately {}, got {}",
+                expected,
+                actual
+            );
         } else {
             panic!("Expected decimal result");
         }
@@ -3098,10 +3097,8 @@ mod special_numeric_values {
         )));
 
         // Test addition
-        let add_expr = ArithmeticExpression::new(
-            ArithmeticOp::Add,
-            vec![positive.clone(), negative.clone()],
-        );
+        let add_expr =
+            ArithmeticExpression::new(ArithmeticOp::Add, vec![positive.clone(), negative.clone()]);
         let result = add_expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::new(50));
@@ -3116,15 +3113,12 @@ mod special_numeric_values {
         assert_eq!(result.unwrap(), Value::new(150));
 
         // Test multiplication
-        let mul_expr = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![positive, negative],
-        );
+        let mul_expr = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![positive, negative]);
         let result = mul_expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::new(-5000));
     }
-    
+
     #[test]
     fn test_float_special_operations() {
         let schema = Schema::new(vec![]);
@@ -3142,15 +3136,16 @@ mod special_numeric_values {
             vec![],
         )));
 
-        let expr = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![float1, float2],
-        );
+        let expr = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![float1, float2]);
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_ok());
         let result_val = result.unwrap();
-        if let Value { value_: Val::Float(f), .. } = result_val {
+        if let Value {
+            value_: Val::Float(f),
+            ..
+        } = result_val
+        {
             assert!((f - 8.539734).abs() < 0.001); // Approximate comparison for floats
         } else {
             panic!("Expected float result");
@@ -3171,14 +3166,20 @@ mod error_scenarios {
 
         // Test division by zero for all numeric types
         let test_cases = vec![
-            (Value::new_with_type(Val::TinyInt(10), TypeId::TinyInt), 
-             Value::new_with_type(Val::TinyInt(0), TypeId::TinyInt)),
-            (Value::new_with_type(Val::SmallInt(100), TypeId::SmallInt), 
-             Value::new_with_type(Val::SmallInt(0), TypeId::SmallInt)),
+            (
+                Value::new_with_type(Val::TinyInt(10), TypeId::TinyInt),
+                Value::new_with_type(Val::TinyInt(0), TypeId::TinyInt),
+            ),
+            (
+                Value::new_with_type(Val::SmallInt(100), TypeId::SmallInt),
+                Value::new_with_type(Val::SmallInt(0), TypeId::SmallInt),
+            ),
             (Value::new(1000), Value::new(0)),
             (Value::new(10000i64), Value::new(0i64)),
-            (Value::new_with_type(Val::Float(3.14), TypeId::Float), 
-             Value::new_with_type(Val::Float(0.0), TypeId::Float)),
+            (
+                Value::new_with_type(Val::Float(3.14), TypeId::Float),
+                Value::new_with_type(Val::Float(0.0), TypeId::Float),
+            ),
             (Value::new(2.718), Value::new(0.0)),
         ];
 
@@ -3215,29 +3216,38 @@ mod error_scenarios {
         // Test overflow for different integer types
         let overflow_cases = vec![
             // TinyInt overflow
-            (Value::new_with_type(Val::TinyInt(i8::MAX), TypeId::TinyInt),
-             Value::new_with_type(Val::TinyInt(1), TypeId::TinyInt),
-             ArithmeticOp::Add),
-            (Value::new_with_type(Val::TinyInt(i8::MIN), TypeId::TinyInt),
-             Value::new_with_type(Val::TinyInt(1), TypeId::TinyInt),
-             ArithmeticOp::Subtract),
-            
+            (
+                Value::new_with_type(Val::TinyInt(i8::MAX), TypeId::TinyInt),
+                Value::new_with_type(Val::TinyInt(1), TypeId::TinyInt),
+                ArithmeticOp::Add,
+            ),
+            (
+                Value::new_with_type(Val::TinyInt(i8::MIN), TypeId::TinyInt),
+                Value::new_with_type(Val::TinyInt(1), TypeId::TinyInt),
+                ArithmeticOp::Subtract,
+            ),
             // SmallInt overflow
-            (Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt),
-             Value::new_with_type(Val::SmallInt(1), TypeId::SmallInt),
-             ArithmeticOp::Add),
-            (Value::new_with_type(Val::SmallInt(i16::MIN), TypeId::SmallInt),
-             Value::new_with_type(Val::SmallInt(1), TypeId::SmallInt),
-             ArithmeticOp::Subtract),
-            
+            (
+                Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt),
+                Value::new_with_type(Val::SmallInt(1), TypeId::SmallInt),
+                ArithmeticOp::Add,
+            ),
+            (
+                Value::new_with_type(Val::SmallInt(i16::MIN), TypeId::SmallInt),
+                Value::new_with_type(Val::SmallInt(1), TypeId::SmallInt),
+                ArithmeticOp::Subtract,
+            ),
             // Integer overflow
             (Value::new(i32::MAX), Value::new(1), ArithmeticOp::Add),
             (Value::new(i32::MIN), Value::new(1), ArithmeticOp::Subtract),
             (Value::new(i32::MAX), Value::new(2), ArithmeticOp::Multiply),
-            
             // BigInt overflow
             (Value::new(i64::MAX), Value::new(1i64), ArithmeticOp::Add),
-            (Value::new(i64::MIN), Value::new(1i64), ArithmeticOp::Subtract),
+            (
+                Value::new(i64::MIN),
+                Value::new(1i64),
+                ArithmeticOp::Subtract,
+            ),
         ];
 
         for (left_val, right_val, op) in overflow_cases {
@@ -3252,16 +3262,15 @@ mod error_scenarios {
                 vec![],
             )));
 
-            let expr = Expression::Arithmetic(ArithmeticExpression::new(
-                op,
-                vec![left_expr, right_expr],
-            ));
+            let expr =
+                Expression::Arithmetic(ArithmeticExpression::new(op, vec![left_expr, right_expr]));
 
             let result = expr.evaluate(&tuple, &schema);
-            assert!(matches!(
-                result,
-                Err(ExpressionError::ArithmeticError(Overflow))
-            ), "Expected overflow for {:?}", op);
+            assert!(
+                matches!(result, Err(ExpressionError::ArithmeticError(Overflow))),
+                "Expected overflow for {:?}",
+                op
+            );
         }
     }
 
@@ -3273,16 +3282,17 @@ mod error_scenarios {
         // Test mixed type operations that should overflow
         let mixed_overflow_cases = vec![
             // TinyInt + SmallInt overflow
-            (Value::new_with_type(Val::TinyInt(i8::MAX), TypeId::TinyInt),
-             Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt)),
-            
+            (
+                Value::new_with_type(Val::TinyInt(i8::MAX), TypeId::TinyInt),
+                Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt),
+            ),
             // SmallInt + Integer overflow
-            (Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt),
-             Value::new(i32::MAX)),
-            
+            (
+                Value::new_with_type(Val::SmallInt(i16::MAX), TypeId::SmallInt),
+                Value::new(i32::MAX),
+            ),
             // Integer + BigInt overflow
-            (Value::new(i32::MAX),
-             Value::new(i64::MAX)),
+            (Value::new(i32::MAX), Value::new(i64::MAX)),
         ];
 
         for (left_val, right_val) in mixed_overflow_cases {
@@ -3358,10 +3368,12 @@ mod validation {
             )));
 
             let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![left_col, right_col]);
-            assert!(expr.validate(&schema).is_ok(), 
-                "Validation should pass for {} + {}", 
+            assert!(
+                expr.validate(&schema).is_ok(),
+                "Validation should pass for {} + {}",
                 schema.get_column(left_idx).unwrap().get_name(),
-                schema.get_column(right_idx).unwrap().get_name());
+                schema.get_column(right_idx).unwrap().get_name()
+            );
         }
     }
 
@@ -3398,9 +3410,11 @@ mod validation {
             )));
 
             let expr = ArithmeticExpression::new(ArithmeticOp::Add, vec![int_col, invalid_col]);
-            assert!(expr.validate(&schema).is_err(), 
-                "Validation should fail for Integer + {}", 
-                schema.get_column(invalid_idx).unwrap().get_name());
+            assert!(
+                expr.validate(&schema).is_err(),
+                "Validation should fail for Integer + {}",
+                schema.get_column(invalid_idx).unwrap().get_name()
+            );
         }
     }
 
@@ -3414,13 +3428,22 @@ mod validation {
 
         // Create nested expression: (a + b) * c
         let col_a = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, schema.get_column(0).unwrap().clone(), vec![],
+            0,
+            0,
+            schema.get_column(0).unwrap().clone(),
+            vec![],
         )));
         let col_b = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 1, schema.get_column(1).unwrap().clone(), vec![],
+            0,
+            1,
+            schema.get_column(1).unwrap().clone(),
+            vec![],
         )));
         let col_c = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 2, schema.get_column(2).unwrap().clone(), vec![],
+            0,
+            2,
+            schema.get_column(2).unwrap().clone(),
+            vec![],
         )));
 
         let inner_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
@@ -3428,10 +3451,7 @@ mod validation {
             vec![col_a, col_b],
         )));
 
-        let outer_expr = ArithmeticExpression::new(
-            ArithmeticOp::Multiply,
-            vec![inner_expr, col_c],
-        );
+        let outer_expr = ArithmeticExpression::new(ArithmeticOp::Multiply, vec![inner_expr, col_c]);
 
         assert!(outer_expr.validate(&schema).is_ok());
     }
@@ -3491,13 +3511,10 @@ mod memory_and_resource_tests {
 
         // Clone the expression multiple times
         let clones: Vec<_> = (0..100).map(|_| expr.clone()).collect();
-        
+
         // Verify all clones are equivalent
         for clone in &clones {
-            assert_eq!(
-                clone.as_ref() as *const _,
-                expr.as_ref() as *const _
-            );
+            assert_eq!(clone.as_ref() as *const _, expr.as_ref() as *const _);
         }
     }
 

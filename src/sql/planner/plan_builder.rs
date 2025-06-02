@@ -6,6 +6,7 @@ use crate::catalog::schema::Schema;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::types_db::type_id::TypeId;
@@ -14,7 +15,6 @@ use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::*;
 use std::sync::Arc;
-use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -32,7 +32,9 @@ impl LogicalPlanBuilder {
     pub fn build_query_plan(&self, query: &Query) -> Result<Box<LogicalPlan>, String> {
         // Start with the main query body
         let mut current_plan = match &*query.body {
-            SetExpr::Select(select) => self.build_select_plan_with_order_by(select, query.order_by.as_ref())?,
+            SetExpr::Select(select) => {
+                self.build_select_plan_with_order_by(select, query.order_by.as_ref())?
+            }
             SetExpr::Query(nested_query) => self.build_query_plan(nested_query)?,
             SetExpr::Values(values) => {
                 let schema = self.schema_manager.create_values_schema(&values.rows)?;
@@ -170,9 +172,9 @@ impl LogicalPlanBuilder {
     }
 
     pub fn build_select_plan_with_order_by(
-        &self, 
-        select: &Box<Select>, 
-        order_by: Option<&sqlparser::ast::OrderBy>
+        &self,
+        select: &Box<Select>,
+        order_by: Option<&sqlparser::ast::OrderBy>,
     ) -> Result<Box<LogicalPlan>, String> {
         let mut current_plan = {
             if select.from.is_empty() {
@@ -225,7 +227,9 @@ impl LogicalPlanBuilder {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     // Use the original schema for parsing expressions to ensure all columns are available
-                    let parsed_expr = self.expression_parser.parse_expression(expr, &original_schema)?;
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, &original_schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -233,7 +237,9 @@ impl LogicalPlanBuilder {
                 }
                 SelectItem::ExprWithAlias { expr, alias: _ } => {
                     // Use the original schema for parsing expressions to ensure all columns are available
-                    let parsed_expr = self.expression_parser.parse_expression(expr, &original_schema)?;
+                    let parsed_expr = self
+                        .expression_parser
+                        .parse_expression(expr, &original_schema)?;
                     if let Expression::Aggregate(_) = parsed_expr {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
@@ -271,13 +277,17 @@ impl LogicalPlanBuilder {
 
             // Create a new schema for the aggregate plan using the schema manager
             let group_by_exprs_refs: Vec<&Expression> = group_by_exprs.iter().collect();
-            let alias_mapping = self.schema_manager.create_column_alias_mapping(&select.projection, &group_by_exprs_refs);
-            let agg_schema = self.schema_manager.create_aggregation_output_schema_with_alias_mapping(
-                &group_by_exprs_refs,
-                &agg_exprs,
-                has_group_by,
-                Some(&alias_mapping),
-            );
+            let alias_mapping = self
+                .schema_manager
+                .create_column_alias_mapping(&select.projection, &group_by_exprs_refs);
+            let agg_schema = self
+                .schema_manager
+                .create_aggregation_output_schema_with_alias_mapping(
+                    &group_by_exprs_refs,
+                    &agg_exprs,
+                    has_group_by,
+                    Some(&alias_mapping),
+                );
 
             // Create aggregation plan node
             current_plan = LogicalPlan::aggregate(
@@ -291,7 +301,9 @@ impl LogicalPlanBuilder {
             if let Some(having) = &select.having {
                 // Use the original schema for parsing the HAVING clause instead of the aggregate schema
                 // This ensures columns like 'age' can be found when used inside aggregate functions
-                let having_expr = self.expression_parser.parse_expression(having, &original_schema)?;
+                let having_expr = self
+                    .expression_parser
+                    .parse_expression(having, &original_schema)?;
 
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone().unwrap(),
@@ -304,8 +316,11 @@ impl LogicalPlanBuilder {
 
             // Add projection on top of aggregation
             // Use the original schema for parsing projection expressions
-            current_plan =
-                self.build_projection_plan_with_schema(&select.projection, current_plan, &original_schema)?;
+            current_plan = self.build_projection_plan_with_schema(
+                &select.projection,
+                current_plan,
+                &original_schema,
+            )?;
         } else {
             // No aggregates, just add projection
             current_plan = self.build_projection_plan(&select.projection, current_plan)?;
@@ -315,7 +330,9 @@ impl LogicalPlanBuilder {
         // This is a bit unusual but SQL allows it
         if !has_aggregates && !has_group_by {
             if let Some(having) = &select.having {
-                let having_expr = self.expression_parser.parse_expression(having, &original_schema)?;
+                let having_expr = self
+                    .expression_parser
+                    .parse_expression(having, &original_schema)?;
                 current_plan = LogicalPlan::filter(
                     current_plan.get_schema().clone().unwrap(),
                     String::new(), // table_name
@@ -339,9 +356,11 @@ impl LogicalPlanBuilder {
             match &order_by.kind {
                 OrderByKind::Expressions(order_by_exprs) => {
                     for order_item in order_by_exprs {
-                        let expr = self
-                            .expression_parser
-                            .parse_expression_with_fallback(&order_item.expr, &projection_schema, &original_schema)?;
+                        let expr = self.expression_parser.parse_expression_with_fallback(
+                            &order_item.expr,
+                            &projection_schema,
+                            &original_schema,
+                        )?;
                         sort_exprs.push(Arc::new(expr));
                     }
                 }
@@ -363,13 +382,18 @@ impl LogicalPlanBuilder {
                 .sort_by
                 .iter()
                 .map(|expr| {
-                    let parsed_expr = self.expression_parser.parse_expression_with_fallback(expr, &projection_schema, &original_schema)?;
+                    let parsed_expr = self.expression_parser.parse_expression_with_fallback(
+                        expr,
+                        &projection_schema,
+                        &original_schema,
+                    )?;
                     Ok(Arc::new(parsed_expr))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
 
             if !sort_exprs.is_empty() {
-                current_plan = LogicalPlan::sort(sort_exprs, projection_schema.clone(), current_plan);
+                current_plan =
+                    LogicalPlan::sort(sort_exprs, projection_schema.clone(), current_plan);
             }
         }
 
@@ -385,12 +409,12 @@ impl LogicalPlanBuilder {
     ) -> Result<(), String> {
         // Create a set of group by column identifiers for quick lookup
         let mut group_by_columns = std::collections::HashSet::new();
-        
+
         for expr in group_by_exprs {
             if let Expression::ColumnRef(col_ref) = expr {
                 let col_name = col_ref.get_return_type().get_name();
                 group_by_columns.insert(col_name.to_string());
-                
+
                 // Also add the unqualified version if it's a qualified name
                 if let Some(dot_pos) = col_name.find('.') {
                     let unqualified = &col_name[dot_pos + 1..];
@@ -405,22 +429,22 @@ impl LogicalPlanBuilder {
                 SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
                     // Parse the expression to check if it's an aggregate
                     let parsed_expr = self.expression_parser.parse_expression(expr, schema)?;
-                    
+
                     // If it's not an aggregate, it must be in GROUP BY
                     if !matches!(parsed_expr, Expression::Aggregate(_)) {
                         // Check if this expression corresponds to a column that should be in GROUP BY
                         if let Expression::ColumnRef(col_ref) = &parsed_expr {
                             let col_name = col_ref.get_return_type().get_name();
-                            
+
                             // Check both qualified and unqualified versions
-                            let found_in_group_by = group_by_columns.contains(col_name) ||
-                                if let Some(dot_pos) = col_name.find('.') {
+                            let found_in_group_by = group_by_columns.contains(col_name)
+                                || if let Some(dot_pos) = col_name.find('.') {
                                     let unqualified = &col_name[dot_pos + 1..];
                                     group_by_columns.contains(unqualified)
                                 } else {
                                     false
                                 };
-                            
+
                             if !found_in_group_by {
                                 return Err(format!(
                                     "Column '{}' must appear in the GROUP BY clause or be used in an aggregate function",
@@ -525,7 +549,7 @@ impl LogicalPlanBuilder {
                     if is_aggregate_input && !matches!(parsed_expr, Expression::Aggregate(_)) {
                         // For aliased expressions, first try to find by the alias value
                         let mut col_idx_opt = input_schema.get_qualified_column_index(&alias.value);
-                        
+
                         if col_idx_opt.is_none() {
                             // Try to find the column by matching the underlying expression to expected alias
                             match expr {
@@ -533,23 +557,25 @@ impl LogicalPlanBuilder {
                                     let table_alias = &parts[0].value;
                                     let column_name = &parts[1].value;
                                     let qualified_name = format!("{}.{}", table_alias, column_name);
-                                    
+
                                     // Map known patterns to expected aliases
-                                    let expected_alias = if table_alias == "e" && column_name == "name" {
-                                        "employee"
-                                    } else if table_alias == "d" && column_name == "name" {
-                                        "department"
-                                    } else {
-                                        // Keep the original qualified name for other cases
-                                        &qualified_name
-                                    };
-                                    
-                                    col_idx_opt = input_schema.get_qualified_column_index(expected_alias);
+                                    let expected_alias =
+                                        if table_alias == "e" && column_name == "name" {
+                                            "employee"
+                                        } else if table_alias == "d" && column_name == "name" {
+                                            "department"
+                                        } else {
+                                            // Keep the original qualified name for other cases
+                                            &qualified_name
+                                        };
+
+                                    col_idx_opt =
+                                        input_schema.get_qualified_column_index(expected_alias);
                                 }
                                 _ => {}
                             }
                         }
-                        
+
                         if let Some(col_idx) = col_idx_opt {
                             projection_exprs.push(Arc::new(Expression::ColumnRef(
                                 ColumnRefExpression::new(
@@ -643,7 +669,7 @@ impl LogicalPlanBuilder {
         let columns = self
             .schema_manager
             .convert_column_defs(&create_table.columns)?;
-            
+
         // Double-check that we have columns after conversion
         if columns.is_empty() {
             return Err(format!(
@@ -2032,9 +2058,12 @@ impl LogicalPlanBuilder {
             let mut columns = Vec::new();
             for column_ident in &insert.columns {
                 let column_name = column_ident.value.clone();
-                let column_index = full_schema
-                    .get_column_index(&column_name)
-                    .ok_or_else(|| format!("Column '{}' does not exist in table '{}'", column_name, table_name))?;
+                let column_index = full_schema.get_column_index(&column_name).ok_or_else(|| {
+                    format!(
+                        "Column '{}' does not exist in table '{}'",
+                        column_name, table_name
+                    )
+                })?;
                 let column = full_schema
                     .get_column(column_index)
                     .ok_or_else(|| format!("Failed to get column '{}' from schema", column_name))?;
@@ -2067,7 +2096,7 @@ impl LogicalPlanBuilder {
 
         Ok(LogicalPlan::insert(
             table_name,
-            full_schema,  // Use full schema for the INSERT plan itself
+            full_schema, // Use full schema for the INSERT plan itself
             table_oid,
             source_plan,
         ))
@@ -2120,43 +2149,43 @@ impl LogicalPlanBuilder {
         for assignment in assignments {
             // Validate that the column being updated exists in the table schema
             let column_name = match &assignment.target {
-                sqlparser::ast::AssignmentTarget::ColumnName(obj_name) => {
-                    obj_name.to_string()
-                }
+                sqlparser::ast::AssignmentTarget::ColumnName(obj_name) => obj_name.to_string(),
                 sqlparser::ast::AssignmentTarget::Tuple(_) => {
                     return Err("Tuple assignments are not supported".to_string());
                 }
             };
-            
+
             // Check if column exists in the schema and get its index
-            let column_index = (0..schema.get_column_count() as usize)
-                .find(|&i| {
-                    if let Some(col) = schema.get_column(i) {
-                        col.get_name() == column_name
-                    } else {
-                        false
-                    }
-                });
-            
+            let column_index = (0..schema.get_column_count() as usize).find(|&i| {
+                if let Some(col) = schema.get_column(i) {
+                    col.get_name() == column_name
+                } else {
+                    false
+                }
+            });
+
             let column_index = column_index.ok_or_else(|| {
-                format!("Column '{}' does not exist in table '{}'", column_name, table_name)
+                format!(
+                    "Column '{}' does not exist in table '{}'",
+                    column_name, table_name
+                )
             })?;
-            
+
             // Get the column info
             let column = schema.get_column(column_index).unwrap().clone();
-            
+
             // Parse the value expression
             let value_expr = self
                 .expression_parser
                 .parse_expression(&assignment.value, &schema)?;
-            
+
             // Create an AssignmentExpression that encapsulates both the target column and value
             let assignment_expr = Expression::Assignment(AssignmentExpression::new(
                 column_index,
                 column.clone(),
                 Arc::new(value_expr),
             ));
-            
+
             // Add the single assignment expression
             update_exprs.push(Arc::new(assignment_expr));
         }
@@ -2489,10 +2518,7 @@ mod tests {
                 .unwrap();
 
             fixture.assert_table_exists("simple");
-            fixture.assert_table_schema(
-                "simple",
-                &[("value".to_string(), TypeId::Integer)],
-            );
+            fixture.assert_table_schema("simple", &[("value".to_string(), TypeId::Integer)]);
         }
 
         #[test]
@@ -2504,16 +2530,14 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            fixture
-                .create_table("wide_table", &columns, false)
-                .unwrap();
+            fixture.create_table("wide_table", &columns, false).unwrap();
 
             fixture.assert_table_exists("wide_table");
-            
+
             let expected_schema: Vec<_> = (1..=20)
                 .map(|i| (format!("col{}", i), TypeId::Integer))
                 .collect();
-            
+
             fixture.assert_table_schema("wide_table", &expected_schema);
         }
 
@@ -2588,7 +2612,11 @@ mod tests {
 
             // First create the referenced table
             fixture
-                .create_table("categories", "id INTEGER PRIMARY KEY, name VARCHAR(255)", false)
+                .create_table(
+                    "categories",
+                    "id INTEGER PRIMARY KEY, name VARCHAR(255)",
+                    false,
+                )
                 .unwrap();
 
             // Then create table with foreign key
@@ -2646,7 +2674,9 @@ mod tests {
 
             // Verify it's a CreateTable plan
             match &plan.plan_type {
-                LogicalPlanType::CreateTable { schema, table_name, .. } => {
+                LogicalPlanType::CreateTable {
+                    schema, table_name, ..
+                } => {
                     assert_eq!(table_name, "temp_data");
                     assert_eq!(schema.get_column_count(), 2);
                 }
@@ -2659,14 +2689,12 @@ mod tests {
             let mut fixture = TestContext::new("create_table_duplicate");
 
             // Create initial table
-            fixture
-                .create_table("users", "id INTEGER", false)
-                .unwrap();
+            fixture.create_table("users", "id INTEGER", false).unwrap();
 
             // Try to create same table again (should fail)
             let result = fixture.create_table("users", "id INTEGER", false);
             assert!(result.is_err());
-            
+
             let error_msg = result.unwrap_err();
             assert!(error_msg.contains("already exists"));
         }
@@ -2780,7 +2808,8 @@ mod tests {
             let mut fixture = TestContext::new("create_table_engine");
 
             // Test MySQL-style engine options
-            let create_sql = "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+            let create_sql =
+                "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
             let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
 
             match &plan.plan_type {
@@ -2810,10 +2839,18 @@ mod tests {
                 .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
                 .unwrap();
             fixture
-                .create_table("products", "product_id INTEGER, name VARCHAR(255), price DECIMAL", false)
+                .create_table(
+                    "products",
+                    "product_id INTEGER, name VARCHAR(255), price DECIMAL",
+                    false,
+                )
                 .unwrap();
             fixture
-                .create_table("orders", "order_id INTEGER, user_id INTEGER, product_id INTEGER, quantity INTEGER", false)
+                .create_table(
+                    "orders",
+                    "order_id INTEGER, user_id INTEGER, product_id INTEGER, quantity INTEGER",
+                    false,
+                )
                 .unwrap();
         }
 
@@ -2866,7 +2903,7 @@ mod tests {
                 } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(expressions.len(), 2);
-                    
+
                     // Verify column names in output schema
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
@@ -2894,7 +2931,7 @@ mod tests {
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
-                    
+
                     // Verify aliased column names
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
@@ -2979,7 +3016,7 @@ mod tests {
                     // Should have a compound expression (AND)
                     match predicate.as_ref() {
                         Expression::Logic(_) => (), // AND expression
-                        _ => (), // Might be optimized differently
+                        _ => (),                    // Might be optimized differently
                     }
                 }
                 _ => panic!("Expected Filter node"),
@@ -2995,14 +3032,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -3016,14 +3051,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -3037,14 +3070,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::NotEqual);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::NotEqual);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -3058,14 +3089,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::LessThanOrEqual);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::LessThanOrEqual);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -3079,14 +3108,12 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { predicate, .. } => {
-                    match predicate.as_ref() {
-                        Expression::Comparison(comp) => {
-                            assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThanOrEqual);
-                        }
-                        _ => panic!("Expected Comparison expression"),
+                LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                    Expression::Comparison(comp) => {
+                        assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThanOrEqual);
                     }
-                }
+                    _ => panic!("Expected Comparison expression"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -3150,7 +3177,7 @@ mod tests {
                     // Should have a logical OR expression
                     match predicate.as_ref() {
                         Expression::Logic(_) => (), // OR expression
-                        _ => (), // Might be represented differently
+                        _ => (),                    // Might be represented differently
                     }
                 }
                 _ => panic!("Expected Filter node"),
@@ -3170,7 +3197,7 @@ mod tests {
                     // Should handle nested logical expressions
                     match predicate.as_ref() {
                         Expression::Logic(_) => (), // Complex logical expression
-                        _ => (), // Might be optimized or represented differently
+                        _ => (),                    // Might be optimized or represented differently
                     }
                 }
                 _ => panic!("Expected Filter node"),
@@ -3188,12 +3215,12 @@ mod tests {
             match &plan.plan_type {
                 LogicalPlanType::Projection { schema, .. } => {
                     assert_eq!(schema.get_column_count(), 2);
-                    
+
                     // Check that aliases are handled properly
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    
+
                     // The column names might include the table alias
                     // This depends on the implementation
                 }
@@ -3237,14 +3264,14 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(expressions.len(), 2);
-                    
+
                     // Verify the alias is applied
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
@@ -3260,18 +3287,19 @@ mod tests {
             let mut fixture = TestContext::new("select_constants");
             setup_test_table(&mut fixture);
 
-            let select_sql = "SELECT id, 'constant_string' AS const_str, 42 AS const_num FROM users";
+            let select_sql =
+                "SELECT id, 'constant_string' AS const_str, 42 AS const_num FROM users";
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
-                    
+
                     // Verify the constant aliases
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
@@ -3288,18 +3316,19 @@ mod tests {
             let mut fixture = TestContext::new("select_complex_expressions");
             setup_test_table(&mut fixture);
 
-            let select_sql = "SELECT id, age * 2 + 1 AS formula, name FROM users WHERE age * 2 > 50";
+            let select_sql =
+                "SELECT id, age * 2 + 1 AS formula, name FROM users WHERE age * 2 > 50";
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
-                    
+
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
@@ -3375,14 +3404,14 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(expressions.len(), 2);
-                    
+
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
@@ -3401,14 +3430,14 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 1);
                     assert_eq!(expressions.len(), 1);
-                    
+
                     let col = schema.get_column(0).unwrap();
                     assert_eq!(col.get_name(), "name");
                 }
@@ -3425,14 +3454,14 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 3);
                     assert_eq!(expressions.len(), 3);
-                    
+
                     // All three should be name columns
                     for i in 0..3 {
                         let col = schema.get_column(i).unwrap();
@@ -3450,26 +3479,47 @@ mod tests {
 
             let test_cases = vec![
                 ("SELECT * FROM users WHERE age = 30", ComparisonType::Equal),
-                ("SELECT * FROM users WHERE age != 30", ComparisonType::NotEqual),
-                ("SELECT * FROM users WHERE age <> 30", ComparisonType::NotEqual),
-                ("SELECT * FROM users WHERE age < 30", ComparisonType::LessThan),
-                ("SELECT * FROM users WHERE age <= 30", ComparisonType::LessThanOrEqual),
-                ("SELECT * FROM users WHERE age > 30", ComparisonType::GreaterThan),
-                ("SELECT * FROM users WHERE age >= 30", ComparisonType::GreaterThanOrEqual),
+                (
+                    "SELECT * FROM users WHERE age != 30",
+                    ComparisonType::NotEqual,
+                ),
+                (
+                    "SELECT * FROM users WHERE age <> 30",
+                    ComparisonType::NotEqual,
+                ),
+                (
+                    "SELECT * FROM users WHERE age < 30",
+                    ComparisonType::LessThan,
+                ),
+                (
+                    "SELECT * FROM users WHERE age <= 30",
+                    ComparisonType::LessThanOrEqual,
+                ),
+                (
+                    "SELECT * FROM users WHERE age > 30",
+                    ComparisonType::GreaterThan,
+                ),
+                (
+                    "SELECT * FROM users WHERE age >= 30",
+                    ComparisonType::GreaterThanOrEqual,
+                ),
             ];
 
             for (sql, expected_op) in test_cases {
                 let plan = fixture.planner.create_logical_plan(sql).unwrap();
-                
+
                 match &plan.children[0].plan_type {
-                    LogicalPlanType::Filter { predicate, .. } => {
-                        match predicate.as_ref() {
-                            Expression::Comparison(comp) => {
-                                assert_eq!(comp.get_comp_type(), expected_op, "Failed for SQL: {}", sql);
-                            }
-                            _ => panic!("Expected Comparison expression for SQL: {}", sql),
+                    LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
+                        Expression::Comparison(comp) => {
+                            assert_eq!(
+                                comp.get_comp_type(),
+                                expected_op,
+                                "Failed for SQL: {}",
+                                sql
+                            );
                         }
-                    }
+                        _ => panic!("Expected Comparison expression for SQL: {}", sql),
+                    },
                     _ => panic!("Expected Filter node for SQL: {}", sql),
                 }
             }
@@ -3518,24 +3568,23 @@ mod tests {
             let mut fixture = TestContext::new("select_string_operations");
             setup_test_table(&mut fixture);
 
-            let select_sql = "SELECT name, UPPER(name) AS upper_name, LENGTH(name) AS name_length FROM users";
+            let select_sql =
+                "SELECT name, UPPER(name) AS upper_name, LENGTH(name) AS name_length FROM users";
             let result = fixture.planner.create_logical_plan(select_sql);
 
             // String functions might not be implemented yet, so test graceful handling
             match result {
-                Ok(plan) => {
-                    match &plan.plan_type {
-                        LogicalPlanType::Projection { 
-                            expressions, 
-                            schema,
-                            ..
-                        } => {
-                            assert_eq!(schema.get_column_count(), 3);
-                            assert_eq!(expressions.len(), 3);
-                        }
-                        _ => panic!("Expected Projection as root node"),
+                Ok(plan) => match &plan.plan_type {
+                    LogicalPlanType::Projection {
+                        expressions,
+                        schema,
+                        ..
+                    } => {
+                        assert_eq!(schema.get_column_count(), 3);
+                        assert_eq!(expressions.len(), 3);
                     }
-                }
+                    _ => panic!("Expected Projection as root node"),
+                },
                 Err(_) => {
                     // String functions might not be implemented, which is acceptable
                 }
@@ -3550,7 +3599,7 @@ mod tests {
             // Test with just WHERE keyword but no condition (should be syntax error)
             let select_sql = "SELECT * FROM users WHERE";
             let result = fixture.planner.create_logical_plan(select_sql);
-            
+
             assert!(result.is_err(), "Empty WHERE clause should cause an error");
         }
 
@@ -3564,13 +3613,13 @@ mod tests {
                 .map(|i| format!("id AS id_{}", i))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             let select_sql = format!("SELECT {} FROM users", long_projection);
             let plan = fixture.planner.create_logical_plan(&select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
@@ -3590,14 +3639,14 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
             match &plan.plan_type {
-                LogicalPlanType::Projection { 
-                    expressions, 
+                LogicalPlanType::Projection {
+                    expressions,
                     schema,
                     ..
                 } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(expressions.len(), 2);
-                    
+
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
@@ -3707,13 +3756,13 @@ mod tests {
         #[test]
         fn test_insert_different_data_types() {
             let mut fixture = TestContext::new("insert_different_types");
-            
+
             // Create a table with various data types
             fixture
                 .create_table(
-                    "mixed_types", 
-                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN", 
-                    false
+                    "mixed_types",
+                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN",
+                    false,
                 )
                 .unwrap();
 
@@ -3796,7 +3845,7 @@ mod tests {
         #[test]
         fn test_insert_single_column_table() {
             let mut fixture = TestContext::new("insert_single_column");
-            
+
             fixture
                 .create_table("single_col", "id INTEGER", false)
                 .unwrap();
@@ -3853,7 +3902,7 @@ mod tests {
         #[test]
         fn test_insert_many_columns() {
             let mut fixture = TestContext::new("insert_many_columns");
-            
+
             // Create a table with many columns
             fixture
                 .create_table(
@@ -3896,7 +3945,7 @@ mod tests {
                 values_list.push(format!("({}, 'user{}')", i, i));
             }
             let insert_sql = format!("INSERT INTO users VALUES {}", values_list.join(", "));
-            
+
             let plan = fixture.planner.create_logical_plan(&insert_sql).unwrap();
 
             match &plan.plan_type {
@@ -3948,37 +3997,38 @@ mod tests {
         #[test]
         fn test_insert_with_default_values() {
             let mut fixture = TestContext::new("insert_default_values");
-            
+
             // Create a table with default values
             fixture
                 .create_table(
-                    "users_with_defaults", 
-                    "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0", 
-                    false
+                    "users_with_defaults",
+                    "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0",
+                    false,
                 )
                 .unwrap();
 
             let insert_sql = "INSERT INTO users_with_defaults (id) VALUES (1)";
-            
+
             // This should work with the current implementation
             // Note: Full default value handling might need additional implementation
             let result = fixture.planner.create_logical_plan(insert_sql);
-            
+
             // For now, just check that it doesn't crash - full default value support
             // might require additional logic in the planner
             match result {
-                Ok(plan) => {
-                    match &plan.plan_type {
-                        LogicalPlanType::Insert { table_name, .. } => {
-                            assert_eq!(table_name, "users_with_defaults");
-                        }
-                        _ => panic!("Expected Insert plan node"),
+                Ok(plan) => match &plan.plan_type {
+                    LogicalPlanType::Insert { table_name, .. } => {
+                        assert_eq!(table_name, "users_with_defaults");
                     }
-                }
+                    _ => panic!("Expected Insert plan node"),
+                },
                 Err(e) => {
                     // Default value handling might not be fully implemented yet
                     // This test documents the current behavior
-                    println!("Expected behavior - default values not yet supported: {}", e);
+                    println!(
+                        "Expected behavior - default values not yet supported: {}",
+                        e
+                    );
                 }
             }
         }
@@ -4004,7 +4054,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4033,7 +4087,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4062,7 +4120,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4090,7 +4152,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4113,12 +4179,17 @@ mod tests {
             let mut fixture = TestContext::new("update_complex_where");
             setup_test_table(&mut fixture);
 
-            let update_sql = "UPDATE users SET salary = 75000 WHERE age > 25 AND department = 'Engineering'";
+            let update_sql =
+                "UPDATE users SET salary = 75000 WHERE age > 25 AND department = 'Engineering'";
             let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4168,7 +4239,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4196,7 +4271,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4224,7 +4303,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4245,22 +4328,27 @@ mod tests {
         #[test]
         fn test_update_different_data_types() {
             let mut fixture = TestContext::new("update_different_types");
-            
+
             // Create a table with various data types
             fixture
                 .create_table(
-                    "mixed_types", 
-                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN", 
-                    false
+                    "mixed_types",
+                    "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN",
+                    false,
                 )
                 .unwrap();
 
-            let update_sql = "UPDATE mixed_types SET name = 'Alice', age = 25, salary = 50000.50, active = true";
+            let update_sql =
+                "UPDATE mixed_types SET name = 'Alice', age = 25, salary = 50000.50, active = true";
             let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "mixed_types");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4288,7 +4376,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4309,7 +4401,7 @@ mod tests {
         #[test]
         fn test_update_single_column_table() {
             let mut fixture = TestContext::new("update_single_column");
-            
+
             fixture
                 .create_table("single_col", "value INTEGER", false)
                 .unwrap();
@@ -4319,7 +4411,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "single_col");
                     assert_eq!(schema.get_column_count(), 1);
@@ -4344,7 +4440,7 @@ mod tests {
 
             let test_cases = vec![
                 "UPDATE users SET age = 30 WHERE id > 5",
-                "UPDATE users SET age = 30 WHERE id < 10", 
+                "UPDATE users SET age = 30 WHERE id < 10",
                 "UPDATE users SET age = 30 WHERE id >= 5",
                 "UPDATE users SET age = 30 WHERE id <= 10",
                 "UPDATE users SET age = 30 WHERE id != 5",
@@ -4352,12 +4448,20 @@ mod tests {
             ];
 
             for update_sql in test_cases {
-                let plan = fixture.planner.create_logical_plan(update_sql)
-                    .unwrap_or_else(|e| panic!("Failed to create plan for: {}, error: {}", update_sql, e));
+                let plan = fixture
+                    .planner
+                    .create_logical_plan(update_sql)
+                    .unwrap_or_else(|e| {
+                        panic!("Failed to create plan for: {}, error: {}", update_sql, e)
+                    });
 
                 match &plan.plan_type {
                     LogicalPlanType::Update {
-                        table_name, schema, table_oid, update_expressions, ..
+                        table_name,
+                        schema,
+                        table_oid,
+                        update_expressions,
+                        ..
                     } => {
                         assert_eq!(table_name, "users");
                         assert_eq!(schema.get_column_count(), 5);
@@ -4368,7 +4472,10 @@ mod tests {
                             LogicalPlanType::Filter { table_name, .. } => {
                                 assert_eq!(table_name, "users");
                             }
-                            _ => panic!("Expected Filter node as child of Update for: {}", update_sql),
+                            _ => panic!(
+                                "Expected Filter node as child of Update for: {}",
+                                update_sql
+                            ),
                         }
                     }
                     _ => panic!("Expected Update plan node for: {}", update_sql),
@@ -4383,17 +4490,25 @@ mod tests {
 
             let test_cases = vec![
                 "UPDATE users SET salary = 60000 WHERE age > 25 AND department = 'Engineering'",
-                "UPDATE users SET salary = 60000 WHERE age < 30 OR department = 'Sales'", 
+                "UPDATE users SET salary = 60000 WHERE age < 30 OR department = 'Sales'",
                 "UPDATE users SET salary = 60000 WHERE NOT (age < 25)",
             ];
 
             for update_sql in test_cases {
-                let plan = fixture.planner.create_logical_plan(update_sql)
-                    .unwrap_or_else(|e| panic!("Failed to create plan for: {}, error: {}", update_sql, e));
+                let plan = fixture
+                    .planner
+                    .create_logical_plan(update_sql)
+                    .unwrap_or_else(|e| {
+                        panic!("Failed to create plan for: {}, error: {}", update_sql, e)
+                    });
 
                 match &plan.plan_type {
                     LogicalPlanType::Update {
-                        table_name, schema, table_oid, update_expressions, ..
+                        table_name,
+                        schema,
+                        table_oid,
+                        update_expressions,
+                        ..
                     } => {
                         assert_eq!(table_name, "users");
                         assert_eq!(schema.get_column_count(), 5);
@@ -4404,7 +4519,10 @@ mod tests {
                             LogicalPlanType::Filter { table_name, .. } => {
                                 assert_eq!(table_name, "users");
                             }
-                            _ => panic!("Expected Filter node as child of Update for: {}", update_sql),
+                            _ => panic!(
+                                "Expected Filter node as child of Update for: {}",
+                                update_sql
+                            ),
                         }
                     }
                     _ => panic!("Expected Update plan node for: {}", update_sql),
@@ -4417,12 +4535,17 @@ mod tests {
             let mut fixture = TestContext::new("update_parentheses");
             setup_test_table(&mut fixture);
 
-            let update_sql = "UPDATE users SET salary = (age * 1000) + 5000 WHERE (id > 1 AND id < 10)";
+            let update_sql =
+                "UPDATE users SET salary = (age * 1000) + 5000 WHERE (id > 1 AND id < 10)";
             let plan = fixture.planner.create_logical_plan(update_sql).unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4450,7 +4573,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4480,7 +4607,11 @@ mod tests {
 
             match &plan.plan_type {
                 LogicalPlanType::Update {
-                    table_name, schema, table_oid, update_expressions, ..
+                    table_name,
+                    schema,
+                    table_oid,
+                    update_expressions,
+                    ..
                 } => {
                     assert_eq!(table_name, "users");
                     assert_eq!(schema.get_column_count(), 5);
@@ -4741,36 +4872,32 @@ mod tests {
             setup_sales_table(fixture);
             fixture
                 .create_table(
-                    "orders", 
-                    "order_id INTEGER, customer_id INTEGER, total DECIMAL, order_date VARCHAR(255)", 
-                    false
+                    "orders",
+                    "order_id INTEGER, customer_id INTEGER, total DECIMAL, order_date VARCHAR(255)",
+                    false,
                 )
                 .unwrap();
-            
+
             // Create employees table
             fixture
                 .create_table(
                     "employees",
                     "id INTEGER, name VARCHAR(255), department_id INTEGER, salary DECIMAL",
-                    false
+                    false,
                 )
                 .unwrap();
-            
+
             // Create departments table
             fixture
-                .create_table(
-                    "departments",
-                    "id INTEGER, name VARCHAR(255)",
-                    false
-                )
+                .create_table("departments", "id INTEGER, name VARCHAR(255)", false)
                 .unwrap();
-            
+
             // Create employee_projects table
             fixture
                 .create_table(
                     "employee_projects",
                     "employee_id INTEGER, project_id INTEGER",
-                    false
+                    false,
                 )
                 .unwrap();
         }
@@ -4795,10 +4922,14 @@ mod tests {
 
             // Verify aggregate
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { aggregates, group_by, .. } => {
+                LogicalPlanType::Aggregate {
+                    aggregates,
+                    group_by,
+                    ..
+                } => {
                     assert_eq!(aggregates.len(), 1);
                     assert_eq!(group_by.len(), 0); // No GROUP BY
-                    
+
                     if let Expression::Aggregate(agg) = aggregates[0].as_ref() {
                         assert_eq!(agg.get_agg_type(), &AggregationType::CountStar);
                         assert_eq!(agg.get_return_type().get_type(), TypeId::BigInt);
@@ -4884,7 +5015,7 @@ mod tests {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Aggregate { aggregates, .. } => {
                     assert_eq!(aggregates.len(), 2);
-                    
+
                     if let Expression::Aggregate(min_agg) = aggregates[0].as_ref() {
                         assert_eq!(*min_agg.get_agg_type(), AggregationType::Min);
                         assert_eq!(min_agg.get_return_type().get_type(), TypeId::Integer);
@@ -4915,11 +5046,11 @@ mod tests {
             match &plan.plan_type {
                 LogicalPlanType::Projection { schema, .. } => {
                     assert_eq!(schema.get_column_count(), 5);
-                    
+
                     let col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
-                    
+
                     assert!(col_names.contains(&"user_count"));
                     assert!(col_names.contains(&"total_age"));
                     assert!(col_names.contains(&"avg_age"));
@@ -4933,7 +5064,7 @@ mod tests {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Aggregate { aggregates, .. } => {
                     assert_eq!(aggregates.len(), 5);
-                    
+
                     let expected_types = [
                         AggregationType::CountStar,
                         AggregationType::Sum,
@@ -4963,7 +5094,11 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                LogicalPlanType::Aggregate {
+                    group_by,
+                    aggregates,
+                    schema,
+                } => {
                     assert_eq!(group_by.len(), 1); // name column
                     assert_eq!(aggregates.len(), 1); // COUNT(*)
                     assert_eq!(schema.get_column_count(), 2); // name + count
@@ -4977,11 +5112,16 @@ mod tests {
             let mut fixture = TestContext::new("group_by_multiple_columns");
             setup_sales_table(&mut fixture);
 
-            let sql = "SELECT region, product, SUM(amount), COUNT(*) FROM sales GROUP BY region, product";
+            let sql =
+                "SELECT region, product, SUM(amount), COUNT(*) FROM sales GROUP BY region, product";
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+                LogicalPlanType::Aggregate {
+                    group_by,
+                    aggregates,
+                    schema,
+                } => {
                     assert_eq!(group_by.len(), 2); // region, product
                     assert_eq!(aggregates.len(), 2); // SUM, COUNT
                     assert_eq!(schema.get_column_count(), 4); // region + product + sum + count
@@ -5000,17 +5140,15 @@ mod tests {
 
             // Should have projection -> aggregate -> filter -> table_scan
             match &plan.plan_type {
-                LogicalPlanType::Projection { .. } => {
-                    match &plan.children[0].plan_type {
-                        LogicalPlanType::Aggregate { .. } => {
-                            match &plan.children[0].children[0].plan_type {
-                                LogicalPlanType::Filter { .. } => (),
-                                _ => panic!("Expected Filter under Aggregate"),
-                            }
+                LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
+                    LogicalPlanType::Aggregate { .. } => {
+                        match &plan.children[0].children[0].plan_type {
+                            LogicalPlanType::Filter { .. } => (),
+                            _ => panic!("Expected Filter under Aggregate"),
                         }
-                        _ => panic!("Expected Aggregate under Projection"),
                     }
-                }
+                    _ => panic!("Expected Aggregate under Projection"),
+                },
                 _ => panic!("Expected Projection as root node"),
             }
         }
@@ -5020,7 +5158,8 @@ mod tests {
             let mut fixture = TestContext::new("having_clause_aggregate");
             setup_test_table(&mut fixture);
 
-            let sql = "SELECT name, COUNT(*) as user_count FROM users GROUP BY name HAVING COUNT(*) > 1";
+            let sql =
+                "SELECT name, COUNT(*) as user_count FROM users GROUP BY name HAVING COUNT(*) > 1";
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             // Should have projection -> filter (HAVING) -> aggregate -> table_scan
@@ -5058,20 +5197,18 @@ mod tests {
 
             for sql in test_cases {
                 let plan = fixture.planner.create_logical_plan(sql).unwrap();
-                
+
                 // Verify basic structure: Projection -> Filter (HAVING) -> Aggregate
                 match &plan.plan_type {
-                    LogicalPlanType::Projection { .. } => {
-                        match &plan.children[0].plan_type {
-                            LogicalPlanType::Filter { .. } => {
-                                match &plan.children[0].children[0].plan_type {
-                                    LogicalPlanType::Aggregate { .. } => (),
-                                    _ => panic!("Expected Aggregate under Filter for SQL: {}", sql),
-                                }
+                    LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { .. } => {
+                            match &plan.children[0].children[0].plan_type {
+                                LogicalPlanType::Aggregate { .. } => (),
+                                _ => panic!("Expected Aggregate under Filter for SQL: {}", sql),
                             }
-                            _ => panic!("Expected Filter for HAVING clause for SQL: {}", sql),
                         }
-                    }
+                        _ => panic!("Expected Filter for HAVING clause for SQL: {}", sql),
+                    },
                     _ => panic!("Expected Projection as root for SQL: {}", sql),
                 }
             }
@@ -5089,13 +5226,13 @@ mod tests {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Aggregate { aggregates, .. } => {
                     assert_eq!(aggregates.len(), 2); // SUM and AVG
-                    
+
                     for agg_expr in aggregates {
                         match agg_expr.as_ref() {
                             Expression::Aggregate(agg) => {
                                 // Verify it's a supported aggregate type
                                 assert!(matches!(
-                                    agg.get_agg_type(), 
+                                    agg.get_agg_type(),
                                     AggregationType::Sum | AggregationType::Avg
                                 ));
                             }
@@ -5116,7 +5253,11 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { group_by, aggregates, .. } => {
+                LogicalPlanType::Aggregate {
+                    group_by,
+                    aggregates,
+                    ..
+                } => {
                     assert_eq!(group_by.len(), 0); // No GROUP BY
                     assert_eq!(aggregates.len(), 3); // COUNT, SUM, AVG
                 }
@@ -5152,14 +5293,12 @@ mod tests {
 
             // Structure: Projection -> Aggregate -> Filter -> TableScan
             match &plan.plan_type {
-                LogicalPlanType::Projection { .. } => {
-                    match &plan.children[0].plan_type {
-                        LogicalPlanType::Aggregate { aggregates, .. } => {
-                            assert_eq!(aggregates.len(), 2);
-                        }
-                        _ => panic!("Expected Aggregate node"),
+                LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
+                    LogicalPlanType::Aggregate { aggregates, .. } => {
+                        assert_eq!(aggregates.len(), 2);
                     }
-                }
+                    _ => panic!("Expected Aggregate node"),
+                },
                 _ => panic!("Expected Projection as root node"),
             }
         }
@@ -5172,7 +5311,7 @@ mod tests {
             // This should be an error: selecting non-grouped columns with aggregates
             let sql = "SELECT name, age, COUNT(*) FROM users";
             let result = fixture.planner.create_logical_plan(sql);
-            
+
             // This might be an error or might be handled differently depending on implementation
             // The test documents the expected behavior
         }
@@ -5184,7 +5323,7 @@ mod tests {
 
             let sql = "SELECT name, COUNT(*) FROM users GROUP BY 1";
             let result = fixture.planner.create_logical_plan(sql);
-            
+
             // GROUP BY ordinal position might not be implemented yet
             // Test documents expected behavior
         }
@@ -5196,7 +5335,7 @@ mod tests {
 
             let test_cases = vec![
                 "SELECT count(*) FROM users",
-                "SELECT Count(*) FROM users", 
+                "SELECT Count(*) FROM users",
                 "SELECT COUNT(*) FROM users",
                 "SELECT sum(age) FROM users",
                 "SELECT SUM(age) FROM users",
@@ -5206,7 +5345,7 @@ mod tests {
 
             for sql in test_cases {
                 let plan = fixture.planner.create_logical_plan(sql).unwrap();
-                
+
                 match &plan.children[0].plan_type {
                     LogicalPlanType::Aggregate { aggregates, .. } => {
                         assert_eq!(aggregates.len(), 1);
@@ -5224,7 +5363,7 @@ mod tests {
             // This should be an error: nested aggregates
             let sql = "SELECT SUM(COUNT(age)) FROM users";
             let result = fixture.planner.create_logical_plan(sql);
-            
+
             // Nested aggregates should cause an error
             assert!(result.is_err(), "Nested aggregates should cause an error");
         }
@@ -5239,17 +5378,15 @@ mod tests {
 
             // Should have Sort -> Projection -> Aggregate structure
             match &plan.plan_type {
-                LogicalPlanType::Sort { .. } => {
-                    match &plan.children[0].plan_type {
-                        LogicalPlanType::Projection { .. } => {
-                            match &plan.children[0].children[0].plan_type {
-                                LogicalPlanType::Aggregate { .. } => (),
-                                _ => panic!("Expected Aggregate under Projection"),
-                            }
+                LogicalPlanType::Sort { .. } => match &plan.children[0].plan_type {
+                    LogicalPlanType::Projection { .. } => {
+                        match &plan.children[0].children[0].plan_type {
+                            LogicalPlanType::Aggregate { .. } => (),
+                            _ => panic!("Expected Aggregate under Projection"),
                         }
-                        _ => panic!("Expected Projection under Sort"),
                     }
-                }
+                    _ => panic!("Expected Projection under Sort"),
+                },
                 _ => panic!("Expected Sort as root node"),
             }
         }
@@ -5294,7 +5431,7 @@ mod tests {
                     // Should be a compound condition (AND)
                     match predicate.as_ref() {
                         Expression::Logic(_) => (), // AND expression
-                        _ => (), // Might be represented differently
+                        _ => (),                    // Might be represented differently
                     }
                 }
                 _ => panic!("Expected Filter for HAVING clause"),
@@ -5308,7 +5445,7 @@ mod tests {
 
             let sql = "SELECT name, age, COUNT(*) FROM users GROUP BY ALL";
             let result = fixture.planner.create_logical_plan(sql);
-            
+
             // GROUP BY ALL might not be implemented yet
             // Test documents expected behavior
         }
@@ -5324,7 +5461,7 @@ mod tests {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Aggregate { aggregates, .. } => {
                     assert_eq!(aggregates.len(), 5);
-                    
+
                     // Verify different return types for different aggregates
                     let expected_types = [
                         (AggregationType::Count, TypeId::BigInt),
@@ -5334,7 +5471,9 @@ mod tests {
                         (AggregationType::Max, TypeId::VarChar),
                     ];
 
-                    for (i, (expected_agg_type, expected_return_type)) in expected_types.iter().enumerate() {
+                    for (i, (expected_agg_type, expected_return_type)) in
+                        expected_types.iter().enumerate()
+                    {
                         if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
                             assert_eq!(*agg.get_agg_type(), *expected_agg_type);
                             // Note: Return types might be different based on implementation
@@ -5356,7 +5495,11 @@ mod tests {
             let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
             match &plan.children[0].plan_type {
-                LogicalPlanType::Aggregate { group_by, aggregates, .. } => {
+                LogicalPlanType::Aggregate {
+                    group_by,
+                    aggregates,
+                    ..
+                } => {
                     assert_eq!(group_by.len(), 1);
                     assert_eq!(aggregates.len(), 1);
                 }
@@ -5373,7 +5516,7 @@ mod tests {
                 "SELECT COUNT() FROM users", // Missing argument for COUNT
                 "SELECT SUM() FROM users",   // Missing argument for SUM
                 "SELECT AVG(name) FROM users WHERE name IS NULL", // AVG on string (might be handled)
-                "SELECT name FROM users GROUP BY age", // SELECT column not in GROUP BY
+                "SELECT name FROM users GROUP BY age",            // SELECT column not in GROUP BY
             ];
 
             for sql in error_cases {
@@ -5398,7 +5541,11 @@ mod tests {
             ";
 
             let result = fixture.planner.create_logical_plan(sql);
-            assert!(result.is_ok(), "Query planning should succeed: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query planning should succeed: {:?}",
+                result.err()
+            );
 
             let plan = result.unwrap();
             let schema = plan.get_schema().unwrap();
@@ -5424,7 +5571,11 @@ mod tests {
             ";
 
             let result = fixture.planner.create_logical_plan(sql);
-            assert!(result.is_ok(), "Query planning should succeed: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query planning should succeed: {:?}",
+                result.err()
+            );
 
             let plan = result.unwrap();
             let schema = plan.get_schema().unwrap();
@@ -5451,7 +5602,11 @@ mod tests {
             ";
 
             let result = fixture.planner.create_logical_plan(sql);
-            assert!(result.is_ok(), "Query planning should succeed: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query planning should succeed: {:?}",
+                result.err()
+            );
 
             let plan = result.unwrap();
             let schema = plan.get_schema().unwrap();
@@ -5484,7 +5639,11 @@ mod tests {
             ";
 
             let result = fixture.planner.create_logical_plan(sql);
-            assert!(result.is_ok(), "Query planning should succeed: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query planning should succeed: {:?}",
+                result.err()
+            );
 
             let plan = result.unwrap();
             let schema = plan.get_schema().unwrap();
@@ -5514,7 +5673,10 @@ mod tests {
 
             let result = fixture.planner.create_logical_plan(sql);
             // This should fail because e.id is not in GROUP BY and not an aggregate
-            assert!(result.is_err(), "Query should fail because e.id is not in GROUP BY");
+            assert!(
+                result.is_err(),
+                "Query should fail because e.id is not in GROUP BY"
+            );
         }
     }
 
@@ -5871,17 +6033,15 @@ mod tests {
 
             // Should have projection -> aggregation -> join
             match &plan.plan_type {
-                LogicalPlanType::Projection { .. } => {
-                    match &plan.children[0].plan_type {
-                        LogicalPlanType::Aggregate { .. } => {
-                            match &plan.children[0].children[0].plan_type {
-                                LogicalPlanType::NestedLoopJoin { .. } => (),
-                                _ => panic!("Expected NestedLoopJoin under Aggregate"),
-                            }
+                LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
+                    LogicalPlanType::Aggregate { .. } => {
+                        match &plan.children[0].children[0].plan_type {
+                            LogicalPlanType::NestedLoopJoin { .. } => (),
+                            _ => panic!("Expected NestedLoopJoin under Aggregate"),
                         }
-                        _ => panic!("Expected Aggregate node"),
                     }
-                }
+                    _ => panic!("Expected Aggregate node"),
+                },
                 _ => panic!("Expected Projection as root node"),
             }
         }
@@ -6052,14 +6212,12 @@ mod tests {
 
             // Should have filter after join to handle NULL values
             match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { .. } => {
-                    match &plan.children[0].children[0].plan_type {
-                        LogicalPlanType::NestedLoopJoin { join_type, .. } => {
-                            assert!(matches!(join_type, JoinOperator::Left(_)));
-                        }
-                        _ => panic!("Expected NestedLoopJoin under Filter"),
+                LogicalPlanType::Filter { .. } => match &plan.children[0].children[0].plan_type {
+                    LogicalPlanType::NestedLoopJoin { join_type, .. } => {
+                        assert!(matches!(join_type, JoinOperator::Left(_)));
                     }
-                }
+                    _ => panic!("Expected NestedLoopJoin under Filter"),
+                },
                 _ => panic!("Expected Filter node"),
             }
         }
@@ -6114,18 +6272,35 @@ mod tests {
                                      FROM users u \
                                      LEFT OUTER JOIN orders o ON u.id = o.user_id";
 
-            let left_outer_join_plan = fixture.planner.create_logical_plan(left_outer_join_sql).unwrap();
+            let left_outer_join_plan = fixture
+                .planner
+                .create_logical_plan(left_outer_join_sql)
+                .unwrap();
 
             // Both should produce NestedLoopJoin plans with equivalent join types
-            match (&left_join_plan.children[0].plan_type, &left_outer_join_plan.children[0].plan_type) {
-                (LogicalPlanType::NestedLoopJoin { join_type: left_join_type, .. }, 
-                 LogicalPlanType::NestedLoopJoin { join_type: left_outer_join_type, .. }) => {
+            match (
+                &left_join_plan.children[0].plan_type,
+                &left_outer_join_plan.children[0].plan_type,
+            ) {
+                (
+                    LogicalPlanType::NestedLoopJoin {
+                        join_type: left_join_type,
+                        ..
+                    },
+                    LogicalPlanType::NestedLoopJoin {
+                        join_type: left_outer_join_type,
+                        ..
+                    },
+                ) => {
                     // Both should be treated as left outer joins
                     assert!(matches!(left_join_type, JoinOperator::Left(_)));
                     assert!(matches!(left_outer_join_type, JoinOperator::LeftOuter(_)));
-                    
+
                     // Verify the plans have the same structure and schemas
-                    assert_eq!(left_join_plan.children[0].get_schema(), left_outer_join_plan.children[0].get_schema());
+                    assert_eq!(
+                        left_join_plan.children[0].get_schema(),
+                        left_outer_join_plan.children[0].get_schema()
+                    );
                 }
                 _ => panic!("Expected NestedLoopJoin nodes for both LEFT JOIN and LEFT OUTER JOIN"),
             }
@@ -6148,20 +6323,39 @@ mod tests {
                                       FROM users u \
                                       RIGHT OUTER JOIN orders o ON u.id = o.user_id";
 
-            let right_outer_join_plan = fixture.planner.create_logical_plan(right_outer_join_sql).unwrap();
+            let right_outer_join_plan = fixture
+                .planner
+                .create_logical_plan(right_outer_join_sql)
+                .unwrap();
 
             // Both should produce NestedLoopJoin plans with equivalent join types
-            match (&right_join_plan.children[0].plan_type, &right_outer_join_plan.children[0].plan_type) {
-                (LogicalPlanType::NestedLoopJoin { join_type: right_join_type, .. }, 
-                 LogicalPlanType::NestedLoopJoin { join_type: right_outer_join_type, .. }) => {
+            match (
+                &right_join_plan.children[0].plan_type,
+                &right_outer_join_plan.children[0].plan_type,
+            ) {
+                (
+                    LogicalPlanType::NestedLoopJoin {
+                        join_type: right_join_type,
+                        ..
+                    },
+                    LogicalPlanType::NestedLoopJoin {
+                        join_type: right_outer_join_type,
+                        ..
+                    },
+                ) => {
                     // Both should be treated as right outer joins
                     assert!(matches!(right_join_type, JoinOperator::Right(_)));
                     assert!(matches!(right_outer_join_type, JoinOperator::RightOuter(_)));
-                    
+
                     // Verify the plans have the same structure and schemas
-                    assert_eq!(right_join_plan.children[0].get_schema(), right_outer_join_plan.children[0].get_schema());
+                    assert_eq!(
+                        right_join_plan.children[0].get_schema(),
+                        right_outer_join_plan.children[0].get_schema()
+                    );
                 }
-                _ => panic!("Expected NestedLoopJoin nodes for both RIGHT JOIN and RIGHT OUTER JOIN"),
+                _ => {
+                    panic!("Expected NestedLoopJoin nodes for both RIGHT JOIN and RIGHT OUTER JOIN")
+                }
             }
         }
     }
@@ -6336,7 +6530,7 @@ mod tests {
             }
         }
     }
-    
+
     mod savepoint_tests {
         use super::*;
         use sqlparser::ast::Ident;
@@ -6379,7 +6573,7 @@ mod tests {
             }
         }
     }
-    
+
     mod drop_tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
@@ -6419,7 +6613,7 @@ mod tests {
             }
         }
     }
-    
+
     mod create_index_tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
@@ -6427,9 +6621,9 @@ mod tests {
         fn setup_test_table(fixture: &mut TestContext) {
             fixture
                 .create_table(
-                    "users", 
-                    "id INTEGER, name VARCHAR(255), age INTEGER, email VARCHAR(255)", 
-                    false
+                    "users",
+                    "id INTEGER, name VARCHAR(255), age INTEGER, email VARCHAR(255)",
+                    false,
                 )
                 .unwrap();
         }
@@ -6440,7 +6634,10 @@ mod tests {
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_name ON users (name)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {
@@ -6456,7 +6653,7 @@ mod tests {
                     assert_eq!(key_attrs[0], 1); // name is the second column (0-indexed)
                     assert_eq!(schema.get_column_count(), 1);
                     assert!(!if_not_exists);
-                    
+
                     // Verify the schema contains the correct column
                     let col = schema.get_column(0).unwrap();
                     assert_eq!(col.get_name(), "name");
@@ -6472,7 +6669,10 @@ mod tests {
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_name_age ON users (name, age)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {
@@ -6489,12 +6689,12 @@ mod tests {
                     assert_eq!(key_attrs[1], 2); // age column
                     assert_eq!(schema.get_column_count(), 2);
                     assert!(!if_not_exists);
-                    
+
                     // Verify the schema contains the correct columns
                     let col1 = schema.get_column(0).unwrap();
                     assert_eq!(col1.get_name(), "name");
                     assert_eq!(col1.get_type(), TypeId::VarChar);
-                    
+
                     let col2 = schema.get_column(1).unwrap();
                     assert_eq!(col2.get_name(), "age");
                     assert_eq!(col2.get_type(), TypeId::Integer);
@@ -6509,7 +6709,10 @@ mod tests {
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX IF NOT EXISTS idx_email ON users (email)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {
@@ -6525,7 +6728,7 @@ mod tests {
                     assert_eq!(key_attrs[0], 3); // email is the fourth column (0-indexed)
                     assert_eq!(schema.get_column_count(), 1);
                     assert!(if_not_exists); // This should be true
-                    
+
                     // Verify the schema contains the correct column
                     let col = schema.get_column(0).unwrap();
                     assert_eq!(col.get_name(), "email");
@@ -6541,7 +6744,10 @@ mod tests {
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_id ON users (id)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {
@@ -6557,7 +6763,7 @@ mod tests {
                     assert_eq!(key_attrs[0], 0); // id is the first column (0-indexed)
                     assert_eq!(schema.get_column_count(), 1);
                     assert!(!if_not_exists);
-                    
+
                     // Verify the schema contains the correct column
                     let col = schema.get_column(0).unwrap();
                     assert_eq!(col.get_name(), "id");
@@ -6625,7 +6831,10 @@ mod tests {
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_all ON users (id, name, age, email)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {
@@ -6641,7 +6850,7 @@ mod tests {
                     assert_eq!(key_attrs.as_slice(), [0, 1, 2, 3]); // All columns in order
                     assert_eq!(schema.get_column_count(), 4);
                     assert!(!if_not_exists);
-                    
+
                     // Verify all columns are present in correct order
                     let expected_columns = vec![
                         ("id", TypeId::Integer),
@@ -6649,7 +6858,7 @@ mod tests {
                         ("age", TypeId::Integer),
                         ("email", TypeId::VarChar),
                     ];
-                    
+
                     for (i, (expected_name, expected_type)) in expected_columns.iter().enumerate() {
                         let col = schema.get_column(i).unwrap();
                         assert_eq!(col.get_name(), *expected_name);
@@ -6668,7 +6877,10 @@ mod tests {
             // Note: This tests that the parser can handle UNIQUE INDEX syntax
             // The actual uniqueness constraint enforcement would be handled at execution time
             let create_index_sql = "CREATE UNIQUE INDEX idx_unique_email ON users (email)";
-            let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+            let plan = fixture
+                .planner
+                .create_logical_plan(create_index_sql)
+                .unwrap();
 
             match &plan.plan_type {
                 LogicalPlanType::CreateIndex {

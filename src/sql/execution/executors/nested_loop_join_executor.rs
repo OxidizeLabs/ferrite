@@ -16,16 +16,16 @@ use std::sync::Arc;
 /**
  * NESTED LOOP JOIN EXECUTOR IMPLEMENTATION OVERVIEW
  * =================================================
- * 
+ *
  * The Nested Loop Join executor implements the simplest join algorithm by using two nested loops:
  * - Outer loop: iterates through all tuples from the left child executor
  * - Inner loop: for each left tuple, iterates through all tuples from the right child executor
- * 
+ *
  * ALGORITHM PHASES:
  * 1. INITIALIZATION: Create and initialize both child executors (left and right)
  * 2. EXECUTION: Implement nested loop with join predicate evaluation
  * 3. OUTPUT: Combine tuples based on join type and predicate result
- * 
+ *
  * JOIN TYPE HANDLING:
  * - INNER JOIN: Output combined tuple only when predicate evaluates to true
  * - LEFT OUTER JOIN: Output left tuple with nulls if no right match found
@@ -34,14 +34,14 @@ use std::sync::Arc;
  * - CROSS JOIN: Output cartesian product (predicate always true)
  * - SEMI JOIN: Output left tuple if any right tuple matches (no right columns)
  * - ANTI JOIN: Output left tuple if no right tuple matches
- * 
+ *
  * STATE MANAGEMENT:
  * The executor maintains state between next() calls:
  * - Current left tuple being processed
  * - Current right tuple position
  * - Tracking which left tuples have been matched (for outer joins)
  * - Tracking which right tuples have been matched (for right/full outer joins)
- * 
+ *
  * PERFORMANCE CONSIDERATIONS:
  * - Time complexity: O(M * N) where M = left tuples, N = right tuples
  * - Memory: Minimal (streaming), but may need to cache unmatched tuples for outer joins
@@ -52,21 +52,21 @@ pub struct NestedLoopJoinExecutor {
     children_executors: Option<Vec<Box<dyn AbstractExecutor>>>,
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<NestedLoopJoinNode>,
-    
+
     // Execution state
     initialized: bool,
-    
+
     // Current execution state for nested loops
     current_left_tuple: Option<(Arc<Tuple>, RID)>,
     current_right_executor_exhausted: bool,
     left_executor_exhausted: bool,
-    
+
     // Join state tracking for outer joins
     current_left_matched: bool,
     unmatched_right_tuples: Vec<(Arc<Tuple>, RID)>, // For right/full outer joins
     processing_unmatched_right: bool,
     unmatched_right_index: usize,
-    
+
     // For full outer join - track which left tuples were unmatched
     unmatched_left_tuples: Vec<(Arc<Tuple>, RID)>,
     processing_unmatched_left: bool,
@@ -97,15 +97,19 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Create null-padded tuple for outer joins
      * Used when one side of the join has no match and needs to be padded with nulls
      */
-    fn create_null_padded_tuple(&self, left_tuple: Option<&Arc<Tuple>>, right_tuple: Option<&Arc<Tuple>>) -> Arc<Tuple> {
+    fn create_null_padded_tuple(
+        &self,
+        left_tuple: Option<&Arc<Tuple>>,
+        right_tuple: Option<&Arc<Tuple>>,
+    ) -> Arc<Tuple> {
         // 1. Get schemas to determine final tuple structure
         let left_schema = self.plan.get_left_schema();
         let right_schema = self.plan.get_right_schema();
         let output_schema = self.plan.get_output_schema();
-        
+
         // 2. Create combined vector of values
         let mut combined_values = Vec::new();
-        
+
         // 3. Add left tuple values or nulls
         if let Some(left_tuple) = left_tuple {
             // Add actual values from left tuple
@@ -116,7 +120,7 @@ impl NestedLoopJoinExecutor {
                 combined_values.push(Value::new(Val::Null));
             }
         }
-        
+
         // 4. Add right tuple values or nulls
         if let Some(right_tuple) = right_tuple {
             // Add actual values from right tuple
@@ -127,7 +131,7 @@ impl NestedLoopJoinExecutor {
                 combined_values.push(Value::new(Val::Null));
             }
         }
-        
+
         // 5. Create and return new tuple with combined values
         let rid = RID::new(0, 0); // Use dummy RID for joined tuples
         Arc::new(Tuple::new(&combined_values, output_schema, rid))
@@ -140,16 +144,16 @@ impl NestedLoopJoinExecutor {
     fn combine_tuples(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Arc<Tuple> {
         // 1. Get output schema from the plan
         let output_schema = self.plan.get_output_schema();
-        
+
         // 2. Create combined vector of values
         let mut combined_values = Vec::new();
-        
+
         // 3. Add values from left tuple
         combined_values.extend(left_tuple.get_values().iter().cloned());
-        
+
         // 4. Add values from right tuple
         combined_values.extend(right_tuple.get_values().iter().cloned());
-        
+
         // 5. Create and return new tuple with combined values
         let rid = RID::new(0, 0); // Use dummy RID for joined tuples
         Arc::new(Tuple::new(&combined_values, output_schema, rid))
@@ -162,11 +166,11 @@ impl NestedLoopJoinExecutor {
     fn evaluate_join_predicate(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> bool {
         // 1. Get the predicate from the plan
         let predicate = self.plan.get_predicate();
-        
+
         // 2. Get schemas for both sides
         let left_schema = self.plan.get_left_schema();
         let right_schema = self.plan.get_right_schema();
-        
+
         // 3. Call predicate.evaluate_join() with the context
         // The predicate knows how to resolve column references:
         // - tuple_index 0 refers to left_tuple
@@ -186,7 +190,10 @@ impl NestedLoopJoinExecutor {
             }
             Err(e) => {
                 // Handle evaluation errors as false
-                trace!("Join predicate evaluation error: {:?}, treating as false", e);
+                trace!(
+                    "Join predicate evaluation error: {:?}, treating as false",
+                    e
+                );
                 false
             }
         }
@@ -196,7 +203,11 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle inner join logic
      * Returns Some(tuple) if join condition is met, None otherwise
      */
-    fn handle_inner_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_inner_join(
+        &mut self,
+        left_tuple: &Arc<Tuple>,
+        right_tuple: &Arc<Tuple>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. Evaluate join predicate for tuple pair
         if self.evaluate_join_predicate(left_tuple, right_tuple) {
             // 2. If predicate is true:
@@ -218,7 +229,11 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle left outer join logic
      * Ensures left tuples are output even if no right match exists
      */
-    fn handle_left_outer_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_left_outer_join(
+        &mut self,
+        left_tuple: &Arc<Tuple>,
+        right_tuple: Option<&Arc<Tuple>>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. If right_tuple is Some:
         if let Some(right_tuple) = right_tuple {
             //    a. Evaluate join predicate
@@ -251,7 +266,11 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle right outer join logic  
      * Ensures right tuples are output even if no left match exists
      */
-    fn handle_right_outer_join(&mut self, left_tuple: Option<&Arc<Tuple>>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_right_outer_join(
+        &mut self,
+        left_tuple: Option<&Arc<Tuple>>,
+        right_tuple: &Arc<Tuple>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. If left_tuple is Some:
         if let Some(left_tuple) = left_tuple {
             //    a. Evaluate join predicate
@@ -280,7 +299,11 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle full outer join logic
      * Ensures all tuples from both sides are output, with nulls for unmatched
      */
-    fn handle_full_outer_join(&mut self, left_tuple: Option<&Arc<Tuple>>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_full_outer_join(
+        &mut self,
+        left_tuple: Option<&Arc<Tuple>>,
+        right_tuple: Option<&Arc<Tuple>>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         match (left_tuple, right_tuple) {
             // 1. During normal processing (both tuples available):
             (Some(left_tuple), Some(right_tuple)) => {
@@ -297,7 +320,7 @@ impl NestedLoopJoinExecutor {
                     None
                 }
             }
-            
+
             // 2. After main loop completion:
             //    a. Process unmatched left tuples (left + nulls)
             (Some(left_tuple), None) => {
@@ -306,7 +329,7 @@ impl NestedLoopJoinExecutor {
                 let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
                 Some((padded_tuple, padded_rid))
             }
-            
+
             //    b. Process unmatched right tuples (nulls + right)
             (None, Some(right_tuple)) => {
                 // Processing unmatched right tuples
@@ -314,7 +337,7 @@ impl NestedLoopJoinExecutor {
                 let padded_rid = RID::new(0, 0); // Use dummy RID for joined tuples
                 Some((padded_tuple, padded_rid))
             }
-            
+
             // 3. Both tuples are None - shouldn't happen in normal execution
             (None, None) => {
                 // This case shouldn't occur in normal full outer join processing
@@ -327,15 +350,19 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle cross join logic
      * Returns cartesian product of all tuple combinations
      */
-    fn handle_cross_join(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_cross_join(
+        &self,
+        left_tuple: &Arc<Tuple>,
+        right_tuple: &Arc<Tuple>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. Cross join ignores predicate (or assumes it's always true)
         // 2. Combine every left tuple with every right tuple
         let combined_tuple = self.combine_tuples(left_tuple, right_tuple);
-        
+
         // 3. Return combined tuple directly
         let combined_rid = RID::new(0, 0); // Use dummy RID for joined tuples
         Some((combined_tuple, combined_rid))
-        
+
         // Note: Cross join is the simplest case - just combine all pairs
     }
 
@@ -343,13 +370,17 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle semi join logic
      * Returns left tuples that have at least one matching right tuple
      */
-    fn handle_semi_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_semi_join(
+        &mut self,
+        left_tuple: &Arc<Tuple>,
+        right_tuple: &Arc<Tuple>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. Evaluate join predicate
         if self.evaluate_join_predicate(left_tuple, right_tuple) {
             // 2. If predicate is true:
             //    a. Mark current left tuple as matched
             self.current_left_matched = true;
-            
+
             //    b. Return left tuple ONLY (no right columns)
             //    c. Skip to next left tuple (optimization)
             // Create a new tuple with only left schema columns
@@ -357,7 +388,7 @@ impl NestedLoopJoinExecutor {
             let left_values = left_tuple.get_values().clone();
             let left_rid = RID::new(0, 0); // Use dummy RID for joined tuples
             let left_only_tuple = Arc::new(Tuple::new(&left_values, left_schema, left_rid));
-            
+
             Some((left_only_tuple, left_rid))
         } else {
             // 3. If predicate is false:
@@ -371,7 +402,11 @@ impl NestedLoopJoinExecutor {
      * HELPER METHOD: Handle anti join logic  
      * Returns left tuples that have NO matching right tuples
      */
-    fn handle_anti_join(&mut self, left_tuple: &Arc<Tuple>, right_tuple: Option<&Arc<Tuple>>) -> Option<(Arc<Tuple>, RID)> {
+    fn handle_anti_join(
+        &mut self,
+        left_tuple: &Arc<Tuple>,
+        right_tuple: Option<&Arc<Tuple>>,
+    ) -> Option<(Arc<Tuple>, RID)> {
         // 1. If right_tuple is Some:
         if let Some(right_tuple) = right_tuple {
             //    a. Evaluate join predicate
@@ -391,7 +426,7 @@ impl NestedLoopJoinExecutor {
                 let left_values = left_tuple.get_values().clone();
                 let left_rid = RID::new(0, 0); // Use dummy RID for joined tuples
                 let left_only_tuple = Arc::new(Tuple::new(&left_values, left_schema, left_rid));
-                
+
                 Some((left_only_tuple, left_rid))
             } else {
                 //    c. If left tuple was matched: return None
@@ -413,15 +448,15 @@ impl NestedLoopJoinExecutor {
                 children[1].init();
             }
         }
-        
+
         // 2. Reset right executor exhausted flag
         self.current_right_executor_exhausted = false;
-        
+
         // 3. Clear any right-side state tracking that's specific to current iteration
-        // Note: We don't clear unmatched_right_tuples here as it's used for 
+        // Note: We don't clear unmatched_right_tuples here as it's used for
         // tracking across the entire join operation for outer joins.
         // The main join logic will handle when to populate and process those.
-        
+
         // Log the reset for debugging
         trace!("Reset right executor for next left tuple iteration");
     }
@@ -444,7 +479,10 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         //    a. Verify exactly 2 children exist
         let children_plans = self.plan.get_children();
         if children_plans.len() != 2 {
-            panic!("NestedLoopJoin requires exactly 2 children, got {}", children_plans.len());
+            panic!(
+                "NestedLoopJoin requires exactly 2 children, got {}",
+                children_plans.len()
+            );
         }
 
         //    b. Validate join predicate is not null (it's Arc<Expression>, so it exists)
@@ -477,7 +515,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
             }
         }
 
-        // Create right executor  
+        // Create right executor
         debug!("Creating right executor with plan: {:?}", right_plan);
         match right_plan.create_executor(self.context.clone()) {
             Ok(right_executor) => {
@@ -497,12 +535,18 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
             //    a. Call init() on left executor
             debug!("Initializing left executor");
             children[0].init();
-            debug!("Left executor initialized with schema: {:?}", children[0].get_output_schema());
+            debug!(
+                "Left executor initialized with schema: {:?}",
+                children[0].get_output_schema()
+            );
 
             //    b. Call init() on right executor
             debug!("Initializing right executor");
             children[1].init();
-            debug!("Right executor initialized with schema: {:?}", children[1].get_output_schema());
+            debug!(
+                "Right executor initialized with schema: {:?}",
+                children[1].get_output_schema()
+            );
         }
 
         // 4. INITIALIZE STATE VARIABLES:
@@ -535,9 +579,12 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                 debug!("Inner/Left/Semi/Anti join detected - no special unmatched tracking needed");
             }
         }
-        
+
         // 6. LOG INITIALIZATION:
-        debug!("NestedLoopJoin initialized - Join Type: {:?}", self.plan.get_join_type());
+        debug!(
+            "NestedLoopJoin initialized - Join Type: {:?}",
+            self.plan.get_join_type()
+        );
         debug!("NestedLoopJoinExecutor initialization completed successfully");
     }
 
@@ -560,7 +607,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
             if self.unmatched_right_index < self.unmatched_right_tuples.len() {
                 let (right_tuple, _) = &self.unmatched_right_tuples[self.unmatched_right_index];
                 self.unmatched_right_index += 1;
-                
+
                 let join_type = self.plan.get_join_type();
                 match join_type {
                     JoinType::RightAnti(_) => {
@@ -568,9 +615,10 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                         let right_schema = self.plan.get_right_schema();
                         let right_values = right_tuple.get_values().clone();
                         let right_rid = RID::new(0, 0);
-                        let right_only_tuple = Arc::new(Tuple::new(&right_values, right_schema, right_rid));
+                        let right_only_tuple =
+                            Arc::new(Tuple::new(&right_values, right_schema, right_rid));
                         return Some((right_only_tuple, right_rid));
-                    },
+                    }
                     _ => {
                         // For other right joins, create null-padded tuple for unmatched right tuple
                         let padded_tuple = self.create_null_padded_tuple(None, Some(right_tuple));
@@ -596,7 +644,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
             if self.unmatched_left_index < self.unmatched_left_tuples.len() {
                 let (left_tuple, _) = &self.unmatched_left_tuples[self.unmatched_left_index];
                 self.unmatched_left_index += 1;
-                
+
                 // Create null-padded tuple for unmatched left tuple
                 let padded_tuple = self.create_null_padded_tuple(Some(left_tuple), None);
                 let rid = RID::new(0, 0);
@@ -641,7 +689,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                             JoinType::CrossJoin => true, // Cross join always matches
                             _ => self.evaluate_join_predicate(&left_tuple, right_tuple),
                         };
-                        
+
                         let result = match join_type {
                             JoinType::Inner(_) => {
                                 if predicate_result {
@@ -650,7 +698,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::LeftOuter(_) | JoinType::Left(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
@@ -658,7 +706,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::RightOuter(_) | JoinType::Right(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
@@ -666,19 +714,22 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::FullOuter(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
-                                    self.handle_full_outer_join(Some(&left_tuple), Some(right_tuple))
+                                    self.handle_full_outer_join(
+                                        Some(&left_tuple),
+                                        Some(right_tuple),
+                                    )
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::CrossJoin => {
                                 self.current_left_matched = true;
                                 self.handle_cross_join(&left_tuple, right_tuple)
-                            },
+                            }
                             JoinType::Semi(_) | JoinType::LeftSemi(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
@@ -689,29 +740,33 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::Anti(_) | JoinType::LeftAnti(_) => {
                                 if predicate_result {
                                     self.current_left_matched = true;
                                 }
                                 None // Anti join doesn't output during main loop
-                            },
+                            }
                             JoinType::RightSemi(_) => {
                                 // Right semi join: return right tuple if predicate matches
                                 if predicate_result {
                                     let right_schema = self.plan.get_right_schema();
                                     let right_values = right_tuple.get_values().clone();
                                     let right_rid = RID::new(0, 0);
-                                    let right_only_tuple = Arc::new(Tuple::new(&right_values, right_schema, right_rid));
+                                    let right_only_tuple = Arc::new(Tuple::new(
+                                        &right_values,
+                                        right_schema,
+                                        right_rid,
+                                    ));
                                     Some((right_only_tuple, right_rid))
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             JoinType::RightAnti(_) => {
                                 // Right anti join: track matches, output unmatched rights later
                                 None // Anti join doesn't output during main loop
-                            },
+                            }
                             JoinType::Join(_) => {
                                 // Treat as inner join
                                 if predicate_result {
@@ -720,12 +775,15 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                 } else {
                                     None
                                 }
-                            },
+                            }
                             _ => None, // Unsupported join types
                         };
 
                         if result.is_some() {
-                            trace!("Processing left tuple: {:?}, right tuple: {:?}", left_tuple, right_tuple);
+                            trace!(
+                                "Processing left tuple: {:?}, right tuple: {:?}",
+                                left_tuple, right_tuple
+                            );
                             debug!("Join predicate result: {}", predicate_result);
                             return result;
                         }
@@ -747,21 +805,21 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                     } else {
                         None
                     }
-                },
+                }
                 JoinType::Anti(_) | JoinType::LeftAnti(_) => {
                     if !self.current_left_matched {
                         self.handle_anti_join(&left_tuple, None)
                     } else {
                         None
                     }
-                },
+                }
                 JoinType::FullOuter(_) => {
                     if !self.current_left_matched {
                         // Track unmatched left tuple for later processing
                         self.unmatched_left_tuples.push((left_tuple, left_rid));
                     }
                     None
-                },
+                }
                 _ => None,
             };
 
@@ -778,33 +836,42 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         // Main loop completed - for right/full outer joins, collect unmatched right tuples
         let join_type = self.plan.get_join_type();
         match join_type {
-            JoinType::RightOuter(_) | JoinType::Right(_) | JoinType::FullOuter(_) | JoinType::RightSemi(_) | JoinType::RightAnti(_) => {
+            JoinType::RightOuter(_)
+            | JoinType::Right(_)
+            | JoinType::FullOuter(_)
+            | JoinType::RightSemi(_)
+            | JoinType::RightAnti(_) => {
                 if !self.processing_unmatched_right && self.unmatched_right_tuples.is_empty() {
                     // Get the predicate without cloning - we'll use it directly
                     let predicate = self.plan.get_predicate();
-                    
+
                     // Collect all unmatched right tuples by scanning the right executor
                     if let Some(ref mut children) = self.children_executors {
                         // Reset right executor to scan all right tuples
                         children[1].init();
-                        
+
                         while let Some(right_result) = children[1].next() {
                             let (right_tuple, _) = &right_result;
                             let mut is_matched = false;
-                            
+
                             // Check if this right tuple matches any left tuple
                             // Reset left executor to scan all left tuples
                             children[0].init();
                             while let Some(left_result) = children[0].next() {
                                 let (left_tuple, _) = &left_result;
-                                
+
                                 // Use the evaluate_join_predicate logic directly
                                 // Get schemas directly from plan without cloning
                                 let left_schema = self.plan.get_left_schema();
                                 let right_schema = self.plan.get_right_schema();
-                                
+
                                 // Evaluate predicate using the same logic as evaluate_join_predicate
-                                match predicate.evaluate_join(left_tuple, left_schema, right_tuple, right_schema) {
+                                match predicate.evaluate_join(
+                                    left_tuple,
+                                    left_schema,
+                                    right_tuple,
+                                    right_schema,
+                                ) {
                                     Ok(value) => {
                                         match value.as_bool() {
                                             Ok(result) => {
@@ -812,39 +879,46 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                                                     is_matched = true;
                                                     break;
                                                 }
-                                            },
+                                            }
                                             Err(_) => {
                                                 // Handle null values - treat as false for join predicates
-                                                trace!("Join predicate evaluated to null or error, treating as false");
+                                                trace!(
+                                                    "Join predicate evaluated to null or error, treating as false"
+                                                );
                                             }
                                         }
                                     }
                                     Err(e) => {
                                         // Handle evaluation errors as false
-                                        trace!("Join predicate evaluation error: {:?}, treating as false", e);
+                                        trace!(
+                                            "Join predicate evaluation error: {:?}, treating as false",
+                                            e
+                                        );
                                     }
                                 }
                             }
-                            
+
                             // If no match found, add to unmatched right tuples based on join type
                             if !is_matched {
                                 match join_type {
-                                    JoinType::RightOuter(_) | JoinType::Right(_) | JoinType::FullOuter(_) => {
+                                    JoinType::RightOuter(_)
+                                    | JoinType::Right(_)
+                                    | JoinType::FullOuter(_) => {
                                         self.unmatched_right_tuples.push(right_result);
-                                    },
+                                    }
                                     JoinType::RightSemi(_) => {
                                         // Right semi - don't add unmatched tuples (we want matched ones)
-                                    },
+                                    }
                                     JoinType::RightAnti(_) => {
                                         // Right anti - add unmatched tuples (this is what we want to output)
                                         self.unmatched_right_tuples.push(right_result);
-                                    },
+                                    }
                                     _ => {}
                                 }
                             }
                         }
                     }
-                    
+
                     // Start processing unmatched right tuples
                     if !self.unmatched_right_tuples.is_empty() {
                         self.processing_unmatched_right = true;
@@ -857,7 +931,7 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                         return self.next(); // Recurse to process unmatched left tuples
                     }
                 }
-            },
+            }
             _ => {}
         }
 
@@ -977,9 +1051,13 @@ mod unit_tests {
 
     // Helper function to create test tuples
     fn create_test_tuple(values: Vec<Value>) -> Arc<Tuple> {
-        let schema = Schema::new(values.iter().enumerate().map(|(i, v)| {
-            Column::new(&format!("col_{}", i), v.get_type_id())
-        }).collect());
+        let schema = Schema::new(
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| Column::new(&format!("col_{}", i), v.get_type_id()))
+                .collect(),
+        );
 
         let rid = RID::new(0, 0);
         Arc::new(Tuple::new(&values, &schema, rid))
@@ -1052,10 +1130,7 @@ mod unit_tests {
         let executor = create_test_executor();
 
         // Create a left tuple
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         // Test with right tuple as None (should pad right side with nulls)
         let result = executor.create_null_padded_tuple(Some(&left_tuple), None);
@@ -1095,10 +1170,7 @@ mod unit_tests {
     fn test_combine_tuples() {
         let executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1126,10 +1198,7 @@ mod unit_tests {
     fn test_evaluate_join_predicate_true() {
         let executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1176,10 +1245,7 @@ mod unit_tests {
 
         let executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1195,10 +1261,7 @@ mod unit_tests {
     fn test_handle_inner_join_match() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1251,10 +1314,7 @@ mod unit_tests {
 
         let mut executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1273,10 +1333,7 @@ mod unit_tests {
     fn test_handle_left_outer_join_with_match() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1300,10 +1357,7 @@ mod unit_tests {
         let mut executor = create_test_executor();
         executor.current_left_matched = false; // Simulate no previous match
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let result = executor.handle_left_outer_join(&left_tuple, None);
 
@@ -1326,10 +1380,7 @@ mod unit_tests {
     fn test_handle_cross_join() {
         let executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1351,10 +1402,7 @@ mod unit_tests {
     fn test_handle_semi_join_match() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1412,10 +1460,7 @@ mod unit_tests {
         let mut executor = NestedLoopJoinExecutor::new(execution_context, join_plan);
         executor.current_left_matched = false; // No match found during scan
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         // Test with None right tuple (end of right side)
         let result = executor.handle_anti_join(&left_tuple, None);
@@ -1437,10 +1482,7 @@ mod unit_tests {
         let mut executor = create_test_executor();
         executor.current_left_matched = true; // Match was found during scan
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         // Test with None right tuple (end of right side)
         let result = executor.handle_anti_join(&left_tuple, None);
@@ -1453,10 +1495,7 @@ mod unit_tests {
     fn test_handle_right_outer_join_with_match() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1485,7 +1524,9 @@ mod unit_tests {
         ]);
 
         // Simulate processing unmatched right tuples
-        executor.unmatched_right_tuples.push((right_tuple.clone(), RID::new(0, 0)));
+        executor
+            .unmatched_right_tuples
+            .push((right_tuple.clone(), RID::new(0, 0)));
         executor.processing_unmatched_right = true;
         executor.unmatched_right_index = 0;
 
@@ -1510,10 +1551,7 @@ mod unit_tests {
     fn test_handle_full_outer_join_match() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         let right_tuple = create_test_tuple(vec![
             Value::new(100),
@@ -1535,13 +1573,12 @@ mod unit_tests {
     fn test_handle_full_outer_join_unmatched_left() {
         let mut executor = create_test_executor();
 
-        let left_tuple = create_test_tuple(vec![
-            Value::new(1),
-            Value::new("Alice"),
-        ]);
+        let left_tuple = create_test_tuple(vec![Value::new(1), Value::new("Alice")]);
 
         // Simulate processing unmatched left tuples
-        executor.unmatched_left_tuples.push((left_tuple.clone(), RID::new(0, 0)));
+        executor
+            .unmatched_left_tuples
+            .push((left_tuple.clone(), RID::new(0, 0)));
         executor.processing_unmatched_left = true;
         executor.unmatched_left_index = 0;
 
@@ -1619,7 +1656,9 @@ mod integration_tests {
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::sql::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
@@ -2046,7 +2085,7 @@ mod integration_tests {
             result_count += 1;
             let values = tuple.get_values();
             let user_name = ToString::to_string(&values[1]);
-            
+
             match user_name.as_str() {
                 "Alice" => alice_posts += 1,
                 "Bob" => bob_posts += 1,
@@ -2399,11 +2438,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -2441,8 +2486,7 @@ mod integration_tests {
             result_count += 1;
             let values = tuple.get_values();
             let user_name = ToString::to_string(&values[1]);
-            
-            
+
             match user_name.as_str() {
                 "Alice" => {
                     alice_results += 1;
@@ -2473,9 +2517,9 @@ mod integration_tests {
         // Expected results: Alice(2) + Bob(1) + Charlie(1) + David(1) = 5 rows
         assert_eq!(result_count, 5);
         assert_eq!(alice_results, 2); // Alice has 2 posts
-        assert_eq!(bob_results, 1);   // Bob has 1 post
+        assert_eq!(bob_results, 1); // Bob has 1 post
         assert_eq!(charlie_results, 1); // Charlie with nulls
-        assert_eq!(david_results, 1);   // David with nulls
+        assert_eq!(david_results, 1); // David with nulls
     }
 
     #[test]
@@ -2520,7 +2564,11 @@ mod integration_tests {
             vec![Value::new(2), Value::new(1), Value::new("Alice Post 2")], // Has user
             vec![Value::new(3), Value::new(2), Value::new("Bob Post 1")],   // Has user
             vec![Value::new(4), Value::new(99), Value::new("Orphaned Post 1")], // No matching user
-            vec![Value::new(5), Value::new(100), Value::new("Orphaned Post 2")], // No matching user
+            vec![
+                Value::new(5),
+                Value::new(100),
+                Value::new("Orphaned Post 2"),
+            ], // No matching user
         ];
 
         // Insert data into tables
@@ -2572,11 +2620,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -2629,7 +2683,7 @@ mod integration_tests {
         // Expected results: All 5 posts should appear
         assert_eq!(result_count, 5);
         assert_eq!(posts_with_users, 3); // 3 posts have matching users
-        assert_eq!(orphaned_posts, 2);   // 2 posts are orphaned
+        assert_eq!(orphaned_posts, 2); // 2 posts are orphaned
     }
 
     #[test]
@@ -2725,11 +2779,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -2765,10 +2825,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             let user_id_null = values[0].is_null();
             let post_id_null = values[2].is_null();
-            
+
             if !user_id_null && !post_id_null {
                 matched_rows += 1; // Both sides have data
             } else if user_id_null && !post_id_null {
@@ -2883,11 +2943,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -2922,10 +2988,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Semi join should only return left table columns
             assert_eq!(values.len(), 2); // Only user columns (id, name)
-            
+
             let user_name = ToString::to_string(&values[1]);
             match user_name.as_str() {
                 "Alice" => alice_found = true,
@@ -3036,11 +3102,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -3075,10 +3147,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Anti join should only return left table columns
             assert_eq!(values.len(), 2); // Only user columns (id, name)
-            
+
             let user_name = ToString::to_string(&values[1]);
             match user_name.as_str() {
                 "Charlie" => charlie_found = true,
@@ -3187,11 +3259,17 @@ mod integration_tests {
 
         // Create join predicate (departments.dept_id = employees.dept_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("dept_id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("dept_id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("dept_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("dept_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -3225,10 +3303,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Left semi join should only return left table columns
             assert_eq!(values.len(), 2); // Only department columns
-            
+
             let dept_name = ToString::to_string(&values[1]);
             departments_found.push(dept_name);
         }
@@ -3334,11 +3412,17 @@ mod integration_tests {
 
         // Create join predicate (departments.dept_id = employees.dept_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("dept_id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("dept_id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("dept_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("dept_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -3372,10 +3456,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Left anti join should only return left table columns
             assert_eq!(values.len(), 2); // Only department columns
-            
+
             let dept_name = ToString::to_string(&values[1]);
             departments_found.push(dept_name);
         }
@@ -3482,11 +3566,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -3520,10 +3610,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Right semi join should only return right table columns
             assert_eq!(values.len(), 3); // Only post columns (id, user_id, title)
-            
+
             let post_title = ToString::to_string(&values[2]);
             post_titles.push(post_title);
         }
@@ -3631,11 +3721,17 @@ mod integration_tests {
 
         // Create join predicate (users.id = posts.user_id)
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, 0, Column::new("id", TypeId::Integer), vec![],
+            0,
+            0,
+            Column::new("id", TypeId::Integer),
+            vec![],
         )));
 
         let right_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            1, 1, Column::new("user_id", TypeId::Integer), vec![],
+            1,
+            1,
+            Column::new("user_id", TypeId::Integer),
+            vec![],
         )));
 
         let predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
@@ -3669,10 +3765,10 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Right anti join should only return right table columns
             assert_eq!(values.len(), 3); // Only post columns (id, user_id, title)
-            
+
             let post_title = ToString::to_string(&values[2]);
             post_titles.push(post_title);
         }
@@ -3781,10 +3877,16 @@ mod integration_tests {
         // Create complex predicate: products.category_id = categories.id AND products.price >= categories.min_price
         let category_match = Arc::new(Expression::Comparison(ComparisonExpression::new(
             Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                0, 2, Column::new("category_id", TypeId::Integer), vec![],
+                0,
+                2,
+                Column::new("category_id", TypeId::Integer),
+                vec![],
             ))),
             Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-                1, 0, Column::new("id", TypeId::Integer), vec![],
+                1,
+                0,
+                Column::new("id", TypeId::Integer),
+                vec![],
             ))),
             ComparisonType::Equal,
             vec![],
@@ -3816,7 +3918,7 @@ mod integration_tests {
         while let Some((tuple, _)) = join_executor.next() {
             result_count += 1;
             let values = tuple.get_values();
-            
+
             // Verify the join condition is met
             let product_category_id = values[2].as_integer().unwrap();
             let category_id = values[3].as_integer().unwrap();

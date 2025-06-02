@@ -204,7 +204,10 @@ mod tests {
         match &plan_enum {
             PlanNode::RollbackTransaction(inner_node) => {
                 assert_eq!(inner_node.is_chain(), true);
-                assert_eq!(inner_node.get_savepoint(), &Some("test_savepoint".to_string()));
+                assert_eq!(
+                    inner_node.get_savepoint(),
+                    &Some("test_savepoint".to_string())
+                );
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
             }
@@ -295,10 +298,13 @@ mod tests {
         // Test rollback to savepoint and chain
         let savepoint_and_chain = RollbackTransactionPlanNode::new(true, Some("sp1".to_string()));
         assert!(savepoint_and_chain.is_chain());
-        assert_eq!(savepoint_and_chain.get_savepoint(), &Some("sp1".to_string()));
+        assert_eq!(
+            savepoint_and_chain.get_savepoint(),
+            &Some("sp1".to_string())
+        );
 
         let detailed_both = format!("{:#}", savepoint_and_chain);
         assert!(detailed_both.contains("Chain: true"));
         assert!(detailed_both.contains("Savepoint: sp1"));
     }
-} 
+}

@@ -8,20 +8,20 @@ use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
+use crate::storage::index::types::key_types::KeyType;
+use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::types_db::value::Value;
 use log::warn;
 use log::{debug, error};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
-use crate::types_db::value::Value;
 use tempfile::TempDir;
-use crate::sql::execution::plans::filter_plan::FilterNode;
-use crate::storage::table::table_heap::TableHeap;
-use crate::storage::index::types::key_types::KeyType;
 
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -191,24 +191,25 @@ impl AbstractExecutor for UpdateExecutor {
 
             // Apply the updates to the tuple
             let mut values = tuple.get_values();
-            
+
             // Handle target expressions
             // Note: There are three formats the target expressions can be in:
             // 1. Assignment expressions - new format from planner
             // 2. Pairs of [ColumnRef, ValueExpr] - traditional format
             // 3. Single expressions like Arithmetic(balance - 200) - from SQL parsing
-            
+
             // Check if all expressions are Assignment expressions
-            let all_assignments = target_expressions.iter().all(|expr| {
-                matches!(expr.as_ref(), Expression::Assignment(_))
-            });
-            
+            let all_assignments = target_expressions
+                .iter()
+                .all(|expr| matches!(expr.as_ref(), Expression::Assignment(_)));
+
             if all_assignments {
                 // Case 1: Assignment expressions
                 for expr in target_expressions.iter() {
                     if let Expression::Assignment(assignment_expr) = expr.as_ref() {
                         let col_idx = assignment_expr.get_target_column_index();
-                        let new_value = assignment_expr.get_value_expr()
+                        let new_value = assignment_expr
+                            .get_value_expr()
                             .evaluate(&tuple, output_schema)
                             .expect("Failed to evaluate assignment expression");
                         values[col_idx] = new_value;
@@ -217,7 +218,7 @@ impl AbstractExecutor for UpdateExecutor {
             } else if target_expressions.len() == 1 {
                 // Case 2: Single arithmetic or other expression where the target is embedded
                 let expr = &target_expressions[0];
-                
+
                 // Extract target column from expression
                 let col_idx = match expr.as_ref() {
                     Expression::Arithmetic(arith_expr) => {
@@ -234,32 +235,39 @@ impl AbstractExecutor for UpdateExecutor {
                                         }
                                     }
                                     None
-                                },
+                                }
                                 _ => None,
                             }
                         }
-                        
-                        find_column_ref(&Expression::Arithmetic(arith_expr.clone())).unwrap_or_else(|| {
-                            panic!("Could not determine target column from arithmetic expression")
-                        })
-                    },
+
+                        find_column_ref(&Expression::Arithmetic(arith_expr.clone())).unwrap_or_else(
+                            || {
+                                panic!(
+                                    "Could not determine target column from arithmetic expression"
+                                )
+                            },
+                        )
+                    }
                     Expression::ColumnRef(col_ref) => {
                         // Direct column reference
                         col_ref.get_column_index()
-                    },
+                    }
                     _ => {
-                        // For other expression types (like Constant, Literal, etc.), 
-                        // we need to handle them differently. This case suggests the 
+                        // For other expression types (like Constant, Literal, etc.),
+                        // we need to handle them differently. This case suggests the
                         // planner is creating expressions in a different format than expected.
                         // Let's fall back to the paired expression format.
-                        panic!("Unsupported update expression type: {:?}. Expected either paired expressions [ColumnRef, ValueExpr] or single arithmetic expressions.", expr)
+                        panic!(
+                            "Unsupported update expression type: {:?}. Expected either paired expressions [ColumnRef, ValueExpr] or single arithmetic expressions.",
+                            expr
+                        )
                     }
                 };
-                
+
                 let new_value = expr
                     .evaluate(&tuple, output_schema)
                     .expect("Failed to evaluate expression");
-                
+
                 values[col_idx] = new_value;
             } else {
                 // Case 3: Pairs of expressions
@@ -347,7 +355,6 @@ mod tests {
     use crate::types_db::types::Type;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
-    use crate::sql::execution::expressions::abstract_expression::Expression::Logic;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -503,12 +510,15 @@ mod tests {
 
     fn create_complex_filter(schema: &Schema) -> FilterNode {
         // id > 2 AND (age < 35 OR department = 'Engineering')
-        
+
         // id > 2
         let id_idx = schema.get_column_index("id").unwrap();
         let id_col = schema.get_column(id_idx).unwrap().clone();
         let id_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, id_idx, id_col.clone(), vec![],
+            0,
+            id_idx,
+            id_col.clone(),
+            vec![],
         )));
         let id_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(2),
@@ -516,14 +526,20 @@ mod tests {
             vec![],
         )));
         let id_pred = Arc::new(Expression::Comparison(ComparisonExpression::new(
-            id_expr, id_val, ComparisonType::GreaterThan, vec![],
+            id_expr,
+            id_val,
+            ComparisonType::GreaterThan,
+            vec![],
         )));
-        
+
         // age < 35
         let age_idx = schema.get_column_index("age").unwrap();
         let age_col = schema.get_column(age_idx).unwrap().clone();
         let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, age_idx, age_col.clone(), vec![],
+            0,
+            age_idx,
+            age_col.clone(),
+            vec![],
         )));
         let age_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(35),
@@ -531,14 +547,20 @@ mod tests {
             vec![],
         )));
         let age_pred = Arc::new(Expression::Comparison(ComparisonExpression::new(
-            age_expr, age_val, ComparisonType::LessThan, vec![],
+            age_expr,
+            age_val,
+            ComparisonType::LessThan,
+            vec![],
         )));
-        
+
         // department = 'Engineering'
         let dept_idx = schema.get_column_index("department").unwrap();
         let dept_col = schema.get_column(dept_idx).unwrap().clone();
         let dept_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, dept_idx, dept_col.clone(), vec![],
+            0,
+            dept_idx,
+            dept_col.clone(),
+            vec![],
         )));
         let dept_val = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new("Engineering".to_string()),
@@ -546,17 +568,20 @@ mod tests {
             vec![],
         )));
         let dept_pred = Arc::new(Expression::Comparison(ComparisonExpression::new(
-            dept_expr, dept_val, ComparisonType::Equal, vec![],
-        )));
-        
-        // age < 35 OR department = 'Engineering'
-        let or_pred = Arc::new(Expression::Logic(LogicExpression::new(
-            age_pred.clone(), 
-            dept_pred.clone(), 
-            LogicType::Or, 
+            dept_expr,
+            dept_val,
+            ComparisonType::Equal,
             vec![],
         )));
-        
+
+        // age < 35 OR department = 'Engineering'
+        let or_pred = Arc::new(Expression::Logic(LogicExpression::new(
+            age_pred.clone(),
+            dept_pred.clone(),
+            LogicType::Or,
+            vec![],
+        )));
+
         // id > 2 AND (age < 35 OR department = 'Engineering')
         let and_pred = Expression::Logic(LogicExpression::new(
             id_pred.clone(),
@@ -564,7 +589,7 @@ mod tests {
             LogicType::And,
             vec![],
         ));
-        
+
         FilterNode::new(
             schema.clone(),
             0,
@@ -767,13 +792,18 @@ mod tests {
         // Simulating what we'd get from parsing "UPDATE test_table SET salary = salary - 5000 WHERE id = 1"
         let salary_idx = schema.get_column_index("salary").unwrap();
         let salary_col = schema.get_column(salary_idx).unwrap().clone();
-        
+
         let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, salary_idx, salary_col.clone(), vec![],
+            0,
+            salary_idx,
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(5000), salary_col.clone(), vec![],
+            Value::new(5000),
+            salary_col.clone(),
+            vec![],
         )));
 
         // This is the single update expression: salary - 5000
@@ -806,12 +836,12 @@ mod tests {
         // Verify the update
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
-        
+
         while let Some((meta, tuple)) = iterator.next() {
             if meta.is_deleted() {
                 continue;
             }
-            
+
             let id = tuple.get_value(0).as_integer().unwrap();
             if id == 1 {
                 let salary = tuple.get_value(4).as_integer().unwrap();
@@ -820,7 +850,7 @@ mod tests {
                 break;
             }
         }
-        
+
         assert!(verified, "Update was not verified");
     }
 
@@ -864,20 +894,30 @@ mod tests {
         let dept_idx = schema.get_column_index("department").unwrap();
         let dept_col = schema.get_column(dept_idx).unwrap().clone();
         let dept_target = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, dept_idx, dept_col.clone(), vec![],
+            0,
+            dept_idx,
+            dept_col.clone(),
+            vec![],
         )));
         let dept_value = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new("Marketing".to_string()), dept_col.clone(), vec![],
+            Value::new("Marketing".to_string()),
+            dept_col.clone(),
+            vec![],
         )));
-        
+
         // 2. Update salary to 85000
         let salary_idx = schema.get_column_index("salary").unwrap();
         let salary_col = schema.get_column(salary_idx).unwrap().clone();
         let salary_target = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, salary_idx, salary_col.clone(), vec![],
+            0,
+            salary_idx,
+            salary_col.clone(),
+            vec![],
         )));
         let salary_value = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(85000), salary_col.clone(), vec![],
+            Value::new(85000),
+            salary_col.clone(),
+            vec![],
         )));
 
         // Create update plan with multiple target expressions
@@ -904,24 +944,24 @@ mod tests {
         // Verify the updates
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
-        
+
         while let Some((meta, tuple)) = iterator.next() {
             if meta.is_deleted() {
                 continue;
             }
-            
+
             let id = tuple.get_value(0).as_integer().unwrap();
             if id == 2 {
                 let dept = String::from_value(&tuple.get_value(3)).unwrap();
                 let salary = tuple.get_value(4).as_integer().unwrap();
-                
+
                 assert_eq!(dept, "Marketing"); // Changed from "Sales"
                 assert_eq!(salary, 85000); // Changed from 80000
                 verified = true;
                 break;
             }
         }
-        
+
         assert!(verified, "Updates were not verified");
     }
 
@@ -963,11 +1003,14 @@ mod tests {
         // Create a salary update expression: salary * 1.1
         let salary_idx = schema.get_column_index("salary").unwrap();
         let salary_col = schema.get_column(salary_idx).unwrap().clone();
-        
+
         let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, salary_idx, salary_col.clone(), vec![],
+            0,
+            salary_idx,
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             Value::new(1.1), // 10% raise
             Column::new("factor", TypeId::Decimal),
@@ -1014,20 +1057,23 @@ mod tests {
         // Print all tuples to verify the updates (instead of assertions)
         println!("\nALL TUPLES AFTER UPDATE:");
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
-        
+
         while let Some((meta, tuple)) = iterator.next() {
             if meta.is_deleted() {
                 continue;
             }
-            
+
             let id = tuple.get_value(0).as_integer().unwrap();
             let name = tuple.get_value(1);
             let age = tuple.get_value(2).as_integer().unwrap();
             let department = tuple.get_value(3);
             let salary = tuple.get_value(4).as_integer().unwrap();
-            
-            println!("Found tuple: id={}, name={}, age={}, department={}, salary={}", id, name, age, department, salary);
-            
+
+            println!(
+                "Found tuple: id={}, name={}, age={}, department={}, salary={}",
+                id, name, age, department, salary
+            );
+
             // Instead of assertions, manually verify the expected values
             if id == 3 && salary != 99000 {
                 println!("ERROR: Charlie's salary should be 99000, got {}", salary);
@@ -1037,7 +1083,7 @@ mod tests {
                 println!("ERROR: Eve's salary should be 93500, got {}", salary);
             }
         }
-        
+
         // Comment out the assertion since we're manually verifying
         // assert_eq!(verified_count, 3, "Not all updates were verified");
     }
@@ -1081,10 +1127,15 @@ mod tests {
         let age_idx = schema.get_column_index("age").unwrap();
         let age_col = schema.get_column(age_idx).unwrap().clone();
         let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, age_idx, age_col.clone(), vec![],
+            0,
+            age_idx,
+            age_col.clone(),
+            vec![],
         )));
         let update_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(50), age_col.clone(), vec![],
+            Value::new(50),
+            age_col.clone(),
+            vec![],
         )));
 
         // Create update plan
@@ -1145,13 +1196,21 @@ mod tests {
         let id_idx = schema.get_column_index("id").unwrap();
         let id_col = schema.get_column(id_idx).unwrap().clone();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, id_idx, id_col.clone(), vec![],
+            0,
+            id_idx,
+            id_col.clone(),
+            vec![],
         )));
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(0), id_col.clone(), vec![],
+            Value::new(0),
+            id_col.clone(),
+            vec![],
         )));
         let predicate = Expression::Comparison(ComparisonExpression::new(
-            col_expr, const_expr, ComparisonType::GreaterThan, vec![],
+            col_expr,
+            const_expr,
+            ComparisonType::GreaterThan,
+            vec![],
         ));
         let filter_plan = FilterNode::new(
             schema.clone(),
@@ -1165,10 +1224,15 @@ mod tests {
         let dept_idx = schema.get_column_index("department").unwrap();
         let dept_col = schema.get_column(dept_idx).unwrap().clone();
         let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, dept_idx, dept_col.clone(), vec![],
+            0,
+            dept_idx,
+            dept_col.clone(),
+            vec![],
         )));
         let update_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new("Updated".to_string()), dept_col.clone(), vec![],
+            Value::new("Updated".to_string()),
+            dept_col.clone(),
+            vec![],
         )));
 
         // Create update plan
@@ -1234,13 +1298,18 @@ mod tests {
         // Create division expression: salary / 2
         let salary_idx = schema.get_column_index("salary").unwrap();
         let salary_col = schema.get_column(salary_idx).unwrap().clone();
-        
+
         let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, salary_idx, salary_col.clone(), vec![],
+            0,
+            salary_idx,
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(2), salary_col.clone(), vec![],
+            Value::new(2),
+            salary_col.clone(),
+            vec![],
         )));
 
         let division_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
@@ -1272,12 +1341,12 @@ mod tests {
         // Verify the division result
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
-        
+
         while let Some((meta, tuple)) = iterator.next() {
             if meta.is_deleted() {
                 continue;
             }
-            
+
             let id = tuple.get_value(0).as_integer().unwrap();
             if id == 3 {
                 let salary = tuple.get_value(4).as_integer().unwrap();
@@ -1286,7 +1355,7 @@ mod tests {
                 break;
             }
         }
-        
+
         assert!(verified, "Division update was not verified");
     }
 
@@ -1329,11 +1398,16 @@ mod tests {
         let name_idx = schema.get_column_index("name").unwrap();
         let name_col = schema.get_column(name_idx).unwrap().clone();
         let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, name_idx, name_col.clone(), vec![],
+            0,
+            name_idx,
+            name_col.clone(),
+            vec![],
         )));
-        
+
         let new_name_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new("Alice Smith".to_string()), name_col.clone(), vec![],
+            Value::new("Alice Smith".to_string()),
+            name_col.clone(),
+            vec![],
         )));
 
         // Create update plan
@@ -1360,12 +1434,12 @@ mod tests {
         // Verify the update result
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
-        
+
         while let Some((meta, tuple)) = iterator.next() {
             if meta.is_deleted() {
                 continue;
             }
-            
+
             let id = tuple.get_value(0).as_integer().unwrap();
             if id == 1 {
                 let name = String::from_value(&tuple.get_value(1)).unwrap();
@@ -1374,7 +1448,7 @@ mod tests {
                 break;
             }
         }
-        
+
         assert!(verified, "String constant update was not verified");
     }
 
@@ -1414,10 +1488,15 @@ mod tests {
         let age_idx = schema.get_column_index("age").unwrap();
         let age_col = schema.get_column(age_idx).unwrap().clone();
         let target_col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, age_idx, age_col.clone(), vec![],
+            0,
+            age_idx,
+            age_col.clone(),
+            vec![],
         )));
         let update_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(99), age_col.clone(), vec![],
+            Value::new(99),
+            age_col.clone(),
+            vec![],
         )));
 
         // Create update plan without any children (no filter)
@@ -1441,7 +1520,10 @@ mod tests {
         }
 
         // Without a child executor (table scan), no updates should occur
-        assert_eq!(update_count, 0, "No updates should occur without a data source");
+        assert_eq!(
+            update_count, 0,
+            "No updates should occur without a data source"
+        );
     }
 
     #[test]
@@ -1482,21 +1564,30 @@ mod tests {
         // Create complex arithmetic expression: (salary + 5000) * 2 - 1000
         let salary_idx = schema.get_column_index("salary").unwrap();
         let salary_col = schema.get_column(salary_idx).unwrap().clone();
-        
+
         let salary_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, salary_idx, salary_col.clone(), vec![],
+            0,
+            salary_idx,
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_5000 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(5000), salary_col.clone(), vec![],
+            Value::new(5000),
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_2 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(2), salary_col.clone(), vec![],
+            Value::new(2),
+            salary_col.clone(),
+            vec![],
         )));
-        
+
         let const_1000 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(1000), salary_col.clone(), vec![],
+            Value::new(1000),
+            salary_col.clone(),
+            vec![],
         )));
 
         // salary + 5000
@@ -1578,13 +1669,21 @@ mod tests {
         let dept_idx = schema.get_column_index("department").unwrap();
         let dept_col = schema.get_column(dept_idx).unwrap().clone();
         let col_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, dept_idx, dept_col.clone(), vec![],
+            0,
+            dept_idx,
+            dept_col.clone(),
+            vec![],
         )));
         let const_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new("Engineering".to_string()), dept_col.clone(), vec![],
+            Value::new("Engineering".to_string()),
+            dept_col.clone(),
+            vec![],
         )));
         let predicate = Expression::Comparison(ComparisonExpression::new(
-            col_expr, const_expr, ComparisonType::Equal, vec![],
+            col_expr,
+            const_expr,
+            ComparisonType::Equal,
+            vec![],
         ));
         let filter_plan = FilterNode::new(
             schema.clone(),
@@ -1597,13 +1696,18 @@ mod tests {
         // Create update expression to increment age by 10
         let age_idx = schema.get_column_index("age").unwrap();
         let age_col = schema.get_column(age_idx).unwrap().clone();
-        
+
         let age_expr = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
-            0, age_idx, age_col.clone(), vec![],
+            0,
+            age_idx,
+            age_col.clone(),
+            vec![],
         )));
-        
+
         let const_10 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(10), age_col.clone(), vec![],
+            Value::new(10),
+            age_col.clone(),
+            vec![],
         )));
 
         let increment_expr = Arc::new(Expression::Arithmetic(ArithmeticExpression::new(
@@ -1626,14 +1730,17 @@ mod tests {
 
         // Execute update - should only update matching tuples once
         let mut total_updates = 0;
-        
+
         // Execute all updates
         while let Some(_) = executor.next() {
             total_updates += 1;
         }
 
         // Should update both Alice and Charlie in Engineering department
-        assert_eq!(total_updates, 2, "Should update both tuples in Engineering department");
+        assert_eq!(
+            total_updates, 2,
+            "Should update both tuples in Engineering department"
+        );
 
         // The update count assertion is sufficient to verify that both Engineering employees were updated
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction

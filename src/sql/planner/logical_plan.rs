@@ -1,9 +1,11 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
+use crate::common::rid::RID;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
+use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
@@ -38,8 +40,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ptr;
 use std::sync::Arc;
 use std::thread_local;
-use crate::common::rid::RID;
-use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
@@ -1692,7 +1692,7 @@ impl<'a> PlanConverter<'a> {
                         expressions.clone(),
                         column_mappings.clone(),
                     )
-                    .with_children(child_plans),
+                        .with_children(child_plans),
                 ))
             }
 
@@ -1973,8 +1973,8 @@ impl<'a> PlanConverter<'a> {
                 // Create a CommitTransaction plan node
                 Ok(PlanNode::CommitTransaction(
                     crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode::new(
-                        *chain, 
-                        *end
+                        *chain,
+                        *end,
                     )
                 ))
             }
@@ -1985,7 +1985,7 @@ impl<'a> PlanConverter<'a> {
                 Ok(PlanNode::RollbackTransaction(
                     crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode::new(
                         *chain,
-                        savepoint_str
+                        savepoint_str,
                     )
                 ))
             }
@@ -2227,13 +2227,13 @@ fn extract_join_keys(
             // Step 2.1.1: Verify it's an equality comparison (error if not)
             if let ComparisonType::Equal = comp_expr.get_comp_type() {
                 let children = comp_expr.get_children();
-                
+
                 // Step 2.1.2: Extract the two sides of the comparison
                 if children.len() == 2 {
                     // Step 2.1.3: Verify both sides are ColumnRefExpressions
-                    if let (Expression::ColumnRef(left_ref), Expression::ColumnRef(right_ref)) = 
+                    if let (Expression::ColumnRef(left_ref), Expression::ColumnRef(right_ref)) =
                         (children[0].as_ref(), children[1].as_ref()) {
-                        
+
                         // Step 2.1.4: Create new column references with proper tuple indices
                         let left_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                             0, // Left tuple index always 0
@@ -2241,7 +2241,7 @@ fn extract_join_keys(
                             left_ref.get_return_type().clone(),
                             vec![],
                         )));
-                        
+
                         // Step 2.1.5: Special handling for "d.id" - fix column index to 0
                         let col_name = right_ref.get_return_type().get_name();
                         let (tuple_index, column_index) = if col_name == "d.id" {
@@ -2249,14 +2249,14 @@ fn extract_join_keys(
                         } else {
                             (1, right_ref.get_column_index()) // Right tuple index always 1
                         };
-                        
+
                         let right_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                             tuple_index,
                             column_index,
                             right_ref.get_return_type().clone(),
                             vec![],
                         )));
-                        
+
                         // Step 2.1.6: Create a fixed comparison with the new column references
                         let fixed_predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
                             left_key.clone(),
@@ -2264,11 +2264,11 @@ fn extract_join_keys(
                             ComparisonType::Equal,
                             vec![left_key.clone(), right_key.clone()],
                         )));
-                        
+
                         // Step 2.1.7: Add to respective key vectors
                         left_keys.push(left_key);
                         right_keys.push(right_key);
-                        
+
                         return Ok((left_keys, right_keys, fixed_predicate));
                     } else {
                         return Err("Join predicate must compare column references".to_string());
@@ -2279,27 +2279,27 @@ fn extract_join_keys(
             } else {
                 return Err("Join predicate must use equality comparison".to_string());
             }
-        },
-        
+        }
+
         // Step 2.2: Handle Logic expressions (like AND between multiple conditions)
         Expression::Logic(logic_expr) => {
             // Step 2.2.1: Verify it's an AND expression
             if let LogicType::And = logic_expr.get_logic_type() {
                 let children = logic_expr.get_children();
-                
+
                 if children.len() == 2 {
                     // Step 2.2.2: Recursively extract keys from each child predicate
-                    let (mut left_keys1, mut right_keys1, fixed_pred1) = 
+                    let (mut left_keys1, mut right_keys1, fixed_pred1) =
                         extract_join_keys(&children[0])?;
-                    let (mut left_keys2, mut right_keys2, fixed_pred2) = 
+                    let (mut left_keys2, mut right_keys2, fixed_pred2) =
                         extract_join_keys(&children[1])?;
-                    
+
                     // Step 2.2.3: Combine the results
                     left_keys.append(&mut left_keys1);
                     left_keys.append(&mut left_keys2);
                     right_keys.append(&mut right_keys1);
                     right_keys.append(&mut right_keys2);
-                    
+
                     // Step 2.2.4: Combine the fixed predicates with AND
                     let combined_predicate = Arc::new(Expression::Logic(LogicExpression::new(
                         fixed_pred1,
@@ -2307,7 +2307,7 @@ fn extract_join_keys(
                         LogicType::And,
                         children.clone(),
                     )));
-                    
+
                     return Ok((left_keys, right_keys, combined_predicate));
                 } else {
                     return Err("Logic expression must have exactly two operands".to_string());
@@ -2315,8 +2315,8 @@ fn extract_join_keys(
             } else {
                 return Err("Only AND is supported for combining join conditions".to_string());
             }
-        },
-        
+        }
+
         // Step 2.3: Error for unsupported expression types
         _ => return Err(format!("Unsupported join predicate expression type: {:?}", predicate)),
     }
@@ -3645,19 +3645,19 @@ mod test_extract_join_keys {
         let left_col = create_column_ref(0, 0, "a.id");
         let right_col = create_column_ref(0, 1, "b.id");
         let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
-        
+
         let result = extract_join_keys(&predicate).unwrap();
-        
+
         // Verify we got one key from each side
         assert_eq!(result.0.len(), 1);
         assert_eq!(result.1.len(), 1);
-        
+
         // Verify the fixed predicate exists
         let fixed_predicate = result.2;
-        
+
         // Verify tuple indices
         if let Expression::Comparison(comp) = fixed_predicate.as_ref() {
-            if let (Expression::ColumnRef(left), Expression::ColumnRef(right)) = 
+            if let (Expression::ColumnRef(left), Expression::ColumnRef(right)) =
                 (comp.get_children()[0].as_ref(), comp.get_children()[1].as_ref()) {
                 assert_eq!(left.get_tuple_index(), 0);
                 assert_eq!(right.get_tuple_index(), 1);
@@ -3668,26 +3668,26 @@ mod test_extract_join_keys {
             panic!("Expected comparison expression for fixed predicate");
         }
     }
-    
+
     #[test]
     fn test_extract_multiple_conditions() {
         // a.id = b.id AND a.value = b.value
         let left_col1 = create_column_ref(0, 0, "a.id");
         let right_col1 = create_column_ref(0, 1, "b.id");
         let pred1 = create_comparison(left_col1, right_col1, ComparisonType::Equal);
-        
+
         let left_col2 = create_column_ref(0, 2, "a.value");
         let right_col2 = create_column_ref(0, 3, "b.value");
         let pred2 = create_comparison(left_col2, right_col2, ComparisonType::Equal);
-        
+
         let combined_pred = create_logic(pred1, pred2, LogicType::And);
-        
+
         let result = extract_join_keys(&combined_pred).unwrap();
-        
+
         // Verify we got two keys from each side
         assert_eq!(result.0.len(), 2);
         assert_eq!(result.1.len(), 2);
-        
+
         // Verify the fixed predicate exists and is a logic expression
         if let Expression::Logic(logic) = result.2.as_ref() {
             assert_eq!(logic.get_logic_type(), LogicType::And);
@@ -3695,16 +3695,16 @@ mod test_extract_join_keys {
             panic!("Expected logic expression for fixed predicate with multiple conditions");
         }
     }
-    
+
     #[test]
     fn test_fix_column_index_for_right_table() {
         // a.dept_id = d.id where d.id is first column (index 0) in departments table
         let left_col = create_column_ref(0, 2, "a.dept_id");
         let right_col = create_column_ref(0, 3, "d.id"); // Index is wrong in original predicate
         let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
-        
+
         let result = extract_join_keys(&predicate).unwrap();
-        
+
         // Check the fixed predicate's right column index
         if let Expression::Comparison(comp) = result.2.as_ref() {
             if let Expression::ColumnRef(right) = comp.get_children()[1].as_ref() {
@@ -3718,18 +3718,18 @@ mod test_extract_join_keys {
             panic!("Expected comparison expression");
         }
     }
-    
+
     #[test]
     fn test_non_equality_predicate() {
         // a.id > b.id (should fail)
         let left_col = create_column_ref(0, 0, "a.id");
         let right_col = create_column_ref(0, 1, "b.id");
         let predicate = create_comparison(left_col, right_col, ComparisonType::GreaterThan);
-        
+
         let result = extract_join_keys(&predicate);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_non_column_predicate() {
         // Create a non-column reference expression (should fail)
@@ -3740,7 +3740,7 @@ mod test_extract_join_keys {
         )));
         let col = create_column_ref(0, 0, "a.id");
         let predicate = create_comparison(constant, col, ComparisonType::Equal);
-        
+
         let result = extract_join_keys(&predicate);
         assert!(result.is_err());
     }

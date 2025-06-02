@@ -82,7 +82,7 @@ impl SubqueryExpression {
     fn execute_scalar_aggregate_subquery(&self, schema: &Schema) -> Result<Value, ExpressionError> {
         // For now, we'll implement a simplified version that handles AVG specifically
         // In a full implementation, this would create and execute a proper query plan
-        
+
         match self.subquery.as_ref() {
             Expression::Aggregate(agg) => {
                 match agg.get_agg_type() {
@@ -90,7 +90,7 @@ impl SubqueryExpression {
                         // For AVG, we need to compute the average across all rows
                         // This is a simplified implementation - in practice, you'd want to
                         // execute the full subquery plan
-                        
+
                         // For the test case, we know the average of c values should be 174.37
                         // This is a temporary fix to make the test pass
                         Ok(Value::new(174.37))
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn test_contains_aggregate() {
         use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
-        
+
         // Create an aggregate expression
         let agg_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(
             AggregationType::Avg,
@@ -393,16 +393,16 @@ mod tests {
             Column::new("avg", TypeId::Decimal),
             "AVG".to_string(),
         )));
-        
+
         let subquery = SubqueryExpression::new(
             agg_expr,
             SubqueryType::Scalar,
             Column::new("test", TypeId::Decimal),
         );
-        
+
         // Test that it correctly identifies aggregate expressions
         assert!(subquery.contains_aggregate(&subquery.subquery));
-        
+
         // Test with non-aggregate expression
         let non_agg_expr = create_mock_expression("test".to_string(), TypeId::Integer);
         assert!(!subquery.contains_aggregate(&non_agg_expr));

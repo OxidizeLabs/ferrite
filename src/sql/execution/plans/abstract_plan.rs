@@ -24,6 +24,7 @@ use crate::sql::execution::executors::update_executor::UpdateExecutor;
 use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::executors::window_executor::WindowExecutor;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
+use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode;
 use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
@@ -36,6 +37,7 @@ use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
+use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::sql::execution::plans::sort_plan::SortNode;
 use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
@@ -49,8 +51,6 @@ use parking_lot::RwLock;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode;
-use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -174,7 +174,9 @@ impl PlanNode {
                 // These plan nodes don't fully implement AbstractPlanNode
                 // So we handle them as special cases in Display implementation
                 // But to avoid panics, we'll throw a more descriptive error
-                panic!("CommandResult and Explain plan nodes cannot be used with as_abstract_plan_node")
+                panic!(
+                    "CommandResult and Explain plan nodes cannot be used with as_abstract_plan_node"
+                )
             }
         }
     }
@@ -744,30 +746,28 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
-            PlanNode::StartTransaction(node) => {
-                Ok(Box::new(StartTransactionExecutor::new(
-                    context,
-                    node.clone(),
-                )))
-            },
+            PlanNode::StartTransaction(node) => Ok(Box::new(StartTransactionExecutor::new(
+                context,
+                node.clone(),
+            ))),
             PlanNode::CommitTransaction(node) => {
                 use crate::sql::execution::executors::commit_transaction_executor::CommitTransactionExecutor;
                 Ok(Box::new(CommitTransactionExecutor::new(
                     context,
                     node.clone(),
                 )))
-            },
+            }
             PlanNode::RollbackTransaction(node) => {
                 use crate::sql::execution::executors::rollback_transaction_executor::RollbackTransactionExecutor;
                 Ok(Box::new(RollbackTransactionExecutor::new(
                     context,
                     node.clone(),
                 )))
-            },
+            }
             PlanNode::CommandResult(cmd) => {
                 use crate::sql::execution::executors::command_executor::CommandExecutor;
                 Ok(Box::new(CommandExecutor::new(context, cmd.clone())))
-            },
+            }
             PlanNode::Explain(_) => todo!(),
         }
     }

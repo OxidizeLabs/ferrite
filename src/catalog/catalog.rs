@@ -319,12 +319,12 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::concurrency::lock_manager::LockManager;
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,

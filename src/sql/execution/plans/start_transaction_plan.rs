@@ -1,8 +1,8 @@
 use crate::catalog::schema::Schema;
+use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use crate::concurrency::transaction::IsolationLevel;
 
 /// Represents a plan node that starts a transaction with specified isolation level and read-only status
 #[derive(Debug, Clone, PartialEq)]
