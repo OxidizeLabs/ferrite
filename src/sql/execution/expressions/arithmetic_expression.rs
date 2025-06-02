@@ -1331,7 +1331,8 @@ mod basic_functionality {
 
 #[cfg(test)]
 mod display_and_formatting {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::arithmetic_expression::{
         ArithmeticExpression, ArithmeticOp,
@@ -1454,7 +1455,8 @@ mod display_and_formatting {
 
 #[cfg(test)]
 mod specific_data_types {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{
@@ -1532,7 +1534,8 @@ mod specific_data_types {
 
 #[cfg(test)]
 mod extended_numeric_types {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{
@@ -1718,7 +1721,8 @@ mod extended_numeric_types {
 
 #[cfg(test)]
 mod mixed_type_operations {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{
@@ -1919,7 +1923,8 @@ mod mixed_type_operations {
 
 #[cfg(test)]
 mod invalid_operations {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{
@@ -2132,7 +2137,8 @@ mod invalid_operations {
 #[cfg(test)]
 mod type_inference {
     use std::sync::Arc;
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{ArithmeticExpression, ArithmeticOp};
@@ -2358,7 +2364,8 @@ mod type_inference {
 
 #[cfg(test)]
 mod edge_cases {
-    use crate::catalog::{Column, Schema};
+    use crate::catalog::column::Column;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
     use crate::sql::execution::expressions::arithmetic_expression::{
