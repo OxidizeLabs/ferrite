@@ -503,7 +503,7 @@ impl DirtyPageTable {
 mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Schema;
+    use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
