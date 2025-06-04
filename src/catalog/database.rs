@@ -149,10 +149,10 @@ impl Database {
         self.db_oid
     }
 
-    /// Creates a new table and returns its metadata.
+    /// Creates a new table in the database and returns its metadata.
     ///
     /// # Parameters
-    /// - `name`: The name of the new table. Note that all tables beginning with `__` are reserved for the system.
+    /// - `name`: The name of the new table.
     /// - `schema`: The schema of the new table.
     ///
     /// # Returns
@@ -160,6 +160,12 @@ impl Database {
     pub fn create_table(&mut self, name: String, schema: Schema) -> Option<TableInfo> {
         // Check if table with this name already exists
         if self.table_names.contains_key(&name) {
+            return None;
+        }
+
+        // Validate foreign key constraints
+        if let Err(err) = self.validate_foreign_key_constraints(&schema) {
+            warn!("Cannot create table '{}': {}", name, err);
             return None;
         }
 
@@ -188,6 +194,43 @@ impl Database {
         );
 
         Some(table_info)
+    }
+
+    /// Validates foreign key constraints for a schema.
+    ///
+    /// # Parameters
+    /// - `schema`: The schema to validate.
+    ///
+    /// # Returns
+    /// Ok(()) if all foreign key constraints are valid, Err(String) with error message otherwise
+    fn validate_foreign_key_constraints(&self, schema: &Schema) -> Result<(), String> {
+        for column in schema.get_columns() {
+            if let Some(fk) = column.get_foreign_key() {
+                // Check if referenced table exists
+                if !self.table_names.contains_key(&fk.referenced_table) {
+                    return Err(format!(
+                        "foreign key constraint references non-existent table '{}'",
+                        fk.referenced_table
+                    ));
+                }
+
+                // Check if referenced column exists in the referenced table
+                if let Some(referenced_table_schema) = self.get_table_schema(&fk.referenced_table) {
+                    if referenced_table_schema.get_column_index(&fk.referenced_column).is_none() {
+                        return Err(format!(
+                            "foreign key constraint references non-existent column '{}' in table '{}'",
+                            fk.referenced_column, fk.referenced_table
+                        ));
+                    }
+                } else {
+                    return Err(format!(
+                        "foreign key constraint references non-existent table '{}'",
+                        fk.referenced_table
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Queries table metadata by name.
