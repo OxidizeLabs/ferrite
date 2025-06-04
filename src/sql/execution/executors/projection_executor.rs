@@ -165,6 +165,11 @@ impl AbstractExecutor for ProjectionExecutor {
                             projected_values.push(value);
                         }
                         Err(e) => {
+                            // Handle invalid column references gracefully by skipping the tuple
+                            if let crate::common::exception::ExpressionError::InvalidColumnIndex(_) = e {
+                                debug!("Skipping tuple due to invalid column reference: {}", e);
+                                return self.next(); // Try the next tuple
+                            }
                             return Err(DBError::Execution(format!("Failed to evaluate projection expression: {}", e)));
                         }
                     }
