@@ -1,6 +1,7 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::storage::table::tuple::Tuple;
@@ -129,18 +130,21 @@ impl AbstractExecutor for CommandExecutor {
         // No initialization needed
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
-            return None;
+            return Ok(None);
         }
 
         self.executed = true;
 
         // Execute the command and get the result tuple
-        self.execute_command().map(|(meta, tuple)| {
-            let rid = tuple.get_rid();
-            (Arc::new(tuple), rid)
-        })
+        match self.execute_command() {
+            Some((_meta, tuple)) => {
+                let rid = tuple.get_rid();
+                Ok(Some((Arc::new(tuple), rid)))
+            }
+            None => Ok(None)
+        }
     }
 
     fn get_output_schema(&self) -> &Schema {

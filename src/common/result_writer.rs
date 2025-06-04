@@ -141,7 +141,7 @@ impl ResultWriter for NetworkResultWriter {
         self.rows.push(values);
     }
 
-    fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema) {
+    fn write_row_with_schema(&mut self, values: Vec<Value>, _schema: &Schema) {
         // For network responses, we still store the original values
         // but the formatting will be handled when converting to strings
         self.rows.push(values);

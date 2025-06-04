@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
@@ -20,8 +21,10 @@ pub trait AbstractExecutor: Send + Sync {
     ///
     /// # Returns
     ///
-    /// Returns `Some((Tuple, RID))` if a tuple was produced, `None` if there are no more tuples.
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)>;
+    /// Returns `Ok(Some((Tuple, RID)))` if a tuple was produced, 
+    /// `Ok(None)` if there are no more tuples,
+    /// `Err(DBError)` if an error occurred during execution.
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError>;
 
     /// Get the schema of the tuples that this executor produces.
     fn get_output_schema(&self) -> &Schema;

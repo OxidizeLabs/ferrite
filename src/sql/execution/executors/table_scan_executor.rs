@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -49,33 +50,35 @@ impl AbstractExecutor for TableScanExecutor {
         debug!("TableScanExecutor initialized successfully");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         // Initialize if not already done
         if !self.initialized {
             self.init();
         }
 
         // Get the next tuple from the iterator
-        match &mut self.iterator {
-            Some(iter) => {
-                match iter.next() {
-                    Some((meta, tuple)) => {
-                        // Skip deleted tuples
-                        if meta.is_deleted() {
-                            return self.next();
+        loop {
+            match &mut self.iterator {
+                Some(iter) => {
+                    match iter.next() {
+                        Some((meta, tuple)) => {
+                            // Skip deleted tuples
+                            if meta.is_deleted() {
+                                continue; // Use continue instead of recursive call
+                            }
+                            debug!("Found tuple with RID: {:?}", tuple.get_rid());
+                            return Ok(Some((tuple.clone(), tuple.get_rid())));
                         }
-                        debug!("Found tuple with RID: {:?}", tuple.get_rid());
-                        Some((tuple.clone(), tuple.get_rid()))
-                    }
-                    None => {
-                        debug!("No more tuples to scan");
-                        None
+                        None => {
+                            debug!("No more tuples to scan");
+                            return Ok(None);
+                        }
                     }
                 }
-            }
-            None => {
-                error!("Iterator not initialized");
-                None
+                None => {
+                    error!("Iterator not initialized");
+                    return Err(DBError::Execution("Iterator not initialized".to_string()));
+                }
             }
         }
     }
@@ -231,7 +234,7 @@ mod tests {
         // Test scanning
         executor.init();
         let mut count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             count += 1;
         }
 
@@ -271,7 +274,7 @@ mod tests {
         executor.init();
 
         assert!(
-            executor.next().is_none(),
+            executor.next().unwrap().is_none(),
             "Empty table should return no tuples"
         );
     }

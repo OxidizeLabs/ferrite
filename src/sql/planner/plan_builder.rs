@@ -6480,7 +6480,7 @@ mod tests {
 
         #[test]
         fn test_build_start_transaction_plan_with_access_mode() {
-            let mut context = TestContext::new("test_access_mode");
+            let context = TestContext::new("test_access_mode");
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
             let modes = vec![TransactionMode::AccessMode(TransactionAccessMode::ReadOnly)];
             let plan = builder.build_start_transaction_plan(
@@ -6504,7 +6504,7 @@ mod tests {
 
         #[test]
         fn test_build_start_transaction_plan_with_isolation_level() {
-            let mut context = TestContext::new("test_isolation_level");
+            let context = TestContext::new("test_isolation_level");
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
             let modes = vec![TransactionMode::IsolationLevel(
                 TransactionIsolationLevel::Serializable,
@@ -6537,7 +6537,7 @@ mod tests {
 
         #[test]
         fn test_build_savepoint_plan() {
-            let mut fixture = TestContext::new("savepoint_test");
+            let fixture = TestContext::new("savepoint_test");
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
@@ -6555,7 +6555,7 @@ mod tests {
 
         #[test]
         fn test_build_release_savepoint_plan() {
-            let mut fixture = TestContext::new("release_savepoint_test");
+            let fixture = TestContext::new("release_savepoint_test");
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
@@ -6580,7 +6580,7 @@ mod tests {
 
         #[test]
         fn test_build_drop_plan() {
-            let mut fixture = TestContext::new("drop_plan_test");
+            let fixture = TestContext::new("drop_plan_test");
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());

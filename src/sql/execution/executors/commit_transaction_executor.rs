@@ -1,12 +1,12 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode;
-use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, info};
+use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -33,9 +33,9 @@ impl AbstractExecutor for CommitTransactionExecutor {
         debug!("Initializing CommitTransactionExecutor");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
-            return None;
+            return Ok(None);
         }
 
         debug!("Executing transaction commit");
@@ -66,8 +66,8 @@ impl AbstractExecutor for CommitTransactionExecutor {
             context_write.set_chain_after_transaction(true);
         }
 
-        // Return None as transaction operations don't produce tuples
-        None
+        // Return Ok(None) as transaction operations don't produce tuples
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {

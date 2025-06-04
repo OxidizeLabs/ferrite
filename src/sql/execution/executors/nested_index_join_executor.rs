@@ -20,6 +20,7 @@ use crate::types_db::value::Val;
 use log::{debug, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::common::exception::DBError;
 
 pub struct NestedIndexJoinExecutor {
     children_executors: Option<Vec<Box<dyn AbstractExecutor>>>,
@@ -92,11 +93,12 @@ impl NestedIndexJoinExecutor {
         ))
     }
 
-    fn get_next_inner_tuple(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn get_next_inner_tuple(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
+        // Updated to handle Result type from child executors
         // If we have a current right executor, try to get next tuple from it
         if let Some(executor) = &mut self.current_right_executor {
             loop {
-                if let Some(tuple_and_rid) = executor.next() {
+                if let Ok(Some(tuple_and_rid)) = executor.next() {
                     let right_rid = tuple_and_rid.1;
                     // Skip if we've already processed this right tuple for the current left tuple
                     if self.processed_right_rids.contains(&right_rid) {
@@ -108,7 +110,7 @@ impl NestedIndexJoinExecutor {
                     debug!("Adding RID to processed list: {:?}", right_rid);
                     self.processed_right_rids.push(right_rid);
 
-                    return Some(tuple_and_rid);
+                    return Ok(Some(tuple_and_rid));
                 } else {
                     // No more tuples from this executor
                     break;
@@ -116,15 +118,17 @@ impl NestedIndexJoinExecutor {
             }
             // If we get here, exhausted the executor
             self.current_right_executor = None;
-            return None;
+            return Ok(None);
         }
 
         // Create executor for the current left tuple
-        self.create_right_executor()?;
+        if self.create_right_executor().is_none() {
+            return Err(DBError::Execution("Failed to create right executor".to_string()));
+        }
 
         // Now try to get the first result with the newly created executor
         if let Some(executor) = &mut self.current_right_executor {
-            if let Some(tuple_and_rid) = executor.next() {
+            if let Ok(Some(tuple_and_rid)) = executor.next() {
                 let right_rid = tuple_and_rid.1;
 
                 // Check if we've already processed this RID
@@ -143,15 +147,15 @@ impl NestedIndexJoinExecutor {
                 );
                 self.processed_right_rids.push(right_rid);
 
-                return Some(tuple_and_rid);
+                return Ok(Some(tuple_and_rid));
             }
         }
 
         // No results found
-        None
+        Ok(None)
     }
 
-    // New helper method to create the right executor
+    // Modified helper method to return Result instead of Option
     fn create_right_executor(&mut self) -> Option<()> {
         // Get the current left tuple
         let (left_tuple, _) = self.current_left_tuple.as_ref()?;
@@ -266,8 +270,8 @@ impl AbstractExecutor for DummyExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
-        None
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -310,10 +314,10 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("NestedIndexJoinExecutor not initialized");
-            return None;
+            return Ok(None);
         }
 
         loop {
@@ -324,14 +328,14 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
                     let left_rid_clone = *left_rid;
 
                     // Try to get next matching tuple from right relation using index
-                    if let Some((right_tuple, _)) = self.get_next_inner_tuple() {
+                    if let Ok(Some((right_tuple, _))) = self.get_next_inner_tuple() {
                         // Double-check the predicate since get_next_inner_tuple already filters by key equality
                         if self.evaluate_predicate(&left_tuple_clone, &right_tuple) {
                             debug!("Found matching tuple pair, constructing join result");
-                            return Some((
+                            return Ok(Some((
                                 self.construct_output_tuple(&left_tuple_clone, &right_tuple),
                                 left_rid_clone,
-                            ));
+                            )));
                         }
                         continue;
                     } else {
@@ -345,7 +349,7 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
 
             // Get next tuple from left relation
             if let Some(children) = &mut self.children_executors {
-                if let Some(left_tuple) = children[0].next() {
+                if let Some(left_tuple) = children[0].next()? {
                     debug!(
                         "Got new left tuple: {:?}, clearing processed RIDs list",
                         left_tuple.0.get_values()
@@ -360,7 +364,7 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
 
             // No more tuples from left relation
             debug!("No more left tuples, ending join");
-            return None;
+            return Ok(None);
         }
     }
 
@@ -403,7 +407,6 @@ mod tests {
     use crate::types_db::types::{CmpBool, Type};
     use crate::types_db::value::{Val, Value};
     use sqlparser::ast::{JoinConstraint, JoinOperator};
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -577,7 +580,7 @@ mod tests {
 
             debug!("Starting left table scan");
             let mut left_tuples = Vec::new();
-            while let Some((tuple, rid)) = left_executor.next() {
+            while let Ok(Some((tuple, rid))) = left_executor.next() {
                 debug!(
                     "Left table scan tuple at RID {:?}: {:?}",
                     rid,
@@ -611,7 +614,7 @@ mod tests {
 
             debug!("Starting right table scan");
             let mut right_tuples = Vec::new();
-            while let Some((tuple, rid)) = right_executor.next() {
+            while let Ok(Some((tuple, rid))) = right_executor.next() {
                 debug!(
                     "Right table scan tuple at RID {:?}: {:?}",
                     rid,
@@ -679,7 +682,7 @@ mod tests {
                 let dummy_transaction = ctx.transaction_context.get_transaction();
 
                 // Insert each tuple's keys into the index
-                while let Some((tuple, rid)) = right_executor.next() {
+                while let Ok(Some((tuple, rid))) = right_executor.next() {
                     // Extract the key value (id) from the tuple
                     let key_columns = vec![0]; // column index for "id"
                     let mut key_values = Vec::new();
@@ -774,7 +777,7 @@ mod tests {
 
         // Collect and verify results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = join_executor.next() {
+        while let Ok(Some((tuple, _))) = join_executor.next() {
             results.push(tuple);
         }
 

@@ -1,6 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -8,7 +9,7 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use log::{debug, error};
+use log::{debug, error, trace};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -139,40 +140,47 @@ impl ProjectionExecutor {
 
 impl AbstractExecutor for ProjectionExecutor {
     fn init(&mut self) {
-        if self.initialized {
-            debug!("ProjectionExecutor already initialized");
-            return;
-        }
-
         debug!("Initializing ProjectionExecutor");
-
-        // Initialize child executor first
         self.child_executor.init();
-
         self.initialized = true;
-        debug!("ProjectionExecutor initialization complete");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
-            debug!("ProjectionExecutor not initialized, initializing now");
-            self.init();
+            return Err(DBError::Execution("ProjectionExecutor not initialized".to_string()));
         }
 
-        // Get next tuple from child
-        while let Some((tuple, rid)) = self.child_executor.next() {
-            debug!("Processing tuple from child executor");
+        // Get the next tuple from the child executor
+        match self.child_executor.next()? {
+            Some((input_tuple, rid)) => {
+                trace!("ProjectionExecutor processing tuple with RID {:?}", rid);
+                
+                // Apply projections to create the output tuple
+                let mut projected_values = Vec::new();
+                let child_schema = self.child_executor.get_output_schema();
 
-            // Project tuple values according to expressions
-            if let Some(projected_tuple) = self.project_tuple(&tuple) {
-                debug!("Successfully projected tuple");
-                return Some((Arc::from(projected_tuple), rid));
+                for expression in self.plan.get_expressions() {
+                    match expression.evaluate(&input_tuple, child_schema) {
+                        Ok(value) => {
+                            projected_values.push(value);
+                        }
+                        Err(e) => {
+                            return Err(DBError::Execution(format!("Failed to evaluate projection expression: {}", e)));
+                        }
+                    }
+                }
+
+                // Create output tuple with projected values
+                let output_tuple = Arc::new(Tuple::new(&projected_values, self.plan.get_output_schema(), RID::default()));
+                
+                trace!("ProjectionExecutor produced projected tuple");
+                Ok(Some((output_tuple, rid)))
             }
-            debug!("Failed to project tuple, trying next one");
+            None => {
+                debug!("ProjectionExecutor reached end of input");
+                Ok(None)
+            }
         }
-
-        debug!("No more tuples from child executor");
-        None
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -379,19 +387,19 @@ mod tests {
         executor.init();
 
         // First tuple
-        let (tuple1, _rid1) = executor.next().unwrap();
+        let (tuple1, _rid1) = executor.next().unwrap().unwrap();
         assert_eq!(tuple1.get_value(0).get_val(), &Val::from(1));
         assert_eq!(tuple1.get_value(1).get_val(), &Val::from("Alice"));
         assert_eq!(tuple1.get_values().len(), 2);
 
         // Second tuple
-        let (tuple2, _rid2) = executor.next().unwrap();
+        let (tuple2, _rid2) = executor.next().unwrap().unwrap();
         assert_eq!(tuple2.get_value(0).get_val(), &Val::from(2));
         assert_eq!(tuple2.get_value(1).get_val(), &Val::from("Bob"));
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -470,19 +478,19 @@ mod tests {
         executor.init();
 
         // First tuple (Alice's group)
-        let (tuple1, _) = executor.next().unwrap();
+        let (tuple1, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple1.get_value(0).get_val(), &Val::from("Alice"));
         assert_eq!(tuple1.get_value(1).get_val(), &Val::from(75));
         assert_eq!(tuple1.get_values().len(), 2);
 
         // Second tuple (Bob's group)
-        let (tuple2, _) = executor.next().unwrap();
+        let (tuple2, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple2.get_value(0).get_val(), &Val::from("Bob"));
         assert_eq!(tuple2.get_value(1).get_val(), &Val::from(45));
         assert_eq!(tuple2.get_values().len(), 2);
 
         // No more tuples
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -594,7 +602,7 @@ mod tests {
         executor.init();
 
         // Verify first department's results
-        let (tuple1, _) = executor.next().unwrap();
+        let (tuple1, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple1.get_value(0).get_val(), &Val::from("Engineering"));
         assert_eq!(tuple1.get_value(1).get_val(), &Val::from(150)); // total_age
         assert_eq!(tuple1.get_value(2).get_val(), &Val::from(3)); // emp_count
@@ -603,7 +611,7 @@ mod tests {
         assert_eq!(tuple1.get_value(5).get_val(), &Val::from(100000)); // max_salary
 
         // Verify second department's results
-        let (tuple2, _) = executor.next().unwrap();
+        let (tuple2, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple2.get_value(0).get_val(), &Val::from("Sales"));
         assert_eq!(tuple2.get_value(1).get_val(), &Val::from(120));
         assert_eq!(tuple2.get_value(2).get_val(), &Val::from(2));
@@ -611,7 +619,7 @@ mod tests {
         assert_eq!(tuple2.get_value(4).get_val(), &Val::from(28));
         assert_eq!(tuple2.get_value(5).get_val(), &Val::from(90000));
 
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -659,7 +667,7 @@ mod tests {
 
         executor.init();
         // Should skip the tuple due to invalid column reference
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -738,20 +746,20 @@ mod tests {
         executor.init();
 
         // First tuple
-        let (tuple1, _) = executor.next().unwrap();
+        let (tuple1, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple1.get_value(0).get_val(), &Val::from(10)); // price
         assert_eq!(tuple1.get_value(1).get_val(), &Val::from(5)); // quantity
         assert_eq!(tuple1.get_value(2).get_val(), &Val::from(50)); // total
         assert_eq!(tuple1.get_value(3).get_val(), &Val::from(45.0)); // discounted_total as decimal
 
         // Second tuple
-        let (tuple2, _) = executor.next().unwrap();
+        let (tuple2, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple2.get_value(0).get_val(), &Val::from(20));
         assert_eq!(tuple2.get_value(1).get_val(), &Val::from(3));
         assert_eq!(tuple2.get_value(2).get_val(), &Val::from(60));
         assert_eq!(tuple2.get_value(3).get_val(), &Val::from(54.0)); // discounted_total as decimal
 
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -846,19 +854,19 @@ mod tests {
         executor.init();
 
         // First tuple
-        let (tuple1, _) = executor.next().unwrap();
+        let (tuple1, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple1.get_value(0).get_val(), &Val::from(1));
         assert_eq!(tuple1.get_value(1).get_val(), &Val::from("Alice"));
         assert!(tuple1.get_value(2).is_null());
         assert_eq!(tuple1.get_value(3).get_val(), &Val::from(false)); // Changed: NULL IS NOT NULL -> false
 
         // Second tuple
-        let (tuple2, _) = executor.next().unwrap();
+        let (tuple2, _) = executor.next().unwrap().unwrap();
         assert_eq!(tuple2.get_value(0).get_val(), &Val::from(2));
         assert!(tuple2.get_value(1).is_null());
         assert_eq!(tuple2.get_value(2).get_val(), &Val::from(50000));
         assert_eq!(tuple2.get_value(3).get_val(), &Val::from(true)); // Non-NULL IS NOT NULL -> true
 
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 }

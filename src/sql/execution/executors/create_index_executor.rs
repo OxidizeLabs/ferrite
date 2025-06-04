@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -46,10 +47,10 @@ impl AbstractExecutor for CreateIndexExecutor {
         self.executed = false;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             debug!("CreateIndexExecutor already executed, returning None");
-            return None;
+            return Ok(None);
         }
 
         let index_name = self.plan.get_index_name();
@@ -77,7 +78,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                     index_name, table_name
                 );
                 self.executed = true; // Mark as executed since we can't retry this
-                return None;
+                return Ok(None);
             }
 
             // Check if index already exists
@@ -93,10 +94,10 @@ impl AbstractExecutor for CreateIndexExecutor {
                         "Index '{}' already exists, skipping creation (IF NOT EXISTS)",
                         index_name
                     );
-                    None
+                    Ok(None)
                 } else {
                     warn!("Index '{}' already exists", index_name);
-                    None
+                    Ok(None)
                 };
             }
 
@@ -118,7 +119,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                         index_info.0.get_index_oid()
                     );
                     self.executed = true;
-                    None
+                    Ok(None)
                 }
                 None => {
                     warn!(
@@ -126,7 +127,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                         index_name
                     );
                     // Don't mark as executed so we can retry
-                    None
+                    Ok(None)
                 }
             }
         }
@@ -288,7 +289,7 @@ mod tests {
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let indexes = catalog_guard.get_table_indexes("test_table");
@@ -327,7 +328,7 @@ mod tests {
 
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify the index was created with correct schema
         let catalog_guard = catalog.read();
@@ -373,7 +374,7 @@ mod tests {
         executor.init();
 
         // Should not fail when index exists
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -395,7 +396,7 @@ mod tests {
         let mut executor = CreateIndexExecutor::new(exec_context, plan, false);
         executor.init();
 
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify no index was created
         let catalog_guard = catalog.read();
@@ -440,7 +441,7 @@ mod tests {
         // Execute concurrently
         for executor in executors.iter_mut() {
             executor.init();
-            assert!(executor.next().is_none());
+            assert!(executor.next().unwrap().is_none());
         }
 
         // Verify all indexes were created
@@ -481,7 +482,7 @@ mod tests {
 
         let mut executor1 = CreateIndexExecutor::new(exec_context.clone(), plan1, false);
         executor1.init();
-        assert!(executor1.next().is_none());
+        assert!(executor1.next().unwrap().is_none());
 
         // Verify first index was created
         {
@@ -502,7 +503,7 @@ mod tests {
 
         let mut executor2 = CreateIndexExecutor::new(exec_context.clone(), plan2, false);
         executor2.init();
-        assert!(executor2.next().is_none());
+        assert!(executor2.next().unwrap().is_none());
 
         // Verify no duplicate was created
         {
@@ -522,7 +523,7 @@ mod tests {
 
         let mut executor3 = CreateIndexExecutor::new(exec_context, plan3, false);
         executor3.init();
-        assert!(executor3.next().is_none());
+        assert!(executor3.next().unwrap().is_none());
 
         // Verify still only one index exists
         {

@@ -1,27 +1,19 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::filter_executor::FilterExecutor;
-use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
-use crate::sql::execution::executors::table_scan_executor::TableScanExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::sql::execution::expressions::assignment_expression::AssignmentExpression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
-use crate::sql::execution::plans::filter_plan::FilterNode;
-use crate::sql::execution::plans::table_scan_plan::TableScanNode;
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::storage::index::types::key_types::KeyType;
-use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::value::Value;
-use log::warn;
-use log::{debug, error};
+use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tempfile::TempDir;
 
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -30,6 +22,8 @@ pub struct UpdateExecutor {
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
     updated_rids: HashSet<RID>,
+    executed: bool,
+    rows_updated: usize,
 }
 
 impl UpdateExecutor {
@@ -83,240 +77,138 @@ impl UpdateExecutor {
             initialized: false,
             child_executor: None,
             updated_rids: HashSet::new(),
+            executed: false,
+            rows_updated: 0,
+        }
+    }
+
+    /// Evaluates an update expression against a tuple to get the new value
+    fn evaluate_update_expression(&self, expr: &crate::sql::execution::expressions::abstract_expression::Expression, tuple: &Tuple) -> Option<Value> {
+        // This is a simplified implementation - in reality, this would be more complex
+        // For now, we'll handle constant expressions and column references
+        match expr {
+            crate::sql::execution::expressions::abstract_expression::Expression::Constant(const_expr) => {
+                Some(const_expr.get_value().clone())
+            }
+            crate::sql::execution::expressions::abstract_expression::Expression::ColumnRef(col_ref) => {
+                let col_idx = col_ref.get_column_index();
+                if col_idx < tuple.get_column_count() {
+                    Some(tuple.get_value(col_idx).clone())
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // For other expression types, we'd need to implement full expression evaluation
+                warn!("Unsupported update expression type: {:?}", expr);
+                None
+            }
         }
     }
 }
 
 impl AbstractExecutor for UpdateExecutor {
     fn init(&mut self) {
-        if self.initialized {
-            return;
-        }
-
-        debug!(
-            "Initializing UpdateExecutor for table '{}'",
-            self.plan.get_table_name()
-        );
-
-        // Initialize child executor if present
-        if let Some(child) = self.plan.get_children().first() {
-            match child {
-                PlanNode::Filter(filter_plan) => {
-                    // Create table scan executor as the child for filter executor
-                    let catalog = {
-                        let context_guard = self.context.read();
-                        context_guard.get_catalog().clone()
-                    };
-
-                    let table_info = {
-                        let catalog_guard = catalog.read();
-                        catalog_guard
-                            .get_table(self.plan.get_table_name())
-                            .unwrap_or_else(|| {
-                                panic!("Table {} not found", self.plan.get_table_name())
-                            })
-                            .clone()
-                    };
-
-                    let table_scan_plan = Arc::new(TableScanNode::new(
-                        table_info,
-                        Arc::new(self.plan.get_output_schema().clone()),
-                        None,
-                    ));
-
-                    let table_scan_executor = Box::new(TableScanExecutor::new(
-                        self.context.clone(),
-                        table_scan_plan,
-                    ));
-
-                    // Create filter executor with table scan as child
-                    self.child_executor = Some(Box::new(FilterExecutor::new(
-                        table_scan_executor,
-                        self.context.clone(),
-                        filter_plan.clone().into(),
-                    )));
-                }
-                PlanNode::SeqScan(seq_scan_plan) => {
-                    // Direct table scan without filter (UPDATE without WHERE clause)
-                    debug!("Creating SeqScanExecutor for UPDATE without WHERE clause");
-                    self.child_executor = Some(Box::new(SeqScanExecutor::new(
-                        self.context.clone(),
-                        Arc::new(seq_scan_plan.clone()),
-                    )));
-                }
-                PlanNode::TableScan(table_scan_plan) => {
-                    // Direct table scan without filter (UPDATE without WHERE clause)
-                    debug!("Creating TableScanExecutor for UPDATE without WHERE clause");
-                    self.child_executor = Some(Box::new(TableScanExecutor::new(
-                        self.context.clone(),
-                        Arc::new(table_scan_plan.clone()),
-                    )));
-                }
-                _ => warn!("Unexpected child plan type for UpdateExecutor: {:?}", child),
-            }
-        }
-
-        if let Some(child) = self.child_executor.as_mut() {
+        debug!("Initializing UpdateExecutor");
+        if let Some(ref mut child) = self.child_executor {
             child.init();
         }
-
         self.initialized = true;
-        debug!("UpdateExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
+            warn!("UpdateExecutor not initialized, initializing now");
             self.init();
         }
 
-        // Get the next tuple to update from child executor
-        let child = self.child_executor.as_mut()?;
+        if self.executed {
+            return Ok(None);
+        }
 
-        while let Some((tuple, rid)) = child.next() {
-            // Skip if we've already updated this tuple
-            if self.updated_rids.contains(&rid) {
-                continue;
-            }
+        debug!("Executing update operation");
+        self.executed = true;
 
-            debug!("Updating tuple in table '{}'", self.plan.get_table_name());
+        // Get table information from catalog
+        let (schema, table_heap, table_oidt, txn_context) = {
+            let binding = self.context.read();
+            let catalog_guard = binding.get_catalog().read();
+            let table_info = catalog_guard
+                .get_table(&self.plan.get_table_name())
+                .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
-            let txn_ctx = {
-                let context = self.context.read();
-                context.get_transaction_context().clone()
-            };
+            let schema = table_info.get_table_schema().clone();
+            let table_heap = table_info.get_table_heap().clone();
+            let table_oidt = table_info.get_table_oidt();
+            let txn_context = binding.get_transaction_context().clone();
+            
+            (schema, table_heap, table_oidt, txn_context)
+        };
 
-            // Get the target expressions before applying updates
-            let target_expressions = self.plan.get_target_expressions();
-            let output_schema = self.plan.get_output_schema();
+        // Create transactional table heap
+        let transactional_table_heap = crate::storage::table::transactional_table_heap::TransactionalTableHeap::new(table_heap, table_oidt);
 
-            // Apply the updates to the tuple
-            let mut values = tuple.get_values();
+        let mut update_count = 0;
 
-            // Handle target expressions
-            // Note: There are three formats the target expressions can be in:
-            // 1. Assignment expressions - new format from planner
-            // 2. Pairs of [ColumnRef, ValueExpr] - traditional format
-            // 3. Single expressions like Arithmetic(balance - 200) - from SQL parsing
-
-            // Check if all expressions are Assignment expressions
-            let all_assignments = target_expressions
-                .iter()
-                .all(|expr| matches!(expr.as_ref(), Expression::Assignment(_)));
-
-            if all_assignments {
-                // Case 1: Assignment expressions
-                for expr in target_expressions.iter() {
-                    if let Expression::Assignment(assignment_expr) = expr.as_ref() {
-                        let col_idx = assignment_expr.get_target_column_index();
-                        let new_value = assignment_expr
-                            .get_value_expr()
-                            .evaluate(&tuple, output_schema)
-                            .expect("Failed to evaluate assignment expression");
-                        values[col_idx] = new_value;
-                    }
-                }
-            } else if target_expressions.len() == 1 {
-                // Case 2: Single arithmetic or other expression where the target is embedded
-                let expr = &target_expressions[0];
-
-                // Extract target column from expression
-                let col_idx = match expr.as_ref() {
-                    Expression::Arithmetic(arith_expr) => {
-                        // For operations like balance = balance - 200
-                        // Extract the column from the first child
-                        fn find_column_ref(expr: &Expression) -> Option<usize> {
-                            match expr {
-                                Expression::ColumnRef(col_ref) => Some(col_ref.get_column_index()),
-                                Expression::Arithmetic(arith_expr) => {
-                                    // Check all children for column references
-                                    for child in arith_expr.get_children() {
-                                        if let Some(idx) = find_column_ref(child.as_ref()) {
-                                            return Some(idx);
-                                        }
-                                    }
-                                    None
+        // Process all tuples from child executor (scan)
+        if let Some(ref mut child) = self.child_executor {
+            loop {
+                match child.next()? {
+                    Some((tuple, rid)) => {
+                        debug!("Processing tuple for update with RID {:?}", rid);
+                        
+                        // Apply updates based on the update plan
+                        let mut updated_values = tuple.get_values().clone();
+                        
+                        // Apply each update expression
+                        let expressions = self.plan.get_target_expressions();
+                        for i in (0..expressions.len()).step_by(2) {
+                            if i + 1 < expressions.len() {
+                                // First expression should be a column reference indicating which column to update
+                                if let Expression::ColumnRef(col_ref) = expressions[i].as_ref() {
+                                    let column_idx = col_ref.get_column_index();
+                                    let new_value_expr = &expressions[i + 1];
+                                    let new_value = new_value_expr.evaluate(&tuple, &schema)?;
+                                    updated_values[column_idx] = new_value;
                                 }
-                                _ => None,
                             }
                         }
 
-                        find_column_ref(&Expression::Arithmetic(arith_expr.clone())).unwrap_or_else(
-                            || {
-                                panic!(
-                                    "Could not determine target column from arithmetic expression"
-                                )
-                            },
-                        )
+                        // Create updated tuple
+                        let updated_tuple = Tuple::new(&updated_values, &schema, rid);
+
+                        // Update the tuple in the table
+                        match transactional_table_heap.update_tuple(
+                            &TupleMeta::new(0),
+                            &updated_tuple,
+                            rid,
+                            txn_context.clone(),
+                        ) {
+                            Ok(_) => {
+                                update_count += 1;
+                                trace!("Successfully updated tuple #{} with RID {:?}", update_count, rid);
+                            }
+                            Err(e) => {
+                                error!("Failed to update tuple with RID {:?}: {}", rid, e);
+                                return Err(DBError::Execution(format!("Update failed: {}", e)));
+                            }
+                        }
                     }
-                    Expression::ColumnRef(col_ref) => {
-                        // Direct column reference
-                        col_ref.get_column_index()
-                    }
-                    _ => {
-                        // For other expression types (like Constant, Literal, etc.),
-                        // we need to handle them differently. This case suggests the
-                        // planner is creating expressions in a different format than expected.
-                        // Let's fall back to the paired expression format.
-                        panic!(
-                            "Unsupported update expression type: {:?}. Expected either paired expressions [ColumnRef, ValueExpr] or single arithmetic expressions.",
-                            expr
-                        )
-                    }
-                };
-
-                let new_value = expr
-                    .evaluate(&tuple, output_schema)
-                    .expect("Failed to evaluate expression");
-
-                values[col_idx] = new_value;
-            } else {
-                // Case 3: Pairs of expressions
-                for (i, expr) in target_expressions.iter().step_by(2).enumerate() {
-                    let col_idx = match expr.as_ref() {
-                        Expression::ColumnRef(col_ref) => col_ref.get_column_index(),
-                        _ => panic!("Expected ColumnRef as target expression"),
-                    };
-
-                    let value_expr = &target_expressions[i * 2 + 1];
-                    let new_value = value_expr
-                        .evaluate(&tuple, output_schema)
-                        .expect("Failed to evaluate expression");
-
-                    values[col_idx] = new_value;
+                    None => break,
                 }
             }
-
-            // Create a new tuple with the updated values
-            let updated_tuple = Arc::new(Tuple::new(&values, self.plan.get_output_schema(), rid));
-
-            // Create tuple meta
-            let tuple_meta = TupleMeta::new(txn_ctx.get_transaction_id());
-
-            // Update the tuple using TransactionalTableHeap
-            match self
-                .table_heap
-                .update_tuple(&tuple_meta, &updated_tuple, rid, txn_ctx)
-            {
-                Ok(new_rid) => {
-                    debug!("Successfully updated tuple: {:?}", new_rid);
-                    // Add the RID to our set of updated tuples
-                    self.updated_rids.insert(rid);
-                    return Some((updated_tuple, new_rid));
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to update tuple in table '{}': {}",
-                        self.plan.get_table_name(),
-                        e
-                    );
-                }
-            }
+        } else {
+            return Err(DBError::Execution("No child executor found for UPDATE".to_string()));
         }
-        None
+
+        info!("Update operation completed successfully, {} rows updated", update_count);
+        self.rows_updated = update_count;
+
+        // Update operations don't return tuples to the caller
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
-        debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
@@ -721,7 +613,7 @@ mod tests {
 
         // Count and verify updates
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -827,7 +719,7 @@ mod tests {
 
         // Execute update and count affected rows
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -935,7 +827,7 @@ mod tests {
 
         // Execute update and count affected rows
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1038,7 +930,7 @@ mod tests {
 
         // Execute update and count affected rows
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1153,7 +1045,7 @@ mod tests {
 
         // Count updates - should be 0
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1250,7 +1142,7 @@ mod tests {
 
         // Count updates - should be 5 (all rows)
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1332,7 +1224,7 @@ mod tests {
 
         // Execute update
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1425,7 +1317,7 @@ mod tests {
 
         // Execute update
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1515,7 +1407,7 @@ mod tests {
         // This should handle the case where there's no child executor
         // The executor should return None immediately since there's no data source
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1623,7 +1515,7 @@ mod tests {
 
         // Execute update
         let mut update_count = 0;
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             update_count += 1;
         }
 
@@ -1732,7 +1624,7 @@ mod tests {
         let mut total_updates = 0;
 
         // Execute all updates
-        while let Some(_) = executor.next() {
+        while let Ok(Some(_)) = executor.next() {
             total_updates += 1;
         }
 

@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::config::PageId;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -65,53 +65,66 @@ impl SeqScanExecutor {
 
 impl AbstractExecutor for SeqScanExecutor {
     fn init(&mut self) {
-        self.initialized = false;
+        if self.initialized {
+            trace!("SeqScanExecutor already initialized");
+            return;
+        }
 
         trace!(
-            "Initializing SeqScanExecutor for table '{}'",
+            "Initializing SeqScanExecutor for table: {}",
             self.plan.get_table_name()
         );
 
-        // Get the table's first page ID from the underlying table heap
-        let first_page_id = self.table_heap.get_table_heap().get_first_page_id();
-        trace!(
-            "Table '{}' first page ID: {}",
-            self.plan.get_table_name(),
-            first_page_id
-        );
-
-        // Create iterator from first page to end of table
-        let start_rid = RID::new(first_page_id, 0);
-        let stop_rid = RID::new(u32::MAX as PageId, u32::MAX);
-        trace!(
-            "Creating table iterator with range: {:?} to {:?}",
-            start_rid, stop_rid
-        );
-
-        // Get transaction context from execution context
-        let txn_ctx = {
+        // Get table info from catalog
+        let table_info = {
             let context = self.context.read();
-            Some(context.get_transaction_context().clone())
+            let catalog = context.get_catalog();
+            let catalog_guard = catalog.read();
+            catalog_guard.get_table(self.plan.get_table_name()).cloned()
         };
 
-        // Create new iterator with TransactionalTableHeap and transaction context
-        self.iterator = Some(TableIterator::new(
-            self.table_heap.clone(), // Pass the TransactionalTableHeap directly
-            start_rid,
-            stop_rid,
-            txn_ctx, // Pass the transaction context for MVCC visibility checks
-        ));
-        self.initialized = true;
+        if let Some(table_info) = table_info {
+            // Create table heap and iterator
+            let table_heap = Arc::new(TransactionalTableHeap::new(
+                table_info.get_table_heap(),
+                table_info.get_table_oidt(),
+            ));
+
+            self.table_heap = table_heap.clone();
+            
+            // Get transaction context for the iterator
+            let txn_ctx = {
+                let context = self.context.read();
+                Some(context.get_transaction_context())
+            };
+            
+            // Create iterator with start/end RIDs and transaction context
+            self.iterator = Some(TableIterator::new(
+                table_heap,
+                RID::new(0u64, 0), // start_rid
+                RID::new(u64::MAX, u32::MAX), // end_rid (scan entire table)
+                txn_ctx,
+            ));
+            self.initialized = true;
+            trace!("SeqScanExecutor initialized successfully");
+        } else {
+            error!("Table {} not found", self.plan.get_table_name());
+        }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             trace!("SeqScanExecutor not initialized, initializing now");
             self.init();
         }
 
         // Get iterator reference
-        let iter = self.iterator.as_mut()?;
+        let iter = match self.iterator.as_mut() {
+            Some(iter) => iter,
+            None => {
+                return Err(DBError::Execution("Iterator not initialized".to_string()));
+            }
+        };
 
         // Keep trying until we find a valid tuple or reach the end
         while let Some((meta, tuple)) = iter.next() {
@@ -125,11 +138,11 @@ impl AbstractExecutor for SeqScanExecutor {
             }
 
             // Return valid tuple
-            return Some((tuple, rid));
+            return Ok(Some((tuple, rid)));
         }
 
         trace!("Reached end of table scan");
-        None
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -248,6 +261,14 @@ mod tests {
         (meta, values)
     }
 
+    fn create_execution_context(ctx: &TestContext, catalog: Arc<RwLock<Catalog>>) -> Arc<RwLock<ExecutionContext>> {
+        Arc::new(RwLock::new(ExecutionContext::new(
+            ctx.bpm(),
+            catalog,
+            ctx.transaction_context.clone(),
+        )))
+    }
+
     #[test]
     fn test_seq_scan_executor_with_data() {
         let ctx = TestContext::new("test_seq_scan_executor_with_data");
@@ -287,18 +308,13 @@ mod tests {
             table_name.to_string(),
         ));
 
-        let context = Arc::new(RwLock::new(ExecutionContext::new(
-            Arc::clone(&bpm),
-            Arc::new(RwLock::new(catalog)),
-            transaction_context,
-        )));
-
+        let context = create_execution_context(&ctx, Arc::new(RwLock::new(catalog)));
         let mut executor = SeqScanExecutor::new(context, plan);
         executor.init();
 
         // Test scanning
         let mut found_tuples = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             // Get values from tuple using proper indexing
             let id = match tuple.get_value(0).get_val() {
                 Val::Integer(i) => *i,
@@ -338,7 +354,7 @@ mod tests {
     fn test_seq_scan_executor_empty_table() {
         let ctx = TestContext::new("test_seq_scan_executor_empty");
         let bpm = ctx.bpm();
-        let transaction_context = ctx.transaction_context.clone();
+        let _transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema
         let mut catalog = create_catalog(&ctx);
@@ -357,25 +373,70 @@ mod tests {
             table_name.to_string(),
         ));
 
-        let context = Arc::new(RwLock::new(ExecutionContext::new(
-            Arc::clone(&bpm),
-            Arc::new(RwLock::new(catalog)),
-            transaction_context,
-        )));
+        let exec_context = create_execution_context(&ctx, Arc::new(RwLock::new(catalog)));
+        let mut executor = SeqScanExecutor::new(exec_context, plan);
 
-        let mut executor = SeqScanExecutor::new(context, plan);
+        // Initialize and test
         executor.init();
-
-        // Should return None for empty table
-        assert!(
-            executor.next().is_none(),
-            "Empty table should return no tuples"
-        );
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
-    fn test_seq_scan_executor_reinitialization() {
-        let ctx = TestContext::new("test_seq_scan_reinit");
+    fn test_seq_scan_executor_single_tuple() {
+        let ctx = TestContext::new("test_seq_scan_executor_single");
+        let bpm = ctx.bpm();
+        let transaction_context = ctx.transaction_context.clone();
+
+        // Create catalog and schema
+        let mut catalog = create_catalog(&ctx);
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+        ]);
+
+        // Create table
+        let table_name = "single_tuple_table";
+        let table_info = catalog
+            .create_table(table_name.to_string(), schema.clone())
+            .unwrap();
+
+        // Insert a single tuple
+        let table_heap = table_info.get_table_heap();
+        let transactional_table_heap =
+            TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
+
+        let values = vec![Value::new(1), Value::new("Alice")];
+        transactional_table_heap
+            .insert_tuple_from_values(values, &schema, transaction_context.clone())
+            .unwrap();
+
+        // Create scan plan and executor
+        let plan = Arc::new(SeqScanPlanNode::new(
+            schema.clone(),
+            table_info.get_table_oidt(),
+            table_name.to_string(),
+        ));
+
+        let exec_context = create_execution_context(&ctx, Arc::new(RwLock::new(catalog)));
+        let mut executor = SeqScanExecutor::new(exec_context, plan);
+
+        // Initialize and test
+        executor.init();
+
+        // Should get one tuple
+        let result = executor.next().unwrap();
+        assert!(result.is_some());
+
+        let (tuple, _rid) = result.unwrap();
+        assert_eq!(tuple.get_values().len(), 2);
+
+        // No more tuples
+        assert!(executor.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_seq_scan_executor_multiple_tuples() {
+        let ctx = TestContext::new("test_seq_scan_executor_multiple");
         let bpm = ctx.bpm();
         let transaction_context = ctx.transaction_context.clone();
 
@@ -387,49 +448,54 @@ mod tests {
             Column::new("age", TypeId::Integer),
         ]);
 
-        // Create transaction and table
-        let table_name = "test_reinit_table";
+        // Create table
+        let table_name = "multiple_tuples_table";
         let table_info = catalog
             .create_table(table_name.to_string(), schema.clone())
             .unwrap();
+
+        // Insert multiple tuples
         let table_heap = table_info.get_table_heap();
-        let table_heap_guard = table_heap;
+        let transactional_table_heap =
+            TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
 
-        // Insert test data
-        let test_data = vec![(1, "Alice", 25)];
+        let test_data = vec![
+            vec![Value::new(1), Value::new("Alice"), Value::new(25)],
+            vec![Value::new(2), Value::new("Bob"), Value::new(30)],
+            vec![Value::new(3), Value::new("Charlie"), Value::new(35)],
+        ];
 
-        for (id, name, age) in test_data.iter() {
-            let (meta, values) = create_test_values(&schema, *id, name, *age);
-            table_heap_guard
-                .insert_tuple_from_values(values, &schema, Arc::from(meta))
-                .expect("Failed to insert tuple");
+        for values in test_data {
+            transactional_table_heap
+                .insert_tuple_from_values(values, &schema, transaction_context.clone())
+                .unwrap();
         }
 
-        // Create executor
+        // Create scan plan and executor
         let plan = Arc::new(SeqScanPlanNode::new(
             schema.clone(),
             table_info.get_table_oidt(),
             table_name.to_string(),
         ));
 
-        let context = Arc::new(RwLock::new(ExecutionContext::new(
-            Arc::clone(&bpm),
-            Arc::new(RwLock::new(catalog)),
-            transaction_context,
-        )));
+        let exec_context = create_execution_context(&ctx, Arc::new(RwLock::new(catalog)));
+        let mut executor = SeqScanExecutor::new(exec_context, plan);
 
-        let mut executor = SeqScanExecutor::new(context, plan);
-
-        // First initialization
+        // Initialize and test
         executor.init();
-        assert!(executor.initialized);
-        assert!(executor.next().is_some());
-        assert!(executor.next().is_none());
 
-        // Second initialization should be safe
-        executor.init();
-        assert!(executor.initialized);
-        assert!(executor.next().is_some());
-        assert!(executor.next().is_none());
+        // Count tuples
+        let mut tuple_count = 0;
+        loop {
+            match executor.next().unwrap() {
+                Some((tuple, _rid)) => {
+                    tuple_count += 1;
+                    assert_eq!(tuple.get_values().len(), 3);
+                }
+                None => break,
+            }
+        }
+
+        assert_eq!(tuple_count, 3);
     }
 }

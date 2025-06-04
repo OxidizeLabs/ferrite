@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -296,12 +297,21 @@ impl AbstractExecutor for FilterExecutor {
         self.child_executor.init();
 
         let filter_expr = self.plan.get_filter_expression();
-        let schema = self.child_executor.get_output_schema();
+        let _schema = self.child_executor.get_output_schema();
 
         if matches!(filter_expr.get_filter_type(), FilterType::Having) {
             debug!("Collecting tuples for HAVING clause");
-            while let Some((tuple, _)) = self.child_executor.next() {
-                self.group_tuples.push(tuple);
+            loop {
+                match self.child_executor.next() {
+                    Ok(Some((tuple, _))) => {
+                        self.group_tuples.push(tuple);
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        error!("Error during FilterExecutor initialization: {}", e);
+                        break;
+                    }
+                }
             }
         }
 
@@ -309,7 +319,7 @@ impl AbstractExecutor for FilterExecutor {
         debug!("FilterExecutor initialized successfully");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("FilterExecutor not initialized, initializing now");
             self.init();
@@ -317,18 +327,18 @@ impl AbstractExecutor for FilterExecutor {
 
         match self.plan.get_filter_expression().get_filter_type() {
             FilterType::Where => loop {
-                match self.child_executor.next() {
+                match self.child_executor.next()? {
                     Some((tuple, rid)) => {
                         debug!("Processing tuple with RID {:?}", rid);
                         if self.apply_filter(&tuple) {
                             debug!("Found matching tuple with RID {:?}", rid);
-                            return Some((tuple, rid));
+                            return Ok(Some((tuple, rid)));
                         }
                         debug!("Tuple did not match filter, continuing...");
                     }
                     None => {
                         debug!("No more tuples from child executor");
-                        return None;
+                        return Ok(None);
                     }
                 }
             },
@@ -340,11 +350,11 @@ impl AbstractExecutor for FilterExecutor {
 
                     if self.apply_filter(tuple) {
                         debug!("Found matching tuple for HAVING clause");
-                        return Some((tuple.clone(), rid));
+                        return Ok(Some((tuple.clone(), rid)));
                     }
                 }
                 debug!("No more tuples matching HAVING clause");
-                None
+                Ok(None)
             }
         }
     }
@@ -388,7 +398,6 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     struct TestContext {
@@ -478,8 +487,8 @@ mod tests {
             self.initialized = true;
         }
 
-        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
-            None
+        fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
+            Ok(None) // Always returns no tuples
         }
 
         fn get_output_schema(&self) -> &Schema {
@@ -735,17 +744,23 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let tuple_values = tuple.get_values();
-            let name = match tuple_values[1].get_val() {
-                Val::VarLen(s) | Val::ConstLen(s) => s.to_string(),
-                _ => "".to_string(),
-            };
-            let age = match tuple_values[2].get_val() {
-                Val::Integer(a) => *a,
-                _ => panic!("Expected integer value for age"),
-            };
-            results.push((name, age));
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let tuple_values = tuple.get_values();
+                    let name = match tuple_values[1].get_val() {
+                        Val::VarLen(s) | Val::ConstLen(s) => s.to_string(),
+                        _ => panic!("Expected string value for name"),
+                    };
+                    let age = match tuple_values[2].get_val() {
+                        Val::Integer(a) => *a,
+                        _ => panic!("Expected integer value for age"),
+                    };
+                    results.push((name, age));
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         assert_eq!(results.len(), 1, "Should find exactly one match");
@@ -806,12 +821,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let age = match tuple.get_value(2).get_val() {
-                Val::Integer(a) => *a,
-                _ => panic!("Expected integer value for age"),
-            };
-            results.push(age);
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let age = match tuple.get_value(2).get_val() {
+                        Val::Integer(a) => *a,
+                        _ => panic!("Expected integer value for age"),
+                    };
+                    results.push(age);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison
@@ -854,7 +875,7 @@ mod tests {
         executor.init();
 
         // Should not return any results
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify cleanup
         drop(executor);
@@ -913,17 +934,23 @@ mod tests {
         let max_iterations = 100; // Reasonable upper limit
         let mut iteration_count = 0;
 
-        while let Some((tuple, _)) = executor.next() {
-            iteration_count += 1;
-            if iteration_count > max_iterations {
-                panic!("Possible infinite loop detected in filter execution");
-            }
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    iteration_count += 1;
+                    if iteration_count > max_iterations {
+                        panic!("Possible infinite loop detected in filter execution");
+                    }
 
-            let age = match tuple.get_value(2).get_val() {
-                Val::Integer(a) => *a,
-                _ => panic!("Expected integer for age"),
-            };
-            results.push(age);
+                    let age = match tuple.get_value(2).get_val() {
+                        Val::Integer(a) => *a,
+                        _ => panic!("Expected integer for age"),
+                    };
+                    results.push(age);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort and verify results
@@ -975,7 +1002,7 @@ mod tests {
 
         // Should initialize but return no results due to invalid predicate
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify cleanup
         drop(executor);
@@ -1031,12 +1058,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let age = match tuple.get_value(2).get_val() {
-                Val::Integer(a) => *a,
-                _ => panic!("Expected integer value for age"),
-            };
-            results.push(age);
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let age = match tuple.get_value(2).get_val() {
+                        Val::Integer(a) => *a,
+                        _ => panic!("Expected integer value for age"),
+                    };
+                    results.push(age);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison
@@ -1076,7 +1109,7 @@ mod tests {
         executor.init();
 
         // Should not return any results
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify cleanup
         drop(executor);
@@ -1132,12 +1165,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let salary = match tuple.get_value(3).get_val() {
-                Val::Decimal(s) => *s,
-                _ => panic!("Expected decimal value for salary"),
-            };
-            results.push(salary);
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let salary = match tuple.get_value(3).get_val() {
+                        Val::Decimal(s) => *s,
+                        _ => panic!("Expected decimal value for salary"),
+                    };
+                    results.push(salary);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison
@@ -1205,12 +1244,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let salary = match tuple.get_value(3).get_val() {
-                Val::Decimal(s) => *s,
-                _ => panic!("Expected decimal value for salary"),
-            };
-            results.push(salary);
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let salary = match tuple.get_value(3).get_val() {
+                        Val::Decimal(s) => *s,
+                        _ => panic!("Expected decimal value for salary"),
+                    };
+                    results.push(salary);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison
@@ -1286,12 +1331,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = having_executor.next() {
-            let salary = match tuple.get_value(3).get_val() {
-                Val::Decimal(s) => *s,
-                _ => panic!("Expected decimal value for salary"),
-            };
-            results.push(salary);
+        loop {
+            match having_executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let salary = match tuple.get_value(3).get_val() {
+                        Val::Decimal(s) => *s,
+                        _ => panic!("Expected decimal value for salary"),
+                    };
+                    results.push(salary);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison
@@ -1379,12 +1430,18 @@ mod tests {
 
         // Collect filtered results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
-            let salary = match tuple.get_value(3).get_val() {
-                Val::Decimal(s) => *s,
-                _ => panic!("Expected decimal value for salary"),
-            };
-            results.push(salary);
+        loop {
+            match executor.next() {
+                Ok(Some((tuple, _))) => {
+                    let salary = match tuple.get_value(3).get_val() {
+                        Val::Decimal(s) => *s,
+                        _ => panic!("Expected decimal value for salary"),
+                    };
+                    results.push(salary);
+                }
+                Ok(None) => break,
+                Err(e) => panic!("Error during execution: {}", e),
+            }
         }
 
         // Sort results for consistent comparison

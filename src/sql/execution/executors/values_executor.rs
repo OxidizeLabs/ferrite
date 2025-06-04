@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -36,7 +37,7 @@ impl AbstractExecutor for ValuesExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
@@ -44,11 +45,15 @@ impl AbstractExecutor for ValuesExecutor {
         // Check if we've processed all rows
         if self.current_row >= self.plan.get_row_count() {
             debug!("No more rows to process");
-            return None;
+            return Ok(None);
         }
 
         // Get the current row
-        let row = self.plan.get_rows().get(self.current_row)?;
+        let row = match self.plan.get_rows().get(self.current_row) {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+        
         let mut row_clone = row.clone();
         let schema = self.plan.get_output_schema();
 
@@ -65,11 +70,11 @@ impl AbstractExecutor for ValuesExecutor {
                     "Successfully evaluated row {}, advancing to next row",
                     self.current_row - 1
                 );
-                Some((tuple, RID::default()))
+                Ok(Some((tuple, RID::default())))
             }
             Err(e) => {
                 error!("Failed to evaluate values: {}", e);
-                None
+                Err(DBError::Execution(format!("Failed to evaluate values: {}", e)))
             }
         }
     }
@@ -272,7 +277,7 @@ mod tests {
             let context = test_ctx.create_executor_context();
 
             let mut executor = ValuesExecutor::new(context, plan);
-            assert!(executor.next().is_none());
+            assert!(executor.next().unwrap().is_none());
         }
 
         #[test]
@@ -285,8 +290,8 @@ mod tests {
             let mut executor = ValuesExecutor::new(context, plan);
             let result = executor.next();
 
-            assert!(result.is_some());
-            let (tuple, rid) = result.unwrap();
+            assert!(result.is_ok());
+            let (tuple, rid) = result.unwrap().unwrap();
             assert_eq!(tuple.get_value(0), Value::new(0));
             assert_eq!(tuple.get_value(1), Value::new("name_0".to_string()));
             assert_eq!(tuple.get_value(2), Value::new(true));
@@ -309,8 +314,8 @@ mod tests {
 
             for i in 0..3 {
                 let result = executor.next();
-                assert!(result.is_some());
-                let (tuple, _) = result.unwrap();
+                assert!(result.is_ok());
+                let (tuple, _) = result.unwrap().unwrap();
                 assert_eq!(tuple.get_value(0), Value::new(i));
             }
 
@@ -371,7 +376,7 @@ mod tests {
             let mut executor = ValuesExecutor::new(context, plan);
 
             // Process row within transaction
-            assert!(executor.next().is_some());
+            assert!(executor.next().is_ok());
 
             // Commit transaction
             test_ctx.transaction_manager().commit(
@@ -395,7 +400,7 @@ mod tests {
             let mut executor = ValuesExecutor::new(context, plan);
 
             // Process row within transaction
-            assert!(executor.next().is_some());
+            assert!(executor.next().is_ok());
 
             // Abort transaction
             test_ctx
