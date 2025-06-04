@@ -1,6 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -83,7 +84,7 @@ impl AbstractExecutor for MockScanExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("MockScanExecutor not initialized, initializing now");
             self.init();
@@ -93,10 +94,10 @@ impl AbstractExecutor for MockScanExecutor {
             let result = self.mock_tuples[self.current_index].clone();
             self.current_index += 1;
             debug!("Returning mock tuple with RID {:?}", result.1);
-            Some(result)
+            Ok(Some(result))
         } else {
             info!("Reached end of mock scan");
-            None
+            Ok(None)
         }
     }
 
@@ -238,7 +239,7 @@ mod tests {
 
         // Test scanning
         let mut tuple_count = 0;
-        while let Some((_tuple, rid)) = executor.next() {
+        while let Ok(Some((_tuple, rid))) = executor.next() {
             // Verify tuple structure
             assert_eq!(plan.get_output_schema().get_column_count(), 2);
             assert!(rid.get_page_id() < 3); // We generate 3 mock tuples
@@ -279,12 +280,18 @@ mod tests {
 
         // First scan
         executor.init();
-        let first_count = executor.next().into_iter().count();
-        assert_eq!(first_count, 1, "First scan should return 3 tuples");
+        let mut first_count = 0;
+        while let Ok(Some(_)) = executor.next() {
+            first_count += 1;
+        }
+        assert_eq!(first_count, 3, "First scan should return 3 tuples");
 
         // Reset and scan again
         executor.init();
-        let second_count = executor.next().into_iter().count();
-        assert_eq!(second_count, 1, "Second scan should also return 3 tuples");
+        let mut second_count = 0;
+        while let Ok(Some(_)) = executor.next() {
+            second_count += 1;
+        }
+        assert_eq!(second_count, 3, "Second scan should also return 3 tuples");
     }
 }

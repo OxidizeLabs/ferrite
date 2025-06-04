@@ -402,7 +402,7 @@ mod integration_tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
-    use crate::storage::page::page::{Page, PageTrait};
+    use crate::storage::page::page::PageTrait;
     use crate::storage::page::page_guard::PageGuard;
     use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
     use parking_lot::RwLock;

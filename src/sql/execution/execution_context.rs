@@ -292,7 +292,7 @@ impl ExecutorType {
     }
 
     /// Execute the next method on the wrapped executor
-    pub fn next(&mut self) -> Option<(Arc<crate::storage::table::tuple::Tuple>, crate::common::rid::RID)> {
+    pub fn next(&mut self) -> Result<Option<(Arc<crate::storage::table::tuple::Tuple>, crate::common::rid::RID)>, crate::common::exception::DBError> {
         match self {
             ExecutorType::Aggregation(executor) => executor.next(),
             ExecutorType::Command(executor) => executor.next(),
@@ -556,7 +556,6 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
-    use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
@@ -686,9 +685,9 @@ mod tests {
         let context = executor_type.get_executor_context();
         assert!(!context.try_read().is_none());
 
-        // Test next method (should return None for CreateTable after execution)
+        // Test next method (should return Ok(None) for CreateTable after execution)
         let result = executor_type.next();
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]

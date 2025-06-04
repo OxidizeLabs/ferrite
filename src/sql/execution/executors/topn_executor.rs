@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
@@ -123,27 +124,39 @@ impl AbstractExecutor for TopNExecutor {
         let mut heap = BinaryHeap::new();
 
         // Process tuples one at a time
-        while let Some((tuple, rid)) = self.child.next() {
-            let sort_keys = self.evaluate_sort_keys(&tuple);
-            debug!("Processing tuple with sort keys: {:?}", sort_keys);
+        loop {
+            match self.child.next() {
+                Ok(Some((tuple, rid))) => {
+                    let sort_keys = self.evaluate_sort_keys(&tuple);
+                    debug!("Processing tuple with sort keys: {:?}", sort_keys);
 
-            let tuple_with_keys = TupleWithKeys {
-                sort_keys,
-                tuple,
-                rid,
-            };
+                    let tuple_with_keys = TupleWithKeys {
+                        sort_keys,
+                        tuple, // tuple is already Arc<Tuple>
+                        rid,
+                    };
 
-            if heap.len() < k {
-                // Heap not full yet, add element
-                debug!("Heap not full (size {}), adding tuple", heap.len());
-                heap.push(Reverse(tuple_with_keys));
-            } else if let Some(Reverse(current_min)) = heap.peek() {
-                // Compare with smallest element in heap
-                if current_min < &tuple_with_keys {
-                    // Remove smallest and add new larger element
-                    debug!("Replacing smallest element with larger tuple");
-                    heap.pop();
-                    heap.push(Reverse(tuple_with_keys));
+                    if heap.len() < k {
+                        // Heap not full yet, add element
+                        debug!("Heap not full (size {}), adding tuple", heap.len());
+                        heap.push(Reverse(tuple_with_keys));
+                    } else if let Some(Reverse(current_min)) = heap.peek() {
+                        // Compare with smallest element in heap
+                        if current_min < &tuple_with_keys {
+                            // Remove smallest and add new larger element
+                            debug!("Replacing smallest element with larger tuple");
+                            heap.pop();
+                            heap.push(Reverse(tuple_with_keys));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // No more tuples
+                    break;
+                }
+                Err(e) => {
+                    debug!("Error processing child tuple: {}", e);
+                    break;
                 }
             }
         }
@@ -160,7 +173,7 @@ impl AbstractExecutor for TopNExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
@@ -173,10 +186,10 @@ impl AbstractExecutor for TopNExecutor {
                 self.current_index - 1,
                 result.sort_keys
             );
-            Some((result.tuple.clone(), result.rid))
+            Ok(Some((result.tuple.clone(), result.rid)))
         } else {
             debug!("No more tuples to return");
-            None
+            Ok(None)
         }
     }
 
@@ -339,10 +352,10 @@ mod tests {
         executor.init();
 
         // Verify results (should get top 3 values in descending order)
-        let result1 = executor.next().unwrap();
-        let result2 = executor.next().unwrap();
-        let result3 = executor.next().unwrap();
-        let result4 = executor.next();
+        let result1 = executor.next().unwrap().unwrap();
+        let result2 = executor.next().unwrap().unwrap();
+        let result3 = executor.next().unwrap().unwrap();
+        let result4 = executor.next().unwrap();
 
         assert_eq!(result1.0.get_value(1).as_integer().unwrap(), 50);
         assert_eq!(result2.0.get_value(1).as_integer().unwrap(), 40);

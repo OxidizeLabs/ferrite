@@ -798,7 +798,6 @@ mod basic_behaviour {
     use chrono::Utc;
     use log::info;
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -1040,7 +1039,6 @@ mod complex_behaviour {
     use chrono::Utc;
     use log::{info, warn};
     use parking_lot::RwLock;
-    use std::collections::HashMap;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;

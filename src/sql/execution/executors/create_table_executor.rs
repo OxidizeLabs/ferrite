@@ -1,11 +1,12 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info, warn};
+use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -45,10 +46,10 @@ impl AbstractExecutor for CreateTableExecutor {
         self.executed = false;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             debug!("CreateTableExecutor already executed, returning None");
-            return None;
+            return Ok(None);
         }
 
         let table_name = self.plan.get_table_name();
@@ -62,8 +63,7 @@ impl AbstractExecutor for CreateTableExecutor {
                     guard
                 }
                 None => {
-                    warn!("Failed to acquire context read lock - lock contention detected");
-                    return None;
+                    return Err(DBError::Execution("Failed to acquire context read lock - lock contention detected".to_string()));
                 }
             };
             context_guard.get_catalog().clone()
@@ -78,8 +78,7 @@ impl AbstractExecutor for CreateTableExecutor {
                     guard
                 }
                 None => {
-                    warn!("Failed to acquire catalog write lock - lock contention detected");
-                    return None;
+                    return Err(DBError::Execution("Failed to acquire catalog write lock - lock contention detected".to_string()));
                 }
             };
 
@@ -90,7 +89,7 @@ impl AbstractExecutor for CreateTableExecutor {
                     table_name
                 );
                 self.executed = true;
-                return None;
+                return Ok(None);
             }
 
             // Create the table
@@ -105,9 +104,11 @@ impl AbstractExecutor for CreateTableExecutor {
                     );
                 }
                 None => {
-                    // If we reach here, table creation failed due to constraint validation
-                    // (table existence was already checked above)
-                    panic!("Failed to create table '{}' - constraints validation failed", table_name);
+                    // Return a proper error instead of panicking
+                    return Err(DBError::Validation(format!(
+                        "Failed to create table '{}' - constraints validation failed",
+                        table_name
+                    )));
                 }
             }
         }
@@ -115,7 +116,7 @@ impl AbstractExecutor for CreateTableExecutor {
 
         self.executed = true;
         debug!("CreateTableExecutor execution completed");
-        None
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -266,7 +267,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("test_table").unwrap();
@@ -289,7 +290,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("employees").unwrap();
@@ -322,7 +323,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("simple_table").unwrap();
@@ -346,7 +347,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("new_table").unwrap();
@@ -374,7 +375,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Should still exist and not panic
         let catalog_guard = catalog.read();
@@ -383,7 +384,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Failed to create table 'duplicate_table' - constraints validation failed")]
     fn test_create_table_duplicate_without_if_not_exists() {
         let test_context = TestContext::new("test_create_table_duplicate");
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
@@ -404,7 +404,15 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        executor.next(); // This should panic
+        
+        // This should return an error now instead of None
+        let result = executor.next();
+        assert!(result.is_err());
+        
+        // The table should still exist (the original one)
+        let catalog_guard = catalog.read();
+        let table = catalog_guard.get_table("duplicate_table").unwrap();
+        assert_eq!(table.get_table_name(), "duplicate_table");
     }
 
     #[test]
@@ -430,7 +438,7 @@ mod tests {
 
             let mut executor = CreateTableExecutor::new(exec_context.clone(), plan, false);
             executor.init();
-            assert!(executor.next().is_none());
+            assert!(executor.next().unwrap().is_none());
         }
 
         // Verify all tables exist
@@ -458,14 +466,14 @@ mod tests {
 
         // First execution
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Second call to next() should return None (already executed)
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Re-initialize and try again
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("reuse_test").unwrap();
@@ -487,7 +495,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // The behavior here depends on the catalog implementation
         // It might create a table with empty name or handle it gracefully
@@ -517,7 +525,7 @@ mod tests {
 
             let mut executor = CreateTableExecutor::new(exec_context.clone(), plan, false);
             executor.init();
-            assert!(executor.next().is_none());
+            assert!(executor.next().unwrap().is_none());
 
             let catalog_guard = catalog.read();
             let table = catalog_guard.get_table(name);
@@ -578,7 +586,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("all_types_table").unwrap();
@@ -637,7 +645,7 @@ mod tests {
 
         let mut executor1 = CreateTableExecutor::new(exec_context.clone(), plan1, false);
         executor1.init();
-        assert!(executor1.next().is_none());
+        assert!(executor1.next().unwrap().is_none());
 
         // Second table
         let plan = Arc::new(CreateTablePlanNode::new(
@@ -648,7 +656,7 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
 
         // Verify both tables were created
         let catalog_guard = catalog.read();

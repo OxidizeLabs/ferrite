@@ -372,7 +372,7 @@ mod tests {
     use super::*;
     use crate::common::config::TxnId;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
-    use log::{info, warn};
+    use log::warn;
     use std::fs;
     use std::path::Path;
     use std::thread::sleep;

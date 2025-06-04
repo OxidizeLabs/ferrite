@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -334,19 +335,23 @@ impl AbstractExecutor for IndexScanExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("IndexScanExecutor not initialized, initializing now");
             self.init();
         }
 
         // Get child result first
-        // No need to check for Some since child_executor is not an Option
-        if let Some(child_result) = self.child_executor.next() {
-            debug!("Using result from child executor");
-            return Some(child_result);
+        // Handle the Result from child_executor.next()
+        match self.child_executor.next()? {
+            Some(child_result) => {
+                debug!("Using result from child executor");
+                return Ok(Some(child_result));
+            }
+            None => {
+                debug!("Child executor exhausted, proceeding with index scan");
+            }
         }
-        debug!("Child executor exhausted, proceeding with index scan");
 
         // Get schema upfront
         let output_schema = self.get_output_schema().clone();
@@ -359,7 +364,10 @@ impl AbstractExecutor for IndexScanExecutor {
         };
 
         // Get iterator reference
-        let iter = self.iterator.as_mut()?;
+        let iter = match self.iterator.as_mut() {
+            Some(i) => i,
+            None => return Ok(None),
+        };
 
         // Keep trying until we find a valid tuple or reach the end
         while let Some(rid) = iter.next() {
@@ -399,7 +407,7 @@ impl AbstractExecutor for IndexScanExecutor {
                     }
 
                     debug!("Successfully fetched tuple for RID {:?}", rid);
-                    return Some((tuple, rid));
+                    return Ok(Some((tuple, rid)));
                 }
                 Err(e) => {
                     debug!("Failed to fetch tuple for RID {:?}, skipping: {}", rid, e);
@@ -409,7 +417,7 @@ impl AbstractExecutor for IndexScanExecutor {
         }
 
         info!("Reached end of index scan");
-        None
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -651,8 +659,8 @@ mod index_scan_executor_tests {
             self.initialized = true;
         }
 
-        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
-            None
+        fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
+            Ok(None)
         }
 
         fn get_output_schema(&self) -> &Schema {
@@ -691,7 +699,7 @@ mod index_scan_executor_tests {
         let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
 
         let mut count = 0;
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
             println!("Got tuple: {:?}", tuple);
         }
@@ -728,7 +736,7 @@ mod index_scan_executor_tests {
         let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
 
         let mut count = 0;
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
             let val0 = tuple.get_value(0);
             let val1 = tuple.get_value(1);
@@ -769,7 +777,7 @@ mod index_scan_executor_tests {
         let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
 
         let mut count = 0;
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
             let id = tuple.get_value(0);
             assert_eq!(
@@ -853,7 +861,7 @@ mod index_scan_executor_tests {
 
         let mut count = 0;
         let mut seen_ids = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
             let id = tuple.get_value(0);
             seen_ids.push(id.clone());

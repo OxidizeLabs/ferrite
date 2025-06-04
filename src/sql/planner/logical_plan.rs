@@ -1,7 +1,5 @@
-use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
-use crate::common::rid::RID;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
@@ -30,7 +28,6 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
-use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::debug;
 use sqlparser::ast::{Ident, JoinOperator, Statement, TransactionModifier};

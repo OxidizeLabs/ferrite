@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -32,9 +33,9 @@ impl AbstractExecutor for RollbackTransactionExecutor {
         debug!("Initializing RollbackTransactionExecutor");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
-            return None;
+            return Ok(None);
         }
 
         debug!("Executing transaction rollback");
@@ -65,7 +66,7 @@ impl AbstractExecutor for RollbackTransactionExecutor {
 
         info!("Transaction {} rollback operation prepared", transaction_id);
 
-        // The actual abort will be performed by the execution engine
+        // The actual rollback will be performed by the execution engine
         // We just need to prepare for potential chaining after rollback
         if self.plan.is_chain() {
             // Store the information needed to chain transactions in the context
@@ -74,8 +75,8 @@ impl AbstractExecutor for RollbackTransactionExecutor {
             context_write.set_chain_after_transaction(true);
         }
 
-        // Return None as transaction operations don't produce tuples
-        None
+        // Return Ok(None) as transaction operations don't produce tuples
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -203,7 +204,7 @@ mod tests {
         let result = executor.next();
 
         // Should return None (no output data)
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
 
         // Verify that the transaction ID remains the same (rollback doesn't change transaction ID)
         let current_txn_id = exec_context
@@ -217,7 +218,7 @@ mod tests {
 
         // Execute again - should return None as it's already executed
         let result = executor.next();
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -242,7 +243,7 @@ mod tests {
         let result = executor.next();
 
         // Should return None (no output data)
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
 
         // Verify that the transaction ID remains the same
         let current_txn_id = exec_context
@@ -282,7 +283,7 @@ mod tests {
         let result = executor.next();
 
         // Should return None (no output data)
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
 
         // Verify that the transaction ID remains the same
         let current_txn_id = exec_context
@@ -325,7 +326,7 @@ mod tests {
         let result = executor.next();
 
         // Should return None (no output data)
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
 
         // Verify that the transaction ID remains the same
         let current_txn_id = exec_context
@@ -400,15 +401,15 @@ mod tests {
 
         // First execution should work
         let result1 = executor.next();
-        assert!(result1.is_none(), "First execution should return None");
+        assert!(result1.unwrap().is_none(), "First execution should return None");
 
         // Second execution should also return None (already executed)
         let result2 = executor.next();
-        assert!(result2.is_none(), "Second execution should return None");
+        assert!(result2.unwrap().is_none(), "Second execution should return None");
 
         // Third execution should also return None
         let result3 = executor.next();
-        assert!(result3.is_none(), "Third execution should return None");
+        assert!(result3.unwrap().is_none(), "Third execution should return None");
     }
 
     #[test]
@@ -443,7 +444,7 @@ mod tests {
 
             // Should return None (no output data)
             assert!(
-                result.is_none(),
+                result.unwrap().is_none(),
                 "Rollback to savepoint '{}' should return None",
                 savepoint_name
             );
@@ -498,7 +499,7 @@ mod tests {
 
             // Should return None (no output data)
             assert!(
-                result.is_none(),
+                result.unwrap().is_none(),
                 "Rollback with chain={}, savepoint={:?} should return None",
                 chain,
                 savepoint
@@ -581,7 +582,7 @@ mod tests {
                 let chain_flag = exec_context.read().should_chain_after_transaction();
 
                 thread_results.lock().push((
-                    result.is_none(),
+                    result.unwrap().is_none(),
                     original_txn_id == current_txn_id,
                     chain_flag == chain,
                 ));
@@ -634,7 +635,7 @@ mod tests {
         // Before initialization, next() should still work (init is optional)
         let result_before_init = executor.next();
         assert!(
-            result_before_init.is_none(),
+            result_before_init.unwrap().is_none(),
             "Should return None even before explicit init"
         );
 
@@ -642,7 +643,7 @@ mod tests {
         executor.init();
         let result_after_init = executor.next();
         assert!(
-            result_after_init.is_none(),
+            result_after_init.unwrap().is_none(),
             "Should return None after init when already executed"
         );
     }

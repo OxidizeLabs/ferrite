@@ -6,7 +6,7 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log;
 use log::debug;
-use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef, DataType, ExactNumberInfo, Expr, Ident, ObjectName, ReferentialAction};
+use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef, DataType, ExactNumberInfo, Expr, ObjectName, ReferentialAction};
 use std::collections::HashSet;
 use std::sync::Arc;
 

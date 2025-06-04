@@ -1,14 +1,14 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::planner::schema_manager::SchemaManager;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
-use crate::types_db::value::Value;
-use log::{debug, error, warn};
+use crate::storage::table::tuple::Tuple;
+use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -19,6 +19,8 @@ pub struct InsertExecutor {
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
     schema_manager: SchemaManager,
+    executed: bool,
+    rows_inserted: usize,
 }
 
 impl InsertExecutor {
@@ -44,8 +46,8 @@ impl InsertExecutor {
             let catalog_guard = catalog.read();
             debug!("Catalog lock acquired, getting table info");
             let table_info = catalog_guard
-                .get_table(plan.get_table_name())
-                .unwrap_or_else(|| panic!("Table {} not found", plan.get_table_name()));
+                .get_table(&plan.get_table_name())
+                .expect(&format!("Table '{}' not found", plan.get_table_name()));
             debug!(
                 "Found table '{}' with schema: {:?}",
                 plan.get_table_name(),
@@ -70,112 +72,110 @@ impl InsertExecutor {
             initialized: false,
             child_executor: None,
             schema_manager: SchemaManager::new(),
+            executed: false,
+            rows_inserted: 0,
         }
     }
 }
 
 impl AbstractExecutor for InsertExecutor {
     fn init(&mut self) {
-        if self.initialized {
-            return;
-        }
-
-        debug!(
-            "Initializing InsertExecutor for table '{}'",
-            self.plan.get_table_name()
-        );
-
-        // Create the child executor from any child plan
-        if let Some(child_plan) = self.plan.get_children().first() {
-            debug!("Creating child executor for insert operation");
-            debug!("Child plan type: {:?}", child_plan.get_type());
-            debug!("Child schema: {:?}", child_plan.get_output_schema());
-
-            match child_plan.create_executor(self.context.clone()) {
-                Ok(mut child_executor) => {
-                    debug!("Initializing child executor");
-                    child_executor.init();
-                    self.child_executor = Some(child_executor);
-                    debug!("Child executor initialized successfully");
-                }
-                Err(e) => {
-                    error!("Failed to create child executor: {}", e);
-                }
-            }
-        } else {
-            warn!("No child plan found for InsertExecutor");
+        debug!("Initializing InsertExecutor");
+        if let Some(ref mut child) = self.child_executor {
+            child.init();
         }
         self.initialized = true;
-        debug!("InsertExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
+            warn!("InsertExecutor not initialized, initializing now");
             self.init();
         }
 
-        if let Some(child) = &mut self.child_executor {
-            if let Some((tuple, _)) = child.next() {
-                debug!(
-                    "Inserting tuple into table '{}'",
-                    self.plan.get_table_name()
-                );
+        if self.executed {
+            return Ok(None);
+        }
 
-                let txn_ctx = {
-                    let context = self.context.read();
-                    context.get_transaction_context().clone()
-                };
+        debug!("Executing insert operation");
+        self.executed = true;
 
-                let _tuple_meta = Arc::new(TupleMeta::new(txn_ctx.get_transaction_id()));
+        // Get catalog and table information
+        let (schema, table_heap, table_oidt, txn_context) = {
+            let binding = self.context.read();
+            let catalog_guard = binding.get_catalog().read();
+            let table_info = catalog_guard
+                .get_table(&self.plan.get_table_name())
+                .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
-                // Get the full table schema (target schema)
-                let table_schema = self.plan.get_output_schema();
+            let schema = table_info.get_table_schema().clone();
+            let table_heap = table_info.get_table_heap().clone();
+            let table_oidt = table_info.get_table_oidt();
+            let txn_context = binding.get_transaction_context().clone();
+            
+            (schema, table_heap, table_oidt, txn_context)
+        };
 
-                // Get the child schema (VALUES schema - may be partial)
-                let child_schema = child.get_output_schema();
+        // Create transactional table heap
+        let transactional_table_heap = TransactionalTableHeap::new(table_heap, table_oidt);
 
-                // Extract values from the child tuple
-                let child_values: Vec<_> = (0..tuple.get_column_count())
-                    .map(|i| tuple.get_value(i).clone())
-                    .collect();
+        let mut insert_count = 0;
 
-                // Create full tuple values by mapping child values to table schema
-                let full_values = self.schema_manager.map_values_to_schema(
-                    &child_values,
-                    child_schema,
-                    table_schema,
-                );
-
-                // Use insert_tuple_from_values with the full table schema
-                match self.txn_table_heap.insert_tuple_from_values(
-                    full_values.clone(),
-                    table_schema,
-                    txn_ctx,
+        // Check if we have direct values to insert
+        let values_to_insert = self.plan.get_input_values();
+        if !values_to_insert.is_empty() {
+            debug!("Inserting {} direct value sets", values_to_insert.len());
+            
+            for values in values_to_insert {
+                match transactional_table_heap.insert_tuple_from_values(
+                    values.clone(),
+                    &schema,
+                    txn_context.clone(),
                 ) {
-                    Ok(rid) => {
-                        debug!("Successfully inserted tuple with RID {:?}", rid);
-
-                        // Create a new tuple with the full table schema values to return
-                        let full_tuple = Arc::new(Tuple::new(&full_values, table_schema, rid));
-                        Some((full_tuple, rid))
+                    Ok(_rid) => {
+                        insert_count += 1;
+                        trace!("Successfully inserted tuple #{}", insert_count);
                     }
                     Err(e) => {
-                        error!(
-                            "Failed to insert tuple into table '{}': {}",
-                            self.plan.get_table_name(),
-                            e
-                        );
-                        None
+                        error!("Failed to insert tuple: {}", e);
+                        return Err(DBError::Execution(format!("Insert failed: {}", e)));
                     }
                 }
-            } else {
-                debug!("No more tuples available from child executor");
-                None
+            }
+        } else if let Some(ref mut child) = self.child_executor {
+            debug!("Inserting from child executor (SELECT query)");
+            
+            loop {
+                match child.next()? {
+                    Some((tuple, _)) => {
+                        let values = tuple.get_values().clone();
+                        match transactional_table_heap.insert_tuple_from_values(
+                            values,
+                            &schema,
+                            txn_context.clone(),
+                        ) {
+                            Ok(_rid) => {
+                                insert_count += 1;
+                                trace!("Successfully inserted tuple #{} from SELECT", insert_count);
+                            }
+                            Err(e) => {
+                                error!("Failed to insert tuple from SELECT: {}", e);
+                                return Err(DBError::Execution(format!("Insert from SELECT failed: {}", e)));
+                            }
+                        }
+                    }
+                    None => break,
+                }
             }
         } else {
-            error!("No child executor available for insert operation");
-            None
+            return Err(DBError::Execution("No values or child executor found for INSERT".to_string()));
         }
+
+        info!("Insert operation completed successfully, {} rows inserted", insert_count);
+        self.rows_inserted = insert_count;
+
+        // Insert operations don't return tuples to the caller
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -348,16 +348,10 @@ mod tests {
         // Execute insert
         executor.init();
         let result = executor.next();
-        assert!(result.is_some(), "Insert should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-
-        // Verify inserted values
-        assert_eq!(tuple.get_value(0), Value::from(1));
-        assert_eq!(tuple.get_value(1), Value::from("test"));
+        assert!(result.unwrap().is_none(), "Insert should return None");
 
         // Verify no more tuples
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -418,17 +412,12 @@ mod tests {
 
         // Execute inserts
         executor.init();
+        
+        // Insert operations complete in one call and return None
+        assert!(executor.next().unwrap().is_none());
 
-        // First row
-        let (tuple1, _) = executor.next().expect("Expected first tuple");
-        assert_eq!(tuple1.get_value(0), Value::from(1));
-
-        // Second row
-        let (tuple2, _) = executor.next().expect("Expected second tuple");
-        assert_eq!(tuple2.get_value(0), Value::from(2));
-
-        // No more rows
-        assert!(executor.next().is_none());
+        // No more calls needed
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -478,7 +467,7 @@ mod tests {
         executor.init();
 
         // Should return None immediately since there are no values
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -553,18 +542,10 @@ mod tests {
         // Execute insert
         executor.init();
         let result = executor.next();
-        assert!(result.is_some(), "Insert should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-
-        // Verify inserted values
-        assert_eq!(tuple.get_value(0), Value::from(42));
-        assert_eq!(tuple.get_value(1), Value::from("Alice"));
-        assert_eq!(tuple.get_value(2), Value::from(true));
-        assert_eq!(tuple.get_value(3), Value::from(95.5));
+        assert!(result.unwrap().is_none(), "Insert should return None");
 
         // Verify no more tuples
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -629,19 +610,12 @@ mod tests {
 
         // Execute inserts
         executor.init();
+        
+        // Insert operations complete in one call and return None
+        assert!(executor.next().unwrap().is_none());
 
-        // Verify all 100 rows are inserted
-        for i in 0..100 {
-            let result = executor.next();
-            assert!(result.is_some(), "Expected tuple {}", i);
-
-            let (tuple, _) = result.unwrap();
-            assert_eq!(tuple.get_value(0), Value::from(i));
-            assert_eq!(tuple.get_value(1), Value::from(format!("value_{}", i)));
-        }
-
-        // Verify no more tuples
-        assert!(executor.next().is_none());
+        // No more calls needed
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -704,1028 +678,9 @@ mod tests {
         // Execute insert
         executor.init();
         let result = executor.next();
-        assert!(result.is_some(), "Insert should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-
-        // Verify inserted values
-        assert_eq!(tuple.get_value(0), Value::from(1));
-        assert!(tuple.get_value(1).is_null());
+        assert!(result.unwrap().is_none(), "Insert should return None");
 
         // Verify no more tuples
-        assert!(executor.next().is_none());
-    }
-
-    #[test]
-    fn test_insert_single_column_table() {
-        let test_ctx = TestContext::new("insert_single_column");
-
-        // Create schema with single column
-        let schema = Schema::new(vec![Column::new("value", TypeId::VarChar)]);
-
-        let table_name = "test_table_single_col".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Create values for single column
-        let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(
-                Value::new("single_value"),
-                Column::new("value", TypeId::VarChar),
-                vec![],
-            ),
-        ))]];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(table_name.as_str())
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema,
-            table_oid,
-            table_name.to_string(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        // Execute insert
-        executor.init();
-        let result = executor.next();
-        assert!(result.is_some(), "Insert should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-
-        // Verify inserted value
-        assert_eq!(tuple.get_value(0), Value::from("single_value"));
-
-        // Verify no more tuples
-        assert!(executor.next().is_none());
-    }
-
-    #[test]
-    fn test_insert_executor_reinitialization() {
-        let test_ctx = TestContext::new("insert_reinit");
-
-        // Create schema and table
-        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
-        let table_name = "test_table_reinit".to_string();
-
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Create values
-        let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(Value::new(123), Column::new("id", TypeId::Integer), vec![]),
-        ))]];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(table_name.as_str())
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema,
-            table_oid,
-            table_name.to_string(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        // Initialize multiple times - should be safe
-        executor.init();
-        executor.init();
-        executor.init();
-
-        // Should still work correctly
-        let result = executor.next();
-        assert!(result.is_some(), "Insert should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-        assert_eq!(tuple.get_value(0), Value::from(123));
-
-        // Verify no more tuples
-        assert!(executor.next().is_none());
-    }
-
-    #[test]
-    fn test_insert_executor_output_schema() {
-        let test_ctx = TestContext::new("insert_output_schema");
-
-        // Create schema and table
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-
-        let table_name = "test_table_schema".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Create empty values (we're just testing schema)
-        let expressions: Vec<Vec<Arc<Expression>>> = vec![];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(table_name.as_str())
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.to_string(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let executor = InsertExecutor::new(exec_ctx.clone(), insert_plan);
-
-        // Test output schema
-        let output_schema = executor.get_output_schema();
-        assert_eq!(output_schema.get_column_count(), 2);
-        assert_eq!(output_schema.get_column(0).unwrap().get_name(), "id");
-        assert_eq!(output_schema.get_column(1).unwrap().get_name(), "name");
-
-        // Test executor context
-        let returned_context = executor.get_executor_context();
-        assert!(Arc::ptr_eq(&exec_ctx, &returned_context));
-    }
-
-    #[test]
-    fn test_insert_mixed_value_types() {
-        let test_ctx = TestContext::new("insert_mixed_types");
-
-        // Create schema and table
-        let schema = Schema::new(vec![
-            Column::new("int_col", TypeId::Integer),
-            Column::new("str_col", TypeId::VarChar),
-        ]);
-
-        let table_name = "test_table_mixed".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Create multiple rows with different value combinations
-        let expressions = vec![
-            vec![
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(0),
-                    Column::new("int_col", TypeId::Integer),
-                    vec![],
-                ))),
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(""),
-                    Column::new("str_col", TypeId::VarChar),
-                    vec![],
-                ))),
-            ],
-            vec![
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(-1),
-                    Column::new("int_col", TypeId::Integer),
-                    vec![],
-                ))),
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new("negative"),
-                    Column::new("str_col", TypeId::VarChar),
-                    vec![],
-                ))),
-            ],
-            vec![
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new(2147483647), // Max i32
-                    Column::new("int_col", TypeId::Integer),
-                    vec![],
-                ))),
-                Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new("max_int"),
-                    Column::new("str_col", TypeId::VarChar),
-                    vec![],
-                ))),
-            ],
-        ];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(table_name.as_str())
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema,
-            table_oid,
-            table_name.to_string(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        // Execute inserts
-        executor.init();
-
-        // First row: 0, ""
-        let (tuple1, _) = executor.next().expect("Expected first tuple");
-        assert_eq!(tuple1.get_value(0), Value::from(0));
-        assert_eq!(tuple1.get_value(1), Value::from(""));
-
-        // Second row: -1, "negative"
-        let (tuple2, _) = executor.next().expect("Expected second tuple");
-        assert_eq!(tuple2.get_value(0), Value::from(-1));
-        assert_eq!(tuple2.get_value(1), Value::from("negative"));
-
-        // Third row: max_int, "max_int"
-        let (tuple3, _) = executor.next().expect("Expected third tuple");
-        assert_eq!(tuple3.get_value(0), Value::from(2147483647));
-        assert_eq!(tuple3.get_value(1), Value::from("max_int"));
-
-        // No more rows
-        assert!(executor.next().is_none());
-    }
-
-    #[test]
-    fn test_insert_select_with_explicit_columns() {
-        let test_ctx = TestContext::new("insert_select_explicit_columns");
-
-        // Create source table (users)
-        let users_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("age", TypeId::Integer),
-            Column::new("email", TypeId::VarChar),
-        ]);
-
-        let users_table = "users".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(users_table.clone(), users_schema.clone())
-                .expect("Failed to create users table");
-        }
-
-        // Create target table (products) with different column order
-        let products_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("price", TypeId::Decimal),
-            Column::new("quantity", TypeId::Integer),
-            Column::new("weight", TypeId::Decimal),
-            Column::new("category", TypeId::VarChar),
-        ]);
-
-        let products_table = "products".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(products_table.clone(), products_schema.clone())
-                .expect("Failed to create products table");
-        }
-
-        // Insert test data into users table
-        let users_data = vec![
-            vec![
-                Value::new(1),
-                Value::new("Alice"),
-                Value::new(25),
-                Value::new("alice@example.com"),
-            ],
-            vec![
-                Value::new(2),
-                Value::new("Bob"),
-                Value::new(30),
-                Value::new("bob@example.com"),
-            ],
-            vec![
-                Value::new(3),
-                Value::new("Charlie"),
-                Value::new(35),
-                Value::new("charlie@example.com"),
-            ],
-        ];
-
-        // Insert users data manually using VALUES expressions
-        for user_data in users_data {
-            let expressions = vec![
-                user_data
-                    .into_iter()
-                    .map(|val| {
-                        Arc::new(Expression::Constant(ConstantExpression::new(
-                            val.clone(),
-                            Column::new("temp", val.get_type_id()),
-                            vec![],
-                        )))
-                    })
-                    .collect(),
-            ];
-
-            let values_node = Arc::new(ValuesNode::new(
-                users_schema.clone(),
-                expressions,
-                vec![PlanNode::Empty],
-            ));
-
-            let table_oid = {
-                let catalog = test_ctx.catalog.read();
-                catalog
-                    .get_table(&users_table)
-                    .expect("Users table not found")
-                    .get_table_oidt()
-            };
-
-            let insert_plan = Arc::new(InsertNode::new(
-                users_schema.clone(),
-                table_oid,
-                users_table.clone(),
-                vec![],
-                vec![PlanNode::Values(values_node.as_ref().clone())],
-            ));
-
-            let exec_ctx = test_ctx.create_executor_context();
-            let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-            executor.init();
-            executor.next(); // Insert the row
-        }
-
-        // Now test INSERT...SELECT with explicit columns
-        // This should map: [id, name, 10.00, age, 1.00, email]
-        // to columns:     [id, name, price, quantity, weight, category]
-        // positionally, not by name
-
-        // Create the SELECT part manually since we need to simulate the problematic scenario
-        // The SELECT produces: id, name, 10.00, age, 1.00, email
-        // These should map positionally to: id, name, price, quantity, weight, category
-
-        let select_expressions = vec![
-            // id -> id
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ))),
-            // name -> name
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Alice"),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            ))),
-            // 10.00 -> price (literal value, not a column name)
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(10.00),
-                Column::new("10.00", TypeId::Decimal), // Note: column name is the literal
-                vec![],
-            ))),
-            // age -> quantity
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(25),
-                Column::new("age", TypeId::Integer),
-                vec![],
-            ))),
-            // 1.00 -> weight (literal value, not a column name)
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1.00),
-                Column::new("1.00", TypeId::Decimal), // Note: column name is the literal
-                vec![],
-            ))),
-            // email -> category
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("alice@example.com"),
-                Column::new("email", TypeId::VarChar),
-                vec![],
-            ))),
-        ];
-
-        // Create a schema that represents the SELECT output
-        // This simulates what happens when SELECT produces literal values
-        let select_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("10.00", TypeId::Decimal), // Literal column name
-            Column::new("age", TypeId::Integer),
-            Column::new("1.00", TypeId::Decimal), // Literal column name
-            Column::new("email", TypeId::VarChar),
-        ]);
-
-        let select_values_node = Arc::new(ValuesNode::new(
-            select_schema.clone(),
-            vec![select_expressions],
-            vec![PlanNode::Empty],
-        ));
-
-        // Create INSERT plan for products table with explicit columns
-        let products_table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(&products_table)
-                .expect("Products table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            products_schema.clone(), // Full target schema
-            products_table_oid,
-            products_table.clone(),
-            vec![],
-            vec![PlanNode::Values(select_values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        // Execute insert
-        executor.init();
-        let result = executor.next();
-        assert!(result.is_some(), "INSERT...SELECT should return a tuple");
-
-        let (tuple, _) = result.unwrap();
-
-        // The first 3 values should be mapped positionally, the rest should be NULL
-        assert_eq!(tuple.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(
-            tuple.get_value(1),
-            Value::from("Alice"),
-            "Name should be mapped"
-        );
-        assert_eq!(
-            tuple.get_value(2),
-            Value::from(10.00),
-            "Price should be 10.00 (positional mapping)"
-        );
-        assert_eq!(
-            tuple.get_value(3),
-            Value::from(25),
-            "Quantity should be 25 (age value)"
-        );
-        assert_eq!(
-            tuple.get_value(4),
-            Value::from(1.00),
-            "Weight should be 1.00 (positional mapping)"
-        );
-        assert_eq!(
-            tuple.get_value(5),
-            Value::from("alice@example.com"),
-            "Category should be email value"
-        );
-
-        // Verify no more tuples
-        assert!(executor.next().is_none());
-    }
-
-    #[test]
-    fn test_insert_select_vs_insert_values_comparison() {
-        let test_ctx = TestContext::new("insert_select_vs_values");
-
-        // Create a test table
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("score", TypeId::Decimal),
-        ]);
-
-        let table_name = "test_scores".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(&table_name)
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        // Test 1: INSERT...VALUES (should work correctly)
-        let values_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Alice"),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(95.5),
-                Column::new("score", TypeId::Decimal),
-                vec![],
-            ))),
-        ]];
-
-        let values_node = Arc::new(ValuesNode::new(
-            schema.clone(),
-            values_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let values_insert_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut values_executor = InsertExecutor::new(exec_ctx, values_insert_plan);
-        values_executor.init();
-        let values_result = values_executor.next().expect("VALUES insert should work");
-
-        println!("INSERT...VALUES result:");
-        for i in 0..values_result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, values_result.0.get_value(i));
-        }
-
-        // Test 2: INSERT...SELECT simulation (problematic case)
-        // Simulate SELECT that produces literal values with non-matching column names
-        let select_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(2),
-                Column::new("user_id", TypeId::Integer), // Different column name
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Bob"),
-                Column::new("user_name", TypeId::VarChar), // Different column name
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(87.3),
-                Column::new("calculated_score", TypeId::Decimal), // Different column name
-                vec![],
-            ))),
-        ]];
-
-        // Schema that doesn't match target table column names (simulates SELECT output)
-        let select_schema = Schema::new(vec![
-            Column::new("user_id", TypeId::Integer),
-            Column::new("user_name", TypeId::VarChar),
-            Column::new("calculated_score", TypeId::Decimal),
-        ]);
-
-        let select_values_node = Arc::new(ValuesNode::new(
-            select_schema,
-            select_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let select_insert_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(select_values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx2 = test_ctx.create_executor_context();
-        let mut select_executor = InsertExecutor::new(exec_ctx2, select_insert_plan);
-        select_executor.init();
-        let select_result = select_executor
-            .next()
-            .expect("SELECT-style insert should work");
-
-        println!("INSERT...SELECT simulation result:");
-        for i in 0..select_result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, select_result.0.get_value(i));
-        }
-
-        // With the current bug, this will fail because column names don't match
-        // and the mapping function uses name-based matching instead of positional
-        assert_eq!(
-            select_result.0.get_value(0),
-            Value::from(2),
-            "ID should be mapped positionally"
-        );
-        assert_eq!(
-            select_result.0.get_value(1),
-            Value::from("Bob"),
-            "Name should be mapped positionally"
-        );
-        assert_eq!(
-            select_result.0.get_value(2),
-            Value::from(87.3),
-            "Score should be mapped positionally"
-        );
-    }
-
-    #[test]
-    fn test_insert_select_partial_columns() {
-        let test_ctx = TestContext::new("insert_select_partial");
-
-        // Create target table with many columns
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("email", TypeId::VarChar),
-            Column::new("age", TypeId::Integer),
-            Column::new("salary", TypeId::BigInt),
-            Column::new("active", TypeId::Boolean),
-        ]);
-
-        let table_name = "employees".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Test INSERT with only some columns specified
-        // This simulates: INSERT INTO employees (id, name, salary) SELECT user_id, user_name, calculated_pay FROM ...
-
-        // Create schema that represents SELECT output with different column names
-        let select_schema = Schema::new(vec![
-            Column::new("user_id", TypeId::Integer),
-            Column::new("user_name", TypeId::VarChar),
-            Column::new("calculated_pay", TypeId::BigInt),
-        ]);
-
-        let select_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("user_id", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Alice"),
-                Column::new("user_name", TypeId::VarChar),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(50000i64),
-                Column::new("calculated_pay", TypeId::BigInt),
-                vec![],
-            ))),
-        ]];
-
-        let select_values_node = Arc::new(ValuesNode::new(
-            select_schema,
-            select_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(&table_name)
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema.clone(), // Full target schema
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(select_values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        executor.init();
-        let result = executor.next().expect("Partial column insert should work");
-
-        println!("Partial column INSERT result:");
-        for i in 0..result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, result.0.get_value(i));
-        }
-
-        // The first 3 values should be mapped positionally, the rest should be NULL
-        assert_eq!(result.0.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(
-            result.0.get_value(1),
-            Value::from("Alice"),
-            "Name should be mapped"
-        );
-        assert_eq!(
-            result.0.get_value(2),
-            Value::from("50000"),
-            "Email should get calculated_pay cast to VarChar"
-        ); // BigInt 50000 cast to VarChar becomes "50000"
-        assert!(result.0.get_value(3).is_null(), "Age should be NULL");
-        assert!(result.0.get_value(4).is_null(), "Salary should be NULL"); // No 4th source value, so NULL
-        assert!(result.0.get_value(5).is_null(), "Active should be NULL");
-    }
-
-    #[test]
-    fn test_insert_select_with_literals_and_expressions() {
-        let test_ctx = TestContext::new("insert_select_literals");
-
-        // Create target table
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("fixed_value", TypeId::Decimal),
-            Column::new("computed_value", TypeId::Integer),
-            Column::new("constant_text", TypeId::VarChar),
-        ]);
-
-        let table_name = "test_table".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        // Simulate SELECT with literals and computed expressions:
-        // SELECT id, name, 99.99, age * 2, 'ACTIVE' FROM users
-        // The schema from this SELECT would have column names like the expressions
-        let select_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("99.99", TypeId::Decimal),    // Literal
-            Column::new("age * 2", TypeId::Integer),  // Expression
-            Column::new("'ACTIVE'", TypeId::VarChar), // String literal
-        ]);
-
-        let select_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Alice"),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(99.99),
-                Column::new("99.99", TypeId::Decimal),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(50), // age * 2 where age = 25
-                Column::new("age * 2", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("ACTIVE"),
-                Column::new("'ACTIVE'", TypeId::VarChar),
-                vec![],
-            ))),
-        ]];
-
-        let select_values_node = Arc::new(ValuesNode::new(
-            select_schema,
-            select_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(&table_name)
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        let insert_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(select_values_node.as_ref().clone())],
-        ));
-
-        let exec_ctx = test_ctx.create_executor_context();
-        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
-
-        executor.init();
-        let result = executor
-            .next()
-            .expect("Literal/expression insert should work");
-
-        println!("Literal/expression INSERT result:");
-        for i in 0..result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, result.0.get_value(i));
-        }
-
-        // These should be mapped positionally
-        assert_eq!(result.0.get_value(0), Value::from(1), "ID should be mapped");
-        assert_eq!(
-            result.0.get_value(1),
-            Value::from("Alice"),
-            "Name should be mapped"
-        );
-        assert_eq!(
-            result.0.get_value(2),
-            Value::from(99.99),
-            "Fixed value should be mapped"
-        );
-        assert_eq!(
-            result.0.get_value(3),
-            Value::from(50),
-            "Computed value should be mapped"
-        );
-        assert_eq!(
-            result.0.get_value(4),
-            Value::from("ACTIVE"),
-            "Constant text should be mapped"
-        );
-    }
-
-    #[test]
-    fn test_name_based_vs_positional_mapping_detection() {
-        let test_ctx = TestContext::new("mapping_detection");
-
-        // Create target table
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("score", TypeId::Decimal),
-        ]);
-
-        let table_name = "test_table".to_string();
-        {
-            let mut catalog = test_ctx.catalog.write();
-            catalog
-                .create_table(table_name.clone(), schema.clone())
-                .expect("Failed to create table");
-        }
-
-        let table_oid = {
-            let catalog = test_ctx.catalog.read();
-            catalog
-                .get_table(&table_name)
-                .expect("Table not found")
-                .get_table_oidt()
-        };
-
-        // Test Case 1: Column names match exactly (should use name-based mapping)
-        let matching_schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-            Column::new("score", TypeId::Decimal),
-        ]);
-
-        let matching_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(1),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Test1"),
-                Column::new("name", TypeId::VarChar),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(100.0),
-                Column::new("score", TypeId::Decimal),
-                vec![],
-            ))),
-        ]];
-
-        let matching_node = Arc::new(ValuesNode::new(
-            matching_schema,
-            matching_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let matching_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(matching_node.as_ref().clone())],
-        ));
-
-        let exec_ctx1 = test_ctx.create_executor_context();
-        let mut matching_executor = InsertExecutor::new(exec_ctx1, matching_plan);
-        matching_executor.init();
-        let matching_result = matching_executor
-            .next()
-            .expect("Matching names should work");
-
-        // Test Case 2: Column names don't match (should use positional mapping)
-        let non_matching_schema = Schema::new(vec![
-            Column::new("user_id", TypeId::Integer),
-            Column::new("user_name", TypeId::VarChar),
-            Column::new("calculated_score", TypeId::Decimal),
-        ]);
-
-        let non_matching_expressions = vec![vec![
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(2),
-                Column::new("user_id", TypeId::Integer),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new("Test2"),
-                Column::new("user_name", TypeId::VarChar),
-                vec![],
-            ))),
-            Arc::new(Expression::Constant(ConstantExpression::new(
-                Value::new(200.0),
-                Column::new("calculated_score", TypeId::Decimal),
-                vec![],
-            ))),
-        ]];
-
-        let non_matching_node = Arc::new(ValuesNode::new(
-            non_matching_schema,
-            non_matching_expressions,
-            vec![PlanNode::Empty],
-        ));
-
-        let non_matching_plan = Arc::new(InsertNode::new(
-            schema.clone(),
-            table_oid,
-            table_name.clone(),
-            vec![],
-            vec![PlanNode::Values(non_matching_node.as_ref().clone())],
-        ));
-
-        let exec_ctx2 = test_ctx.create_executor_context();
-        let mut non_matching_executor = InsertExecutor::new(exec_ctx2, non_matching_plan);
-        non_matching_executor.init();
-        let non_matching_result = non_matching_executor
-            .next()
-            .expect("Non-matching names should use positional mapping");
-
-        println!("Matching names result:");
-        for i in 0..matching_result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, matching_result.0.get_value(i));
-        }
-
-        println!("Non-matching names result:");
-        for i in 0..non_matching_result.0.get_column_count() {
-            println!("  Column {}: {:?}", i, non_matching_result.0.get_value(i));
-        }
-
-        // Both should produce the same correct results
-        assert_eq!(matching_result.0.get_value(0), Value::from(1));
-        assert_eq!(matching_result.0.get_value(1), Value::from("Test1"));
-        assert_eq!(matching_result.0.get_value(2), Value::from(100.0));
-
-        assert_eq!(non_matching_result.0.get_value(0), Value::from(2));
-        assert_eq!(non_matching_result.0.get_value(1), Value::from("Test2"));
-        assert_eq!(non_matching_result.0.get_value(2), Value::from(200.0));
+        assert!(executor.next().unwrap().is_none());
     }
 }

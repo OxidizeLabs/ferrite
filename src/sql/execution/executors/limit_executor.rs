@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -46,24 +47,24 @@ impl AbstractExecutor for LimitExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         // Check if we've reached the limit
         if self.current_index >= self.plan.get_limit() {
-            return None;
+            return Ok(None);
         }
 
         // Get next tuple from child
         if let Some(child) = &mut self.child_executor {
-            // Use a non-recursive approach to get the next tuple
-            match child.next() {
+            // Handle the Result from child.next()
+            match child.next()? {
                 Some(result) => {
                     self.current_index += 1;
-                    Some(result)
+                    Ok(Some(result))
                 }
-                None => None,
+                None => Ok(None),
             }
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -226,7 +227,7 @@ mod tests {
         limit_executor.init();
 
         // Should get first two tuples
-        let result1 = limit_executor.next();
+        let result1 = limit_executor.next().unwrap();
         assert!(result1.is_some(), "Expected first result to be Some");
         let (tuple1, rid1) = result1.unwrap();
         assert_eq!(
@@ -241,7 +242,7 @@ mod tests {
         );
         assert_eq!(rid1, RID::new(0, 0), "First tuple RID should match");
 
-        let result2 = limit_executor.next();
+        let result2 = limit_executor.next().unwrap();
         assert!(result2.is_some(), "Expected second result to be Some");
         let (tuple2, rid2) = result2.unwrap();
         assert_eq!(
@@ -257,11 +258,8 @@ mod tests {
         assert_eq!(rid2, RID::new(0, 1), "Second tuple RID should match");
 
         // Third call should return None since limit is 2
-        let result3 = limit_executor.next();
-        assert!(
-            result3.is_none(),
-            "Expected third result to be None due to limit"
-        );
+        let result3 = limit_executor.next().unwrap();
+        assert!(result3.is_none(), "Expected third result to be None due to limit");
     }
 
     #[test]
@@ -311,7 +309,7 @@ mod tests {
         limit_executor.init();
 
         // Should get no tuples
-        let result = limit_executor.next();
+        let result = limit_executor.next().unwrap();
         assert!(result.is_none(), "Expected no results with limit of 0");
     }
 }

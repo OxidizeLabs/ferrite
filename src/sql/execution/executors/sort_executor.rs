@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
@@ -55,11 +56,23 @@ impl AbstractExecutor for SortExecutor {
             // Collect all tuples
             debug!("Starting to collect tuples from child executor");
             let mut tuple_count = 0;
-            while let Some((tuple, rid)) = child.next() {
-                self.sorted_tuples.push((tuple, rid));
-                tuple_count += 1;
-                if tuple_count % 100 == 0 {
-                    trace!("Collected {} tuples so far", tuple_count);
+            loop {
+                match child.next() {
+                    Ok(Some((tuple, rid))) => {
+                        self.sorted_tuples.push((tuple, rid));
+                        tuple_count += 1;
+                        if tuple_count % 100 == 0 {
+                            trace!("Collected {} tuples so far", tuple_count);
+                        }
+                    }
+                    Ok(None) => {
+                        // No more tuples
+                        break;
+                    }
+                    Err(e) => {
+                        error!("Error collecting tuples from child executor: {}", e);
+                        break;
+                    }
                 }
             }
             debug!("Collected {} tuples for sorting", self.sorted_tuples.len());
@@ -120,7 +133,7 @@ impl AbstractExecutor for SortExecutor {
         debug!("SortExecutor initialization complete");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("SortExecutor not initialized, initializing now");
             self.init();
@@ -128,7 +141,7 @@ impl AbstractExecutor for SortExecutor {
 
         if self.current_index >= self.sorted_tuples.len() {
             debug!("No more tuples to return");
-            return None;
+            return Ok(None);
         }
 
         let result = self.sorted_tuples[self.current_index].clone();
@@ -138,7 +151,7 @@ impl AbstractExecutor for SortExecutor {
             self.current_index,
             self.sorted_tuples.len()
         );
-        Some(result)
+        Ok(Some(result))
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -332,7 +345,7 @@ mod tests {
 
         // Collect results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = sort_executor.next() {
+        while let Ok(Some((tuple, _))) = sort_executor.next() {
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
             results.push(age);
         }
@@ -414,7 +427,7 @@ mod tests {
 
         // Collect results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = sort_executor.next() {
+        while let Ok(Some((tuple, _))) = sort_executor.next() {
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
             let name: String = ToString::to_string(&tuple.get_value(1));
             results.push((age, name));
@@ -492,7 +505,7 @@ mod tests {
         let mut count = 0;
         let mut last_age = 0;
 
-        while let Some((tuple, _)) = sort_executor.next() {
+        while let Ok(Some((tuple, _))) = sort_executor.next() {
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
 
             // Verify ascending order
@@ -592,7 +605,7 @@ mod tests {
 
         // Collect results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = sort_executor.next() {
+        while let Ok(Some((tuple, _))) = sort_executor.next() {
             let id: i32 = tuple.get_value(0).as_integer().unwrap();
             let name: String = ToString::to_string(&tuple.get_value(1));
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
@@ -741,7 +754,7 @@ mod tests {
 
         // Collect and verify results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = outer_sort_executor.next() {
+        while let Ok(Some((tuple, _))) = outer_sort_executor.next() {
             let age: i32 = tuple.get_value(2).as_integer().unwrap();
             results.push(age);
         }

@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -195,29 +196,38 @@ impl AbstractExecutor for AggregationExecutor {
             let mut has_rows = false;
 
             // Process all input tuples
-            while let Some((tuple, _)) = self.child.next() {
-                has_rows = true;
-                // Get schema before computing key
-                let schema = self.child.get_output_schema();
-                let aggregates = self.aggregate_exprs.clone();
+            loop {
+                match self.child.next() {
+                    Ok(Some((tuple, _))) => {
+                        has_rows = true;
+                        // Get schema before computing key
+                        let schema = self.child.get_output_schema();
+                        let aggregates = self.aggregate_exprs.clone();
 
-                // Compute group by key
-                let mut key_values = Vec::new();
-                for expr in &self.group_by_exprs {
-                    key_values.push(expr.evaluate(&tuple, schema).unwrap());
-                }
-                let key = GroupKey { values: key_values };
+                        // Compute group by key
+                        let mut key_values = Vec::new();
+                        for expr in &self.group_by_exprs {
+                            key_values.push(expr.evaluate(&tuple, schema).unwrap());
+                        }
+                        let key = GroupKey { values: key_values };
 
-                // Update aggregates for this group
-                if let Err(e) = Self::compute_aggregate(
-                    &mut self.groups,
-                    &mut self.avg_counts,
-                    &aggregates,
-                    key,
-                    &tuple,
-                    schema,
-                ) {
-                    error!("Error computing aggregate: {}", e);
+                        // Update aggregates for this group
+                        if let Err(e) = Self::compute_aggregate(
+                            &mut self.groups,
+                            &mut self.avg_counts,
+                            &aggregates,
+                            key,
+                            &tuple,
+                            schema,
+                        ) {
+                            error!("Error computing aggregate: {}", e);
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        debug!("Error from child executor: {}", e);
+                        return; // Initialize failed, but we don't propagate errors from init
+                    }
                 }
             }
 
@@ -265,6 +275,7 @@ impl AbstractExecutor for AggregationExecutor {
                         }
                         CmpBool::CmpNull => continue,
                     }
+
                 }
                 std::cmp::Ordering::Equal
             });
@@ -272,7 +283,7 @@ impl AbstractExecutor for AggregationExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
@@ -314,9 +325,9 @@ impl AbstractExecutor for AggregationExecutor {
                 &self.output_schema.clone(),
                 RID::new(0, 0),
             ));
-            Some((tuple, RID::new(0, 0)))
+            Ok(Some((tuple, RID::new(0, 0))))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -474,13 +485,13 @@ mod tests {
         executor.init();
 
         // Should get one result with count = 3
-        let result = executor.next();
+        let result = executor.next().unwrap();
         assert!(result.is_some());
         let (tuple, _) = result.unwrap();
         assert_eq!(tuple.get_value(0), Value::new(BigInt(3)));
 
         // No more results
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -547,13 +558,13 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
         // Sort results by group_id for consistent checking
         results.sort_by(
-            |a, b| match a.get_value(0).compare_less_than(&b.get_value(0)) {
+            |a: &Arc<Tuple>, b: &Arc<Tuple>| match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
@@ -642,12 +653,13 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
+        // Sort results by group_id for consistent checking
         results.sort_by(
-            |a, b| match a.get_value(0).compare_less_than(&b.get_value(0)) {
+            |a: &Arc<Tuple>, b: &Arc<Tuple>| match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
@@ -726,7 +738,7 @@ mod tests {
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();
 
-        let result = executor.next();
+        let result = executor.next().unwrap();
         assert!(result.is_some());
 
         let (tuple, _) = result.unwrap();
@@ -734,7 +746,7 @@ mod tests {
         assert_eq!(tuple.get_value(1), Value::new(Integer(50))); // Max
 
         // No more results
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -810,7 +822,7 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
@@ -868,7 +880,7 @@ mod tests {
         let mut executor = AggregationExecutor::new(exec_ctx, agg_plan, child_executor);
         executor.init();
 
-        let result = executor.next();
+        let result = executor.next().unwrap();
         assert!(
             result.is_some(),
             "Should return a result even with empty input"
@@ -882,7 +894,7 @@ mod tests {
         );
 
         // No more results
-        assert!(executor.next().is_none());
+        assert!(executor.next().unwrap().is_none());
     }
 
     #[test]
@@ -946,7 +958,7 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
@@ -1086,7 +1098,7 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
@@ -1194,7 +1206,7 @@ mod tests {
         executor.init();
 
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
@@ -1229,3 +1241,4 @@ mod tests {
         assert_eq!(results[1].get_value(1).as_integer().unwrap(), 70); // 35 + 35
     }
 }
+

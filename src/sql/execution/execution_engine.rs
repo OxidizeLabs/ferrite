@@ -113,8 +113,19 @@ impl ExecutionEngine {
                 let mut has_results = false;
 
                 // Process all tuples from the executor
-                while let Some(_) = root_executor.next() {
-                    has_results = true;
+                loop {
+                    match root_executor.next() {
+                        Ok(Some(_)) => {
+                            has_results = true;
+                        }
+                        Ok(None) => {
+                            break; // No more tuples
+                        }
+                        Err(e) => {
+                            error!("Error during execution: {}", e);
+                            return Err(e);
+                        }
+                    }
                 }
 
                 // For Insert, CreateTable, and CreateIndex, return true if execution completed successfully
@@ -139,54 +150,72 @@ impl ExecutionEngine {
 
                 // StartTransaction doesn't generate any result tuples
                 // Just execute next() once to trigger the transaction creation
-                root_executor.next();
+                match root_executor.next() {
+                    Ok(_) => {
+                        // Get transaction information from the executor's context
+                        let exec_context = root_executor.get_executor_context();
+                        let txn_context = exec_context.read().get_transaction_context();
+                        let txn_id = txn_context.get_transaction_id();
+                        let isolation_level = txn_context.get_transaction().get_isolation_level();
 
-                // Get transaction information from the executor's context
-                let exec_context = root_executor.get_executor_context();
-                let txn_context = exec_context.read().get_transaction_context();
-                let txn_id = txn_context.get_transaction_id();
-                let isolation_level = txn_context.get_transaction().get_isolation_level();
-
-                info!(
-                    "Transaction {} started successfully with isolation level {:?}",
-                    txn_id, isolation_level
-                );
-                Ok(true)
+                        info!(
+                            "Transaction {} started successfully with isolation level {:?}",
+                            txn_id, isolation_level
+                        );
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        error!("Error starting transaction: {}", e);
+                        Err(e)
+                    }
+                }
             }
             PlanNode::CommitTransaction(_) => {
                 debug!("Executing commit transaction statement");
 
-                // Execute the commit executor to log the operation
-                root_executor.next();
+                // Execute the commit transaction executor once
+                match root_executor.next() {
+                    Ok(_) => {
+                        // Get transaction information from the executor's context
+                        let exec_context = root_executor.get_executor_context();
+                        let should_chain = exec_context.read().should_chain_after_transaction();
 
-                // Get transaction context from execution context
-                let exec_context = root_executor.get_executor_context();
-                let txn_context = exec_context.read().get_transaction_context();
-
-                // Perform the actual commit
-                match self.commit_transaction(txn_context.clone()) {
-                    Ok(true) => {
-                        info!(
-                            "Transaction {} committed successfully",
-                            txn_context.get_transaction_id()
-                        );
-
-                        // Chain a new transaction if needed
-                        if let Err(e) = self.chain_transaction(txn_context, exec_context.clone()) {
-                            error!("Error chaining transaction: {}", e);
+                        if should_chain {
+                            debug!("Transaction commit with chaining requested");
+                            // TODO: Implement transaction chaining logic
                         }
 
-                        Ok(true)
-                    }
-                    Ok(false) => {
-                        error!(
-                            "Transaction {} failed to commit",
-                            txn_context.get_transaction_id()
-                        );
-                        Err(DBError::Execution("Transaction commit failed".to_string()))
+                        let txn_context = exec_context.read().get_transaction_context();
+                        let txn_id = txn_context.get_transaction_id();
+                        
+                        // Commit the transaction through transaction manager
+                        match self.commit_transaction(txn_context.clone()) {
+                            Ok(success) => {
+                                info!("Transaction {} committed successfully", txn_id);
+                                
+                                if should_chain {
+                                    // Chain a new transaction
+                                    match self.chain_transaction(txn_context, exec_context.clone()) {
+                                        Ok(_) => {
+                                            info!("New transaction chained successfully after commit");
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to chain new transaction: {}", e);
+                                            return Err(e);
+                                        }
+                                    }
+                                }
+                                
+                                Ok(success)
+                            }
+                            Err(e) => {
+                                error!("Failed to commit transaction {}: {}", txn_id, e);
+                                Err(e)
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!("Error committing transaction: {}", e);
+                        error!("Error in commit transaction executor: {}", e);
                         Err(e)
                     }
                 }
@@ -194,37 +223,43 @@ impl ExecutionEngine {
             PlanNode::RollbackTransaction(_) => {
                 debug!("Executing rollback transaction statement");
 
-                // Execute the rollback executor to log the operation
-                root_executor.next();
+                // Execute the rollback transaction executor once
+                match root_executor.next() {
+                    Ok(_) => {
+                        // Get transaction information from the executor's context
+                        let exec_context = root_executor.get_executor_context();
+                        let should_chain = exec_context.read().should_chain_after_transaction();
+                        let txn_context = exec_context.read().get_transaction_context();
+                        let txn_id = txn_context.get_transaction_id();
 
-                // Get transaction context from execution context
-                let exec_context = root_executor.get_executor_context();
-                let txn_context = exec_context.read().get_transaction_context();
-
-                // Perform the actual abort
-                match self.abort_transaction(txn_context.clone()) {
-                    Ok(true) => {
-                        info!(
-                            "Transaction {} aborted successfully",
-                            txn_context.get_transaction_id()
-                        );
-
-                        // Chain a new transaction if needed
-                        if let Err(e) = self.chain_transaction(txn_context, exec_context.clone()) {
-                            error!("Error chaining transaction: {}", e);
+                        // Abort the transaction through transaction manager
+                        match self.abort_transaction(txn_context.clone()) {
+                            Ok(success) => {
+                                info!("Transaction {} rolled back successfully", txn_id);
+                                
+                                if should_chain {
+                                    // Chain a new transaction
+                                    match self.chain_transaction(txn_context, exec_context.clone()) {
+                                        Ok(_) => {
+                                            info!("New transaction chained successfully after rollback");
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to chain new transaction: {}", e);
+                                            return Err(e);
+                                        }
+                                    }
+                                }
+                                
+                                Ok(success)
+                            }
+                            Err(e) => {
+                                error!("Failed to rollback transaction {}: {}", txn_id, e);
+                                Err(e)
+                            }
                         }
-
-                        Ok(true)
-                    }
-                    Ok(false) => {
-                        error!(
-                            "Transaction {} failed to abort",
-                            txn_context.get_transaction_id()
-                        );
-                        Err(DBError::Execution("Transaction abort failed".to_string()))
                     }
                     Err(e) => {
-                        error!("Error aborting transaction: {}", e);
+                        error!("Error in rollback transaction executor: {}", e);
                         Err(e)
                     }
                 }
@@ -236,8 +271,19 @@ impl ExecutionEngine {
                 let mut has_results = false;
 
                 // Process all tuples from the executor
-                while let Some(_) = root_executor.next() {
-                    has_results = true;
+                loop {
+                    match root_executor.next() {
+                        Ok(Some(_)) => {
+                            has_results = true;
+                        }
+                        Ok(None) => {
+                            break; // No more tuples
+                        }
+                        Err(e) => {
+                            error!("Error during command execution: {}", e);
+                            return Err(e);
+                        }
+                    }
                 }
 
                 // For other commands, just return success based on whether the executor produced results
@@ -248,8 +294,19 @@ impl ExecutionEngine {
                 let mut has_results = false;
 
                 // Process all tuples from the executor
-                while let Some(_) = root_executor.next() {
-                    has_results = true;
+                loop {
+                    match root_executor.next() {
+                        Ok(Some(_)) => {
+                            has_results = true;
+                        }
+                        Ok(None) => {
+                            break; // No more tuples
+                        }
+                        Err(e) => {
+                            error!("Error during update execution: {}", e);
+                            return Err(e);
+                        }
+                    }
                 }
 
                 if has_results {
@@ -265,8 +322,19 @@ impl ExecutionEngine {
                 let mut has_results = false;
 
                 // Process all tuples from the executor
-                while let Some(_) = root_executor.next() {
-                    has_results = true;
+                loop {
+                    match root_executor.next() {
+                        Ok(Some(_)) => {
+                            has_results = true;
+                        }
+                        Ok(None) => {
+                            break; // No more tuples
+                        }
+                        Err(e) => {
+                            error!("Error during delete execution: {}", e);
+                            return Err(e);
+                        }
+                    }
                 }
 
                 if has_results {
@@ -279,45 +347,45 @@ impl ExecutionEngine {
             }
             _ => {
                 debug!("Executing query statement");
-                let schema = root_executor.get_output_schema();
-                let columns = schema.get_columns();
+                
+                // Get schema before starting the executor loop to avoid borrow conflicts
+                let schema = root_executor.get_output_schema().clone();
+                
+                // Write schema header
+                let column_names: Vec<String> = schema
+                    .get_columns()
+                    .iter()
+                    .map(|col| col.get_name().to_string())
+                    .collect();
+                writer.write_schema_header(column_names);
 
-                // Write schema header with proper aggregate function names
-                writer.write_schema_header(
-                    columns
-                        .iter()
-                        .map(|col| col.get_name().to_string())
-                        .collect(),
-                );
+                let mut tuple_count = 0;
 
-                let mut has_results = false;
-                let mut row_count = 0;
-
-                // Clone schema once to avoid borrow conflicts in the loop
-                let schema_clone = schema.clone();
-
-                // Use a non-recursive approach to process results
-                debug!("Starting to process result tuples");
+                // Process all tuples from the executor
                 loop {
                     match root_executor.next() {
-                        Some((tuple, _)) => {
-                            has_results = true;
-                            row_count += 1;
-                            debug!("Processing result tuple {}", row_count);
-
-                            // Use the schema-aware row writer for proper decimal formatting
-                            writer
-                                .write_row_with_schema(tuple.get_values().to_vec(), &schema_clone);
+                        Ok(Some((tuple, _rid))) => {
+                            // Extract values from tuple
+                            let values: Vec<_> = (0..tuple.get_column_count())
+                                .map(|i| tuple.get_value(i).clone())
+                                .collect();
+                            
+                            // Write row with schema context
+                            writer.write_row_with_schema(values, &schema);
+                            tuple_count += 1;
                         }
-                        None => {
-                            debug!("No more result tuples");
-                            break;
+                        Ok(None) => {
+                            break; // No more tuples
+                        }
+                        Err(e) => {
+                            error!("Error during query execution: {}", e);
+                            return Err(e);
                         }
                     }
                 }
 
-                debug!("Processed {} rows", row_count);
-                Ok(has_results)
+                debug!("Query returned {} tuples", tuple_count);
+                Ok(tuple_count > 0)
             }
         }
     }

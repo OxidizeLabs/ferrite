@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
 use crate::container::hash_function::HashFunction;
 use crate::sql::execution::execution_context::ExecutionContext;
@@ -63,25 +64,34 @@ impl HashJoinExecutor {
 
         self.right_child.init();
 
-        while let Some((tuple, rid)) = self.right_child.next() {
-            let key = match self.plan.get_right_key_expressions()[0]
-                .evaluate(&tuple, self.plan.get_right_schema())
-            {
-                Ok(value) => value,
-                Err(_) => {
-                    debug!("Failed to evaluate right key expression");
-                    return false;
-                }
-            };
+        loop {
+            match self.right_child.next() {
+                Ok(Some((tuple, rid))) => {
+                    let key = match self.plan.get_right_key_expressions()[0]
+                        .evaluate(&tuple, self.plan.get_right_schema())
+                    {
+                        Ok(value) => value,
+                        Err(_) => {
+                            debug!("Failed to evaluate right key expression");
+                            return false;
+                        }
+                    };
 
-            if let Some(ref mut ht) = self.hash_table {
-                if !ht.insert(key, rid) {
-                    debug!("Failed to insert into hash table");
+                    if let Some(ref mut ht) = self.hash_table {
+                        if !ht.insert(key, rid) {
+                            debug!("Failed to insert into hash table");
+                            return false;
+                        }
+                    }
+
+                    self.right_tuples.push((rid, tuple));
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    debug!("Error from right child executor: {}", e);
                     return false;
                 }
             }
-
-            self.right_tuples.push((rid, tuple));
         }
 
         true
@@ -104,16 +114,18 @@ impl AbstractExecutor for HashJoinExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
-            return None;
+            return Ok(None);
         }
 
         loop {
             if self.current_left_tuple.is_none() {
-                self.current_left_tuple = self.left_child.next();
-                if self.current_left_tuple.is_none() {
-                    return None;
+                match self.left_child.next()? {
+                    Some((tuple, rid)) => {
+                        self.current_left_tuple = Some((tuple, rid));
+                    }
+                    None => return Ok(None),
                 }
             }
 
@@ -141,7 +153,7 @@ impl AbstractExecutor for HashJoinExecutor {
                     {
                         let combined_tuple = Arc::new(left_tuple.combine(right_tuple));
                         self.current_left_tuple = None;
-                        return Some((combined_tuple, left_rid));
+                        return Ok(Some((combined_tuple, left_rid)));
                     }
                 }
             }
@@ -265,13 +277,13 @@ mod tests {
             self.index = 0;
         }
 
-        fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+        fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
             if self.index < self.tuples.len() {
                 let result = self.tuples[self.index].clone();
                 self.index += 1;
-                Some(result)
+                Ok(Some(result))
             } else {
-                None
+                Ok(None)
             }
         }
 
@@ -280,7 +292,7 @@ mod tests {
         }
 
         fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
-            panic!("Not implemented for mock");
+            panic!("Mock executor should not be asked for context")
         }
     }
 
@@ -408,7 +420,7 @@ mod tests {
 
         // Collect and verify results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = join_executor.next() {
+        while let Ok(Some((tuple, _))) = join_executor.next() {
             results.push(tuple);
         }
 

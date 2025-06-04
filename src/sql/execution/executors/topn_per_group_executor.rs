@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
@@ -17,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
-#[derive(Eq)]
+#[derive(Eq, Clone)]
 struct TupleWithKeys {
     sort_keys: Vec<Value>,
     tuple: Arc<Tuple>,
@@ -159,102 +160,107 @@ impl AbstractExecutor for TopNPerGroupExecutor {
         debug!("TopNPerGroup n value: {}", n);
 
         // Process all input tuples and maintain top N per group
-        while let Some((tuple, rid)) = self.child.next() {
-            let sort_keys = self.evaluate_sort_keys(&tuple);
-            let group_keys = self.evaluate_group_keys(&tuple);
+        loop {
+            match self.child.next() {
+                Ok(Some((tuple, rid))) => {
+                    let sort_keys = self.evaluate_sort_keys(&tuple);
+                    let group_keys = self.evaluate_group_keys(&tuple);
 
-            debug!(
-                "Processing tuple with sort keys: {:?}, group keys: {:?}",
-                sort_keys, group_keys
-            );
+                    debug!(
+                        "Processing tuple with sort keys: {:?}, group keys: {:?}",
+                        sort_keys, group_keys
+                    );
 
-            let tuple_with_keys = TupleWithKeys {
-                sort_keys,
-                tuple,
-                rid,
-            };
+                    let tuple_with_keys = TupleWithKeys {
+                        sort_keys,
+                        tuple,
+                        rid,
+                    };
 
-            // Get or create min-heap for this group
-            let group_heap = self
-                .groups
-                .entry(group_keys)
-                .or_insert_with(BinaryHeap::new);
+                    // Get or create min-heap for this group
+                    let group_heap = self
+                        .groups
+                        .entry(group_keys)
+                        .or_insert_with(BinaryHeap::new);
 
-            if group_heap.len() < n {
-                // Heap not full yet, add element
-                debug!(
-                    "Group heap not full (size {}), adding tuple",
-                    group_heap.len()
-                );
-                group_heap.push(Reverse(tuple_with_keys));
-            } else if let Some(Reverse(current_min)) = group_heap.peek() {
-                // Compare with smallest element in heap
-                if tuple_with_keys > *current_min {
-                    // Changed comparison
-                    // Remove smallest and add new larger element
-                    debug!("Replacing smallest element in group with larger tuple");
-                    group_heap.pop();
-                    group_heap.push(Reverse(tuple_with_keys));
+                    if group_heap.len() < n {
+                        // Heap not full yet, add element
+                        debug!(
+                            "Group heap not full (size {}), adding tuple",
+                            group_heap.len()
+                        );
+                        group_heap.push(Reverse(tuple_with_keys));
+                    } else if let Some(Reverse(current_min)) = group_heap.peek() {
+                        // Compare with smallest element in heap
+                        if tuple_with_keys > *current_min {
+                            // Changed comparison
+                            // Remove smallest and add new larger element
+                            debug!("Replacing smallest element in group with larger tuple");
+                            group_heap.pop();
+                            group_heap.push(Reverse(tuple_with_keys));
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    debug!("Error from child executor: {}", e);
+                    return; // Initialize failed, but we don't propagate errors from init
                 }
             }
         }
 
-        // Store sorted group keys for iteration
+        // Sort group keys for deterministic iteration order
         self.group_keys = self.groups.keys().cloned().collect();
-        self.group_keys
-            .sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
+        self.group_keys.sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
 
-        debug!(
-            "TopNPerGroupExecutor initialization complete. Number of groups: {}",
-            self.groups.len()
-        );
+        debug!("TopNPerGroupExecutor initialization complete. Found {} groups", self.groups.len());
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
 
         loop {
-            // If we have tuples in current group, return next one
+            // If we have tuples from the current group, return them
             if self.current_tuple_index < self.current_group_tuples.len() {
-                let result = &self.current_group_tuples[self.current_tuple_index];
+                let tuple_with_keys = &self.current_group_tuples[self.current_tuple_index];
                 self.current_tuple_index += 1;
-                debug!(
-                    "Returning tuple from group {:?}, index {}",
-                    self.current_group,
-                    self.current_tuple_index - 1
-                );
-                return Some((result.tuple.clone(), result.rid));
+                return Ok(Some((tuple_with_keys.tuple.clone(), tuple_with_keys.rid)));
             }
 
             // Move to next group
-            if self.group_index < self.group_keys.len() {
-                let group_key = self.group_keys[self.group_index].clone();
-                self.current_group = Some(group_key.clone());
-                self.group_index += 1;
-                debug!("Moving to next group: {:?}", self.current_group);
-
-                // Convert heap to sorted vector for this group
-                if let Some(heap) = self.groups.remove(&group_key) {
-                    // Convert heap to sorted vector and reverse for descending order
-                    let mut tuples: Vec<_> = heap.into_iter().map(|Reverse(t)| t).collect();
-                    tuples.sort_unstable_by(|a, b| b.cmp(a)); // Sort in descending order
-                    self.current_group_tuples = tuples;
-                    self.current_tuple_index = 0;
-                    continue;
-                }
+            if self.group_index >= self.group_keys.len() {
+                debug!("No more groups to process");
+                return Ok(None);
             }
 
-            // No more groups
-            debug!("No more tuples to return");
-            return None;
+            let group_key = &self.group_keys[self.group_index];
+            self.group_index += 1;
+
+            if let Some(group_heap) = self.groups.get(group_key) {
+                // Convert heap to sorted vector (largest first)
+                let mut tuples: Vec<TupleWithKeys> = group_heap
+                    .iter()
+                    .map(|Reverse(tuple_with_keys)| (*tuple_with_keys).clone())
+                    .collect();
+
+                // Sort in descending order (reverse of natural order)
+                tuples.sort_by(|a, b| b.cmp(a));
+
+                debug!("Processing group with {} tuples", tuples.len());
+
+                self.current_group_tuples = tuples;
+                self.current_tuple_index = 0;
+                self.current_group = Some(group_key.clone());
+
+                // Continue loop to return first tuple from this group
+            }
         }
     }
 
     fn get_output_schema(&self) -> &Schema {
-        debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
@@ -430,24 +436,25 @@ mod tests {
 
         // Verify results - should get top 2 salaries from each department
         // Department 1
-        let result = executor.next().unwrap();
+        let result = executor.next().unwrap().unwrap();
         assert_eq!(result.0.get_value(0).as_integer().unwrap(), 1); // dept
         assert_eq!(result.0.get_value(1).as_integer().unwrap(), 300); // salary
 
-        let result = executor.next().unwrap();
+        let result = executor.next().unwrap().unwrap();
         assert_eq!(result.0.get_value(0).as_integer().unwrap(), 1);
         assert_eq!(result.0.get_value(1).as_integer().unwrap(), 200);
 
         // Department 2
-        let result = executor.next().unwrap();
+        let result = executor.next().unwrap().unwrap();
         assert_eq!(result.0.get_value(0).as_integer().unwrap(), 2);
         assert_eq!(result.0.get_value(1).as_integer().unwrap(), 350);
 
-        let result = executor.next().unwrap();
+        let result = executor.next().unwrap().unwrap();
         assert_eq!(result.0.get_value(0).as_integer().unwrap(), 2);
         assert_eq!(result.0.get_value(1).as_integer().unwrap(), 250);
 
         // No more results
-        assert!(executor.next().is_none());
+        let result = executor.next().unwrap();
+        assert!(result.is_none());
     }
 }

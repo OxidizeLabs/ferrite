@@ -1,13 +1,13 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::sql::execution::executors::values_executor::ValuesExecutor;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, warn};
+use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -17,6 +17,8 @@ pub struct DeleteExecutor {
     table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
+    executed: bool,
+    rows_deleted: usize,
 }
 
 impl DeleteExecutor {
@@ -69,107 +71,83 @@ impl DeleteExecutor {
             table_heap,
             initialized: false,
             child_executor: None,
+            executed: false,
+            rows_deleted: 0,
         }
     }
 }
 
 impl AbstractExecutor for DeleteExecutor {
     fn init(&mut self) {
-        if self.initialized {
-            return;
+        debug!("Initializing DeleteExecutor");
+        if let Some(ref mut child) = self.child_executor {
+            child.init();
         }
-
-        debug!(
-            "Initializing DeleteExecutor for table '{}'",
-            self.plan.get_table_name()
-        );
-
-        // Create the child executor from the values plan
-        self.plan
-            .get_children()
-            .iter()
-            .for_each(|child| match child {
-                PlanNode::Values(values_plan) => {
-                    debug!(
-                        "Creating ValuesExecutor for delete with {} rows",
-                        values_plan.get_rows().len()
-                    );
-                    debug!("Values schema: {:?}", values_plan.get_output_schema());
-
-                    self.child_executor = Some(Box::new(ValuesExecutor::new(
-                        self.context.clone(),
-                        Arc::new(values_plan.clone()),
-                    )));
-
-                    debug!("Initializing child ValuesExecutor");
-                    if let Some(child) = self.child_executor.as_mut() {
-                        child.init();
-                        debug!("Child ValuesExecutor initialized successfully");
-                    }
-                }
-                _ => {
-                    warn!("Unexpected child plan type for DeleteExecutor");
-                }
-            });
         self.initialized = true;
-        debug!("DeleteExecutor initialization completed");
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
+            warn!("DeleteExecutor not initialized, initializing now");
             self.init();
         }
 
-        if let Some(child) = &mut self.child_executor {
-            // Get the next tuple to delete from the values executor
-            if let Some((tuple_to_delete, _)) = child.next() {
-                debug!("Processing delete for tuple: {:?}", tuple_to_delete);
+        if self.executed {
+            return Ok(None);
+        }
 
-                let txn_ctx = {
-                    let context = self.context.read();
-                    context.get_transaction_context().clone()
-                };
+        debug!("Executing delete operation");
+        self.executed = true;
 
-                // Get the ID we want to delete
-                let id_to_delete = tuple_to_delete.get_value(0);
-                let id_val = id_to_delete.get_val();
-                debug!("Looking for tuple with ID: {:?}", id_val);
+        // Get table information
+        let table_id = self.plan.get_table_id();
+        let table_info = {
+            let binding = self.context.read();
+            let catalog_guard = binding.get_catalog().read();
+            catalog_guard.get_table_by_oid(table_id)
+                .ok_or_else(|| DBError::Execution(format!("Table with OID {} not found", table_id)))?
+                .clone()
+        };
 
-                // Scan the table to find the matching tuple
-                let mut table_iter = self.table_heap.make_iterator(Some(txn_ctx.clone()));
+        let transactional_table_heap = self.table_heap.clone();
+        let _schema = table_info.get_table_schema();
 
-                while let Some((_tuple_meta, tuple)) = table_iter.next() {
-                    // Store the current ID and RID before any mutable borrows
-                    let current_id = tuple.get_value(0).get_val().clone();
-                    let rid = tuple.get_rid();
+        // Get transaction context
+        let txn_context = self.context.read().get_transaction_context();
 
-                    if current_id == *id_val {
-                        debug!("Found matching tuple with ID: {:?}", current_id);
+        let mut delete_count = 0;
 
-                        // Delete the tuple
-                        match self.table_heap.delete_tuple(rid, txn_ctx.clone()) {
+        // Process all tuples from child executor (scan/filter)
+        if let Some(ref mut child) = self.child_executor {
+            loop {
+                match child.next()? {
+                    Some((_tuple, rid)) => {
+                        debug!("Processing tuple for deletion with RID {:?}", rid);
+                        
+                        // Delete the tuple from the table
+                        match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
                             Ok(_) => {
-                                debug!("Successfully deleted tuple with ID: {:?}", &current_id);
-                                return Some((tuple, rid));
+                                delete_count += 1;
+                                trace!("Successfully deleted tuple #{} with RID {:?}", delete_count, rid);
                             }
                             Err(e) => {
-                                error!("Failed to delete tuple: {}", e);
-                                return None;
+                                error!("Failed to delete tuple with RID {:?}: {}", rid, e);
+                                return Err(DBError::Execution(format!("Delete failed: {}", e)));
                             }
                         }
                     }
+                    None => break,
                 }
-
-                warn!("No matching tuple found for ID: {:?}", id_to_delete);
-                self.next() // Try next value from values executor
-            } else {
-                debug!("No more tuples to delete from values executor");
-                None
             }
         } else {
-            error!("No child executor available for delete operation");
-            None
+            return Err(DBError::Execution("No child executor found for DELETE".to_string()));
         }
+
+        info!("Delete operation completed successfully, {} rows deleted", delete_count);
+        self.rows_deleted = delete_count;
+
+        // Delete operations don't return tuples to the caller
+        Ok(None)
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -183,7 +161,8 @@ impl AbstractExecutor for DeleteExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
+use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
@@ -200,7 +179,6 @@ mod tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
 
@@ -415,7 +393,7 @@ mod tests {
 
         // Count deleted tuples
         let mut delete_count = 0;
-        while let Some((tuple, _)) = delete_executor.next() {
+        while let Ok(Some((tuple, _))) = delete_executor.next() {
             delete_count += 1;
             // Verify the deleted tuple has id > 3
             let id = tuple.get_value(0);

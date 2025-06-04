@@ -248,7 +248,7 @@ mod tests {
         }
 
         fn create_test_begin_record(&self, txn_id: TxnId) -> LogRecord {
-            let mut record =
+            let record =
                 LogRecord::new_transaction_record(txn_id, INVALID_LSN, LogRecordType::Begin);
             // Set a dummy LSN
             record.set_lsn(txn_id as Lsn);
@@ -256,7 +256,7 @@ mod tests {
         }
 
         fn create_test_commit_record(&self, txn_id: TxnId, prev_lsn: Lsn) -> LogRecord {
-            let mut record =
+            let record =
                 LogRecord::new_transaction_record(txn_id, prev_lsn, LogRecordType::Commit);
             // Set a dummy LSN
             record.set_lsn((txn_id + 1) as Lsn);

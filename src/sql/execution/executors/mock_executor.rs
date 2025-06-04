@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
@@ -44,13 +45,13 @@ impl AbstractExecutor for MockExecutor {
         self.initialized = true;
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
 
         if self.current_tuple_idx >= self.tuples.len() {
-            return None;
+            return Ok(None);
         }
 
         let (values, rid) = &self.tuples[self.current_tuple_idx];
@@ -58,7 +59,7 @@ impl AbstractExecutor for MockExecutor {
 
         let tuple = Arc::new(Tuple::new(values, &self.schema, *rid));
 
-        Some((tuple, *rid))
+        Ok(Some((tuple, *rid)))
     }
 
     fn get_output_schema(&self) -> &Schema {

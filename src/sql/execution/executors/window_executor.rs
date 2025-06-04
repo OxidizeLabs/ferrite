@@ -1,5 +1,6 @@
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
+use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
@@ -126,10 +127,19 @@ impl AbstractExecutor for WindowExecutor {
 
             // Collect all tuples and their sort keys
             let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Arc<Tuple>, RID)> = Vec::new();
-            while let Some((tuple, rid)) = self.child_executor.next() {
-                let partition_keys = self.evaluate_partition_keys(&tuple);
-                let sort_keys = self.evaluate_sort_keys(&tuple);
-                all_tuples.push((partition_keys, sort_keys, tuple, rid));
+            loop {
+                match self.child_executor.next() {
+                    Ok(Some((tuple, rid))) => {
+                        let partition_keys = self.evaluate_partition_keys(&tuple);
+                        let sort_keys = self.evaluate_sort_keys(&tuple);
+                        all_tuples.push((partition_keys, sort_keys, tuple, rid));
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        debug!("Error from child executor: {}", e);
+                        return; // Initialize failed, but we don't propagate errors from init
+                    }
+                }
             }
 
             // Group tuples by partition
@@ -185,40 +195,33 @@ impl AbstractExecutor for WindowExecutor {
         }
     }
 
-    fn next(&mut self) -> Option<(Arc<Tuple>, RID)> {
+    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
         }
 
         // Check if we have more partitions to process
         if self.partition_index >= self.current_partition_keys.len() {
-            return None;
+            return Ok(None);
         }
 
         // Get current partition
         let partition_key = &self.current_partition_keys[self.partition_index];
         let partition = self.partitions.get(partition_key).unwrap();
 
-        // Return next tuple from current partition
-        if self.tuple_index < partition.len() {
-            let (tuple, rid) = &partition[self.tuple_index];
-
-            // Create new tuple with row number
-            let mut values = tuple.get_values().to_vec();
-            values.push(Value::new((self.tuple_index + 1) as i32));
-            let new_tuple = Arc::new(Tuple::new(&values, &self.plan.get_output_schema(), *rid));
-
-            // Advance indices
-            self.tuple_index += 1;
-            if self.tuple_index >= partition.len() {
-                self.partition_index += 1;
-                self.tuple_index = 0;
-            }
-
-            Some((new_tuple, *rid))
-        } else {
-            None
+        // Check if we have more tuples in current partition
+        if self.tuple_index >= partition.len() {
+            // Move to next partition
+            self.partition_index += 1;
+            self.tuple_index = 0;
+            return self.next(); // Recursively call to get next partition
         }
+
+        // Return current tuple
+        let (tuple, rid) = partition[self.tuple_index].clone();
+        self.tuple_index += 1;
+
+        Ok(Some((tuple, rid)))
     }
 
     fn get_output_schema(&self) -> &Schema {
@@ -417,7 +420,7 @@ mod tests {
 
         // Collect results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
@@ -512,7 +515,7 @@ mod tests {
 
         // Collect results
         let mut results = Vec::new();
-        while let Some((tuple, _)) = executor.next() {
+        while let Ok(Some((tuple, _))) = executor.next() {
             results.push(tuple);
         }
 
