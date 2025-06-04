@@ -9,10 +9,10 @@ pub fn initialize_logger() {
         let mut builder = Builder::new();
 
         builder
-            .filter_level(LevelFilter::Trace)
-            .filter_module("tkdb", LevelFilter::Trace)
+            .filter_level(LevelFilter::Info)
+            .filter_module("tkdb", LevelFilter::Info)
             .filter_module("tkdb::buffer", LevelFilter::Info)
-            .filter_module("tkdb::storage", LevelFilter::Trace)
+            .filter_module("tkdb::storage", LevelFilter::Info)
             .filter_module("tkdb::concurrency", LevelFilter::Info)
             .filter_module("tkdb::recovery", LevelFilter::Info)
             .filter_module("rustyline", LevelFilter::Info)
