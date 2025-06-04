@@ -44,32 +44,64 @@ impl AbstractExecutor for StartTransactionExecutor {
         debug!("Executing start transaction");
         self.executed = true;
 
-        // Get transaction information from the context
-        let txn_context = self.context.read().get_transaction_context();
-        let transaction_id = txn_context.get_transaction_id();
-
-        // Get isolation level from the plan
-        if let Some(isolation_level) = self.plan.get_isolation_level() {
-            debug!(
-                "Transaction {} starting with isolation level {:?}",
-                transaction_id, isolation_level
-            );
-        } else {
-            debug!(
-                "Transaction {} starting with default isolation level",
-                transaction_id
-            );
-        }
+        // Get the isolation level from the plan or use default
+        let isolation_level = self.plan.get_isolation_level().unwrap_or_default();
+        
+        debug!(
+            "Starting new transaction with isolation level {:?}",
+            isolation_level
+        );
 
         // Check if this is a read-only transaction
         if self.plan.is_read_only() {
-            debug!("Transaction {} is read-only", transaction_id);
+            debug!("Transaction will be read-only");
         }
 
-        info!("Transaction {} start operation prepared", transaction_id);
+        // Get the transaction manager from the current transaction context
+        let transaction_manager = {
+            let context = self.context.read();
+            let txn_context = context.get_transaction_context();
+            txn_context.get_transaction_manager()
+        };
 
-        // The actual transaction start will be handled by the execution engine
-        // Return Ok(None) as transaction operations don't produce tuples
+        // Start a new transaction
+        match transaction_manager.begin(isolation_level) {
+            Ok(new_transaction) => {
+                let transaction_id = new_transaction.get_transaction_id();
+                info!("Started new transaction with ID {}", transaction_id);
+
+                // Create new transaction context with the same lock manager
+                let lock_manager = {
+                    let context = self.context.read();
+                    context.get_transaction_context().get_lock_manager()
+                };
+                
+                let new_transaction_context = Arc::new(TransactionContext::new(
+                    new_transaction,
+                    lock_manager,
+                    transaction_manager,
+                ));
+
+                // Update the execution context with the new transaction context
+                {
+                    let mut context = self.context.write();
+                    context.set_transaction_context(new_transaction_context);
+                }
+
+                debug!("Transaction {} started successfully", transaction_id);
+            }
+            Err(e) => {
+                // Check if the error is due to transaction manager shutdown
+                if e.contains("Transaction manager is shutdown") {
+                    debug!("Transaction manager is shut down, cannot start new transaction");
+                    // Return Ok(None) to indicate the operation completed but no transaction was started
+                    return Ok(None);
+                }
+                return Err(DBError::Execution(format!("Failed to start transaction: {}", e)));
+            }
+        }
+
+        // Transaction operations don't produce tuples
         Ok(None)
     }
 

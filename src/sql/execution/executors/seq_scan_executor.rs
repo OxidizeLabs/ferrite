@@ -71,20 +71,26 @@ impl AbstractExecutor for SeqScanExecutor {
         }
 
         trace!(
-            "Initializing SeqScanExecutor for table: {}",
-            self.plan.get_table_name()
+            "Initializing SeqScanExecutor for table: {} (OID: {})",
+            self.plan.get_table_name(),
+            self.plan.get_table_oid()
         );
 
-        // Get table info from catalog
+        // Get table info from catalog using OID to ensure we get the correct table
         let table_info = {
             let context = self.context.read();
             let catalog = context.get_catalog();
             let catalog_guard = catalog.read();
-            catalog_guard.get_table(self.plan.get_table_name()).cloned()
+            catalog_guard.get_table_by_oid(self.plan.get_table_oid()).cloned()
         };
 
         if let Some(table_info) = table_info {
-            // Create table heap and iterator
+            // Verify we have the correct table
+            assert_eq!(table_info.get_table_oidt(), self.plan.get_table_oid(), 
+                "Table OID mismatch in SeqScanExecutor");
+            
+            // Create table heap and iterator (table_heap should already be correct from constructor,
+            // but recreate it here to be safe and ensure consistency)
             let table_heap = Arc::new(TransactionalTableHeap::new(
                 table_info.get_table_heap(),
                 table_info.get_table_oidt(),
@@ -99,16 +105,17 @@ impl AbstractExecutor for SeqScanExecutor {
             };
             
             // Create iterator with start/end RIDs and transaction context
+            let first_page_id = table_heap.get_table_heap().get_first_page_id();
             self.iterator = Some(TableIterator::new(
                 table_heap,
-                RID::new(0u64, 0), // start_rid
+                RID::new(first_page_id, 0), // start_rid from table's first page
                 RID::new(u64::MAX, u32::MAX), // end_rid (scan entire table)
                 txn_ctx,
             ));
             self.initialized = true;
-            trace!("SeqScanExecutor initialized successfully");
+            trace!("SeqScanExecutor initialized successfully for table OID {}", self.plan.get_table_oid());
         } else {
-            error!("Table {} not found", self.plan.get_table_name());
+            error!("Table with OID {} not found", self.plan.get_table_oid());
         }
     }
 

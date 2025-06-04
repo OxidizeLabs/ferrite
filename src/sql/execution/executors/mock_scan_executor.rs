@@ -69,7 +69,9 @@ impl MockScanExecutor {
 impl AbstractExecutor for MockScanExecutor {
     fn init(&mut self) {
         if self.initialized {
-            debug!("MockScanExecutor already initialized");
+            debug!("MockScanExecutor already initialized, resetting for reuse");
+            // Reset the index to allow scanning again
+            self.current_index = 0;
             return;
         }
 

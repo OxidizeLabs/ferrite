@@ -81,9 +81,27 @@ impl InsertExecutor {
 impl AbstractExecutor for InsertExecutor {
     fn init(&mut self) {
         debug!("Initializing InsertExecutor");
-        if let Some(ref mut child) = self.child_executor {
+        
+        // Create child executor from plan's children if not already created
+        if self.child_executor.is_none() {
+            let children_plans = self.plan.get_children();
+            if !children_plans.is_empty() {
+                // Get the first child plan (typically a Values node)
+                match children_plans[0].create_executor(self.context.clone()) {
+                    Ok(mut child_executor) => {
+                        child_executor.init();
+                        self.child_executor = Some(child_executor);
+                        debug!("Child executor created and initialized");
+                    }
+                    Err(e) => {
+                        error!("Failed to create child executor: {}", e);
+                    }
+                }
+            }
+        } else if let Some(ref mut child) = self.child_executor {
             child.init();
         }
+        
         self.initialized = true;
     }
 

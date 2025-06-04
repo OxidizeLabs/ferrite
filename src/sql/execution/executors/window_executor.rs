@@ -5,7 +5,7 @@ use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::sql::execution::plans::window_plan::WindowNode;
+use crate::sql::execution::plans::window_plan::{WindowNode, WindowFunctionType};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
@@ -217,11 +217,40 @@ impl AbstractExecutor for WindowExecutor {
             return self.next(); // Recursively call to get next partition
         }
 
-        // Return current tuple
-        let (tuple, rid) = partition[self.tuple_index].clone();
+        // Get current tuple and compute window function results
+        let (original_tuple, rid) = partition[self.tuple_index].clone();
+        
+        // Compute window function results for this tuple
+        let window_functions = self.plan.get_window_functions();
+        let mut window_results = Vec::new();
+        
+        for window_fn in window_functions {
+            match window_fn.get_function_type() {
+                WindowFunctionType::RowNumber => {
+                    // Row number is 1-based within partition
+                    let row_number = (self.tuple_index + 1) as i32;
+                    window_results.push(Value::new(row_number));
+                }
+                _ => {
+                    // For now, only support ROW_NUMBER
+                    return Err(DBError::Execution("Unsupported window function".to_string()));
+                }
+            }
+        }
+        
+        // Create new tuple with original values plus window function results
+        let mut output_values = original_tuple.get_values().clone();
+        output_values.extend(window_results);
+        
+        let output_tuple = Arc::new(Tuple::new(
+            &output_values,
+            self.plan.get_output_schema(),
+            rid,
+        ));
+        
         self.tuple_index += 1;
 
-        Ok(Some((tuple, rid)))
+        Ok(Some((output_tuple, rid)))
     }
 
     fn get_output_schema(&self) -> &Schema {
