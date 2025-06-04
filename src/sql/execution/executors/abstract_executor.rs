@@ -8,7 +8,7 @@ use std::sync::Arc;
 /// The AbstractExecutor implements the Volcano tuple-at-a-time iterator model.
 /// This is the base trait from which all executors in the BusTub execution
 /// engine inherit, and defines the minimal interface that all executors support.
-pub trait AbstractExecutor {
+pub trait AbstractExecutor: Send + Sync {
     /// Initialize the executor.
     ///
     /// # Warning
