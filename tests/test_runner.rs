@@ -6,12 +6,14 @@ use std::time::{Duration, Instant};
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
 use tkdb::common::result_writer::ResultWriter;
+use tkdb::common::logger;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::types_db::value::Value;
 use tkdb::catalog::schema::Schema;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use sqllogictest::Runner;
+use std::sync::Once;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -308,6 +310,19 @@ impl DB for TKDBTest {
     }
 }
 
+/// Configure environment for INFO level logging before initializing logger
+fn setup_test_logging() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // Set environment variables to configure the logger for INFO level
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
+        // Initialize the existing logger which will pick up our environment configuration
+        logger::initialize_logger();
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +474,7 @@ mod tests {
 
     #[test]
     fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let mut stats = TestSuiteStats::new("DDL Tests");
         let result = run_test_directory(Path::new("tests/sql/ddl"), &mut stats);
         stats.finish();
@@ -468,6 +484,7 @@ mod tests {
 
     #[test]
     fn run_dml_tests() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let mut stats = TestSuiteStats::new("DML Tests");
         let result = run_test_directory(Path::new("tests/sql/dml"), &mut stats);
         stats.finish();
@@ -477,6 +494,7 @@ mod tests {
 
     #[test]
     fn run_query_tests() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let mut stats = TestSuiteStats::new("Query Tests");
         let result = run_test_directory(Path::new("tests/sql/queries"), &mut stats);
         stats.finish();
@@ -486,6 +504,7 @@ mod tests {
 
     #[test]
     fn run_all_tests() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let test_categories = [
             "ddl",
             "dml",
@@ -544,6 +563,7 @@ mod tests {
 
     #[test]
     fn run_data_modification_suite() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let start_time = Instant::now();
         let mut total_stats = TestStats::new();
 
@@ -578,6 +598,7 @@ mod tests {
 
     #[test]
     fn run_query_optimization_suite() -> Result<(), Box<dyn Error>> {
+        setup_test_logging();
         let start_time = Instant::now();
         let mut total_stats = TestStats::new();
 
