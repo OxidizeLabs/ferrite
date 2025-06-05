@@ -512,10 +512,25 @@ impl LogicalPlanBuilder {
                     debug!("Created column: {:?}", output_col);
                     output_columns.push(output_col);
 
-                    // For aggregate input, use column reference for non-aggregate expressions
-                    if is_aggregate_input && !matches!(parsed_expr, Expression::Aggregate(_)) {
-                        // Find the column in the input schema by name
-                        if let Some(col_idx) = input_schema.get_qualified_column_index(&col_name) {
+                    // For aggregate input, convert all expressions to column references
+                    if is_aggregate_input {
+                        // For aggregate input, we need to map expressions to the aggregation output
+                        if let Expression::Aggregate(agg) = &parsed_expr {
+                            // For aggregate expressions, find them in the input schema by function name and argument
+                            let expected_col_name = agg.get_column_name();
+                            
+                            // Try to find the aggregate column in the input schema
+                            let col_idx = input_schema.get_columns().iter().position(|col| {
+                                let col_name = col.get_name();
+                                // Match exact name or function pattern
+                                col_name == &expected_col_name ||
+                                col_name.starts_with(&format!("{}(", agg.get_function_name())) ||
+                                col_name.starts_with(&format!("{}_", agg.get_function_name()))
+                            }).unwrap_or_else(|| {
+                                                                                                  // Fallback: use position based on order in projection, but ensure it's valid
+                                  std::cmp::min(i, (input_schema.get_column_count() as usize).saturating_sub(1))
+                            });
+                            
                             projection_exprs.push(Arc::new(Expression::ColumnRef(
                                 ColumnRefExpression::new(
                                     0,
@@ -525,7 +540,19 @@ impl LogicalPlanBuilder {
                                 ),
                             )));
                         } else {
-                            projection_exprs.push(Arc::new(parsed_expr));
+                            // For non-aggregate expressions, find the column in the input schema by name
+                            if let Some(col_idx) = input_schema.get_qualified_column_index(&col_name) {
+                                projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                    ColumnRefExpression::new(
+                                        0,
+                                        col_idx,
+                                        input_schema.get_column(col_idx).unwrap().clone(),
+                                        vec![],
+                                    ),
+                                )));
+                            } else {
+                                projection_exprs.push(Arc::new(parsed_expr));
+                            }
                         }
                     } else {
                         projection_exprs.push(Arc::new(parsed_expr));
@@ -545,8 +572,33 @@ impl LogicalPlanBuilder {
                     debug!("Created aliased column: {:?}", output_col);
                     output_columns.push(output_col);
 
-                    // For aggregate input, use column reference for non-aggregate expressions
-                    if is_aggregate_input && !matches!(parsed_expr, Expression::Aggregate(_)) {
+                    // For aggregate input, convert all expressions to column references
+                    if is_aggregate_input {
+                        if let Expression::Aggregate(agg) = &parsed_expr {
+                            // For aggregate expressions, find them in the input schema
+                            let expected_col_name = agg.get_column_name();
+                            
+                            // Try to find the aggregate column in the input schema
+                            let col_idx = input_schema.get_columns().iter().position(|col| {
+                                let col_name = col.get_name();
+                                // Match exact name or function pattern
+                                col_name == &expected_col_name ||
+                                col_name.starts_with(&format!("{}(", agg.get_function_name())) ||
+                                col_name.starts_with(&format!("{}_", agg.get_function_name()))
+                            }).unwrap_or_else(|| {
+                                // Fallback: use position based on order in projection, but ensure it's valid
+                                std::cmp::min(i, (input_schema.get_column_count() as usize).saturating_sub(1))
+                            });
+                            
+                            projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                ColumnRefExpression::new(
+                                    0,
+                                    col_idx,
+                                    input_schema.get_column(col_idx).unwrap().clone(),
+                                    vec![],
+                                ),
+                            )));
+                        } else {
                         // For aliased expressions, first try to find by the alias value
                         let mut col_idx_opt = input_schema.get_qualified_column_index(&alias.value);
 
@@ -585,8 +637,9 @@ impl LogicalPlanBuilder {
                                     vec![],
                                 ),
                             )));
-                        } else {
-                            projection_exprs.push(Arc::new(parsed_expr));
+                            } else {
+                                projection_exprs.push(Arc::new(parsed_expr));
+                            }
                         }
                     } else {
                         projection_exprs.push(Arc::new(parsed_expr));
