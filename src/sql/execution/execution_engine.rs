@@ -108,7 +108,7 @@ impl ExecutionEngine {
         debug!("Root executor initialized");
 
         match plan {
-            PlanNode::Insert(_) | PlanNode::CreateTable(_) | PlanNode::CreateIndex(_) => {
+            PlanNode::Insert(_) | PlanNode::Update(_) | PlanNode::Delete(_) | PlanNode::CreateTable(_) | PlanNode::CreateIndex(_) => {
                 debug!("Executing modification statement");
                 let mut has_results = false;
 
@@ -128,8 +128,34 @@ impl ExecutionEngine {
                     }
                 }
 
-                // For Insert, CreateTable, and CreateIndex, return true if execution completed successfully
+                // For Insert, Update, Delete, CreateTable, and CreateIndex, return true if execution completed successfully
                 match plan {
+                    PlanNode::Insert(_) => {
+                        // INSERT operations don't return result tuples - they perform the operation
+                        // If we reach here without error, the insert was successful
+                        info!("Insert operation executed successfully");
+                        Ok(true)
+                    }
+                    PlanNode::Update(_) => {
+                        // UPDATE operations return success based on whether any rows were affected
+                        if has_results {
+                            info!("Update operation executed successfully");
+                            Ok(true)
+                        } else {
+                            info!("Update operation completed - no rows affected");
+                            Ok(false)
+                        }
+                    }
+                    PlanNode::Delete(_) => {
+                        // DELETE operations return success based on whether any rows were affected
+                        if has_results {
+                            info!("Delete operation executed successfully");
+                            Ok(true)
+                        } else {
+                            info!("Delete operation completed - no rows affected");
+                            Ok(false)
+                        }
+                    }
                     PlanNode::CreateTable(_) | PlanNode::CreateIndex(_) => {
                         info!("Create operation executed successfully");
                         Ok(true)
@@ -289,62 +315,7 @@ impl ExecutionEngine {
                 // For other commands, just return success based on whether the executor produced results
                 Ok(has_results)
             }
-            PlanNode::Update(_) => {
-                debug!("Executing update statement");
-                let mut has_results = false;
 
-                // Process all tuples from the executor
-                loop {
-                    match root_executor.next() {
-                        Ok(Some(_)) => {
-                            has_results = true;
-                        }
-                        Ok(None) => {
-                            break; // No more tuples
-                        }
-                        Err(e) => {
-                            error!("Error during update execution: {}", e);
-                            return Err(e);
-                        }
-                    }
-                }
-
-                if has_results {
-                    info!("Update executed successfully");
-                    Ok(true)
-                } else {
-                    info!("No rows affected by update");
-                    Ok(false)
-                }
-            }
-            PlanNode::Delete(_) => {
-                debug!("Executing delete statement");
-                let mut has_results = false;
-
-                // Process all tuples from the executor
-                loop {
-                    match root_executor.next() {
-                        Ok(Some(_)) => {
-                            has_results = true;
-                        }
-                        Ok(None) => {
-                            break; // No more tuples
-                        }
-                        Err(e) => {
-                            error!("Error during delete execution: {}", e);
-                            return Err(e);
-                        }
-                    }
-                }
-
-                if has_results {
-                    info!("Delete executed successfully");
-                    Ok(true)
-                } else {
-                    info!("No rows affected by delete");
-                    Ok(false)
-                }
-            }
             _ => {
                 debug!("Executing query statement");
                 
