@@ -97,6 +97,10 @@ impl AggregateExpression {
         &self.return_type
     }
 
+    pub fn get_function_name(&self) -> &str {
+        &self.function_name
+    }
+
     pub fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         match &self.agg_type {
             AggregationType::Count | AggregationType::CountStar => {
