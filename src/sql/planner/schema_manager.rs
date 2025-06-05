@@ -2218,7 +2218,7 @@ mod tests {
             .unwrap();
         assert_eq!(array_column.get_name(), "test_array");
         assert_eq!(array_column.get_type(), TypeId::Vector);
-        assert_eq!(array_column.get_length(), 1024); // Default array size
+        assert_eq!(array_column.get_length(), 8192); // Default array size
 
         // Test binary types
         let binary_column = manager
