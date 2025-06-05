@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -259,7 +259,10 @@ mod tests {
 
         // Third call should return None since limit is 2
         let result3 = limit_executor.next().unwrap();
-        assert!(result3.is_none(), "Expected third result to be None due to limit");
+        assert!(
+            result3.is_none(),
+            "Expected third result to be None due to limit"
+        );
     }
 
     #[test]

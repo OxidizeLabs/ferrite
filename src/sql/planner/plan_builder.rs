@@ -518,19 +518,29 @@ impl LogicalPlanBuilder {
                         if let Expression::Aggregate(agg) = &parsed_expr {
                             // For aggregate expressions, find them in the input schema by function name and argument
                             let expected_col_name = agg.get_column_name();
-                            
+
                             // Try to find the aggregate column in the input schema
-                            let col_idx = input_schema.get_columns().iter().position(|col| {
-                                let col_name = col.get_name();
-                                // Match exact name or function pattern
-                                col_name == &expected_col_name ||
-                                col_name.starts_with(&format!("{}(", agg.get_function_name())) ||
-                                col_name.starts_with(&format!("{}_", agg.get_function_name()))
-                            }).unwrap_or_else(|| {
-                                                                                                  // Fallback: use position based on order in projection, but ensure it's valid
-                                  std::cmp::min(i, (input_schema.get_column_count() as usize).saturating_sub(1))
-                            });
-                            
+                            let col_idx = input_schema
+                                .get_columns()
+                                .iter()
+                                .position(|col| {
+                                    let col_name = col.get_name();
+                                    // Match exact name or function pattern
+                                    col_name == &expected_col_name
+                                        || col_name
+                                            .starts_with(&format!("{}(", agg.get_function_name()))
+                                        || col_name
+                                            .starts_with(&format!("{}_", agg.get_function_name()))
+                                })
+                                .unwrap_or_else(|| {
+                                    // Fallback: use position based on order in projection, but ensure it's valid
+                                    std::cmp::min(
+                                        i,
+                                        (input_schema.get_column_count() as usize)
+                                            .saturating_sub(1),
+                                    )
+                                });
+
                             projection_exprs.push(Arc::new(Expression::ColumnRef(
                                 ColumnRefExpression::new(
                                     0,
@@ -541,7 +551,9 @@ impl LogicalPlanBuilder {
                             )));
                         } else {
                             // For non-aggregate expressions, find the column in the input schema by name
-                            if let Some(col_idx) = input_schema.get_qualified_column_index(&col_name) {
+                            if let Some(col_idx) =
+                                input_schema.get_qualified_column_index(&col_name)
+                            {
                                 projection_exprs.push(Arc::new(Expression::ColumnRef(
                                     ColumnRefExpression::new(
                                         0,
@@ -577,19 +589,29 @@ impl LogicalPlanBuilder {
                         if let Expression::Aggregate(agg) = &parsed_expr {
                             // For aggregate expressions, find them in the input schema
                             let expected_col_name = agg.get_column_name();
-                            
+
                             // Try to find the aggregate column in the input schema
-                            let col_idx = input_schema.get_columns().iter().position(|col| {
-                                let col_name = col.get_name();
-                                // Match exact name or function pattern
-                                col_name == &expected_col_name ||
-                                col_name.starts_with(&format!("{}(", agg.get_function_name())) ||
-                                col_name.starts_with(&format!("{}_", agg.get_function_name()))
-                            }).unwrap_or_else(|| {
-                                // Fallback: use position based on order in projection, but ensure it's valid
-                                std::cmp::min(i, (input_schema.get_column_count() as usize).saturating_sub(1))
-                            });
-                            
+                            let col_idx = input_schema
+                                .get_columns()
+                                .iter()
+                                .position(|col| {
+                                    let col_name = col.get_name();
+                                    // Match exact name or function pattern
+                                    col_name == &expected_col_name
+                                        || col_name
+                                            .starts_with(&format!("{}(", agg.get_function_name()))
+                                        || col_name
+                                            .starts_with(&format!("{}_", agg.get_function_name()))
+                                })
+                                .unwrap_or_else(|| {
+                                    // Fallback: use position based on order in projection, but ensure it's valid
+                                    std::cmp::min(
+                                        i,
+                                        (input_schema.get_column_count() as usize)
+                                            .saturating_sub(1),
+                                    )
+                                });
+
                             projection_exprs.push(Arc::new(Expression::ColumnRef(
                                 ColumnRefExpression::new(
                                     0,
@@ -599,44 +621,46 @@ impl LogicalPlanBuilder {
                                 ),
                             )));
                         } else {
-                        // For aliased expressions, first try to find by the alias value
-                        let mut col_idx_opt = input_schema.get_qualified_column_index(&alias.value);
+                            // For aliased expressions, first try to find by the alias value
+                            let mut col_idx_opt =
+                                input_schema.get_qualified_column_index(&alias.value);
 
-                        if col_idx_opt.is_none() {
-                            // Try to find the column by matching the underlying expression to expected alias
-                            match expr {
-                                Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
-                                    let table_alias = &parts[0].value;
-                                    let column_name = &parts[1].value;
-                                    let qualified_name = format!("{}.{}", table_alias, column_name);
+                            if col_idx_opt.is_none() {
+                                // Try to find the column by matching the underlying expression to expected alias
+                                match expr {
+                                    Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                                        let table_alias = &parts[0].value;
+                                        let column_name = &parts[1].value;
+                                        let qualified_name =
+                                            format!("{}.{}", table_alias, column_name);
 
-                                    // Map known patterns to expected aliases
-                                    let expected_alias =
-                                        if table_alias == "e" && column_name == "name" {
-                                            "employee"
-                                        } else if table_alias == "d" && column_name == "name" {
-                                            "department"
-                                        } else {
-                                            // Keep the original qualified name for other cases
-                                            &qualified_name
-                                        };
+                                        // Map known patterns to expected aliases
+                                        let expected_alias =
+                                            if table_alias == "e" && column_name == "name" {
+                                                "employee"
+                                            } else if table_alias == "d" && column_name == "name" {
+                                                "department"
+                                            } else {
+                                                // Keep the original qualified name for other cases
+                                                &qualified_name
+                                            };
 
-                                    col_idx_opt =
-                                        input_schema.get_qualified_column_index(expected_alias);
+                                        col_idx_opt =
+                                            input_schema.get_qualified_column_index(expected_alias);
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
                             }
-                        }
 
-                        if let Some(col_idx) = col_idx_opt {
-                            projection_exprs.push(Arc::new(Expression::ColumnRef(
-                                ColumnRefExpression::new(
-                                    0,
-                                    col_idx,
-                                    input_schema.get_column(col_idx).unwrap().clone(),
-                                    vec![],
-                                ),
-                            )));
+                            if let Some(col_idx) = col_idx_opt {
+                                projection_exprs.push(Arc::new(Expression::ColumnRef(
+                                    ColumnRefExpression::new(
+                                        0,
+                                        col_idx,
+                                        input_schema.get_column(col_idx).unwrap().clone(),
+                                        vec![],
+                                    ),
+                                )));
                             } else {
                                 projection_exprs.push(Arc::new(parsed_expr));
                             }

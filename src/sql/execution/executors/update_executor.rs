@@ -1,13 +1,12 @@
-use crate::catalog::schema::Schema;
 use crate::catalog::column::Column;
-use crate::common::rid::RID;
+use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
-use crate::storage::index::types::key_types::KeyType;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::type_id::TypeId;
@@ -85,14 +84,20 @@ impl UpdateExecutor {
     }
 
     /// Evaluates an update expression against a tuple to get the new value
-    fn evaluate_update_expression(&self, expr: &crate::sql::execution::expressions::abstract_expression::Expression, tuple: &Tuple) -> Option<Value> {
+    fn evaluate_update_expression(
+        &self,
+        expr: &crate::sql::execution::expressions::abstract_expression::Expression,
+        tuple: &Tuple,
+    ) -> Option<Value> {
         // This is a simplified implementation - in reality, this would be more complex
         // For now, we'll handle constant expressions and column references
         match expr {
-            crate::sql::execution::expressions::abstract_expression::Expression::Constant(const_expr) => {
-                Some(const_expr.get_value().clone())
-            }
-            crate::sql::execution::expressions::abstract_expression::Expression::ColumnRef(col_ref) => {
+            crate::sql::execution::expressions::abstract_expression::Expression::Constant(
+                const_expr,
+            ) => Some(const_expr.get_value().clone()),
+            crate::sql::execution::expressions::abstract_expression::Expression::ColumnRef(
+                col_ref,
+            ) => {
                 let col_idx = col_ref.get_column_index();
                 if col_idx < tuple.get_column_count() {
                     Some(tuple.get_value(col_idx).clone())
@@ -112,7 +117,7 @@ impl UpdateExecutor {
 impl AbstractExecutor for UpdateExecutor {
     fn init(&mut self) {
         debug!("Initializing UpdateExecutor");
-        
+
         // Create child executor from plan's children if not already created
         if self.child_executor.is_none() {
             let children_plans = self.plan.get_children();
@@ -132,7 +137,7 @@ impl AbstractExecutor for UpdateExecutor {
                 debug!("No child plans found - update will scan entire table");
             }
         }
-        
+
         if let Some(ref mut child) = self.child_executor {
             child.init();
         }
@@ -164,12 +169,15 @@ impl AbstractExecutor for UpdateExecutor {
             let table_heap = table_info.get_table_heap().clone();
             let table_oidt = table_info.get_table_oidt();
             let txn_context = binding.get_transaction_context().clone();
-            
+
             (schema, table_heap, table_oidt, txn_context)
         };
 
         // Create transactional table heap
-        let transactional_table_heap = crate::storage::table::transactional_table_heap::TransactionalTableHeap::new(table_heap, table_oidt);
+        let transactional_table_heap =
+            crate::storage::table::transactional_table_heap::TransactionalTableHeap::new(
+                table_heap, table_oidt,
+            );
 
         let mut update_count = 0;
 
@@ -179,10 +187,10 @@ impl AbstractExecutor for UpdateExecutor {
                 match child.next()? {
                     Some((tuple, rid)) => {
                         debug!("Processing tuple for update with RID {:?}", rid);
-                        
+
                         // Apply updates based on the update plan
                         let mut updated_values = tuple.get_values().clone();
-                        
+
                         // Apply each update expression
                         let expressions = self.plan.get_target_expressions();
                         for expression in expressions {
@@ -198,10 +206,13 @@ impl AbstractExecutor for UpdateExecutor {
                                     for i in (0..expressions.len()).step_by(2) {
                                         if i + 1 < expressions.len() {
                                             // First expression should be a column reference indicating which column to update
-                                            if let Expression::ColumnRef(col_ref) = expressions[i].as_ref() {
+                                            if let Expression::ColumnRef(col_ref) =
+                                                expressions[i].as_ref()
+                                            {
                                                 let column_idx = col_ref.get_column_index();
                                                 let new_value_expr = &expressions[i + 1];
-                                                let new_value = new_value_expr.evaluate(&tuple, &schema)?;
+                                                let new_value =
+                                                    new_value_expr.evaluate(&tuple, &schema)?;
                                                 updated_values[column_idx] = new_value;
                                             }
                                         }
@@ -223,7 +234,10 @@ impl AbstractExecutor for UpdateExecutor {
                         ) {
                             Ok(_) => {
                                 update_count += 1;
-                                trace!("Successfully updated tuple #{} with RID {:?}", update_count, rid);
+                                trace!(
+                                    "Successfully updated tuple #{} with RID {:?}",
+                                    update_count, rid
+                                );
                             }
                             Err(e) => {
                                 error!("Failed to update tuple with RID {:?}: {}", rid, e);
@@ -235,18 +249,21 @@ impl AbstractExecutor for UpdateExecutor {
                 }
             }
         } else {
-            return Err(DBError::Execution("No child executor found for UPDATE".to_string()));
+            return Err(DBError::Execution(
+                "No child executor found for UPDATE".to_string(),
+            ));
         }
 
-        info!("Update operation completed successfully, {} rows updated", update_count);
+        info!(
+            "Update operation completed successfully, {} rows updated",
+            update_count
+        );
         self.rows_updated = update_count;
 
         // Return a result tuple with the update count if rows were updated
         if update_count > 0 {
             let result_values = vec![Value::new(update_count as i32)];
-            let result_schema = Schema::new(vec![
-                Column::new("rows_updated", TypeId::Integer)
-            ]);
+            let result_schema = Schema::new(vec![Column::new("rows_updated", TypeId::Integer)]);
             let result_tuple = Arc::new(Tuple::new(&result_values, &result_schema, RID::default()));
             Ok(Some((result_tuple, RID::default())))
         } else {
@@ -290,6 +307,7 @@ mod tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::types::Type;
     use tempfile::TempDir;
+    use crate::storage::index::types::KeyType;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -373,7 +391,12 @@ mod tests {
         )))
     }
 
-    fn create_age_filter(age: i32, comparison_type: ComparisonType, schema: &Schema, table_oid: crate::common::config::TableOidT) -> FilterNode {
+    fn create_age_filter(
+        age: i32,
+        comparison_type: ComparisonType,
+        schema: &Schema,
+        table_oid: crate::common::config::TableOidT,
+    ) -> FilterNode {
         // Create column reference for age
         let col_idx = schema.get_column_index("age").unwrap();
         let age_col = schema.get_column(col_idx).unwrap().clone();
@@ -415,7 +438,11 @@ mod tests {
         )
     }
 
-    fn create_id_filter(id: i32, schema: &Schema, table_oid: crate::common::config::TableOidT) -> FilterNode {
+    fn create_id_filter(
+        id: i32,
+        schema: &Schema,
+        table_oid: crate::common::config::TableOidT,
+    ) -> FilterNode {
         // Create column reference for id
         let col_idx = schema.get_column_index("id").unwrap();
         let id_col = schema.get_column(col_idx).unwrap().clone();
@@ -457,7 +484,10 @@ mod tests {
         )
     }
 
-    fn create_complex_filter(schema: &Schema, table_oid: crate::common::config::TableOidT) -> FilterNode {
+    fn create_complex_filter(
+        schema: &Schema,
+        table_oid: crate::common::config::TableOidT,
+    ) -> FilterNode {
         // id > 2 AND (age < 35 OR department = 'Engineering')
 
         // id > 2
@@ -555,7 +585,11 @@ mod tests {
         )
     }
 
-    fn create_department_filter(department: &str, schema: &Schema, table_oid: crate::common::config::TableOidT) -> FilterNode {
+    fn create_department_filter(
+        department: &str,
+        schema: &Schema,
+        table_oid: crate::common::config::TableOidT,
+    ) -> FilterNode {
         // Create column reference for department
         let col_idx = schema.get_column_index("department").unwrap();
         let dept_col = schema.get_column(col_idx).unwrap().clone();
@@ -720,14 +754,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 2, "Should have updated 2 rows");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // Verify the updates using TransactionalTableHeap's iterator
         let mut found_updates = 0;
@@ -838,14 +877,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 1, "Should have updated 1 row");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // Verify the update
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
@@ -950,14 +994,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 1, "Should have updated 1 row");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // Verify the updates
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
@@ -1065,14 +1114,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert!(update_count > 0, "Should have updated some rows");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // The update count assertion is sufficient to verify that the complex arithmetic update was applied
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
@@ -1199,14 +1253,14 @@ mod tests {
             ComparisonType::GreaterThan,
             vec![],
         ));
-        
+
         // Create a SeqScanPlanNode as the child to provide data to filter
         let seq_scan = crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode::new(
             schema.clone(),
             table_oid,
             "test_table".to_string(),
         );
-        
+
         let filter_plan = FilterNode::new(
             schema.clone(),
             0,
@@ -1246,14 +1300,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 5, "Should have updated all 5 rows");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // The update completion is sufficient to verify that all rows were updated
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
@@ -1340,14 +1399,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 1, "Should have updated 1 row");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // Verify the division result
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
@@ -1437,14 +1501,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 1, "Should have updated 1 row");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // Verify the update result
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
@@ -1639,14 +1708,19 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
         assert_eq!(update_count, 1, "Should have updated 1 row");
-        
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // The update count assertion is sufficient to verify that the complex arithmetic update was applied
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
@@ -1733,14 +1807,22 @@ mod tests {
         // Execute update - should complete successfully and return update count
         let result = executor.next();
         assert!(result.is_ok());
-        let (result_tuple, _) = result.unwrap().expect("Update should return result tuple when rows are updated");
+        let (result_tuple, _) = result
+            .unwrap()
+            .expect("Update should return result tuple when rows are updated");
         let update_count = result_tuple.get_value(0).as_integer().unwrap();
-        assert_eq!(update_count, 2, "Should have updated 2 rows (Alice and Charlie in Engineering)");
-        
+        assert_eq!(
+            update_count, 2,
+            "Should have updated 2 rows (Alice and Charlie in Engineering)"
+        );
+
         // Subsequent calls should return None
         let result = executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Subsequent calls should return None");
+        assert!(
+            result.unwrap().is_none(),
+            "Subsequent calls should return None"
+        );
 
         // The update count assertion is sufficient to verify that both Engineering employees were updated
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction

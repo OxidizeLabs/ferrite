@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -81,14 +81,19 @@ impl AbstractExecutor for SeqScanExecutor {
             let context = self.context.read();
             let catalog = context.get_catalog();
             let catalog_guard = catalog.read();
-            catalog_guard.get_table_by_oid(self.plan.get_table_oid()).cloned()
+            catalog_guard
+                .get_table_by_oid(self.plan.get_table_oid())
+                .cloned()
         };
 
         if let Some(table_info) = table_info {
             // Verify we have the correct table
-            assert_eq!(table_info.get_table_oidt(), self.plan.get_table_oid(), 
-                "Table OID mismatch in SeqScanExecutor");
-            
+            assert_eq!(
+                table_info.get_table_oidt(),
+                self.plan.get_table_oid(),
+                "Table OID mismatch in SeqScanExecutor"
+            );
+
             // Create table heap and iterator (table_heap should already be correct from constructor,
             // but recreate it here to be safe and ensure consistency)
             let table_heap = Arc::new(TransactionalTableHeap::new(
@@ -97,13 +102,13 @@ impl AbstractExecutor for SeqScanExecutor {
             ));
 
             self.table_heap = table_heap.clone();
-            
+
             // Get transaction context for the iterator
             let txn_ctx = {
                 let context = self.context.read();
                 Some(context.get_transaction_context())
             };
-            
+
             // Create iterator with start/end RIDs and transaction context
             let first_page_id = table_heap.get_table_heap().get_first_page_id();
             self.iterator = Some(TableIterator::new(
@@ -113,7 +118,10 @@ impl AbstractExecutor for SeqScanExecutor {
                 txn_ctx,
             ));
             self.initialized = true;
-            trace!("SeqScanExecutor initialized successfully for table OID {}", self.plan.get_table_oid());
+            trace!(
+                "SeqScanExecutor initialized successfully for table OID {}",
+                self.plan.get_table_oid()
+            );
         } else {
             error!("Table with OID {} not found", self.plan.get_table_oid());
         }
@@ -268,7 +276,10 @@ mod tests {
         (meta, values)
     }
 
-    fn create_execution_context(ctx: &TestContext, catalog: Arc<RwLock<Catalog>>) -> Arc<RwLock<ExecutionContext>> {
+    fn create_execution_context(
+        ctx: &TestContext,
+        catalog: Arc<RwLock<Catalog>>,
+    ) -> Arc<RwLock<ExecutionContext>> {
         Arc::new(RwLock::new(ExecutionContext::new(
             ctx.bpm(),
             catalog,

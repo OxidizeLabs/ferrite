@@ -384,7 +384,9 @@ mod tests {
 
     #[test]
     fn test_contains_aggregate() {
-        use crate::sql::execution::expressions::aggregate_expression::{AggregateExpression, AggregationType};
+        use crate::sql::execution::expressions::aggregate_expression::{
+            AggregateExpression, AggregationType,
+        };
 
         // Create an aggregate expression
         let agg_expr = Arc::new(Expression::Aggregate(AggregateExpression::new(

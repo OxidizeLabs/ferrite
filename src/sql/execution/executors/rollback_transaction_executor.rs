@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -401,15 +401,24 @@ mod tests {
 
         // First execution should work
         let result1 = executor.next();
-        assert!(result1.unwrap().is_none(), "First execution should return None");
+        assert!(
+            result1.unwrap().is_none(),
+            "First execution should return None"
+        );
 
         // Second execution should also return None (already executed)
         let result2 = executor.next();
-        assert!(result2.unwrap().is_none(), "Second execution should return None");
+        assert!(
+            result2.unwrap().is_none(),
+            "Second execution should return None"
+        );
 
         // Third execution should also return None
         let result3 = executor.next();
-        assert!(result3.unwrap().is_none(), "Third execution should return None");
+        assert!(
+            result3.unwrap().is_none(),
+            "Third execution should return None"
+        );
     }
 
     #[test]

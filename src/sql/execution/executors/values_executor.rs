@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -53,7 +53,7 @@ impl AbstractExecutor for ValuesExecutor {
             Some(row) => row,
             None => return Ok(None),
         };
-        
+
         let mut row_clone = row.clone();
         let schema = self.plan.get_output_schema();
 
@@ -74,7 +74,10 @@ impl AbstractExecutor for ValuesExecutor {
             }
             Err(e) => {
                 error!("Failed to evaluate values: {}", e);
-                Err(DBError::Execution(format!("Failed to evaluate values: {}", e)))
+                Err(DBError::Execution(format!(
+                    "Failed to evaluate values: {}",
+                    e
+                )))
             }
         }
     }

@@ -1,18 +1,18 @@
+use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::catalog::column::Column;
-use crate::types_db::type_id::TypeId;
 
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -83,7 +83,7 @@ impl DeleteExecutor {
 impl AbstractExecutor for DeleteExecutor {
     fn init(&mut self) {
         debug!("Initializing DeleteExecutor");
-        
+
         // Create child executor from plan's children if not already created
         if self.child_executor.is_none() {
             let children_plans = self.plan.get_children();
@@ -103,7 +103,7 @@ impl AbstractExecutor for DeleteExecutor {
         } else if let Some(ref mut child) = self.child_executor {
             child.init();
         }
-        
+
         self.initialized = true;
     }
 
@@ -125,8 +125,11 @@ impl AbstractExecutor for DeleteExecutor {
         let table_info = {
             let binding = self.context.read();
             let catalog_guard = binding.get_catalog().read();
-            catalog_guard.get_table_by_oid(table_id)
-                .ok_or_else(|| DBError::Execution(format!("Table with OID {} not found", table_id)))?
+            catalog_guard
+                .get_table_by_oid(table_id)
+                .ok_or_else(|| {
+                    DBError::Execution(format!("Table with OID {} not found", table_id))
+                })?
                 .clone()
         };
 
@@ -144,12 +147,15 @@ impl AbstractExecutor for DeleteExecutor {
                 match child.next()? {
                     Some((_tuple, rid)) => {
                         debug!("Processing tuple for deletion with RID {:?}", rid);
-                        
+
                         // Delete the tuple from the table
                         match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
                             Ok(_) => {
                                 delete_count += 1;
-                                trace!("Successfully deleted tuple #{} with RID {:?}", delete_count, rid);
+                                trace!(
+                                    "Successfully deleted tuple #{} with RID {:?}",
+                                    delete_count, rid
+                                );
                             }
                             Err(e) => {
                                 error!("Failed to delete tuple with RID {:?}: {}", rid, e);
@@ -161,10 +167,15 @@ impl AbstractExecutor for DeleteExecutor {
                 }
             }
         } else {
-            return Err(DBError::Execution("No child executor found for DELETE".to_string()));
+            return Err(DBError::Execution(
+                "No child executor found for DELETE".to_string(),
+            ));
         }
 
-        info!("Delete operation completed successfully, {} rows deleted", delete_count);
+        info!(
+            "Delete operation completed successfully, {} rows deleted",
+            delete_count
+        );
         self.rows_deleted = delete_count;
 
         // Return a result tuple if any rows were deleted
@@ -172,9 +183,7 @@ impl AbstractExecutor for DeleteExecutor {
             // Create a simple result tuple indicating success with the number of rows deleted
             let result_values = vec![Value::new(delete_count as i32)];
             // Create a simple schema for the result tuple with just one column for the count
-            let result_schema = Schema::new(vec![
-                Column::new("rows_deleted", TypeId::Integer)
-            ]);
+            let result_schema = Schema::new(vec![Column::new("rows_deleted", TypeId::Integer)]);
             let result_tuple = Arc::new(Tuple::new(&result_values, &result_schema, RID::default()));
             Ok(Some((result_tuple, RID::default())))
         } else {
@@ -194,8 +203,7 @@ impl AbstractExecutor for DeleteExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::sql::execution::plans::abstract_plan::PlanNode;
-use super::*;
+    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
@@ -203,16 +211,14 @@ use super::*;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::expressions::abstract_expression::Expression::Constant;
-    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use crate::sql::execution::plans::values_plan::ValuesNode;
+    use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::{Val, Value};
+    use crate::types_db::value::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
 
@@ -426,7 +432,10 @@ use super::*;
             }
         }
 
-        assert_eq!(remaining_count, 0, "Should have 0 tuples remaining (all deleted)");
+        assert_eq!(
+            remaining_count, 0,
+            "Should have 0 tuples remaining (all deleted)"
+        );
 
         // Clean up - commit verification transaction
         ctx.transaction_manager

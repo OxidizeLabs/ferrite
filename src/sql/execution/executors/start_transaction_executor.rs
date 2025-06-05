@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -46,7 +46,7 @@ impl AbstractExecutor for StartTransactionExecutor {
 
         // Get the isolation level from the plan or use default
         let isolation_level = self.plan.get_isolation_level().unwrap_or_default();
-        
+
         debug!(
             "Starting new transaction with isolation level {:?}",
             isolation_level
@@ -75,7 +75,7 @@ impl AbstractExecutor for StartTransactionExecutor {
                     let context = self.context.read();
                     context.get_transaction_context().get_lock_manager()
                 };
-                
+
                 let new_transaction_context = Arc::new(TransactionContext::new(
                     new_transaction,
                     lock_manager,
@@ -97,7 +97,10 @@ impl AbstractExecutor for StartTransactionExecutor {
                     // Return Ok(None) to indicate the operation completed but no transaction was started
                     return Ok(None);
                 }
-                return Err(DBError::Execution(format!("Failed to start transaction: {}", e)));
+                return Err(DBError::Execution(format!(
+                    "Failed to start transaction: {}",
+                    e
+                )));
             }
         }
 
@@ -117,12 +120,12 @@ impl AbstractExecutor for StartTransactionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::concurrency::transaction::IsolationLevel;
-use super::*;
+    use super::*;
     use crate::buffer::buffer_pool_manager::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::storage::disk::disk_manager::FileDiskManager;
     use crate::storage::disk::disk_scheduler::DiskScheduler;

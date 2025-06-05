@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
@@ -211,9 +211,13 @@ impl AbstractExecutor for TopNPerGroupExecutor {
 
         // Sort group keys for deterministic iteration order
         self.group_keys = self.groups.keys().cloned().collect();
-        self.group_keys.sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
+        self.group_keys
+            .sort_by(|a, b| Self::compare_group_keys(a.as_slice(), b.as_slice()));
 
-        debug!("TopNPerGroupExecutor initialization complete. Found {} groups", self.groups.len());
+        debug!(
+            "TopNPerGroupExecutor initialization complete. Found {} groups",
+            self.groups.len()
+        );
         self.initialized = true;
     }
 

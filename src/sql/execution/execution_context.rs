@@ -118,8 +118,8 @@ use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::executors::window_executor::WindowExecutor;
 use crate::sql::execution::transaction_context::TransactionContext;
 use log::debug;
-use parking_lot::RwLock;
 use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -292,7 +292,15 @@ impl ExecutorType {
     }
 
     /// Execute the next method on the wrapped executor
-    pub fn next(&mut self) -> Result<Option<(Arc<crate::storage::table::tuple::Tuple>, crate::common::rid::RID)>, crate::common::exception::DBError> {
+    pub fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<crate::storage::table::tuple::Tuple>,
+            crate::common::rid::RID,
+        )>,
+        crate::common::exception::DBError,
+    > {
         match self {
             ExecutorType::Aggregation(executor) => executor.next(),
             ExecutorType::Command(executor) => executor.next(),
@@ -579,8 +587,18 @@ mod tests {
 
             // Create temporary directory and disk components
             let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("test.db").to_str().unwrap().to_string();
-            let log_path = temp_dir.path().join("test.log").to_str().unwrap().to_string();
+            let db_path = temp_dir
+                .path()
+                .join("test.db")
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join("test.log")
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
             let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
@@ -641,7 +659,10 @@ mod tests {
 
         // Test direct construction
         let executor_type = ExecutorType::CreateTable(executor);
-        assert_eq!(ExecutionContext::get_executor_type_name(&executor_type), "CreateTableExecutor");
+        assert_eq!(
+            ExecutionContext::get_executor_type_name(&executor_type),
+            "CreateTableExecutor"
+        );
     }
 
     #[test]
@@ -658,7 +679,10 @@ mod tests {
 
         // Test from_* constructor
         let executor_type = ExecutorType::from_create_table(executor);
-        assert_eq!(ExecutionContext::get_executor_type_name(&executor_type), "CreateTableExecutor");
+        assert_eq!(
+            ExecutionContext::get_executor_type_name(&executor_type),
+            "CreateTableExecutor"
+        );
     }
 
     #[test]
@@ -757,16 +781,20 @@ mod tests {
     fn test_all_executor_type_names() {
         let test_ctx = TestContext::new();
         let schema = create_test_schema();
-        
+
         // Test a few representative executor types
         let create_table_plan = Arc::new(CreateTablePlanNode::new(
             schema.clone(),
             "test_table".to_string(),
             false,
         ));
-        let create_table_executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), create_table_plan, false);
+        let create_table_executor =
+            CreateTableExecutor::new(test_ctx.execution_context.clone(), create_table_plan, false);
         let create_table_type = ExecutorType::from_create_table(create_table_executor);
-        assert_eq!(ExecutionContext::get_executor_type_name(&create_table_type), "CreateTableExecutor");
+        assert_eq!(
+            ExecutionContext::get_executor_type_name(&create_table_type),
+            "CreateTableExecutor"
+        );
 
         // Test that all ExecutorType variants have the correct type names
         // This validates the enum is complete without needing actual executors
@@ -778,7 +806,7 @@ mod tests {
         // Compile-time test: ExecutorType should implement Send + Sync
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
-        
+
         assert_send::<ExecutorType>();
         assert_sync::<ExecutorType>();
     }
@@ -786,11 +814,11 @@ mod tests {
     #[test]
     fn test_execution_context_init_check_options() {
         let test_ctx = TestContext::new();
-        
+
         {
             let mut exec_ctx = test_ctx.execution_context.write();
             exec_ctx.init_check_options();
-            
+
             let check_options = exec_ctx.get_check_options();
             assert!(check_options.has_check(&CheckOption::EnablePushdownCheck));
             assert!(check_options.has_check(&CheckOption::EnableTopnCheck));
@@ -800,28 +828,28 @@ mod tests {
     #[test]
     fn test_execution_context_getters_and_setters() {
         let test_ctx = TestContext::new();
-        
+
         {
             let mut exec_ctx = test_ctx.execution_context.write();
-            
+
             // Test delete flag
             assert!(!exec_ctx.is_delete());
             exec_ctx.set_delete(true);
             assert!(exec_ctx.is_delete());
-            
+
             // Test chain after transaction
             assert!(!exec_ctx.should_chain_after_transaction());
             exec_ctx.set_chain_after_transaction(true);
             assert!(exec_ctx.should_chain_after_transaction());
-            
+
             // Test transaction context getter
             let txn_ctx = exec_ctx.get_transaction_context();
             assert_eq!(txn_ctx.get_transaction_id(), 0);
-            
+
             // Test buffer pool manager getter
             let bpm = exec_ctx.get_buffer_pool_manager();
             assert!(Arc::ptr_eq(&bpm, &test_ctx.bpm));
-            
+
             // Test catalog getter
             let catalog = exec_ctx.get_catalog();
             assert!(Arc::ptr_eq(catalog, &test_ctx.catalog));
@@ -845,8 +873,13 @@ mod tests {
             false,
         ));
 
-        let create_table_executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), create_table_plan, false);
-        let create_table_executor2 = CreateTableExecutor::new(test_ctx.execution_context.clone(), create_table_plan2, false);
+        let create_table_executor =
+            CreateTableExecutor::new(test_ctx.execution_context.clone(), create_table_plan, false);
+        let create_table_executor2 = CreateTableExecutor::new(
+            test_ctx.execution_context.clone(),
+            create_table_plan2,
+            false,
+        );
 
         let create_table_type = ExecutorType::from_create_table(create_table_executor);
         let create_table_type2 = ExecutorType::from_create_table(create_table_executor2);
@@ -869,12 +902,12 @@ mod tests {
     fn test_executor_type_all_variants_compile() {
         // This is a compile-time test to ensure all ExecutorType variants exist
         // and have the required from_* constructors
-        
+
         // We can't easily create all executor types in tests due to their dependencies,
         // but we can verify the enum variants exist
         let type_names = vec![
             "AggregationExecutor",
-            "CommandExecutor", 
+            "CommandExecutor",
             "CommitTransactionExecutor",
             "CreateIndexExecutor",
             "CreateTableExecutor",
@@ -903,7 +936,7 @@ mod tests {
 
         // Verify we have all expected type names
         assert_eq!(type_names.len(), 26);
-        
+
         // This test passes if it compiles, proving all variants exist
         assert!(true);
     }

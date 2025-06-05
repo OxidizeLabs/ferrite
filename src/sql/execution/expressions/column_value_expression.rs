@@ -49,12 +49,12 @@ impl ExpressionOps for ColumnRefExpression {
     fn evaluate(&self, tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
         // Get the values from the tuple
         let values = tuple.get_values();
-        
+
         // Check if the column index is within bounds
         if self.column_index >= values.len() {
             return Err(ExpressionError::InvalidColumnIndex(self.column_index));
         }
-        
+
         Ok(values[self.column_index].clone())
     }
 

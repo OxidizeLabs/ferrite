@@ -1088,7 +1088,8 @@ impl Value {
         match self.type_id_ {
             TypeId::Decimal => {
                 if let Some(col) = column {
-                    if let (Some(_precision), Some(scale)) = (col.get_precision(), col.get_scale()) {
+                    if let (Some(_precision), Some(scale)) = (col.get_precision(), col.get_scale())
+                    {
                         return self.format_decimal_with_scale(scale);
                     }
                 }

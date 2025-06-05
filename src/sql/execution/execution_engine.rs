@@ -1085,7 +1085,8 @@ mod tests {
             let mut ctx = TestContext::new("test_create_multiple_tables_same_session");
 
             // Create first table
-            let create_sql1 = "CREATE TABLE employees (id INTEGER, name VARCHAR(100), department_id INTEGER)";
+            let create_sql1 =
+                "CREATE TABLE employees (id INTEGER, name VARCHAR(100), department_id INTEGER)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -1094,7 +1095,8 @@ mod tests {
             assert!(success, "Create employees table failed");
 
             // Create second table
-            let create_sql2 = "CREATE TABLE departments (id INTEGER, name VARCHAR(100), budget BIGINT)";
+            let create_sql2 =
+                "CREATE TABLE departments (id INTEGER, name VARCHAR(100), budget BIGINT)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -1109,7 +1111,8 @@ mod tests {
                 .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
 
-            let insert_dept_sql = "INSERT INTO departments VALUES (1, 'Engineering', 1000000), (2, 'Sales', 500000)";
+            let insert_dept_sql =
+                "INSERT INTO departments VALUES (1, 'Engineering', 1000000), (2, 'Sales', 500000)";
             let mut writer = TestResultWriter::new();
             ctx.engine
                 .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
@@ -1214,12 +1217,13 @@ mod tests {
             assert!(success, "First create table should succeed");
 
             // Try to create table with same name - should fail
-            let create_duplicate_sql = "CREATE TABLE duplicate_test (other_id INTEGER, other_name VARCHAR(100))";
+            let create_duplicate_sql =
+                "CREATE TABLE duplicate_test (other_id INTEGER, other_name VARCHAR(100))";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
-            
+            let result =
+                ctx.engine
+                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+
             // Should return an error for duplicate table name
             assert!(result.is_err(), "Creating duplicate table should fail");
         }
@@ -1257,7 +1261,8 @@ mod tests {
             assert!(success, "Insert boolean data failed");
 
             // Test boolean queries
-            let select_enabled_sql = "SELECT feature_name FROM feature_flags WHERE is_enabled = true";
+            let select_enabled_sql =
+                "SELECT feature_name FROM feature_flags WHERE is_enabled = true";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -1273,7 +1278,11 @@ mod tests {
                 .execute_sql(select_experimental_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Select experimental features failed");
-            assert_eq!(writer.get_rows().len(), 2, "Expected 2 experimental non-deprecated features");
+            assert_eq!(
+                writer.get_rows().len(),
+                2,
+                "Expected 2 experimental non-deprecated features"
+            );
         }
 
         #[test]
@@ -1329,7 +1338,11 @@ mod tests {
                 .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Complex filter query failed");
-            assert_eq!(writer.get_rows().len(), 2, "Expected 2 expensive electronics");
+            assert_eq!(
+                writer.get_rows().len(),
+                2,
+                "Expected 2 expensive electronics"
+            );
 
             // Test calculated columns
             let calc_sql = "SELECT product_name, price, quantity, price * quantity as total_value FROM sales_data ORDER BY total_value DESC";
@@ -1388,303 +1401,323 @@ mod tests {
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Select after commit failed");
-                         assert_eq!(writer.get_rows().len(), 1, "Expected data to persist after commit");
-         }
+            assert_eq!(
+                writer.get_rows().len(),
+                1,
+                "Expected data to persist after commit"
+            );
+        }
 
-         #[test]
-         fn test_create_table_primary_key_constraint() {
-             let mut ctx = TestContext::new("test_create_table_primary_key_constraint");
+        #[test]
+        fn test_create_table_primary_key_constraint() {
+            let mut ctx = TestContext::new("test_create_table_primary_key_constraint");
 
-             // Test CREATE TABLE with PRIMARY KEY constraint
-             let create_sql = "CREATE TABLE users_pk (
+            // Test CREATE TABLE with PRIMARY KEY constraint
+            let create_sql = "CREATE TABLE users_pk (
                  id INTEGER PRIMARY KEY,
                  name VARCHAR(100),
                  email VARCHAR(255)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with PRIMARY KEY failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with PRIMARY KEY failed");
 
-             // Insert valid data
-             let insert_sql1 = "INSERT INTO users_pk VALUES (1, 'Alice', 'alice@example.com')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert valid data failed");
+            // Insert valid data
+            let insert_sql1 = "INSERT INTO users_pk VALUES (1, 'Alice', 'alice@example.com')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert valid data failed");
 
-             let insert_sql2 = "INSERT INTO users_pk VALUES (2, 'Bob', 'bob@example.com')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second valid record failed");
+            let insert_sql2 = "INSERT INTO users_pk VALUES (2, 'Bob', 'bob@example.com')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second valid record failed");
 
-             // Try to insert duplicate primary key - should fail
-             let insert_duplicate_sql = "INSERT INTO users_pk VALUES (1, 'Charlie', 'charlie@example.com')";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: Depending on implementation, this might succeed if PK constraints aren't enforced yet
-             // The test documents expected behavior
+            // Try to insert duplicate primary key - should fail
+            let insert_duplicate_sql =
+                "INSERT INTO users_pk VALUES (1, 'Charlie', 'charlie@example.com')";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: Depending on implementation, this might succeed if PK constraints aren't enforced yet
+            // The test documents expected behavior
 
-             // Verify data integrity
-             let select_sql = "SELECT * FROM users_pk ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from PK table failed");
-             assert_eq!(writer.get_rows().len(), 2, "Expected 2 unique records");
-         }
+            // Verify data integrity
+            let select_sql = "SELECT * FROM users_pk ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from PK table failed");
+            assert_eq!(writer.get_rows().len(), 2, "Expected 2 unique records");
+        }
 
-         #[test]
-         fn test_create_table_not_null_constraint() {
-             let mut ctx = TestContext::new("test_create_table_not_null_constraint");
+        #[test]
+        fn test_create_table_not_null_constraint() {
+            let mut ctx = TestContext::new("test_create_table_not_null_constraint");
 
-             // Test CREATE TABLE with NOT NULL constraints
-             let create_sql = "CREATE TABLE required_fields (
+            // Test CREATE TABLE with NOT NULL constraints
+            let create_sql = "CREATE TABLE required_fields (
                  id INTEGER NOT NULL,
                  name VARCHAR(100) NOT NULL,
                  email VARCHAR(255) NOT NULL,
                  phone VARCHAR(20)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with NOT NULL failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with NOT NULL failed");
 
-             // Insert valid data with all required fields
-             let insert_sql1 = "INSERT INTO required_fields VALUES (1, 'Alice', 'alice@example.com', '123-456-7890')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert with all fields failed");
+            // Insert valid data with all required fields
+            let insert_sql1 = "INSERT INTO required_fields VALUES (1, 'Alice', 'alice@example.com', '123-456-7890')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert with all fields failed");
 
-             // Insert valid data with optional field as NULL
-             let insert_sql2 = "INSERT INTO required_fields VALUES (2, 'Bob', 'bob@example.com', NULL)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert with NULL optional field failed");
+            // Insert valid data with optional field as NULL
+            let insert_sql2 =
+                "INSERT INTO required_fields VALUES (2, 'Bob', 'bob@example.com', NULL)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert with NULL optional field failed");
 
-             // Try to insert with NULL required field - should fail
-             let insert_null_sql = "INSERT INTO required_fields VALUES (3, NULL, 'charlie@example.com', '555-0123')";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_null_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: Depending on implementation, this behavior may vary
+            // Try to insert with NULL required field - should fail
+            let insert_null_sql =
+                "INSERT INTO required_fields VALUES (3, NULL, 'charlie@example.com', '555-0123')";
+            let mut writer = TestResultWriter::new();
+            let result = ctx
+                .engine
+                .execute_sql(insert_null_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: Depending on implementation, this behavior may vary
 
-             // Verify successful inserts
-             let select_sql = "SELECT id, name, email FROM required_fields ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from NOT NULL table failed");
-             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
-         }
+            // Verify successful inserts
+            let select_sql = "SELECT id, name, email FROM required_fields ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from NOT NULL table failed");
+            assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
+        }
 
-         #[test]
-         fn test_create_table_unique_constraint() {
-             let mut ctx = TestContext::new("test_create_table_unique_constraint");
+        #[test]
+        fn test_create_table_unique_constraint() {
+            let mut ctx = TestContext::new("test_create_table_unique_constraint");
 
-             // Test CREATE TABLE with UNIQUE constraint
-             let create_sql = "CREATE TABLE unique_emails (
+            // Test CREATE TABLE with UNIQUE constraint
+            let create_sql = "CREATE TABLE unique_emails (
                  id INTEGER,
                  name VARCHAR(100),
                  email VARCHAR(255) UNIQUE,
                  department VARCHAR(50)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with UNIQUE constraint failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with UNIQUE constraint failed");
 
-             // Insert records with unique emails
-             let insert_sql1 = "INSERT INTO unique_emails VALUES (1, 'Alice', 'alice@company.com', 'Engineering')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert first unique email failed");
+            // Insert records with unique emails
+            let insert_sql1 =
+                "INSERT INTO unique_emails VALUES (1, 'Alice', 'alice@company.com', 'Engineering')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert first unique email failed");
 
-             let insert_sql2 = "INSERT INTO unique_emails VALUES (2, 'Bob', 'bob@company.com', 'Sales')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second unique email failed");
+            let insert_sql2 =
+                "INSERT INTO unique_emails VALUES (2, 'Bob', 'bob@company.com', 'Sales')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second unique email failed");
 
-             // Try to insert duplicate email - should fail
-             let insert_duplicate_sql = "INSERT INTO unique_emails VALUES (3, 'Charlie', 'alice@company.com', 'Marketing')";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: Behavior depends on UNIQUE constraint enforcement
+            // Try to insert duplicate email - should fail
+            let insert_duplicate_sql =
+                "INSERT INTO unique_emails VALUES (3, 'Charlie', 'alice@company.com', 'Marketing')";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: Behavior depends on UNIQUE constraint enforcement
 
-             // Verify data integrity
-             let select_sql = "SELECT name, email FROM unique_emails ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from UNIQUE table failed");
-             assert_eq!(writer.get_rows().len(), 2, "Expected 2 records with unique emails");
-         }
+            // Verify data integrity
+            let select_sql = "SELECT name, email FROM unique_emails ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from UNIQUE table failed");
+            assert_eq!(
+                writer.get_rows().len(),
+                2,
+                "Expected 2 records with unique emails"
+            );
+        }
 
-         #[test]
-         fn test_create_table_check_constraint() {
-             let mut ctx = TestContext::new("test_create_table_check_constraint");
+        #[test]
+        fn test_create_table_check_constraint() {
+            let mut ctx = TestContext::new("test_create_table_check_constraint");
 
-             // Test CREATE TABLE with CHECK constraint
-             let create_sql = "CREATE TABLE employees_check (
+            // Test CREATE TABLE with CHECK constraint
+            let create_sql = "CREATE TABLE employees_check (
                  id INTEGER,
                  name VARCHAR(100),
                  age INTEGER CHECK (age >= 18 AND age <= 100),
                  salary DECIMAL CHECK (salary > 0)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with CHECK constraint failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with CHECK constraint failed");
 
-             // Insert valid data that satisfies constraints
-             let insert_sql1 = "INSERT INTO employees_check VALUES (1, 'Alice', 25, 50000.00)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert valid data failed");
+            // Insert valid data that satisfies constraints
+            let insert_sql1 = "INSERT INTO employees_check VALUES (1, 'Alice', 25, 50000.00)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert valid data failed");
 
-             let insert_sql2 = "INSERT INTO employees_check VALUES (2, 'Bob', 35, 75000.00)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second valid record failed");
+            let insert_sql2 = "INSERT INTO employees_check VALUES (2, 'Bob', 35, 75000.00)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second valid record failed");
 
-             // Try to insert data that violates age constraint
-             let insert_invalid_age_sql = "INSERT INTO employees_check VALUES (3, 'Charlie', 15, 30000.00)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: CHECK constraint enforcement depends on implementation
+            // Try to insert data that violates age constraint
+            let insert_invalid_age_sql =
+                "INSERT INTO employees_check VALUES (3, 'Charlie', 15, 30000.00)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: CHECK constraint enforcement depends on implementation
 
-             // Try to insert data that violates salary constraint
-             let insert_invalid_salary_sql = "INSERT INTO employees_check VALUES (4, 'David', 30, -1000.00)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_invalid_salary_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: CHECK constraint enforcement depends on implementation
+            // Try to insert data that violates salary constraint
+            let insert_invalid_salary_sql =
+                "INSERT INTO employees_check VALUES (4, 'David', 30, -1000.00)";
+            let mut writer = TestResultWriter::new();
+            let result = ctx.engine.execute_sql(
+                insert_invalid_salary_sql,
+                ctx.exec_ctx.clone(),
+                &mut writer,
+            );
+            // Note: CHECK constraint enforcement depends on implementation
 
-             // Verify valid data exists
-             let select_sql = "SELECT name, age, salary FROM employees_check ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from CHECK table failed");
-             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
-         }
+            // Verify valid data exists
+            let select_sql = "SELECT name, age, salary FROM employees_check ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from CHECK table failed");
+            assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
+        }
 
-         #[test]
-         fn test_create_table_default_values() {
-             let mut ctx = TestContext::new("test_create_table_default_values");
+        #[test]
+        fn test_create_table_default_values() {
+            let mut ctx = TestContext::new("test_create_table_default_values");
 
-             // Test CREATE TABLE with DEFAULT values
-             let create_sql = "CREATE TABLE user_preferences (
+            // Test CREATE TABLE with DEFAULT values
+            let create_sql = "CREATE TABLE user_preferences (
                  id INTEGER,
                  username VARCHAR(50),
                  theme VARCHAR(20) DEFAULT 'light',
                  notifications BOOLEAN DEFAULT true,
                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with DEFAULT values failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with DEFAULT values failed");
 
-             // Insert with explicit values
-             let insert_sql1 = "INSERT INTO user_preferences VALUES (1, 'alice', 'dark', false, '2023-01-01 10:00:00')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert with explicit values failed");
+            // Insert with explicit values
+            let insert_sql1 = "INSERT INTO user_preferences VALUES (1, 'alice', 'dark', false, '2023-01-01 10:00:00')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert with explicit values failed");
 
-             // Insert with some defaults (partial column list)
-             let insert_sql2 = "INSERT INTO user_preferences (id, username) VALUES (2, 'bob')";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert with defaults failed");
+            // Insert with some defaults (partial column list)
+            let insert_sql2 = "INSERT INTO user_preferences (id, username) VALUES (2, 'bob')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert with defaults failed");
 
-             // Insert with explicit NULL (overriding default)
-             let insert_sql3 = "INSERT INTO user_preferences VALUES (3, 'charlie', NULL, NULL, NULL)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert with explicit NULL failed");
+            // Insert with explicit NULL (overriding default)
+            let insert_sql3 =
+                "INSERT INTO user_preferences VALUES (3, 'charlie', NULL, NULL, NULL)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert with explicit NULL failed");
 
-             // Verify data including defaults
-             let select_sql = "SELECT id, username, theme, notifications FROM user_preferences ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from DEFAULT table failed");
-             assert_eq!(writer.get_rows().len(), 3, "Expected 3 records");
+            // Verify data including defaults
+            let select_sql =
+                "SELECT id, username, theme, notifications FROM user_preferences ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from DEFAULT table failed");
+            assert_eq!(writer.get_rows().len(), 3, "Expected 3 records");
 
-             // Check that defaults were applied (where supported)
-             let rows = writer.get_rows();
-             assert_eq!(rows[0][1].to_string(), "alice");
-             assert_eq!(rows[1][1].to_string(), "bob");
-             // Note: Default value verification depends on implementation
-         }
+            // Check that defaults were applied (where supported)
+            let rows = writer.get_rows();
+            assert_eq!(rows[0][1].to_string(), "alice");
+            assert_eq!(rows[1][1].to_string(), "bob");
+            // Note: Default value verification depends on implementation
+        }
 
-         #[test]
-         fn test_create_table_multiple_constraints() {
-             let mut ctx = TestContext::new("test_create_table_multiple_constraints");
+        #[test]
+        fn test_create_table_multiple_constraints() {
+            let mut ctx = TestContext::new("test_create_table_multiple_constraints");
 
-             // Test CREATE TABLE with multiple constraints on same table
-             let create_sql = "CREATE TABLE comprehensive_users (
+            // Test CREATE TABLE with multiple constraints on same table
+            let create_sql = "CREATE TABLE comprehensive_users (
                  id INTEGER PRIMARY KEY NOT NULL,
                  username VARCHAR(50) UNIQUE NOT NULL,
                  email VARCHAR(255) UNIQUE NOT NULL,
@@ -1692,210 +1725,216 @@ mod tests {
                  status VARCHAR(20) DEFAULT 'active',
                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with multiple constraints failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with multiple constraints failed");
 
-             // Insert valid data
-             let insert_sql1 = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (1, 'alice123', 'alice@example.com', 25)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert valid constrained data failed");
+            // Insert valid data
+            let insert_sql1 = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (1, 'alice123', 'alice@example.com', 25)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert valid constrained data failed");
 
-             let insert_sql2 = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (2, 'bob456', 'bob@example.com', 30)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second valid record failed");
+            let insert_sql2 = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (2, 'bob456', 'bob@example.com', 30)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second valid record failed");
 
-             // Test various constraint violations
-             
-             // Duplicate primary key
-             let insert_dup_pk_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (1, 'charlie789', 'charlie@example.com', 28)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_dup_pk_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: Constraint enforcement depends on implementation
+            // Test various constraint violations
 
-             // Duplicate username
-             let insert_dup_username_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (3, 'alice123', 'alice2@example.com', 22)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_dup_username_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Duplicate primary key
+            let insert_dup_pk_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (1, 'charlie789', 'charlie@example.com', 28)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_dup_pk_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: Constraint enforcement depends on implementation
 
-             // Age constraint violation
-             let insert_invalid_age_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (4, 'young_user', 'young@example.com', 10)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Duplicate username
+            let insert_dup_username_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (3, 'alice123', 'alice2@example.com', 22)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_dup_username_sql, ctx.exec_ctx.clone(), &mut writer);
 
-             // Verify only valid data exists
-             let select_sql = "SELECT id, username, email, age, status FROM comprehensive_users ORDER BY id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from multi-constraint table failed");
-             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
-         }
+            // Age constraint violation
+            let insert_invalid_age_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (4, 'young_user', 'young@example.com', 10)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
 
-         #[test]
-         fn test_create_table_foreign_key_constraint() {
-             let mut ctx = TestContext::new("test_create_table_foreign_key_constraint");
+            // Verify only valid data exists
+            let select_sql =
+                "SELECT id, username, email, age, status FROM comprehensive_users ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from multi-constraint table failed");
+            assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
+        }
 
-             // Create parent table first
-             let create_parent_sql = "CREATE TABLE departments (
+        #[test]
+        fn test_create_table_foreign_key_constraint() {
+            let mut ctx = TestContext::new("test_create_table_foreign_key_constraint");
+
+            // Create parent table first
+            let create_parent_sql = "CREATE TABLE departments (
                  id INTEGER PRIMARY KEY,
                  name VARCHAR(100) NOT NULL,
                  budget DECIMAL
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_parent_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create parent table failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_parent_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create parent table failed");
 
-             // Create child table with foreign key
-             let create_child_sql = "CREATE TABLE employees_fk (
+            // Create child table with foreign key
+            let create_child_sql = "CREATE TABLE employees_fk (
                  id INTEGER PRIMARY KEY,
                  name VARCHAR(100) NOT NULL,
                  department_id INTEGER,
                  FOREIGN KEY (department_id) REFERENCES departments(id)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_child_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with FOREIGN KEY failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_child_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with FOREIGN KEY failed");
 
-             // Insert parent records
-             let insert_dept_sql = "INSERT INTO departments VALUES (1, 'Engineering', 1000000), (2, 'Sales', 500000)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert departments failed");
+            // Insert parent records
+            let insert_dept_sql =
+                "INSERT INTO departments VALUES (1, 'Engineering', 1000000), (2, 'Sales', 500000)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert departments failed");
 
-             // Insert valid child records
-             let insert_emp_sql1 = "INSERT INTO employees_fk VALUES (1, 'Alice', 1)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_emp_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert employee with valid FK failed");
+            // Insert valid child records
+            let insert_emp_sql1 = "INSERT INTO employees_fk VALUES (1, 'Alice', 1)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_emp_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert employee with valid FK failed");
 
-             let insert_emp_sql2 = "INSERT INTO employees_fk VALUES (2, 'Bob', 2)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_emp_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second employee failed");
+            let insert_emp_sql2 = "INSERT INTO employees_fk VALUES (2, 'Bob', 2)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_emp_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second employee failed");
 
-             // Insert employee with NULL department (should be allowed)
-             let insert_emp_null_sql = "INSERT INTO employees_fk VALUES (3, 'Charlie', NULL)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_emp_null_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert employee with NULL FK failed");
+            // Insert employee with NULL department (should be allowed)
+            let insert_emp_null_sql = "INSERT INTO employees_fk VALUES (3, 'Charlie', NULL)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_emp_null_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert employee with NULL FK failed");
 
-             // Try to insert employee with invalid department_id
-             let insert_invalid_fk_sql = "INSERT INTO employees_fk VALUES (4, 'David', 999)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: FK constraint enforcement depends on implementation
+            // Try to insert employee with invalid department_id
+            let insert_invalid_fk_sql = "INSERT INTO employees_fk VALUES (4, 'David', 999)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: FK constraint enforcement depends on implementation
 
-             // Verify join works correctly
-             let join_sql = "SELECT e.name, d.name FROM employees_fk e LEFT JOIN departments d ON e.department_id = d.id ORDER BY e.id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Join with FK table failed");
-             assert_eq!(writer.get_rows().len(), 3, "Expected 3 employee records");
-         }
+            // Verify join works correctly
+            let join_sql = "SELECT e.name, d.name FROM employees_fk e LEFT JOIN departments d ON e.department_id = d.id ORDER BY e.id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Join with FK table failed");
+            assert_eq!(writer.get_rows().len(), 3, "Expected 3 employee records");
+        }
 
-         #[test]
-         fn test_create_table_auto_increment() {
-             let mut ctx = TestContext::new("test_create_table_auto_increment");
+        #[test]
+        fn test_create_table_auto_increment() {
+            let mut ctx = TestContext::new("test_create_table_auto_increment");
 
-             // Test CREATE TABLE with AUTO_INCREMENT/SERIAL (if supported)
-             let create_sql = "CREATE TABLE auto_id_test (
+            // Test CREATE TABLE with AUTO_INCREMENT/SERIAL (if supported)
+            let create_sql = "CREATE TABLE auto_id_test (
                  id INTEGER PRIMARY KEY AUTO_INCREMENT,
                  name VARCHAR(100),
                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              )";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer);
-             
-             // AUTO_INCREMENT might not be supported, so handle gracefully
-             match result {
-                 Ok(success) => {
-                     assert!(success, "Create table with AUTO_INCREMENT failed");
+            let mut writer = TestResultWriter::new();
+            let result = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer);
 
-                     // Insert without specifying ID
-                     let insert_sql1 = "INSERT INTO auto_id_test (name) VALUES ('Alice')";
-                     let mut writer = TestResultWriter::new();
-                     let success = ctx
-                         .engine
-                         .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                         .unwrap();
-                     assert!(success, "Insert with auto ID failed");
+            // AUTO_INCREMENT might not be supported, so handle gracefully
+            match result {
+                Ok(success) => {
+                    assert!(success, "Create table with AUTO_INCREMENT failed");
 
-                     let insert_sql2 = "INSERT INTO auto_id_test (name) VALUES ('Bob')";
-                     let mut writer = TestResultWriter::new();
-                     let success = ctx
-                         .engine
-                         .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                         .unwrap();
-                     assert!(success, "Insert second auto ID failed");
+                    // Insert without specifying ID
+                    let insert_sql1 = "INSERT INTO auto_id_test (name) VALUES ('Alice')";
+                    let mut writer = TestResultWriter::new();
+                    let success = ctx
+                        .engine
+                        .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                        .unwrap();
+                    assert!(success, "Insert with auto ID failed");
 
-                     // Verify auto-generated IDs
-                     let select_sql = "SELECT id, name FROM auto_id_test ORDER BY id";
-                     let mut writer = TestResultWriter::new();
-                     let success = ctx
-                         .engine
-                         .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                         .unwrap();
-                     assert!(success, "Select auto ID table failed");
-                     assert_eq!(writer.get_rows().len(), 2, "Expected 2 auto-generated records");
-                 }
-                 Err(_) => {
-                     // AUTO_INCREMENT not supported, which is fine
-                     println!("AUTO_INCREMENT not supported, skipping test");
-                 }
-             }
-         }
+                    let insert_sql2 = "INSERT INTO auto_id_test (name) VALUES ('Bob')";
+                    let mut writer = TestResultWriter::new();
+                    let success = ctx
+                        .engine
+                        .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                        .unwrap();
+                    assert!(success, "Insert second auto ID failed");
 
-         #[test]
-         fn test_create_table_composite_constraints() {
-             let mut ctx = TestContext::new("test_create_table_composite_constraints");
+                    // Verify auto-generated IDs
+                    let select_sql = "SELECT id, name FROM auto_id_test ORDER BY id";
+                    let mut writer = TestResultWriter::new();
+                    let success = ctx
+                        .engine
+                        .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                        .unwrap();
+                    assert!(success, "Select auto ID table failed");
+                    assert_eq!(
+                        writer.get_rows().len(),
+                        2,
+                        "Expected 2 auto-generated records"
+                    );
+                }
+                Err(_) => {
+                    // AUTO_INCREMENT not supported, which is fine
+                    println!("AUTO_INCREMENT not supported, skipping test");
+                }
+            }
+        }
 
-             // Test CREATE TABLE with composite constraints
-             let create_sql = "CREATE TABLE order_items (
+        #[test]
+        fn test_create_table_composite_constraints() {
+            let mut ctx = TestContext::new("test_create_table_composite_constraints");
+
+            // Test CREATE TABLE with composite constraints
+            let create_sql = "CREATE TABLE order_items (
                  order_id INTEGER,
                  product_id INTEGER,
                  quantity INTEGER CHECK (quantity > 0),
@@ -1903,57 +1942,61 @@ mod tests {
                  PRIMARY KEY (order_id, product_id),
                  UNIQUE (order_id, product_id)
              )";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Create table with composite constraints failed");
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Create table with composite constraints failed");
 
-             // Insert valid data
-             let insert_sql1 = "INSERT INTO order_items VALUES (1, 101, 2, 25.99)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert valid composite data failed");
+            // Insert valid data
+            let insert_sql1 = "INSERT INTO order_items VALUES (1, 101, 2, 25.99)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert valid composite data failed");
 
-             let insert_sql2 = "INSERT INTO order_items VALUES (1, 102, 1, 15.50)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert second valid record failed");
+            let insert_sql2 = "INSERT INTO order_items VALUES (1, 102, 1, 15.50)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert second valid record failed");
 
-             let insert_sql3 = "INSERT INTO order_items VALUES (2, 101, 3, 25.99)";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Insert third valid record failed");
+            let insert_sql3 = "INSERT INTO order_items VALUES (2, 101, 3, 25.99)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Insert third valid record failed");
 
-             // Try to insert duplicate composite key
-             let insert_duplicate_sql = "INSERT INTO order_items VALUES (1, 101, 5, 30.00)";
-             let mut writer = TestResultWriter::new();
-             let result = ctx
-                 .engine
-                 .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
-             // Note: Composite key constraint enforcement depends on implementation
+            // Try to insert duplicate composite key
+            let insert_duplicate_sql = "INSERT INTO order_items VALUES (1, 101, 5, 30.00)";
+            let mut writer = TestResultWriter::new();
+            let result =
+                ctx.engine
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+            // Note: Composite key constraint enforcement depends on implementation
 
-             // Verify data integrity
-             let select_sql = "SELECT order_id, product_id, quantity FROM order_items ORDER BY order_id, product_id";
-             let mut writer = TestResultWriter::new();
-             let success = ctx
-                 .engine
-                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                 .unwrap();
-             assert!(success, "Select from composite constraint table failed");
-             assert_eq!(writer.get_rows().len(), 3, "Expected 3 unique composite records");
-         }
-     }
+            // Verify data integrity
+            let select_sql = "SELECT order_id, product_id, quantity FROM order_items ORDER BY order_id, product_id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select from composite constraint table failed");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Expected 3 unique composite records"
+            );
+        }
+    }
 
     mod create_index_tests {
         use crate::catalog::column::Column;
@@ -2037,7 +2080,7 @@ mod tests {
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Query after index creation failed");
-            
+
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 2, "Expected 2 users with age > 25");
             assert_eq!(rows[0][0].to_string(), "Bob");
@@ -2096,7 +2139,8 @@ mod tests {
                 .unwrap();
 
             // Test 1: Create composite index on two columns
-            let create_index_sql = "CREATE INDEX idx_employees_name ON employees (first_name, last_name)";
+            let create_index_sql =
+                "CREATE INDEX idx_employees_name ON employees (first_name, last_name)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2105,16 +2149,21 @@ mod tests {
             assert!(success, "Create composite index on names failed");
 
             // Test 2: Create composite index on department and salary
-            let create_index_sql = "CREATE INDEX idx_employees_dept_salary ON employees (department, salary)";
+            let create_index_sql =
+                "CREATE INDEX idx_employees_dept_salary ON employees (department, salary)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
                 .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert!(success, "Create composite index on department and salary failed");
+            assert!(
+                success,
+                "Create composite index on department and salary failed"
+            );
 
             // Test 3: Create composite index with three columns
-            let create_index_sql = "CREATE INDEX idx_employees_full ON employees (department, first_name, last_name)";
+            let create_index_sql =
+                "CREATE INDEX idx_employees_full ON employees (department, first_name, last_name)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2188,7 +2237,8 @@ mod tests {
             assert!(success, "Create unique index on username failed");
 
             // Test 3: Create unique composite index
-            let create_index_sql = "CREATE UNIQUE INDEX idx_users_email_username ON users (email, username)";
+            let create_index_sql =
+                "CREATE UNIQUE INDEX idx_users_email_username ON users (email, username)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2197,12 +2247,13 @@ mod tests {
             assert!(success, "Create unique composite index failed");
 
             // Verify that duplicate values would be rejected (if constraint enforcement is implemented)
-            let insert_duplicate_sql = "INSERT INTO users VALUES (3, 'alice@example.com', 'alice_new', '111-22-3333')";
+            let insert_duplicate_sql =
+                "INSERT INTO users VALUES (3, 'alice@example.com', 'alice_new', '111-22-3333')";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
-            
+            let result =
+                ctx.engine
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+
             // Note: Behavior depends on whether unique constraint enforcement is implemented
             match result {
                 Ok(_) => println!("Note: Unique index constraint not enforced on INSERT"),
@@ -2273,15 +2324,33 @@ mod tests {
 
             // Test creating indexes on different data types
             let test_cases = vec![
-                ("CREATE INDEX idx_small_int ON all_types (small_int_col)", "SmallInt"),
-                ("CREATE INDEX idx_big_int ON all_types (big_int_col)", "BigInt"),
+                (
+                    "CREATE INDEX idx_small_int ON all_types (small_int_col)",
+                    "SmallInt",
+                ),
+                (
+                    "CREATE INDEX idx_big_int ON all_types (big_int_col)",
+                    "BigInt",
+                ),
                 ("CREATE INDEX idx_float ON all_types (float_col)", "Float"),
-                ("CREATE INDEX idx_decimal ON all_types (decimal_col)", "Decimal"),
-                ("CREATE INDEX idx_varchar ON all_types (varchar_col)", "VarChar"),
-                ("CREATE INDEX idx_boolean ON all_types (boolean_col)", "Boolean"),
+                (
+                    "CREATE INDEX idx_decimal ON all_types (decimal_col)",
+                    "Decimal",
+                ),
+                (
+                    "CREATE INDEX idx_varchar ON all_types (varchar_col)",
+                    "VarChar",
+                ),
+                (
+                    "CREATE INDEX idx_boolean ON all_types (boolean_col)",
+                    "Boolean",
+                ),
                 ("CREATE INDEX idx_date ON all_types (date_col)", "Date"),
                 ("CREATE INDEX idx_time ON all_types (time_col)", "Time"),
-                ("CREATE INDEX idx_timestamp ON all_types (timestamp_col)", "Timestamp"),
+                (
+                    "CREATE INDEX idx_timestamp ON all_types (timestamp_col)",
+                    "Timestamp",
+                ),
             ];
 
             for (create_sql, data_type) in test_cases {
@@ -2319,19 +2388,29 @@ mod tests {
                 .unwrap();
 
             // Insert minimal test data
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(100)],
-            ];
+            let test_data = vec![vec![Value::new(1), Value::new("Alice"), Value::new(100)]];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
             // Test different index naming conventions
             let naming_test_cases = vec![
                 ("CREATE INDEX simple_name ON test_table (id)", "simple_name"),
-                ("CREATE INDEX idx_with_underscores ON test_table (name)", "underscores"),
-                ("CREATE INDEX CamelCaseIndex ON test_table (value)", "CamelCase"),
-                ("CREATE INDEX index123 ON test_table (id, name)", "with numbers"),
-                ("CREATE INDEX very_long_index_name_that_describes_exactly_what_it_does ON test_table (name, value)", "long descriptive"),
+                (
+                    "CREATE INDEX idx_with_underscores ON test_table (name)",
+                    "underscores",
+                ),
+                (
+                    "CREATE INDEX CamelCaseIndex ON test_table (value)",
+                    "CamelCase",
+                ),
+                (
+                    "CREATE INDEX index123 ON test_table (id, name)",
+                    "with numbers",
+                ),
+                (
+                    "CREATE INDEX very_long_index_name_that_describes_exactly_what_it_does ON test_table (name, value)",
+                    "long descriptive",
+                ),
             ];
 
             for (create_sql, description) in naming_test_cases {
@@ -2370,18 +2449,24 @@ mod tests {
             // Test 1: Create index on non-existent table
             let create_index_sql = "CREATE INDEX idx_nonexistent ON nonexistent_table (id)";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "Creating index on non-existent table should fail");
+            let result =
+                ctx.engine
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+            assert!(
+                result.is_err(),
+                "Creating index on non-existent table should fail"
+            );
 
             // Test 2: Create index on non-existent column
             let create_index_sql = "CREATE INDEX idx_bad_column ON test_table (nonexistent_column)";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "Creating index on non-existent column should fail");
+            let result =
+                ctx.engine
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+            assert!(
+                result.is_err(),
+                "Creating index on non-existent column should fail"
+            );
 
             // Test 3: Create valid index first
             let create_index_sql = "CREATE INDEX idx_valid ON test_table (id)";
@@ -2395,9 +2480,9 @@ mod tests {
             // Test 4: Try to create index with duplicate name
             let create_duplicate_sql = "CREATE INDEX idx_valid ON test_table (name)";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+            let result =
+                ctx.engine
+                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
             // This may or may not fail depending on implementation
             match result {
                 Ok(_) => println!("Note: Duplicate index names are allowed"),
@@ -2406,10 +2491,10 @@ mod tests {
 
             // Test 5: Invalid SQL syntax for CREATE INDEX
             let invalid_syntax_cases = vec![
-                "CREATE INDEX ON test_table (id)",  // Missing index name
+                "CREATE INDEX ON test_table (id)",        // Missing index name
                 "CREATE INDEX idx_test test_table (id)",  // Missing ON keyword
-                "CREATE INDEX idx_test ON test_table",  // Missing column list
-                "CREATE INDEX idx_test ON test_table ()",  // Empty column list
+                "CREATE INDEX idx_test ON test_table",    // Missing column list
+                "CREATE INDEX idx_test ON test_table ()", // Empty column list
             ];
 
             for invalid_sql in invalid_syntax_cases {
@@ -2446,7 +2531,7 @@ mod tests {
                     Value::new(25 + (i % 15)), // Ages from 25 to 39
                     Value::new(match i % 3 {
                         0 => "Engineering",
-                        1 => "Sales", 
+                        1 => "Sales",
                         _ => "Marketing",
                     }),
                 ]);
@@ -2458,8 +2543,14 @@ mod tests {
             let index_creation_cases = vec![
                 ("CREATE INDEX idx_emp_name ON employees (name)", "name"),
                 ("CREATE INDEX idx_emp_age ON employees (age)", "age"),
-                ("CREATE INDEX idx_emp_dept ON employees (department)", "department"),
-                ("CREATE INDEX idx_emp_age_dept ON employees (age, department)", "composite age-department"),
+                (
+                    "CREATE INDEX idx_emp_dept ON employees (department)",
+                    "department",
+                ),
+                (
+                    "CREATE INDEX idx_emp_age_dept ON employees (age, department)",
+                    "composite age-department",
+                ),
             ];
 
             for (create_sql, description) in index_creation_cases {
@@ -2468,15 +2559,28 @@ mod tests {
                     .engine
                     .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
                     .unwrap();
-                assert!(success, "Create index on {} failed for populated table", description);
+                assert!(
+                    success,
+                    "Create index on {} failed for populated table",
+                    description
+                );
             }
 
             // Verify queries work efficiently after index creation
             let query_test_cases = vec![
                 ("SELECT name FROM employees WHERE age = 30", "age equality"),
-                ("SELECT * FROM employees WHERE department = 'Engineering' ORDER BY name", "department filter"),
-                ("SELECT name, age FROM employees WHERE age > 35 AND department = 'Sales'", "composite condition"),
-                ("SELECT department, COUNT(*) FROM employees GROUP BY department", "aggregation"),
+                (
+                    "SELECT * FROM employees WHERE department = 'Engineering' ORDER BY name",
+                    "department filter",
+                ),
+                (
+                    "SELECT name, age FROM employees WHERE age > 35 AND department = 'Sales'",
+                    "composite condition",
+                ),
+                (
+                    "SELECT department, COUNT(*) FROM employees GROUP BY department",
+                    "aggregation",
+                ),
             ];
 
             for (query_sql, description) in query_test_cases {
@@ -2485,8 +2589,12 @@ mod tests {
                     .engine
                     .execute_sql(query_sql, ctx.exec_ctx.clone(), &mut writer)
                     .unwrap();
-                assert!(success, "Query failed after index creation: {}", description);
-                
+                assert!(
+                    success,
+                    "Query failed after index creation: {}",
+                    description
+                );
+
                 // Verify we got some results for populated table
                 let rows = writer.get_rows();
                 println!("{}: {} results", description, rows.len());
@@ -2563,7 +2671,10 @@ mod tests {
                 .engine
                 .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert!(success, "Create index in transaction (to be rolled back) failed");
+            assert!(
+                success,
+                "Create index in transaction (to be rolled back) failed"
+            );
 
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
@@ -2615,7 +2726,7 @@ mod tests {
 
             // Measure query time before index creation
             let search_sql = "SELECT id, searchable_field FROM performance_test WHERE searchable_field = 'searchable_025'";
-            
+
             let start_time = std::time::Instant::now();
             let mut writer = TestResultWriter::new();
             let success = ctx
@@ -2623,12 +2734,13 @@ mod tests {
                 .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let query_time_before = start_time.elapsed();
-            
+
             assert!(success, "Query before index creation failed");
             assert_eq!(writer.get_rows().len(), 1, "Expected 1 result from search");
 
             // Create index on searchable field
-            let create_index_sql = "CREATE INDEX idx_searchable ON performance_test (searchable_field)";
+            let create_index_sql =
+                "CREATE INDEX idx_searchable ON performance_test (searchable_field)";
             let start_time = std::time::Instant::now();
             let mut writer = TestResultWriter::new();
             let success = ctx
@@ -2636,7 +2748,7 @@ mod tests {
                 .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let index_creation_time = start_time.elapsed();
-            
+
             assert!(success, "Index creation failed");
 
             // Measure query time after index creation
@@ -2647,9 +2759,13 @@ mod tests {
                 .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let query_time_after = start_time.elapsed();
-            
+
             assert!(success, "Query after index creation failed");
-            assert_eq!(writer.get_rows().len(), 1, "Expected 1 result from search after indexing");
+            assert_eq!(
+                writer.get_rows().len(),
+                1,
+                "Expected 1 result from search after indexing"
+            );
 
             // Report performance measurements
             println!("Performance measurements:");
@@ -2660,7 +2776,10 @@ mod tests {
             // Test multiple queries to see consistent performance
             let mut total_time_after = std::time::Duration::new(0, 0);
             for i in 1..=10 {
-                let test_sql = format!("SELECT id FROM performance_test WHERE searchable_field = 'searchable_{:03}'", i);
+                let test_sql = format!(
+                    "SELECT id FROM performance_test WHERE searchable_field = 'searchable_{:03}'",
+                    i
+                );
                 let start_time = std::time::Instant::now();
                 let mut writer = TestResultWriter::new();
                 let success = ctx
@@ -2670,9 +2789,12 @@ mod tests {
                 total_time_after += start_time.elapsed();
                 assert!(success, "Performance test query {} failed", i);
             }
-            
-            println!("Average time for 10 indexed queries: {:?}", total_time_after / 10);
-            
+
+            println!(
+                "Average time for 10 indexed queries: {:?}",
+                total_time_after / 10
+            );
+
             // Verify range queries also work with index
             let range_sql = "SELECT COUNT(*) FROM performance_test WHERE searchable_field >= 'searchable_010' AND searchable_field <= 'searchable_020'";
             let mut writer = TestResultWriter::new();
@@ -2681,7 +2803,7 @@ mod tests {
                 .execute_sql(range_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Range query with index failed");
-            
+
             println!("Range query result: {} rows", writer.get_rows()[0][0]);
         }
 
@@ -2702,14 +2824,14 @@ mod tests {
             // Test CREATE INDEX IF NOT EXISTS (if supported)
             let create_index_sql = "CREATE INDEX IF NOT EXISTS idx_test_id ON test_table (id)";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+            let result =
+                ctx.engine
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
 
             match result {
                 Ok(success) => {
                     assert!(success, "CREATE INDEX IF NOT EXISTS failed");
-                    
+
                     // Try creating the same index again - should not fail
                     let mut writer = TestResultWriter::new();
                     let success = ctx
@@ -2720,7 +2842,7 @@ mod tests {
                 }
                 Err(_) => {
                     println!("Note: CREATE INDEX IF NOT EXISTS syntax not supported");
-                    
+
                     // Fall back to regular CREATE INDEX
                     let create_index_sql = "CREATE INDEX idx_test_id ON test_table (id)";
                     let mut writer = TestResultWriter::new();
@@ -2760,30 +2882,72 @@ mod tests {
                 Column::new("order_date", TypeId::Date),
             ]);
 
-            ctx.create_test_table("users", users_schema.clone()).unwrap();
-            ctx.create_test_table("orders", orders_schema.clone()).unwrap();
+            ctx.create_test_table("users", users_schema.clone())
+                .unwrap();
+            ctx.create_test_table("orders", orders_schema.clone())
+                .unwrap();
 
             // Insert test data
             let users_data = vec![
-                vec![Value::new(1), Value::new("alice"), Value::new("alice@example.com")],
-                vec![Value::new(2), Value::new("bob"), Value::new("bob@example.com")],
+                vec![
+                    Value::new(1),
+                    Value::new("alice"),
+                    Value::new("alice@example.com"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("bob"),
+                    Value::new("bob@example.com"),
+                ],
             ];
-            ctx.insert_tuples("users", users_data, users_schema).unwrap();
+            ctx.insert_tuples("users", users_data, users_schema)
+                .unwrap();
 
             let orders_data = vec![
-                vec![Value::new(101), Value::new(1), Value::new("Laptop"), Value::new("2023-01-15")],
-                vec![Value::new(102), Value::new(2), Value::new("Mouse"), Value::new("2023-01-16")],
-                vec![Value::new(103), Value::new(1), Value::new("Keyboard"), Value::new("2023-01-17")],
+                vec![
+                    Value::new(101),
+                    Value::new(1),
+                    Value::new("Laptop"),
+                    Value::new("2023-01-15"),
+                ],
+                vec![
+                    Value::new(102),
+                    Value::new(2),
+                    Value::new("Mouse"),
+                    Value::new("2023-01-16"),
+                ],
+                vec![
+                    Value::new(103),
+                    Value::new(1),
+                    Value::new("Keyboard"),
+                    Value::new("2023-01-17"),
+                ],
             ];
-            ctx.insert_tuples("orders", orders_data, orders_schema).unwrap();
+            ctx.insert_tuples("orders", orders_data, orders_schema)
+                .unwrap();
 
             // Create indexes on both tables
             let index_creation_cases = vec![
-                ("CREATE INDEX idx_users_email ON users (email)", "users email"),
-                ("CREATE INDEX idx_users_username ON users (username)", "users username"),
-                ("CREATE INDEX idx_orders_user_id ON orders (user_id)", "orders user_id"),
-                ("CREATE INDEX idx_orders_date ON orders (order_date)", "orders date"),
-                ("CREATE INDEX idx_orders_user_product ON orders (user_id, product_name)", "orders composite"),
+                (
+                    "CREATE INDEX idx_users_email ON users (email)",
+                    "users email",
+                ),
+                (
+                    "CREATE INDEX idx_users_username ON users (username)",
+                    "users username",
+                ),
+                (
+                    "CREATE INDEX idx_orders_user_id ON orders (user_id)",
+                    "orders user_id",
+                ),
+                (
+                    "CREATE INDEX idx_orders_date ON orders (order_date)",
+                    "orders date",
+                ),
+                (
+                    "CREATE INDEX idx_orders_user_product ON orders (user_id, product_name)",
+                    "orders composite",
+                ),
             ];
 
             for (create_sql, description) in index_creation_cases {
@@ -2804,7 +2968,8 @@ mod tests {
                 .unwrap();
             assert!(success, "Join query using multiple indexes failed");
 
-            let filter_sql = "SELECT product_name FROM orders WHERE user_id = 1 AND order_date = '2023-01-15'";
+            let filter_sql =
+                "SELECT product_name FROM orders WHERE user_id = 1 AND order_date = '2023-01-15'";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2978,7 +3143,8 @@ mod tests {
                 .unwrap();
 
             // Test INSERT with explicit NULL values
-            let insert_sql = "INSERT INTO contacts VALUES (1, 'Alice', 'alice@example.com', NULL, 25)";
+            let insert_sql =
+                "INSERT INTO contacts VALUES (1, 'Alice', 'alice@example.com', NULL, 25)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -2996,13 +3162,17 @@ mod tests {
             assert!(success, "Insert with multiple NULLs failed");
 
             // Test INSERT with column specification and NULLs
-            let insert_sql = "INSERT INTO contacts (id, name, phone) VALUES (3, 'Charlie', '555-0123')";
+            let insert_sql =
+                "INSERT INTO contacts (id, name, phone) VALUES (3, 'Charlie', '555-0123')";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
                 .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert!(success, "Insert with partial columns (implicit NULLs) failed");
+            assert!(
+                success,
+                "Insert with partial columns (implicit NULLs) failed"
+            );
 
             // Verify NULL handling
             let select_sql = "SELECT id, name, email, phone, age FROM contacts ORDER BY id";
@@ -3136,7 +3306,10 @@ mod tests {
             assert_eq!(rows[0][2].to_string(), "9223372036854775807");
             // Float comparison should be approximate
             let float_val: f32 = rows[0][3].to_string().parse().unwrap();
-            assert!((float_val - 3.14159).abs() < 0.001, "Float value mismatch");
+            assert!(
+                (float_val - std::f32::consts::PI).abs() < 0.001,
+                "Float value mismatch"
+            );
             assert_eq!(rows[0][5].to_string(), "Hello World");
             assert_eq!(rows[0][6].to_string(), "true");
         }
@@ -3194,7 +3367,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "5", "Expected 5 rows copied");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "5",
+                "Expected 5 rows copied"
+            );
 
             // Clear target table for next test
             let delete_sql = "DELETE FROM employees_target";
@@ -3218,7 +3395,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "2", "Expected 2 Engineering employees");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "2",
+                "Expected 2 Engineering employees"
+            );
 
             // Test 3: INSERT with SELECT and column specification
             let insert_columns_sql = "INSERT INTO employees_target (id, name, dept) SELECT emp_id, emp_name, department FROM employees_source WHERE salary > 70000";
@@ -3227,7 +3408,10 @@ mod tests {
                 .engine
                 .execute_sql(insert_columns_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert!(success, "INSERT with SELECT and column specification failed");
+            assert!(
+                success,
+                "INSERT with SELECT and column specification failed"
+            );
 
             // Verify high-salary employees were added (with NULL pay)
             let select_sql = "SELECT COUNT(*) FROM employees_target WHERE pay IS NULL";
@@ -3238,7 +3422,10 @@ mod tests {
                 .unwrap();
             // This test depends on NULL handling in the implementation
             if success {
-                println!("High-salary employees with NULL pay: {}", writer.get_rows()[0][0]);
+                println!(
+                    "High-salary employees with NULL pay: {}",
+                    writer.get_rows()[0][0]
+                );
             }
         }
 
@@ -3378,7 +3565,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "2", "Expected 2 committed rows");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "2",
+                "Expected 2 committed rows"
+            );
 
             // Test 2: INSERT with ROLLBACK
             let begin_sql = "BEGIN";
@@ -3407,7 +3598,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "2", "Expected 2 rows after rollback");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "2",
+                "Expected 2 rows after rollback"
+            );
 
             // Test 3: Multiple INSERTs in single transaction
             let begin_sql = "BEGIN";
@@ -3418,7 +3613,12 @@ mod tests {
 
             // Insert multiple rows in transaction
             for i in 10..15 {
-                let insert_sql = format!("INSERT INTO transactions_test VALUES ({}, 'User{}', {})", i, i, i * 100);
+                let insert_sql = format!(
+                    "INSERT INTO transactions_test VALUES ({}, 'User{}', {})",
+                    i,
+                    i,
+                    i * 100
+                );
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
@@ -3439,7 +3639,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "7", "Expected 7 total rows after batch insert");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "7",
+                "Expected 7 total rows after batch insert"
+            );
         }
 
         #[test]
@@ -3463,7 +3667,10 @@ mod tests {
             let result = ctx
                 .engine
                 .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "INSERT into non-existent table should fail");
+            assert!(
+                result.is_err(),
+                "INSERT into non-existent table should fail"
+            );
 
             // Test 2: INSERT with wrong number of values (too many)
             let insert_sql = "INSERT INTO error_test VALUES (1, 'Alice', 25, 'extra_value')";
@@ -3494,7 +3701,10 @@ mod tests {
             let result = ctx
                 .engine
                 .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "INSERT with non-existent column should fail");
+            assert!(
+                result.is_err(),
+                "INSERT with non-existent column should fail"
+            );
 
             // Test 5: INSERT with type mismatch (string in integer column)
             let insert_sql = "INSERT INTO error_test VALUES ('not_a_number', 'Alice', 25)";
@@ -3515,7 +3725,10 @@ mod tests {
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success, "Count query should work even after errors");
-            println!("Rows in error_test table after error tests: {}", writer.get_rows()[0][0]);
+            println!(
+                "Rows in error_test table after error tests: {}",
+                writer.get_rows()[0][0]
+            );
         }
 
         #[test]
@@ -3537,7 +3750,8 @@ mod tests {
             assert!(success, "Create table with constraints failed");
 
             // Test 1: INSERT valid data that satisfies all constraints
-            let insert_sql = "INSERT INTO constrained_table VALUES (1, 'alice@example.com', 25, 'Alice')";
+            let insert_sql =
+                "INSERT INTO constrained_table VALUES (1, 'alice@example.com', 25, 'Alice')";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3545,7 +3759,8 @@ mod tests {
                 .unwrap();
             assert!(success, "INSERT with valid constrained data failed");
 
-            let insert_sql = "INSERT INTO constrained_table VALUES (2, 'bob@example.com', 30, 'Bob')";
+            let insert_sql =
+                "INSERT INTO constrained_table VALUES (2, 'bob@example.com', 30, 'Bob')";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3554,7 +3769,8 @@ mod tests {
             assert!(success, "Second INSERT with valid constrained data failed");
 
             // Test 2: INSERT with duplicate primary key (should fail)
-            let insert_sql = "INSERT INTO constrained_table VALUES (1, 'charlie@example.com', 35, 'Charlie')";
+            let insert_sql =
+                "INSERT INTO constrained_table VALUES (1, 'charlie@example.com', 35, 'Charlie')";
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
@@ -3566,7 +3782,8 @@ mod tests {
             }
 
             // Test 3: INSERT with duplicate unique constraint (should fail)
-            let insert_sql = "INSERT INTO constrained_table VALUES (3, 'alice@example.com', 40, 'Alice2')";
+            let insert_sql =
+                "INSERT INTO constrained_table VALUES (3, 'alice@example.com', 40, 'Alice2')";
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
@@ -3588,7 +3805,8 @@ mod tests {
             }
 
             // Test 5: INSERT with NOT NULL violation (should fail)
-            let insert_sql = "INSERT INTO constrained_table VALUES (5, 'null_name@example.com', 25, NULL)";
+            let insert_sql =
+                "INSERT INTO constrained_table VALUES (5, 'null_name@example.com', 25, NULL)";
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
@@ -3604,7 +3822,10 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            println!("Final row count in constrained table: {}", writer.get_rows()[0][0]);
+            println!(
+                "Final row count in constrained table: {}",
+                writer.get_rows()[0][0]
+            );
         }
 
         #[test]
@@ -3642,7 +3863,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "50", "Expected 50 rows in large batch");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "50",
+                "Expected 50 rows in large batch"
+            );
 
             // Test SELECT with some of the data to verify correctness
             let select_sql = "SELECT id, data, value FROM large_batch WHERE id <= 5 ORDER BY id";
@@ -3653,15 +3878,25 @@ mod tests {
 
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 5, "Expected 5 rows in sample");
-            
+
             for (i, row) in rows.iter().enumerate() {
                 let expected_id = (i + 1).to_string();
                 let expected_data = format!("data{}", i + 1);
                 let expected_value = ((i + 1) * 10).to_string();
-                
+
                 assert_eq!(row[0].to_string(), expected_id, "ID mismatch at row {}", i);
-                assert_eq!(row[1].to_string(), expected_data, "Data mismatch at row {}", i);
-                assert_eq!(row[2].to_string(), expected_value, "Value mismatch at row {}", i);
+                assert_eq!(
+                    row[1].to_string(),
+                    expected_data,
+                    "Data mismatch at row {}",
+                    i
+                );
+                assert_eq!(
+                    row[2].to_string(),
+                    expected_value,
+                    "Value mismatch at row {}",
+                    i
+                );
             }
         }
 
@@ -3685,7 +3920,8 @@ mod tests {
             assert!(success, "Create table with defaults failed");
 
             // Test 1: INSERT with all explicit values
-            let insert_sql = "INSERT INTO default_test VALUES (1, 'Alice', 'inactive', '2023-12-25', false)";
+            let insert_sql =
+                "INSERT INTO default_test VALUES (1, 'Alice', 'inactive', '2023-12-25', false)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3703,7 +3939,8 @@ mod tests {
             assert!(success, "INSERT with partial columns failed");
 
             // Test 3: INSERT with explicit DEFAULT keyword
-            let insert_sql = "INSERT INTO default_test VALUES (3, 'Charlie', DEFAULT, DEFAULT, DEFAULT)";
+            let insert_sql =
+                "INSERT INTO default_test VALUES (3, 'Charlie', DEFAULT, DEFAULT, DEFAULT)";
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
@@ -3714,7 +3951,8 @@ mod tests {
             }
 
             // Verify the results
-            let select_sql = "SELECT id, name, status, created_date, is_enabled FROM default_test ORDER BY id";
+            let select_sql =
+                "SELECT id, name, status, created_date, is_enabled FROM default_test ORDER BY id";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3725,8 +3963,10 @@ mod tests {
             let rows = writer.get_rows();
             println!("Results after default value inserts:");
             for row in rows {
-                println!("ID: {}, Name: {}, Status: {}, Date: {}, Enabled: {}", 
-                    row[0], row[1], row[2], row[3], row[4]);
+                println!(
+                    "ID: {}, Name: {}, Status: {}, Date: {}, Enabled: {}",
+                    row[0], row[1], row[2], row[3], row[4]
+                );
             }
         }
 
@@ -3787,7 +4027,8 @@ mod tests {
             assert!(success, "INSERT employees with valid FK failed");
 
             // Test 2: INSERT employee with NULL foreign key (should be allowed)
-            let insert_null_fk_sql = "INSERT INTO employees_fk_test VALUES (4, 'David Wilson', NULL, 70000.00)";
+            let insert_null_fk_sql =
+                "INSERT INTO employees_fk_test VALUES (4, 'David Wilson', NULL, 70000.00)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3796,11 +4037,12 @@ mod tests {
             assert!(success, "INSERT with NULL FK failed");
 
             // Test 3: Try to INSERT employee with invalid foreign key
-            let insert_invalid_fk_sql = "INSERT INTO employees_fk_test VALUES (5, 'Eve Davis', 999, 72000.00)";
+            let insert_invalid_fk_sql =
+                "INSERT INTO employees_fk_test VALUES (5, 'Eve Davis', 999, 72000.00)";
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
+            let result =
+                ctx.engine
+                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
             // FK constraint enforcement depends on implementation
             match result {
                 Ok(_) => println!("Note: Foreign key constraint not enforced on INSERT"),
@@ -3822,9 +4064,14 @@ mod tests {
             let rows = writer.get_rows();
             println!("Employee-Department relationships:");
             for row in rows {
-                println!("Employee: {}, Department: {}, Salary: {}", 
-                    row[0], 
-                    if row[1].to_string() == "NULL" { "None".to_string() } else { row[1].to_string() },
+                println!(
+                    "Employee: {}, Department: {}, Salary: {}",
+                    row[0],
+                    if row[1].to_string() == "NULL" {
+                        "None".to_string()
+                    } else {
+                        row[1].to_string()
+                    },
                     row[2]
                 );
             }
@@ -3851,12 +4098,12 @@ mod tests {
             let mut values = Vec::new();
             for i in 1..=100 {
                 values.push(format!(
-                    "({}, {}, {}, 'text_data_{}', {})", 
-                    i, 
+                    "({}, {}, {}, 'text_data_{}', {})",
+                    i,
                     i / 10, // batch_id groups every 10 rows
                     i * i,  // value is square of id
                     i,
-                    i as f64 * 3.14159 // computed value
+                    i as f64 * std::f64::consts::PI // computed value
                 ));
             }
             let bulk_insert_sql = format!("INSERT INTO bulk_test VALUES {}", values.join(", "));
@@ -3868,7 +4115,7 @@ mod tests {
                 .execute_sql(&bulk_insert_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let bulk_duration = start_time.elapsed();
-            
+
             assert!(success, "Bulk INSERT failed");
             println!("Bulk INSERT of 100 rows took: {:?}", bulk_duration);
 
@@ -3878,7 +4125,11 @@ mod tests {
             ctx.engine
                 .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "100", "Expected 100 rows from bulk insert");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "100",
+                "Expected 100 rows from bulk insert"
+            );
 
             // Test 2: Multiple individual INSERT statements for comparison
             let clear_sql = "DELETE FROM bulk_test";
@@ -3888,14 +4139,15 @@ mod tests {
                 .unwrap();
 
             let start_time = std::time::Instant::now();
-            for i in 1..=50 { // Fewer iterations to keep test reasonable
+            for i in 1..=50 {
+                // Fewer iterations to keep test reasonable
                 let individual_insert_sql = format!(
                     "INSERT INTO bulk_test VALUES ({}, {}, {}, 'text_data_{}', {})",
                     i,
                     i / 10,
                     i * i,
                     i,
-                    i as f64 * 3.14159
+                    i as f64 * std::f64::consts::PI
                 );
                 let mut writer = TestResultWriter::new();
                 let success = ctx
@@ -3905,7 +4157,7 @@ mod tests {
                 assert!(success, "Individual INSERT {} failed", i);
             }
             let individual_duration = start_time.elapsed();
-            
+
             println!("50 individual INSERTs took: {:?}", individual_duration);
 
             // Test 3: INSERT with SELECT from existing data (data duplication)
@@ -3917,9 +4169,12 @@ mod tests {
                 .execute_sql(insert_select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let select_insert_duration = start_time.elapsed();
-            
+
             assert!(success, "INSERT with SELECT failed");
-            println!("INSERT with SELECT (25 rows) took: {:?}", select_insert_duration);
+            println!(
+                "INSERT with SELECT (25 rows) took: {:?}",
+                select_insert_duration
+            );
 
             // Verify final state
             let final_count_sql = "SELECT COUNT(*) FROM bulk_test";
@@ -3927,7 +4182,11 @@ mod tests {
             ctx.engine
                 .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "75", "Expected 75 total rows (50 + 25 copied)");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "75",
+                "Expected 75 total rows (50 + 25 copied)"
+            );
 
             // Test aggregation on bulk data
             let agg_sql = "SELECT batch_id, COUNT(*), AVG(value), SUM(computed) FROM bulk_test GROUP BY batch_id ORDER BY batch_id LIMIT 5";
@@ -3940,8 +4199,10 @@ mod tests {
 
             println!("Sample aggregation results:");
             for row in writer.get_rows() {
-                println!("Batch {}: {} rows, avg value: {}, sum computed: {}", 
-                    row[0], row[1], row[2], row[3]);
+                println!(
+                    "Batch {}: {} rows, avg value: {}, sum computed: {}",
+                    row[0], row[1], row[2], row[3]
+                );
             }
         }
 
@@ -3988,7 +4249,11 @@ mod tests {
             ctx.engine
                 .execute_sql(select_t1_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "2", "Expected 2 rows in first transaction");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "2",
+                "Expected 2 rows in first transaction"
+            );
 
             // Commit first transaction
             let commit_sql = "COMMIT";
@@ -4029,7 +4294,11 @@ mod tests {
             ctx.engine
                 .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(writer.get_rows()[0][0].to_string(), "2", "Expected only first transaction data after rollback");
+            assert_eq!(
+                writer.get_rows()[0][0].to_string(),
+                "2",
+                "Expected only first transaction data after rollback"
+            );
 
             // Test 3: Successful transaction sequence
             let begin_sql = "BEGIN";
@@ -4039,7 +4308,8 @@ mod tests {
                 .unwrap();
 
             // Insert and immediately commit
-            let insert_t3_sql = "INSERT INTO concurrent_test VALUES (6, 3, 1, 'Transaction 3 Data')";
+            let insert_t3_sql =
+                "INSERT INTO concurrent_test VALUES (6, 3, 1, 'Transaction 3 Data')";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -4108,20 +4378,22 @@ mod tests {
                 salary * 12 as annual_salary
             FROM employee_computed 
             ORDER BY salary DESC";
-            
+
             let mut writer = TestResultWriter::new();
-            let result = ctx
-                .engine
-                .execute_sql(computed_select_sql, ctx.exec_ctx.clone(), &mut writer);
-            
+            let result =
+                ctx.engine
+                    .execute_sql(computed_select_sql, ctx.exec_ctx.clone(), &mut writer);
+
             match result {
                 Ok(success) => {
                     assert!(success, "SELECT with computed columns failed");
                     let rows = writer.get_rows();
                     println!("Computed employee data:");
                     for row in rows {
-                        println!("ID: {}, Name: {}, Age: {}, Grade: {}, Annual: {}", 
-                            row[0], row[1], row[2], row[3], row[4]);
+                        println!(
+                            "ID: {}, Name: {}, Age: {}, Grade: {}, Annual: {}",
+                            row[0], row[1], row[2], row[3], row[4]
+                        );
                     }
                 }
                 Err(_) => println!("Note: Advanced computed column expressions not supported"),
@@ -4131,23 +4403,23 @@ mod tests {
             let math_insert_sql = "INSERT INTO employee_computed VALUES 
                 (4, 'Alice', 'Wilson', 1988, 65000.00 + 15000.00),
                 (5, 'Charlie', 'Brown', 1992, 70000.00 * 1.1)";
-            
+
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
                 .execute_sql(math_insert_sql, ctx.exec_ctx.clone(), &mut writer);
-            
+
             match result {
                 Ok(success) => {
                     assert!(success, "INSERT with mathematical expressions failed");
-                    
+
                     // Verify the computed values were inserted correctly
                     let verify_sql = "SELECT first_name, last_name, salary FROM employee_computed WHERE id IN (4, 5) ORDER BY id";
                     let mut writer = TestResultWriter::new();
                     ctx.engine
                         .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
                         .unwrap();
-                    
+
                     let rows = writer.get_rows();
                     if rows.len() >= 2 {
                         println!("Mathematical computation results:");
@@ -4168,7 +4440,7 @@ mod tests {
                     salary * 0.9
                 FROM employee_computed 
                 WHERE id <= 2";
-            
+
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -4182,9 +4454,12 @@ mod tests {
             ctx.engine
                 .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            
+
             let total_rows = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
-            assert!(total_rows >= 5, "Expected at least 5 rows after all inserts");
+            assert!(
+                total_rows >= 5,
+                "Expected at least 5 rows after all inserts"
+            );
             println!("Total rows in computed columns test: {}", total_rows);
         }
     }
@@ -4269,11 +4544,7 @@ mod tests {
             ctx.engine
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
-            assert_eq!(
-                writer.get_rows().len(),
-                0,
-                "Bob should be deleted"
-            );
+            assert_eq!(writer.get_rows().len(), 0, "Bob should be deleted");
 
             // Test 2: DELETE with boolean condition
             let delete_sql = "DELETE FROM users WHERE active = false";
@@ -4398,7 +4669,8 @@ mod tests {
             );
 
             // Test 3: DELETE with multiple conditions (AND)
-            let delete_sql = "DELETE FROM employees WHERE department = 'Engineering' AND salary < 60000";
+            let delete_sql =
+                "DELETE FROM employees WHERE department = 'Engineering' AND salary < 60000";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -4417,7 +4689,11 @@ mod tests {
                 .iter()
                 .map(|row| row[0].to_string())
                 .collect();
-            assert_eq!(remaining_names, vec!["Charlie"], "Only Charlie should remain");
+            assert_eq!(
+                remaining_names,
+                vec!["Charlie"],
+                "Only Charlie should remain"
+            );
         }
 
         #[test]
@@ -4730,7 +5006,10 @@ mod tests {
             let result = ctx
                 .engine
                 .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "DELETE from non-existent table should fail");
+            assert!(
+                result.is_err(),
+                "DELETE from non-existent table should fail"
+            );
 
             // Test 2: DELETE with non-existent column
             let delete_sql = "DELETE FROM test_table WHERE nonexistent_column = 1";
@@ -4738,13 +5017,16 @@ mod tests {
             let result = ctx
                 .engine
                 .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
-            assert!(result.is_err(), "DELETE with non-existent column should fail");
+            assert!(
+                result.is_err(),
+                "DELETE with non-existent column should fail"
+            );
 
             // Test 3: Invalid SQL syntax for DELETE
             let invalid_syntax_cases = vec![
-                "DELETE test_table WHERE id = 1",  // Missing FROM
-                "DELETE FROM WHERE id = 1",        // Missing table name
-                "DELETE FROM test_table WHERE",    // Incomplete WHERE clause
+                "DELETE test_table WHERE id = 1", // Missing FROM
+                "DELETE FROM WHERE id = 1",       // Missing table name
+                "DELETE FROM test_table WHERE",   // Incomplete WHERE clause
             ];
 
             for invalid_sql in invalid_syntax_cases {
@@ -4816,7 +5098,7 @@ mod tests {
             let result = ctx
                 .engine
                 .execute_sql(delete_dept_sql, ctx.exec_ctx.clone(), &mut writer);
-            
+
             // Behavior depends on foreign key constraint enforcement
             match result {
                 Ok(_) => println!("Note: Foreign key constraint not enforced on DELETE"),
@@ -4856,7 +5138,10 @@ mod tests {
                 .unwrap();
             let emp_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
 
-            println!("After deletes: {} departments, {} employees", dept_count, emp_count);
+            println!(
+                "After deletes: {} departments, {} employees",
+                dept_count, emp_count
+            );
         }
 
         #[test]
@@ -4884,26 +5169,60 @@ mod tests {
 
             // Insert employee data
             let employee_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(60000i64), Value::new(1)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(75000i64), Value::new(2)],
-                vec![Value::new(3), Value::new("Charlie"), Value::new(80000i64), Value::new(1)],
-                vec![Value::new(4), Value::new("Diana"), Value::new(65000i64), Value::new(3)],
-                vec![Value::new(5), Value::new("Eve"), Value::new(90000i64), Value::new(2)],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(60000i64),
+                    Value::new(1),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(75000i64),
+                    Value::new(2),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(80000i64),
+                    Value::new(1),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("Diana"),
+                    Value::new(65000i64),
+                    Value::new(3),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Eve"),
+                    Value::new(90000i64),
+                    Value::new(2),
+                ],
             ];
             ctx.insert_tuples("employees_sub", employee_data, employees_schema)
                 .unwrap();
 
             // Insert department data
             let department_data = vec![
-                vec![Value::new(1), Value::new("Engineering"), Value::new(500000i64)],
+                vec![
+                    Value::new(1),
+                    Value::new("Engineering"),
+                    Value::new(500000i64),
+                ],
                 vec![Value::new(2), Value::new("Sales"), Value::new(300000i64)],
-                vec![Value::new(3), Value::new("Marketing"), Value::new(200000i64)],
+                vec![
+                    Value::new(3),
+                    Value::new("Marketing"),
+                    Value::new(200000i64),
+                ],
             ];
             ctx.insert_tuples("departments_sub", department_data, departments_schema)
                 .unwrap();
 
             // Test 1: Delete employees with salary above average
-            let delete_sql = "DELETE FROM employees_sub WHERE salary > (SELECT AVG(salary) FROM employees_sub)";
+            let delete_sql =
+                "DELETE FROM employees_sub WHERE salary > (SELECT AVG(salary) FROM employees_sub)";
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
@@ -4912,15 +5231,18 @@ mod tests {
             match result {
                 Ok(success) => {
                     assert!(success, "Delete with subquery failed");
-                    
+
                     // Verify high-salary employees are deleted
                     let count_sql = "SELECT COUNT(*) FROM employees_sub";
                     let mut writer = TestResultWriter::new();
                     ctx.engine
                         .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
                         .unwrap();
-                    
-                    println!("Employees remaining after salary-based delete: {}", writer.get_rows()[0][0]);
+
+                    println!(
+                        "Employees remaining after salary-based delete: {}",
+                        writer.get_rows()[0][0]
+                    );
                 }
                 Err(_) => {
                     println!("Subqueries in DELETE not fully implemented, skipping advanced tests");
@@ -4967,13 +5289,13 @@ mod tests {
             for i in 1..=200 {
                 test_data.push(vec![
                     Value::new(i),
-                    Value::new(i % 10),     // category 0-9
-                    Value::new(i * i),      // value is square of id
+                    Value::new(i % 10), // category 0-9
+                    Value::new(i * i),  // value is square of id
                     Value::new(format!("text_data_{}", i)),
                     Value::new(i % 2 == 0), // even ids are active
                 ]);
             }
-            
+
             // Insert in batches to avoid overwhelming the system
             for chunk in test_data.chunks(50) {
                 ctx.insert_tuples(table_name, chunk.to_vec(), table_schema.clone())
@@ -4989,7 +5311,7 @@ mod tests {
                 .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let delete_duration = start_time.elapsed();
-            
+
             assert!(success, "Bulk delete by category failed");
             println!("Delete by category took: {:?}", delete_duration);
 
@@ -5011,9 +5333,12 @@ mod tests {
                 .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let inactive_delete_duration = start_time.elapsed();
-            
+
             assert!(success, "Bulk delete inactive records failed");
-            println!("Delete inactive records took: {:?}", inactive_delete_duration);
+            println!(
+                "Delete inactive records took: {:?}",
+                inactive_delete_duration
+            );
 
             // Final count
             let count_sql = "SELECT COUNT(*) FROM bulk_delete_test";
@@ -5033,9 +5358,12 @@ mod tests {
                 .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let complex_delete_duration = start_time.elapsed();
-            
+
             assert!(success, "Complex condition delete failed");
-            println!("Complex condition delete took: {:?}", complex_delete_duration);
+            println!(
+                "Complex condition delete took: {:?}",
+                complex_delete_duration
+            );
 
             // Report performance summary
             println!("\nDelete Performance Summary:");
@@ -5078,11 +5406,41 @@ mod tests {
 
             // Insert order data
             let order_data = vec![
-                vec![Value::new(1), Value::new(1), Value::new(101), Value::new(1000i64), Value::new("pending")],
-                vec![Value::new(2), Value::new(2), Value::new(102), Value::new(2000i64), Value::new("completed")],
-                vec![Value::new(3), Value::new(1), Value::new(103), Value::new(1500i64), Value::new("shipped")],
-                vec![Value::new(4), Value::new(3), Value::new(104), Value::new(800i64), Value::new("pending")],
-                vec![Value::new(5), Value::new(2), Value::new(105), Value::new(1200i64), Value::new("cancelled")],
+                vec![
+                    Value::new(1),
+                    Value::new(1),
+                    Value::new(101),
+                    Value::new(1000i64),
+                    Value::new("pending"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new(2),
+                    Value::new(102),
+                    Value::new(2000i64),
+                    Value::new("completed"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new(1),
+                    Value::new(103),
+                    Value::new(1500i64),
+                    Value::new("shipped"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new(3),
+                    Value::new(104),
+                    Value::new(800i64),
+                    Value::new("pending"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new(2),
+                    Value::new(105),
+                    Value::new(1200i64),
+                    Value::new("cancelled"),
+                ],
             ];
             ctx.insert_tuples("orders_del", order_data, orders_schema)
                 .unwrap();
@@ -5097,23 +5455,27 @@ mod tests {
             match result {
                 Ok(success) => {
                     assert!(success, "Delete with EXISTS subquery failed");
-                    
+
                     // Verify orders from inactive customers are deleted
                     let count_sql = "SELECT COUNT(*) FROM orders_del";
                     let mut writer = TestResultWriter::new();
                     ctx.engine
                         .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
                         .unwrap();
-                    
-                    let remaining_orders = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
-                    println!("Orders remaining after deleting from inactive customers: {}", remaining_orders);
-                    
+
+                    let remaining_orders =
+                        writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
+                    println!(
+                        "Orders remaining after deleting from inactive customers: {}",
+                        remaining_orders
+                    );
+
                     // Should have deleted orders 2 and 5 (customer_id = 2, Bob Ltd is inactive)
                     assert_eq!(remaining_orders, 3, "Expected 3 orders to remain");
                 }
                 Err(_) => {
                     println!("EXISTS subquery in DELETE not implemented, trying simpler approach");
-                    
+
                     // Alternative: Delete orders with specific customer_id
                     let delete_sql = "DELETE FROM orders_del WHERE customer_id = 2";
                     let mut writer = TestResultWriter::new();
@@ -5820,7 +6182,7 @@ mod tests {
     }
 
     mod aggregation_tests {}
-    
+
     mod group_by_tests {
         use super::*;
 
@@ -6290,21 +6652,45 @@ mod tests {
 
             let test_cases = vec![
                 // Greater than
-                ("SELECT name FROM employees WHERE score > 90", vec!["Bob", "Diana"]),
+                (
+                    "SELECT name FROM employees WHERE score > 90",
+                    vec!["Bob", "Diana"],
+                ),
                 // Less than
-                ("SELECT name FROM employees WHERE score < 80", vec!["Charlie"]),
+                (
+                    "SELECT name FROM employees WHERE score < 80",
+                    vec!["Charlie"],
+                ),
                 // Greater than or equal
-                ("SELECT name FROM employees WHERE score >= 88", vec!["Bob", "Diana", "Eve"]),
+                (
+                    "SELECT name FROM employees WHERE score >= 88",
+                    vec!["Bob", "Diana", "Eve"],
+                ),
                 // Less than or equal
-                ("SELECT name FROM employees WHERE score <= 85", vec!["Alice", "Charlie"]),
+                (
+                    "SELECT name FROM employees WHERE score <= 85",
+                    vec!["Alice", "Charlie"],
+                ),
                 // Not equal
-                ("SELECT name FROM employees WHERE score != 85", vec!["Bob", "Charlie", "Diana", "Eve"]),
+                (
+                    "SELECT name FROM employees WHERE score != 85",
+                    vec!["Bob", "Charlie", "Diana", "Eve"],
+                ),
                 // BigInt comparisons
-                ("SELECT name FROM employees WHERE salary > 60000", vec!["Bob", "Diana"]),
+                (
+                    "SELECT name FROM employees WHERE salary > 60000",
+                    vec!["Bob", "Diana"],
+                ),
                 // Float comparisons
-                ("SELECT name FROM employees WHERE rating >= 4.5", vec!["Alice", "Bob", "Diana", "Eve"]),
+                (
+                    "SELECT name FROM employees WHERE rating >= 4.5",
+                    vec!["Alice", "Bob", "Diana", "Eve"],
+                ),
                 // Combined comparisons
-                ("SELECT name FROM employees WHERE score > 80 AND salary < 70000", vec!["Alice", "Bob", "Eve"]),
+                (
+                    "SELECT name FROM employees WHERE score > 80 AND salary < 70000",
+                    vec!["Alice", "Bob", "Eve"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6400,20 +6786,30 @@ mod tests {
 
             let test_cases = vec![
                 // Exact string match
-                ("SELECT name FROM contacts WHERE department = 'Engineering'",
-                 vec!["Alice Johnson", "Charlie Brown", "Eve Davis"]),
+                (
+                    "SELECT name FROM contacts WHERE department = 'Engineering'",
+                    vec!["Alice Johnson", "Charlie Brown", "Eve Davis"],
+                ),
                 // String inequality
-                ("SELECT name FROM contacts WHERE department != 'Engineering'",
-                 vec!["Bob Smith", "Diana Prince"]),
+                (
+                    "SELECT name FROM contacts WHERE department != 'Engineering'",
+                    vec!["Bob Smith", "Diana Prince"],
+                ),
                 // String comparison (lexicographic)
-                ("SELECT name FROM contacts WHERE name > 'Charlie'",
-                 vec!["Diana Prince", "Eve Davis"]),
+                (
+                    "SELECT name FROM contacts WHERE name > 'Charlie'",
+                    vec!["Diana Prince", "Eve Davis"],
+                ),
                 // Multiple string conditions
-                ("SELECT name FROM contacts WHERE department = 'Engineering' AND city = 'New York'",
-                 vec!["Alice Johnson"]),
+                (
+                    "SELECT name FROM contacts WHERE department = 'Engineering' AND city = 'New York'",
+                    vec!["Alice Johnson"],
+                ),
                 // String OR conditions
-                ("SELECT name FROM contacts WHERE city = 'New York' OR city = 'Chicago'",
-                 vec!["Alice Johnson", "Charlie Brown", "Diana Prince"]),
+                (
+                    "SELECT name FROM contacts WHERE city = 'New York' OR city = 'Chicago'",
+                    vec!["Alice Johnson", "Charlie Brown", "Diana Prince"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6502,15 +6898,33 @@ mod tests {
 
             let test_cases = vec![
                 // IS NULL
-                ("SELECT name FROM users WHERE email IS NULL", vec!["Charlie", "Diana"]),
-                ("SELECT name FROM users WHERE phone IS NULL", vec!["Bob", "Diana"]),
+                (
+                    "SELECT name FROM users WHERE email IS NULL",
+                    vec!["Charlie", "Diana"],
+                ),
+                (
+                    "SELECT name FROM users WHERE phone IS NULL",
+                    vec!["Bob", "Diana"],
+                ),
                 ("SELECT name FROM users WHERE age IS NULL", vec!["Charlie"]),
                 // IS NOT NULL
-                ("SELECT name FROM users WHERE email IS NOT NULL", vec!["Alice", "Bob"]),
-                ("SELECT name FROM users WHERE phone IS NOT NULL", vec!["Alice", "Charlie"]),
+                (
+                    "SELECT name FROM users WHERE email IS NOT NULL",
+                    vec!["Alice", "Bob"],
+                ),
+                (
+                    "SELECT name FROM users WHERE phone IS NOT NULL",
+                    vec!["Alice", "Charlie"],
+                ),
                 // Combining NULL checks with other conditions
-                ("SELECT name FROM users WHERE email IS NOT NULL AND age > 25", vec!["Bob"]),
-                ("SELECT name FROM users WHERE phone IS NULL OR age IS NULL", vec!["Bob", "Charlie", "Diana"]),
+                (
+                    "SELECT name FROM users WHERE email IS NOT NULL AND age > 25",
+                    vec!["Bob"],
+                ),
+                (
+                    "SELECT name FROM users WHERE phone IS NULL OR age IS NULL",
+                    vec!["Bob", "Charlie", "Diana"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6618,28 +7032,35 @@ mod tests {
 
             let test_cases = vec![
                 // Complex AND/OR combinations
-                ("SELECT name FROM employees WHERE (age > 30 AND salary > 70000) OR department = 'Marketing'", 
-                 vec!["Bob", "Charlie", "Diana", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE (age > 30 AND salary > 70000) OR department = 'Marketing'",
+                    vec!["Bob", "Charlie", "Diana", "Eve"],
+                ),
                 // Nested boolean conditions
-                ("SELECT name FROM employees WHERE active = true AND (department = 'Engineering' OR remote = true)", 
-                 vec!["Alice", "Bob", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE active = true AND (department = 'Engineering' OR remote = true)",
+                    vec!["Alice", "Bob", "Eve"],
+                ),
                 // Multiple boolean fields
-                ("SELECT name FROM employees WHERE active = true AND remote = true", 
-                 vec!["Bob", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE active = true AND remote = true",
+                    vec!["Bob", "Eve"],
+                ),
                 // Range conditions with boolean
-                ("SELECT name FROM employees WHERE salary BETWEEN 60000 AND 80000 AND active = true", 
-                 vec!["Alice", "Bob", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE salary BETWEEN 60000 AND 80000 AND active = true",
+                    vec!["Alice", "Bob", "Diana"],
+                ),
                 // Multiple OR conditions
-                ("SELECT name FROM employees WHERE department = 'Engineering' OR department = 'Sales' OR salary > 85000", 
-                 vec!["Alice", "Bob", "Charlie", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE department = 'Engineering' OR department = 'Sales' OR salary > 85000",
+                    vec!["Alice", "Bob", "Charlie", "Eve"],
+                ),
                 // Complex three-way conditions
-                ("SELECT name FROM employees WHERE (age > 25 AND age < 35) AND (salary > 65000 OR remote = true)", 
-                 vec!["Bob", "Charlie", "Diana"]),
+                (
+                    "SELECT name FROM employees WHERE (age > 25 AND age < 35) AND (salary > 65000 OR remote = true)",
+                    vec!["Bob", "Charlie", "Diana"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6660,21 +7081,28 @@ mod tests {
                 // Sort both arrays for easier comparison since order might vary
                 let mut actual_sorted = actual_names.clone();
                 actual_sorted.sort();
-                let mut expected_sorted = expected_names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                let mut expected_sorted = expected_names
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
                 expected_sorted.sort();
 
                 assert_eq!(
                     actual_sorted.len(),
                     expected_sorted.len(),
                     "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
-                    sql, expected_sorted, actual_sorted
+                    sql,
+                    expected_sorted,
+                    actual_sorted
                 );
 
                 for name in expected_names {
                     assert!(
                         actual_names.contains(&name.to_string()),
                         "Expected name '{}' not found in results for query: {}. Got: {:?}",
-                        name, sql, actual_names
+                        name,
+                        sql,
+                        actual_names
                     );
                 }
             }
@@ -6740,32 +7168,40 @@ mod tests {
 
             let test_cases = vec![
                 // IN with integers
-                ("SELECT name FROM employees WHERE department_id IN (10, 30)", 
-                 vec!["Alice", "Charlie", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE department_id IN (10, 30)",
+                    vec!["Alice", "Charlie", "Diana"],
+                ),
                 // IN with strings
-                ("SELECT name FROM employees WHERE status IN ('active', 'pending')", 
-                 vec!["Alice", "Charlie", "Diana", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE status IN ('active', 'pending')",
+                    vec!["Alice", "Charlie", "Diana", "Eve"],
+                ),
                 // NOT IN with integers
-                ("SELECT name FROM employees WHERE department_id NOT IN (10)", 
-                 vec!["Bob", "Diana", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE department_id NOT IN (10)",
+                    vec!["Bob", "Diana", "Eve"],
+                ),
                 // NOT IN with strings
-                ("SELECT name FROM employees WHERE status NOT IN ('inactive')", 
-                 vec!["Alice", "Charlie", "Diana", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE status NOT IN ('inactive')",
+                    vec!["Alice", "Charlie", "Diana", "Eve"],
+                ),
                 // IN with single value (equivalent to equality)
-                ("SELECT name FROM employees WHERE department_id IN (20)", 
-                 vec!["Bob", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE department_id IN (20)",
+                    vec!["Bob", "Eve"],
+                ),
                 // Complex IN conditions
-                ("SELECT name FROM employees WHERE department_id IN (10, 20) AND status IN ('active')", 
-                 vec!["Alice", "Charlie", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE department_id IN (10, 20) AND status IN ('active')",
+                    vec!["Alice", "Charlie", "Eve"],
+                ),
                 // IN with scores
-                ("SELECT name FROM employees WHERE score IN (85, 90, 95)", 
-                 vec!["Alice", "Bob", "Diana"]),
+                (
+                    "SELECT name FROM employees WHERE score IN (85, 90, 95)",
+                    vec!["Alice", "Bob", "Diana"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6795,7 +7231,8 @@ mod tests {
                             assert!(
                                 actual_names.contains(&name.to_string()),
                                 "Expected name '{}' not found in results for query: {}",
-                                name, sql
+                                name,
+                                sql
                             );
                         }
                     }
@@ -6872,32 +7309,40 @@ mod tests {
 
             let test_cases = vec![
                 // BETWEEN with integers
-                ("SELECT name FROM employees WHERE age BETWEEN 28 AND 32", 
-                 vec!["Bob", "Diana", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE age BETWEEN 28 AND 32",
+                    vec!["Bob", "Diana", "Eve"],
+                ),
                 // BETWEEN with salary (BigInt)
-                ("SELECT name FROM employees WHERE salary BETWEEN 60000 AND 75000", 
-                 vec!["Bob", "Charlie", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE salary BETWEEN 60000 AND 75000",
+                    vec!["Bob", "Charlie", "Diana"],
+                ),
                 // BETWEEN with floats
-                ("SELECT name FROM employees WHERE rating BETWEEN 4.0 AND 4.5", 
-                 vec!["Alice", "Bob", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE rating BETWEEN 4.0 AND 4.5",
+                    vec!["Alice", "Bob", "Diana"],
+                ),
                 // NOT BETWEEN
-                ("SELECT name FROM employees WHERE age NOT BETWEEN 25 AND 30", 
-                 vec!["Charlie", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE age NOT BETWEEN 25 AND 30",
+                    vec!["Charlie", "Eve"],
+                ),
                 // BETWEEN with dates
-                ("SELECT name FROM employees WHERE hire_date BETWEEN '2020-01-01' AND '2021-12-31'", 
-                 vec!["Alice", "Charlie"]),
-                
+                (
+                    "SELECT name FROM employees WHERE hire_date BETWEEN '2020-01-01' AND '2021-12-31'",
+                    vec!["Alice", "Charlie"],
+                ),
                 // Combined BETWEEN conditions
-                ("SELECT name FROM employees WHERE age BETWEEN 25 AND 35 AND salary BETWEEN 50000 AND 70000", 
-                 vec!["Alice", "Bob", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE age BETWEEN 25 AND 35 AND salary BETWEEN 50000 AND 70000",
+                    vec!["Alice", "Bob", "Diana"],
+                ),
                 // BETWEEN with exact boundaries
-                ("SELECT name FROM employees WHERE age BETWEEN 25 AND 25", 
-                 vec!["Alice"]),
+                (
+                    "SELECT name FROM employees WHERE age BETWEEN 25 AND 25",
+                    vec!["Alice"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -6927,12 +7372,16 @@ mod tests {
                             assert!(
                                 actual_names.contains(&name.to_string()),
                                 "Expected name '{}' not found in results for query: {}",
-                                name, sql
+                                name,
+                                sql
                             );
                         }
                     }
                     Err(_) => {
-                        println!("BETWEEN operator not yet implemented, skipping test: {}", sql);
+                        println!(
+                            "BETWEEN operator not yet implemented, skipping test: {}",
+                            sql
+                        );
                     }
                 }
             }
@@ -6998,37 +7447,53 @@ mod tests {
 
             let test_cases = vec![
                 // Simple wildcard patterns
-                ("SELECT name FROM products WHERE email LIKE '%@company.com'", 
-                 vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
-                
-                ("SELECT name FROM products WHERE name LIKE 'A%'", 
-                 vec!["Alice Johnson"]),
-                
-                ("SELECT name FROM products WHERE name LIKE '%Smith'", 
-                 vec!["Bob Smith"]),
-                
+                (
+                    "SELECT name FROM products WHERE email LIKE '%@company.com'",
+                    vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+                ),
+                (
+                    "SELECT name FROM products WHERE name LIKE 'A%'",
+                    vec!["Alice Johnson"],
+                ),
+                (
+                    "SELECT name FROM products WHERE name LIKE '%Smith'",
+                    vec!["Bob Smith"],
+                ),
                 // Wildcard in the middle
-                ("SELECT name FROM products WHERE product_code LIKE 'PROD-%'", 
-                 vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
-                
+                (
+                    "SELECT name FROM products WHERE product_code LIKE 'PROD-%'",
+                    vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+                ),
                 // Single character wildcard
-                ("SELECT name FROM products WHERE product_code LIKE 'PROD-00_'", 
-                 vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
-                
+                (
+                    "SELECT name FROM products WHERE product_code LIKE 'PROD-00_'",
+                    vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+                ),
                 // Pattern with multiple wildcards
-                ("SELECT name FROM products WHERE description LIKE '%laptop%'", 
-                 vec!["Alice Johnson", "Diana Prince"]),
-                
-                ("SELECT name FROM products WHERE description LIKE '%computer%'", 
-                 vec!["Alice Johnson", "Eve Adams"]),
-                
+                (
+                    "SELECT name FROM products WHERE description LIKE '%laptop%'",
+                    vec!["Alice Johnson", "Diana Prince"],
+                ),
+                (
+                    "SELECT name FROM products WHERE description LIKE '%computer%'",
+                    vec!["Alice Johnson", "Eve Adams"],
+                ),
                 // NOT LIKE
-                ("SELECT name FROM products WHERE email NOT LIKE '%@company.com'", 
-                 vec!["Bob Smith", "Diana Prince"]),
-                
+                (
+                    "SELECT name FROM products WHERE email NOT LIKE '%@company.com'",
+                    vec!["Bob Smith", "Diana Prince"],
+                ),
                 // Complex patterns
-                ("SELECT name FROM products WHERE product_code LIKE '%0%'", 
-                 vec!["Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Eve Adams"]),
+                (
+                    "SELECT name FROM products WHERE product_code LIKE '%0%'",
+                    vec![
+                        "Alice Johnson",
+                        "Bob Smith",
+                        "Charlie Brown",
+                        "Diana Prince",
+                        "Eve Adams",
+                    ],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -7051,14 +7516,18 @@ mod tests {
                             actual_names.len(),
                             expected_names.len(),
                             "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
-                            sql, expected_names, actual_names
+                            sql,
+                            expected_names,
+                            actual_names
                         );
 
                         for name in expected_names {
                             assert!(
                                 actual_names.contains(&name.to_string()),
                                 "Expected name '{}' not found in results for query: {}. Got: {:?}",
-                                name, sql, actual_names
+                                name,
+                                sql,
+                                actual_names
                             );
                         }
                     }
@@ -7135,38 +7604,48 @@ mod tests {
 
             let test_cases = vec![
                 // Date comparisons
-                ("SELECT event_name FROM events WHERE event_date > '2023-02-01'", 
-                 vec!["Conference", "Workshop", "Presentation"]),
-                
-                ("SELECT event_name FROM events WHERE event_date = '2023-01-15'", 
-                 vec!["Meeting A"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE event_date > '2023-02-01'",
+                    vec!["Conference", "Workshop", "Presentation"],
+                ),
+                (
+                    "SELECT event_name FROM events WHERE event_date = '2023-01-15'",
+                    vec!["Meeting A"],
+                ),
                 // Date range
-                ("SELECT event_name FROM events WHERE event_date BETWEEN '2023-01-01' AND '2023-02-28'", 
-                 vec!["Meeting A", "Workshop", "Training"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE event_date BETWEEN '2023-01-01' AND '2023-02-28'",
+                    vec!["Meeting A", "Workshop", "Training"],
+                ),
                 // Time comparisons
-                ("SELECT event_name FROM events WHERE start_time > '12:00:00'", 
-                 vec!["Conference", "Presentation"]),
-                
-                ("SELECT event_name FROM events WHERE start_time < '11:00:00'", 
-                 vec!["Meeting A", "Workshop"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE start_time > '12:00:00'",
+                    vec!["Conference", "Presentation"],
+                ),
+                (
+                    "SELECT event_name FROM events WHERE start_time < '11:00:00'",
+                    vec!["Meeting A", "Workshop"],
+                ),
                 // Timestamp comparisons
-                ("SELECT event_name FROM events WHERE created_at > '2023-02-01 00:00:00'", 
-                 vec!["Conference", "Presentation"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE created_at > '2023-02-01 00:00:00'",
+                    vec!["Conference", "Presentation"],
+                ),
                 // Complex date/time conditions
-                ("SELECT event_name FROM events WHERE event_date > '2023-01-01' AND start_time < '12:00:00'", 
-                 vec!["Meeting A", "Workshop", "Training"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE event_date > '2023-01-01' AND start_time < '12:00:00'",
+                    vec!["Meeting A", "Workshop", "Training"],
+                ),
                 // Date with other conditions
-                ("SELECT event_name FROM events WHERE event_date > '2023-02-01' AND priority <= 2", 
-                 vec!["Conference", "Workshop"]),
-                
+                (
+                    "SELECT event_name FROM events WHERE event_date > '2023-02-01' AND priority <= 2",
+                    vec!["Conference", "Workshop"],
+                ),
                 // Different date formats (if supported)
-                ("SELECT event_name FROM events WHERE event_date >= '2023-03-01'", 
-                 vec!["Conference", "Presentation"]),
+                (
+                    "SELECT event_name FROM events WHERE event_date >= '2023-03-01'",
+                    vec!["Conference", "Presentation"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -7189,19 +7668,26 @@ mod tests {
                             actual_names.len(),
                             expected_names.len(),
                             "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
-                            sql, expected_names, actual_names
+                            sql,
+                            expected_names,
+                            actual_names
                         );
 
                         for name in expected_names {
                             assert!(
                                 actual_names.contains(&name.to_string()),
                                 "Expected name '{}' not found in results for query: {}. Got: {:?}",
-                                name, sql, actual_names
+                                name,
+                                sql,
+                                actual_names
                             );
                         }
                     }
                     Err(_) => {
-                        println!("Date/time comparison not fully implemented, skipping test: {}", sql);
+                        println!(
+                            "Date/time comparison not fully implemented, skipping test: {}",
+                            sql
+                        );
                     }
                 }
             }
@@ -7257,18 +7743,33 @@ mod tests {
             let working_cases = vec![
                 // Zero comparisons
                 ("SELECT name FROM test_data WHERE value = 0", vec!["Alice"]),
-                ("SELECT name FROM test_data WHERE value > 0", vec!["Charlie"]),
-                ("SELECT name FROM test_data WHERE value < 0", vec!["Bob", "Diana"]),
-                
+                (
+                    "SELECT name FROM test_data WHERE value > 0",
+                    vec!["Charlie"],
+                ),
+                (
+                    "SELECT name FROM test_data WHERE value < 0",
+                    vec!["Bob", "Diana"],
+                ),
                 // Extreme values
-                ("SELECT name FROM test_data WHERE value = 2147483647", vec!["Charlie"]),
-                
+                (
+                    "SELECT name FROM test_data WHERE value = 2147483647",
+                    vec!["Charlie"],
+                ),
                 // Boolean edge cases
-                ("SELECT name FROM test_data WHERE flag = true", vec!["Alice", "Charlie"]),
-                ("SELECT name FROM test_data WHERE flag = false", vec!["Bob", "Diana"]),
-                
+                (
+                    "SELECT name FROM test_data WHERE flag = true",
+                    vec!["Alice", "Charlie"],
+                ),
+                (
+                    "SELECT name FROM test_data WHERE flag = false",
+                    vec!["Bob", "Diana"],
+                ),
                 // Empty string (if supported)
-                ("SELECT name FROM test_data WHERE name != ''", vec!["Alice", "Bob", "Charlie", "Diana"]),
+                (
+                    "SELECT name FROM test_data WHERE name != ''",
+                    vec!["Alice", "Bob", "Charlie", "Diana"],
+                ),
             ];
 
             for (sql, expected_names) in working_cases {
@@ -7297,7 +7798,8 @@ mod tests {
                     assert!(
                         actual_names.contains(&name.to_string()),
                         "Expected name '{}' not found in results for query: {}",
-                        name, sql
+                        name,
+                        sql
                     );
                 }
             }
@@ -7316,11 +7818,7 @@ mod tests {
                     .engine
                     .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
 
-                assert!(
-                    result.is_err(),
-                    "Expected error for invalid query: {}",
-                    sql
-                );
+                assert!(result.is_err(), "Expected error for invalid query: {}", sql);
             }
         }
 
@@ -7349,44 +7847,81 @@ mod tests {
 
             // Insert employee data
             let employee_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(60000i64), Value::new(1)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(75000i64), Value::new(2)],
-                vec![Value::new(3), Value::new("Charlie"), Value::new(80000i64), Value::new(1)],
-                vec![Value::new(4), Value::new("Diana"), Value::new(65000i64), Value::new(3)],
-                vec![Value::new(5), Value::new("Eve"), Value::new(90000i64), Value::new(2)],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(60000i64),
+                    Value::new(1),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(75000i64),
+                    Value::new(2),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(80000i64),
+                    Value::new(1),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("Diana"),
+                    Value::new(65000i64),
+                    Value::new(3),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Eve"),
+                    Value::new(90000i64),
+                    Value::new(2),
+                ],
             ];
             ctx.insert_tuples("employees", employee_data, employees_schema)
                 .unwrap();
 
             // Insert department data
             let department_data = vec![
-                vec![Value::new(1), Value::new("Engineering"), Value::new(500000i64)],
+                vec![
+                    Value::new(1),
+                    Value::new("Engineering"),
+                    Value::new(500000i64),
+                ],
                 vec![Value::new(2), Value::new("Sales"), Value::new(300000i64)],
-                vec![Value::new(3), Value::new("Marketing"), Value::new(200000i64)],
+                vec![
+                    Value::new(3),
+                    Value::new("Marketing"),
+                    Value::new(200000i64),
+                ],
             ];
             ctx.insert_tuples("departments", department_data, departments_schema)
                 .unwrap();
 
             let test_cases = vec![
                 // Subquery with scalar comparison
-                ("SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)", 
-                 vec!["Charlie", "Eve"]),
-                
+                (
+                    "SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)",
+                    vec!["Charlie", "Eve"],
+                ),
                 // Subquery with EXISTS
-                // ("SELECT name FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.id = e.department_id AND d.budget > 250000)", 
+                // ("SELECT name FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.id = e.department_id AND d.budget > 250000)",
                 //  vec!["Alice", "Charlie", "Bob", "Eve"]),
-                
+
                 // Subquery with IN
-                // ("SELECT name FROM employees WHERE department_id IN (SELECT id FROM departments WHERE budget > 250000)", 
+                // ("SELECT name FROM employees WHERE department_id IN (SELECT id FROM departments WHERE budget > 250000)",
                 //  vec!["Alice", "Charlie", "Bob", "Eve"]),
-                
+
                 // Multiple subqueries
-                ("SELECT name FROM employees WHERE salary > (SELECT MIN(salary) FROM employees) AND salary < (SELECT MAX(salary) FROM employees)", 
-                 vec!["Bob", "Charlie", "Diana"]),
-                
+                (
+                    "SELECT name FROM employees WHERE salary > (SELECT MIN(salary) FROM employees) AND salary < (SELECT MAX(salary) FROM employees)",
+                    vec!["Bob", "Charlie", "Diana"],
+                ),
                 // Subquery in complex condition
-                ("SELECT name FROM employees WHERE department_id = 1 AND salary > (SELECT AVG(salary) FROM employees WHERE department_id = 1)", 
-                 vec!["Charlie"]),
+                (
+                    "SELECT name FROM employees WHERE department_id = 1 AND salary > (SELECT AVG(salary) FROM employees WHERE department_id = 1)",
+                    vec!["Charlie"],
+                ),
             ];
 
             for (sql, expected_names) in test_cases {
@@ -7409,19 +7944,26 @@ mod tests {
                             actual_names.len(),
                             expected_names.len(),
                             "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
-                            sql, expected_names, actual_names
+                            sql,
+                            expected_names,
+                            actual_names
                         );
 
                         for name in expected_names {
                             assert!(
                                 actual_names.contains(&name.to_string()),
                                 "Expected name '{}' not found in results for query: {}. Got: {:?}",
-                                name, sql, actual_names
+                                name,
+                                sql,
+                                actual_names
                             );
                         }
                     }
                     Err(_) => {
-                        println!("Subquery in WHERE not fully implemented, skipping test: {}", sql);
+                        println!(
+                            "Subquery in WHERE not fully implemented, skipping test: {}",
+                            sql
+                        );
                     }
                 }
             }
@@ -7886,7 +8428,7 @@ mod tests {
             );
         }
     }
-    
+
     mod window_tests {}
 
     mod transaction_tests {
@@ -8178,9 +8720,9 @@ mod tests {
             let test_data = vec![
                 vec![
                     Value::new(1),
-                    Value::new(3.14159f32), // Pi approximation
-                    Value::new(0.618f32),   // Golden ratio approximation
-                    Value::new(1.23e-4f32), // Scientific notation
+                    Value::new(std::f32::consts::PI), // Pi approximation
+                    Value::new(0.618f32),             // Golden ratio approximation
+                    Value::new(1.23e-4f32),           // Scientific notation
                 ],
                 vec![
                     Value::new(2),
@@ -8419,7 +8961,7 @@ mod tests {
                 vec![
                     Value::new(10),
                     Value::new("pi_approx"),
-                    Value::new(3.141592653589793),
+                    Value::new(std::f64::consts::PI),
                 ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)

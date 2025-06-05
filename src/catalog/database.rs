@@ -216,7 +216,10 @@ impl Database {
 
                 // Check if referenced column exists in the referenced table
                 if let Some(referenced_table_schema) = self.get_table_schema(&fk.referenced_table) {
-                    if referenced_table_schema.get_column_index(&fk.referenced_column).is_none() {
+                    if referenced_table_schema
+                        .get_column_index(&fk.referenced_column)
+                        .is_none()
+                    {
                         return Err(format!(
                             "foreign key constraint references non-existent column '{}' in table '{}'",
                             fk.referenced_column, fk.referenced_table
