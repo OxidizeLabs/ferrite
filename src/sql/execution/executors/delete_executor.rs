@@ -7,9 +7,12 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::value::Value;
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::catalog::column::Column;
+use crate::types_db::type_id::TypeId;
 
 pub struct DeleteExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -164,8 +167,20 @@ impl AbstractExecutor for DeleteExecutor {
         info!("Delete operation completed successfully, {} rows deleted", delete_count);
         self.rows_deleted = delete_count;
 
-        // Delete operations don't return tuples to the caller
-        Ok(None)
+        // Return a result tuple if any rows were deleted
+        if delete_count > 0 {
+            // Create a simple result tuple indicating success with the number of rows deleted
+            let result_values = vec![Value::new(delete_count as i32)];
+            // Create a simple schema for the result tuple with just one column for the count
+            let result_schema = Schema::new(vec![
+                Column::new("rows_deleted", TypeId::Integer)
+            ]);
+            let result_tuple = Arc::new(Tuple::new(&result_values, &result_schema, RID::default()));
+            Ok(Some((result_tuple, RID::default())))
+        } else {
+            // No rows were deleted
+            Ok(None)
+        }
     }
 
     fn get_output_schema(&self) -> &Schema {
