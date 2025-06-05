@@ -6,7 +6,10 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log;
 use log::debug;
-use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef, DataType, ExactNumberInfo, Expr, ObjectName, ReferentialAction};
+use sqlparser::ast::{
+    ColumnDef, ColumnOption, ColumnOptionDef, DataType, ExactNumberInfo, Expr, ObjectName,
+    ReferentialAction,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -116,13 +119,19 @@ impl SchemaManager {
             let type_id = self.convert_sql_type(&col_def.data_type)?;
 
             // Parse column options to extract constraints
-            let (is_primary_key, is_not_null, is_unique, foreign_key, check_constraint, default_value) = 
-                self.parse_column_options(&col_def.options)?;
+            let (
+                is_primary_key,
+                is_not_null,
+                is_unique,
+                foreign_key,
+                check_constraint,
+                default_value,
+            ) = self.parse_column_options(&col_def.options)?;
 
             // Extract type-specific parameters and create column
             let column = self.create_column_from_sql_type_with_constraints(
-                &column_name, 
-                &col_def.data_type, 
+                &column_name,
+                &col_def.data_type,
                 type_id,
                 is_primary_key,
                 is_not_null,
@@ -138,7 +147,20 @@ impl SchemaManager {
     }
 
     /// Parse column options to extract constraint information
-    fn parse_column_options(&self, options: &[ColumnOptionDef]) -> Result<(bool, bool, bool, Option<ForeignKeyConstraint>, Option<String>, Option<Value>), String> {
+    fn parse_column_options(
+        &self,
+        options: &[ColumnOptionDef],
+    ) -> Result<
+        (
+            bool,
+            bool,
+            bool,
+            Option<ForeignKeyConstraint>,
+            Option<String>,
+            Option<Value>,
+        ),
+        String,
+    > {
         let mut is_primary_key = false;
         let mut is_not_null = false;
         let mut is_unique = false;
@@ -162,21 +184,33 @@ impl SchemaManager {
                 ColumnOption::Null => {
                     is_not_null = false;
                 }
-                ColumnOption::ForeignKey { foreign_table, referred_columns, on_delete, on_update, .. } => {
+                ColumnOption::ForeignKey {
+                    foreign_table,
+                    referred_columns,
+                    on_delete,
+                    on_update,
+                    ..
+                } => {
                     // Convert ObjectName to table name string
                     let table_name = self.object_name_to_string(foreign_table);
-                    
+
                     // For now, we only support single-column foreign keys
                     if referred_columns.len() != 1 {
-                        return Err("Multi-column foreign keys are not currently supported".to_string());
+                        return Err(
+                            "Multi-column foreign keys are not currently supported".to_string()
+                        );
                     }
-                    
+
                     let column_name = referred_columns[0].value.clone();
-                    
+
                     // Convert sqlparser ReferentialAction to our ReferentialAction
-                    let on_delete_action = on_delete.as_ref().map(|action| self.convert_referential_action(action));
-                    let on_update_action = on_update.as_ref().map(|action| self.convert_referential_action(action));
-                    
+                    let on_delete_action = on_delete
+                        .as_ref()
+                        .map(|action| self.convert_referential_action(action));
+                    let on_update_action = on_update
+                        .as_ref()
+                        .map(|action| self.convert_referential_action(action));
+
                     foreign_key = Some(ForeignKeyConstraint {
                         referenced_table: table_name,
                         referenced_column: column_name,
@@ -199,7 +233,14 @@ impl SchemaManager {
             }
         }
 
-        Ok((is_primary_key, is_not_null, is_unique, foreign_key, check_constraint, default_value))
+        Ok((
+            is_primary_key,
+            is_not_null,
+            is_unique,
+            foreign_key,
+            check_constraint,
+            default_value,
+        ))
     }
 
     /// Convert ObjectName to string
@@ -208,7 +249,10 @@ impl SchemaManager {
     }
 
     /// Convert sqlparser ReferentialAction to our ReferentialAction
-    fn convert_referential_action(&self, action: &ReferentialAction) -> crate::catalog::column::ReferentialAction {
+    fn convert_referential_action(
+        &self,
+        action: &ReferentialAction,
+    ) -> crate::catalog::column::ReferentialAction {
         match action {
             ReferentialAction::Restrict => crate::catalog::column::ReferentialAction::Restrict,
             ReferentialAction::Cascade => crate::catalog::column::ReferentialAction::Cascade,
@@ -1601,7 +1645,17 @@ mod tests {
         // Test DECIMAL with precision and scale
         let decimal_type = DataType::Decimal(ExactNumberInfo::PrecisionAndScale(10, 2));
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("price", &decimal_type, TypeId::Decimal, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "price",
+                &decimal_type,
+                TypeId::Decimal,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "price");
@@ -1612,7 +1666,17 @@ mod tests {
         // Test DECIMAL with precision only
         let decimal_type = DataType::Decimal(ExactNumberInfo::Precision(8));
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("amount", &decimal_type, TypeId::Decimal, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "amount",
+                &decimal_type,
+                TypeId::Decimal,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "amount");
@@ -1623,7 +1687,17 @@ mod tests {
         // Test DECIMAL with no precision/scale
         let decimal_type = DataType::Decimal(ExactNumberInfo::None);
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("value", &decimal_type, TypeId::Decimal, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "value",
+                &decimal_type,
+                TypeId::Decimal,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "value");
@@ -1639,7 +1713,17 @@ mod tests {
         // Test VARCHAR (uses default length for now)
         let varchar_type = DataType::Varchar(None);
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("name", &varchar_type, TypeId::VarChar, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "name",
+                &varchar_type,
+                TypeId::VarChar,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "name");
@@ -1649,7 +1733,17 @@ mod tests {
         // Test CHAR (uses default length for now)
         let char_type = DataType::Char(None);
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("code", &char_type, TypeId::Char, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "code",
+                &char_type,
+                TypeId::Char,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "code");
@@ -1664,7 +1758,17 @@ mod tests {
         // Test FLOAT with precision
         let float_type = DataType::Float(Some(7));
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("measurement", &float_type, TypeId::Float, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "measurement",
+                &float_type,
+                TypeId::Float,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "measurement");
@@ -1675,7 +1779,17 @@ mod tests {
         // Test FLOAT without precision
         let float_type = DataType::Float(None);
         let column = schema_manager
-            .create_column_from_sql_type_with_constraints("ratio", &float_type, TypeId::Float, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "ratio",
+                &float_type,
+                TypeId::Float,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
 
         assert_eq!(column.get_name(), "ratio");
@@ -2200,7 +2314,17 @@ mod tests {
 
         // Test integer types
         let int_column = manager
-            .create_column_from_sql_type_with_constraints("test_int", &DataType::Integer(None), TypeId::Integer, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "test_int",
+                &DataType::Integer(None),
+                TypeId::Integer,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(int_column.get_name(), "test_int");
         assert_eq!(int_column.get_type(), TypeId::Integer);
@@ -2213,7 +2337,12 @@ mod tests {
                 "test_array",
                 &DataType::Array(sqlparser::ast::ArrayElemTypeDef::None),
                 TypeId::Vector,
-                false, false, false, None, None, None
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
             )
             .unwrap();
         assert_eq!(array_column.get_name(), "test_array");
@@ -2222,7 +2351,17 @@ mod tests {
 
         // Test binary types
         let binary_column = manager
-            .create_column_from_sql_type_with_constraints("test_binary", &DataType::Binary(None), TypeId::Binary, false, false, false, None, None, None)
+            .create_column_from_sql_type_with_constraints(
+                "test_binary",
+                &DataType::Binary(None),
+                TypeId::Binary,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(binary_column.get_name(), "test_binary");
         assert_eq!(binary_column.get_type(), TypeId::Binary);

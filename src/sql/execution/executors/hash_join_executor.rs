@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
 use crate::container::hash_function::HashFunction;
 use crate::sql::execution::execution_context::ExecutionContext;

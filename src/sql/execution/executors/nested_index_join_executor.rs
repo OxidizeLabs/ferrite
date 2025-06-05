@@ -1,5 +1,6 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::common::exception::DBError;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
@@ -20,7 +21,6 @@ use crate::types_db::value::Val;
 use log::{debug, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use crate::common::exception::DBError;
 
 pub struct NestedIndexJoinExecutor {
     children_executors: Option<Vec<Box<dyn AbstractExecutor>>>,
@@ -123,7 +123,9 @@ impl NestedIndexJoinExecutor {
 
         // Create executor for the current left tuple
         if self.create_right_executor().is_none() {
-            return Err(DBError::Execution("Failed to create right executor".to_string()));
+            return Err(DBError::Execution(
+                "Failed to create right executor".to_string(),
+            ));
         }
 
         // Now try to get the first result with the newly created executor
@@ -326,7 +328,10 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
             // If we have a current left tuple and haven't exhausted right relation
             if !self.right_exhausted {
                 if let Some((left_tuple, left_rid)) = &self.current_left_tuple {
-                    debug!("Processing current left tuple: {:?}", left_tuple.get_values());
+                    debug!(
+                        "Processing current left tuple: {:?}",
+                        left_tuple.get_values()
+                    );
                     let left_tuple_clone = left_tuple.clone();
                     let left_rid_clone = *left_rid;
 
@@ -334,11 +339,12 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
                     debug!("Attempting to get next inner tuple");
                     if let Ok(Some((right_tuple, _))) = self.get_next_inner_tuple() {
                         debug!("Got right tuple: {:?}", right_tuple.get_values());
-                        
+
                         // Double-check the predicate since get_next_inner_tuple already filters by key equality
                         if self.evaluate_predicate(&left_tuple_clone, &right_tuple) {
                             debug!("Predicate evaluation successful, constructing join result");
-                            let result = self.construct_output_tuple(&left_tuple_clone, &right_tuple);
+                            let result =
+                                self.construct_output_tuple(&left_tuple_clone, &right_tuple);
                             debug!("Constructed tuple: {:?}", result.get_values());
                             return Ok(Some((result, left_rid_clone)));
                         } else {
@@ -418,7 +424,6 @@ mod tests {
     use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::types::{CmpBool, Type};
     use crate::types_db::value::{Val, Value};
     use sqlparser::ast::{JoinConstraint, JoinOperator};
     use tempfile::TempDir;
@@ -802,15 +807,26 @@ mod tests {
 
         // Should have 2 matching rows (id=1 and id=2)
         debug!("Total join results: {}", results.len());
-        
+
         if results.len() == 0 {
-            debug!("ERROR: No join results produced! This suggests an issue with the join execution.");
+            debug!(
+                "ERROR: No join results produced! This suggests an issue with the join execution."
+            );
             // Let's debug what went wrong
-            debug!("Left table data and Right table data seem to be inserted correctly based on earlier verification.");
-            debug!("The issue might be in the index creation, index population, or the join execution itself.");
+            debug!(
+                "Left table data and Right table data seem to be inserted correctly based on earlier verification."
+            );
+            debug!(
+                "The issue might be in the index creation, index population, or the join execution itself."
+            );
         }
-        
-        assert_eq!(results.len(), 2, "Expected 2 join results but got {}", results.len());
+
+        assert_eq!(
+            results.len(),
+            2,
+            "Expected 2 join results but got {}",
+            results.len()
+        );
     }
 
     #[test]
@@ -959,17 +975,20 @@ mod tests {
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
         for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
-            let result = left_table
-                .insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone());
+            let result =
+                left_table.insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone());
             debug!("Left table insert for ({}, {}): {:?}", id, value, result);
         }
 
-        // Insert data into right table  
+        // Insert data into right table
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
         for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];
-            let result = right_table
-                .insert_tuple_from_values(values, &right_schema, right_tuple_meta.clone());
+            let result = right_table.insert_tuple_from_values(
+                values,
+                &right_schema,
+                right_tuple_meta.clone(),
+            );
             debug!("Right table insert for ({}, {}): {:?}", id, data, result);
         }
 
@@ -992,7 +1011,11 @@ mod tests {
 
         let mut left_tuples = Vec::new();
         while let Ok(Some((tuple, rid))) = left_executor.next() {
-            debug!("Left table tuple at RID {:?}: {:?}", rid, tuple.get_values());
+            debug!(
+                "Left table tuple at RID {:?}: {:?}",
+                rid,
+                tuple.get_values()
+            );
             left_tuples.push((tuple, rid));
         }
         debug!("Left table total tuples: {}", left_tuples.len());
@@ -1009,14 +1032,18 @@ mod tests {
 
         let mut right_tuples = Vec::new();
         while let Ok(Some((tuple, rid))) = right_executor.next() {
-            debug!("Right table tuple at RID {:?}: {:?}", rid, tuple.get_values());
-            
+            debug!(
+                "Right table tuple at RID {:?}: {:?}",
+                rid,
+                tuple.get_values()
+            );
+
             // Debug each value separately
             let values = tuple.get_values();
             for (i, value) in values.iter().enumerate() {
                 debug!("  Right table value[{}]: {:?}", i, value.get_val());
             }
-            
+
             right_tuples.push((tuple, rid));
         }
         debug!("Right table total tuples: {}", right_tuples.len());
@@ -1027,24 +1054,33 @@ mod tests {
             let id = values[0].get_val();
             let data = values[1].get_val();
             debug!("Right table verification: ID={:?}, DATA={:?}", id, data);
-            
+
             match id {
                 Val::Integer(1) => {
                     debug!("Checking ID=1, expected data='X', actual data={:?}", data);
                     if *data != Val::VarLen("X".to_string()) {
-                        debug!("ERROR: Data mismatch for ID=1! Expected VarLen(\"X\"), got {:?}", data);
+                        debug!(
+                            "ERROR: Data mismatch for ID=1! Expected VarLen(\"X\"), got {:?}",
+                            data
+                        );
                     }
                 }
                 Val::Integer(2) => {
                     debug!("Checking ID=2, expected data='Y', actual data={:?}", data);
                     if *data != Val::VarLen("Y".to_string()) {
-                        debug!("ERROR: Data mismatch for ID=2! Expected VarLen(\"Y\"), got {:?}", data);
+                        debug!(
+                            "ERROR: Data mismatch for ID=2! Expected VarLen(\"Y\"), got {:?}",
+                            data
+                        );
                     }
                 }
                 Val::Integer(4) => {
                     debug!("Checking ID=4, expected data='Z', actual data={:?}", data);
                     if *data != Val::VarLen("Z".to_string()) {
-                        debug!("ERROR: Data mismatch for ID=4! Expected VarLen(\"Z\"), got {:?}", data);
+                        debug!(
+                            "ERROR: Data mismatch for ID=4! Expected VarLen(\"Z\"), got {:?}",
+                            data
+                        );
                     }
                 }
                 _ => debug!("Unexpected ID in right table: {:?}", id),

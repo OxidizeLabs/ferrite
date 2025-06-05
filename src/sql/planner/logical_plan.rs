@@ -4,8 +4,9 @@ use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
-use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
+use crate::sql::execution::expressions::comparison_expression::{
+    ComparisonExpression, ComparisonType,
+};
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
 use crate::sql::execution::plans::abstract_plan::PlanNode;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
@@ -28,7 +29,6 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
-use crate::types_db::value::Value;
 use log::debug;
 use sqlparser::ast::{Ident, JoinOperator, Statement, TransactionModifier};
 use std::cell::Cell;
@@ -1689,7 +1689,7 @@ impl<'a> PlanConverter<'a> {
                         expressions.clone(),
                         column_mappings.clone(),
                     )
-                        .with_children(child_plans),
+                    .with_children(child_plans),
                 ))
             }
 
@@ -1784,10 +1784,11 @@ impl<'a> PlanConverter<'a> {
                     Err("NestedLoopJoin requires two children".to_string())
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
-                    let (left_keys, right_keys, fixed_predicate) = match extract_join_keys(&predicate) {
-                        Ok((l, r, p)) => (l, r, p),
-                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
-                    };
+                    let (left_keys, right_keys, fixed_predicate) =
+                        match extract_join_keys(&predicate) {
+                            Ok((l, r, p)) => (l, r, p),
+                            Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                        };
 
                     Ok(PlanNode::NestedLoopJoin(NestedLoopJoinNode::new(
                         left_schema.clone(),
@@ -1811,10 +1812,11 @@ impl<'a> PlanConverter<'a> {
                     Err("NestedIndexJoin requires two children".to_string())
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
-                    let (left_keys, right_keys, fixed_predicate) = match extract_join_keys(&predicate) {
-                        Ok((l, r, p)) => (l, r, p),
-                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
-                    };
+                    let (left_keys, right_keys, fixed_predicate) =
+                        match extract_join_keys(&predicate) {
+                            Ok((l, r, p)) => (l, r, p),
+                            Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                        };
 
                     Ok(PlanNode::NestedIndexJoin(NestedIndexJoinNode::new(
                         left_schema.clone(),
@@ -1838,10 +1840,11 @@ impl<'a> PlanConverter<'a> {
                     Err("HashJoin requires two children".to_string())
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
-                    let (left_keys, right_keys, fixed_predicate) = match extract_join_keys(&predicate) {
-                        Ok((l, r, p)) => (l, r, p),
-                        Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
-                    };
+                    let (left_keys, right_keys, fixed_predicate) =
+                        match extract_join_keys(&predicate) {
+                            Ok((l, r, p)) => (l, r, p),
+                            Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
+                        };
 
                     Ok(PlanNode::HashJoin(HashJoinNode::new(
                         left_schema.clone(),
@@ -2160,9 +2163,9 @@ impl Display for LogicalPlan {
 
 /*
  * extract_join_keys - Extract and fix join key expressions from a join predicate
- * 
+ *
  * Implementation Plan:
- * 
+ *
  * 1. OVERVIEW:
  *    - Purpose: Extract key columns from join predicates and create a fixed version
  *      with proper tuple indices (0 for left table, 1 for right table)
@@ -2171,7 +2174,7 @@ impl Display for LogicalPlan {
  *      a. Vector of left table key expressions (with tuple_index=0)
  *      b. Vector of right table key expressions (with tuple_index=1)
  *      c. Fixed predicate expression with correct tuple indices for execution
- * 
+ *
  * 2. ALGORITHM STEPS:
  *    a. Initialize empty vectors for left keys, right keys, and fixed predicates
  *    b. Match on expression type:
@@ -2187,7 +2190,7 @@ impl Display for LogicalPlan {
  *         > Verify it's an AND expression (error if not)
  *         > Recursively extract keys from each child predicate
  *         > Combine the results into a single predicate with AND
- *       - For other expressions: 
+ *       - For other expressions:
  *         > Return error - only equality comparisons and AND expressions supported
  *
  * 3. SPECIAL CASES:
@@ -2229,8 +2232,8 @@ fn extract_join_keys(
                 if children.len() == 2 {
                     // Step 2.1.3: Verify both sides are ColumnRefExpressions
                     if let (Expression::ColumnRef(left_ref), Expression::ColumnRef(right_ref)) =
-                        (children[0].as_ref(), children[1].as_ref()) {
-
+                        (children[0].as_ref(), children[1].as_ref())
+                    {
                         // Step 2.1.4: Create new column references with proper tuple indices
                         let left_key = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
                             0, // Left tuple index always 0
@@ -2255,12 +2258,13 @@ fn extract_join_keys(
                         )));
 
                         // Step 2.1.6: Create a fixed comparison with the new column references
-                        let fixed_predicate = Arc::new(Expression::Comparison(ComparisonExpression::new(
-                            left_key.clone(),
-                            right_key.clone(),
-                            ComparisonType::Equal,
-                            vec![left_key.clone(), right_key.clone()],
-                        )));
+                        let fixed_predicate =
+                            Arc::new(Expression::Comparison(ComparisonExpression::new(
+                                left_key.clone(),
+                                right_key.clone(),
+                                ComparisonType::Equal,
+                                vec![left_key.clone(), right_key.clone()],
+                            )));
 
                         // Step 2.1.7: Add to respective key vectors
                         left_keys.push(left_key);
@@ -2315,7 +2319,12 @@ fn extract_join_keys(
         }
 
         // Step 2.3: Error for unsupported expression types
-        _ => return Err(format!("Unsupported join predicate expression type: {:?}", predicate)),
+        _ => {
+            return Err(format!(
+                "Unsupported join predicate expression type: {:?}",
+                predicate
+            ));
+        }
     }
 }
 
@@ -3605,9 +3614,13 @@ mod test_extract_join_keys {
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use crate::sql::execution::expressions::comparison_expression::{ComparisonExpression, ComparisonType};
+    use crate::sql::execution::expressions::comparison_expression::{
+        ComparisonExpression, ComparisonType,
+    };
+    use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
     use crate::types_db::type_id::TypeId;
+    use crate::types_db::value::Value;
 
     fn create_column_ref(tuple_index: usize, column_index: usize, name: &str) -> Arc<Expression> {
         Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
@@ -3618,7 +3631,11 @@ mod test_extract_join_keys {
         )))
     }
 
-    fn create_comparison(left: Arc<Expression>, right: Arc<Expression>, comp_type: ComparisonType) -> Arc<Expression> {
+    fn create_comparison(
+        left: Arc<Expression>,
+        right: Arc<Expression>,
+        comp_type: ComparisonType,
+    ) -> Arc<Expression> {
         Arc::new(Expression::Comparison(ComparisonExpression::new(
             left.clone(),
             right.clone(),
@@ -3627,7 +3644,11 @@ mod test_extract_join_keys {
         )))
     }
 
-    fn create_logic(left: Arc<Expression>, right: Arc<Expression>, logic_type: LogicType) -> Arc<Expression> {
+    fn create_logic(
+        left: Arc<Expression>,
+        right: Arc<Expression>,
+        logic_type: LogicType,
+    ) -> Arc<Expression> {
         Arc::new(Expression::Logic(LogicExpression::new(
             left.clone(),
             right.clone(),
@@ -3654,8 +3675,10 @@ mod test_extract_join_keys {
 
         // Verify tuple indices
         if let Expression::Comparison(comp) = fixed_predicate.as_ref() {
-            if let (Expression::ColumnRef(left), Expression::ColumnRef(right)) =
-                (comp.get_children()[0].as_ref(), comp.get_children()[1].as_ref()) {
+            if let (Expression::ColumnRef(left), Expression::ColumnRef(right)) = (
+                comp.get_children()[0].as_ref(),
+                comp.get_children()[1].as_ref(),
+            ) {
                 assert_eq!(left.get_tuple_index(), 0);
                 assert_eq!(right.get_tuple_index(), 1);
             } else {

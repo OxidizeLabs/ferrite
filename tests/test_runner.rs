@@ -12,7 +12,6 @@ use tkdb::types_db::value::Value;
 use tkdb::catalog::schema::Schema;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sqllogictest::Runner;
 use std::sync::Once;
 
 // Add color constants at the top of the file

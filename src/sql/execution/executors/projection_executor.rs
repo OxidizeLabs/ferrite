@@ -1,7 +1,7 @@
 use crate::catalog::schema::Schema;
+use crate::common::exception::DBError;
 use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
-use crate::common::exception::DBError;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -147,14 +147,16 @@ impl AbstractExecutor for ProjectionExecutor {
 
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
-            return Err(DBError::Execution("ProjectionExecutor not initialized".to_string()));
+            return Err(DBError::Execution(
+                "ProjectionExecutor not initialized".to_string(),
+            ));
         }
 
         // Get the next tuple from the child executor
         match self.child_executor.next()? {
             Some((input_tuple, rid)) => {
                 trace!("ProjectionExecutor processing tuple with RID {:?}", rid);
-                
+
                 // Apply projections to create the output tuple
                 let mut projected_values = Vec::new();
                 let child_schema = self.child_executor.get_output_schema();
@@ -166,18 +168,28 @@ impl AbstractExecutor for ProjectionExecutor {
                         }
                         Err(e) => {
                             // Handle invalid column references gracefully by skipping the tuple
-                            if let crate::common::exception::ExpressionError::InvalidColumnIndex(_) = e {
+                            if let crate::common::exception::ExpressionError::InvalidColumnIndex(
+                                _,
+                            ) = e
+                            {
                                 debug!("Skipping tuple due to invalid column reference: {}", e);
                                 return self.next(); // Try the next tuple
                             }
-                            return Err(DBError::Execution(format!("Failed to evaluate projection expression: {}", e)));
+                            return Err(DBError::Execution(format!(
+                                "Failed to evaluate projection expression: {}",
+                                e
+                            )));
                         }
                     }
                 }
 
                 // Create output tuple with projected values
-                let output_tuple = Arc::new(Tuple::new(&projected_values, self.plan.get_output_schema(), RID::default()));
-                
+                let output_tuple = Arc::new(Tuple::new(
+                    &projected_values,
+                    self.plan.get_output_schema(),
+                    RID::default(),
+                ));
+
                 trace!("ProjectionExecutor produced projected tuple");
                 Ok(Some((output_tuple, rid)))
             }

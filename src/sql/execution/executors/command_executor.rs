@@ -1,7 +1,7 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::storage::table::tuple::Tuple;
@@ -143,7 +143,7 @@ impl AbstractExecutor for CommandExecutor {
                 let rid = tuple.get_rid();
                 Ok(Some((Arc::new(tuple), rid)))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 

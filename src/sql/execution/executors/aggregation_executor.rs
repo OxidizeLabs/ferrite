@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -275,7 +275,6 @@ impl AbstractExecutor for AggregationExecutor {
                         }
                         CmpBool::CmpNull => continue,
                     }
-
                 }
                 std::cmp::Ordering::Equal
             });
@@ -563,13 +562,13 @@ mod tests {
         }
 
         // Sort results by group_id for consistent checking
-        results.sort_by(
-            |a: &Arc<Tuple>, b: &Arc<Tuple>| match a.get_value(0).compare_less_than(&b.get_value(0)) {
+        results.sort_by(|a: &Arc<Tuple>, b: &Arc<Tuple>| {
+            match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
-            },
-        );
+            }
+        });
 
         assert_eq!(results.len(), 2, "Should have exactly 2 groups");
 
@@ -658,13 +657,13 @@ mod tests {
         }
 
         // Sort results by group_id for consistent checking
-        results.sort_by(
-            |a: &Arc<Tuple>, b: &Arc<Tuple>| match a.get_value(0).compare_less_than(&b.get_value(0)) {
+        results.sort_by(|a: &Arc<Tuple>, b: &Arc<Tuple>| {
+            match a.get_value(0).compare_less_than(&b.get_value(0)) {
                 CmpBool::CmpTrue => std::cmp::Ordering::Less,
                 CmpBool::CmpFalse => std::cmp::Ordering::Greater,
                 CmpBool::CmpNull => std::cmp::Ordering::Equal,
-            },
-        );
+            }
+        });
 
         assert_eq!(results.len(), 2, "Should have 2 groups");
 
@@ -1241,4 +1240,3 @@ mod tests {
         assert_eq!(results[1].get_value(1).as_integer().unwrap(), 70); // 35 + 35
     }
 }
-

@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -63,7 +63,10 @@ impl AbstractExecutor for CreateTableExecutor {
                     guard
                 }
                 None => {
-                    return Err(DBError::Execution("Failed to acquire context read lock - lock contention detected".to_string()));
+                    return Err(DBError::Execution(
+                        "Failed to acquire context read lock - lock contention detected"
+                            .to_string(),
+                    ));
                 }
             };
             context_guard.get_catalog().clone()
@@ -78,7 +81,10 @@ impl AbstractExecutor for CreateTableExecutor {
                     guard
                 }
                 None => {
-                    return Err(DBError::Execution("Failed to acquire catalog write lock - lock contention detected".to_string()));
+                    return Err(DBError::Execution(
+                        "Failed to acquire catalog write lock - lock contention detected"
+                            .to_string(),
+                    ));
                 }
             };
 
@@ -329,7 +335,10 @@ mod tests {
         let table = catalog_guard.get_table("simple_table").unwrap();
         assert_eq!(table.get_table_name(), "simple_table");
         assert_eq!(table.get_table_schema().get_columns().len(), 1);
-        assert_eq!(table.get_table_schema().get_columns()[0].get_name(), "single_col");
+        assert_eq!(
+            table.get_table_schema().get_columns()[0].get_name(),
+            "single_col"
+        );
     }
 
     #[test]
@@ -404,11 +413,11 @@ mod tests {
 
         let mut executor = CreateTableExecutor::new(exec_context, plan, false);
         executor.init();
-        
+
         // This should return an error now instead of None
         let result = executor.next();
         assert!(result.is_err());
-        
+
         // The table should still exist (the original one)
         let catalog_guard = catalog.read();
         let table = catalog_guard.get_table("duplicate_table").unwrap();
@@ -554,7 +563,10 @@ mod tests {
 
         // Test that output schema matches the input schema
         let output_schema = executor.get_output_schema();
-        assert_eq!(output_schema.get_columns().len(), schema.get_columns().len());
+        assert_eq!(
+            output_schema.get_columns().len(),
+            schema.get_columns().len()
+        );
 
         for (i, column) in output_schema.get_columns().iter().enumerate() {
             let expected_column = &schema.get_columns()[i];
@@ -660,9 +672,13 @@ mod tests {
 
         // Verify both tables were created
         let catalog_guard = catalog.read();
-        assert!(catalog_guard.get_table("concurrent_table").is_some(), 
-               "concurrent_table should have been created");
-        assert!(catalog_guard.get_table("concurrent_table2").is_some(), 
-               "concurrent_table2 should have been created");
+        assert!(
+            catalog_guard.get_table("concurrent_table").is_some(),
+            "concurrent_table should have been created"
+        );
+        assert!(
+            catalog_guard.get_table("concurrent_table2").is_some(),
+            "concurrent_table2 should have been created"
+        );
     }
 }

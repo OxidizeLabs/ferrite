@@ -1,6 +1,6 @@
 use crate::catalog::schema::Schema;
-use crate::common::rid::RID;
 use crate::common::exception::DBError;
+use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
@@ -81,7 +81,7 @@ impl InsertExecutor {
 impl AbstractExecutor for InsertExecutor {
     fn init(&mut self) {
         debug!("Initializing InsertExecutor");
-        
+
         // Create child executor from plan's children if not already created
         if self.child_executor.is_none() {
             let children_plans = self.plan.get_children();
@@ -101,7 +101,7 @@ impl AbstractExecutor for InsertExecutor {
         } else if let Some(ref mut child) = self.child_executor {
             child.init();
         }
-        
+
         self.initialized = true;
     }
 
@@ -130,7 +130,7 @@ impl AbstractExecutor for InsertExecutor {
             let table_heap = table_info.get_table_heap().clone();
             let table_oidt = table_info.get_table_oidt();
             let txn_context = binding.get_transaction_context().clone();
-            
+
             (schema, table_heap, table_oidt, txn_context)
         };
 
@@ -143,7 +143,7 @@ impl AbstractExecutor for InsertExecutor {
         let values_to_insert = self.plan.get_input_values();
         if !values_to_insert.is_empty() {
             debug!("Inserting {} direct value sets", values_to_insert.len());
-            
+
             for values in values_to_insert {
                 match transactional_table_heap.insert_tuple_from_values(
                     values.clone(),
@@ -162,7 +162,7 @@ impl AbstractExecutor for InsertExecutor {
             }
         } else if let Some(ref mut child) = self.child_executor {
             debug!("Inserting from child executor (SELECT query)");
-            
+
             loop {
                 match child.next()? {
                     Some((tuple, _)) => {
@@ -178,7 +178,10 @@ impl AbstractExecutor for InsertExecutor {
                             }
                             Err(e) => {
                                 error!("Failed to insert tuple from SELECT: {}", e);
-                                return Err(DBError::Execution(format!("Insert from SELECT failed: {}", e)));
+                                return Err(DBError::Execution(format!(
+                                    "Insert from SELECT failed: {}",
+                                    e
+                                )));
                             }
                         }
                     }
@@ -186,10 +189,15 @@ impl AbstractExecutor for InsertExecutor {
                 }
             }
         } else {
-            return Err(DBError::Execution("No values or child executor found for INSERT".to_string()));
+            return Err(DBError::Execution(
+                "No values or child executor found for INSERT".to_string(),
+            ));
         }
 
-        info!("Insert operation completed successfully, {} rows inserted", insert_count);
+        info!(
+            "Insert operation completed successfully, {} rows inserted",
+            insert_count
+        );
         self.rows_inserted = insert_count;
 
         // Insert operations don't return tuples to the caller
@@ -430,7 +438,7 @@ mod tests {
 
         // Execute inserts
         executor.init();
-        
+
         // Insert operations complete in one call and return None
         assert!(executor.next().unwrap().is_none());
 
@@ -628,7 +636,7 @@ mod tests {
 
         // Execute inserts
         executor.init();
-        
+
         // Insert operations complete in one call and return None
         assert!(executor.next().unwrap().is_none());
 
