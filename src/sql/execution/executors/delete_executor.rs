@@ -402,7 +402,7 @@ use super::*;
         delete_executor.init();
         let result = delete_executor.next();
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none()); // Delete returns None
+        assert!(result.unwrap().is_some()); // Delete returns Some with row count when rows are deleted
 
         // Commit the transaction after deletes
         let txn_ctx = execution_context.read().get_transaction_context();
