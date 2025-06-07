@@ -6136,6 +6136,7 @@ mod tests {
         use crate::catalog::schema::Schema;
         use crate::sql::execution::execution_engine::tests::{TestContext, TestResultWriter};
         use crate::types_db::type_id::TypeId;
+        use crate::types_db::value::Val::Null;
         use crate::types_db::value::Value;
 
         #[test]
@@ -6177,6 +6178,539 @@ mod tests {
                 Err(e) => {
                     panic!("Error executing query '{}': {:?}", sql, e);
                 }
+            }
+        }
+
+        #[test]
+        fn test_select_all_columns() {
+            let mut ctx = TestContext::new("test_select_all_columns");
+
+            // Create test table with multiple columns
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+                Column::new("active", TypeId::Boolean),
+                Column::new("salary", TypeId::BigInt),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(30),
+                    Value::new(true),
+                    Value::new(75000i64),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(25),
+                    Value::new(false),
+                    Value::new(50000i64),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(35),
+                    Value::new(true),
+                    Value::new(85000i64),
+                ],
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test SELECT *
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT * FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "SELECT * query failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return all 3 rows");
+            assert_eq!(writer.get_schema().get_columns().len(), 5, "Should return all 5 columns");
+
+            // Test selecting specific columns
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT name, age FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "SELECT specific columns failed");
+            assert_eq!(writer2.get_rows().len(), 3, "Should return all 3 rows");
+            assert_eq!(writer2.get_schema().get_columns().len(), 2, "Should return 2 columns");
+        }
+
+        #[test]
+        fn test_select_with_constants() {
+            let mut ctx = TestContext::new("test_select_with_constants");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("users", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+            ];
+            ctx.insert_tuples("users", test_data, table_schema)
+                .unwrap();
+
+            // Test SELECT with constants
+            let test_cases = vec![
+                ("SELECT 42 as constant_int FROM users", 2, 1), // 2 rows, 1 column
+                ("SELECT 'Hello' as greeting FROM users", 2, 1),
+                ("SELECT name, 'World' as suffix FROM users", 2, 2),
+                ("SELECT id, name, 100 as bonus FROM users", 2, 3),
+                ("SELECT true as flag, false as other_flag FROM users", 2, 2),
+            ];
+
+            for (sql, expected_rows, expected_columns) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_with_expressions() {
+            let mut ctx = TestContext::new("test_select_with_expressions");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("price", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("products", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new(100), Value::new(5), Value::new("Widget")],
+                vec![Value::new(2), Value::new(200), Value::new(3), Value::new("Gadget")],
+                vec![Value::new(3), Value::new(50), Value::new(10), Value::new("Tool")],
+            ];
+            ctx.insert_tuples("products", test_data, table_schema)
+                .unwrap();
+
+            // Test arithmetic expressions
+            let test_cases = vec![
+                ("SELECT price * quantity as total FROM products", 3, 1),
+                ("SELECT price + 10 as adjusted_price FROM products", 3, 1),
+                ("SELECT price - 5, quantity + 1 FROM products", 3, 2),
+                ("SELECT price / 2 as half_price FROM products", 3, 1),
+                ("SELECT price % 3 as remainder FROM products", 3, 1),
+            ];
+
+            for (sql, expected_rows, expected_columns) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_distinct() {
+            let mut ctx = TestContext::new("test_select_distinct");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("department", TypeId::VarChar),
+                Column::new("city", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Engineering"), Value::new("NYC")],
+                vec![Value::new(2), Value::new("Sales"), Value::new("LA")],
+                vec![Value::new(3), Value::new("Engineering"), Value::new("NYC")], // Duplicate
+                vec![Value::new(4), Value::new("Sales"), Value::new("NYC")],
+                vec![Value::new(5), Value::new("Engineering"), Value::new("LA")],
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test DISTINCT on single column
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT DISTINCT department FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "DISTINCT query failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 distinct departments");
+
+            // Test DISTINCT on multiple columns
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT DISTINCT department, city FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "DISTINCT multiple columns failed");
+            assert_eq!(writer2.get_rows().len(), 4, "Should return 4 distinct combinations");
+        }
+
+        #[test]
+        fn test_select_with_limit() {
+            let mut ctx = TestContext::new("test_select_with_limit");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("users", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+                vec![Value::new(3), Value::new("Charlie")],
+                vec![Value::new(4), Value::new("David")],
+                vec![Value::new(5), Value::new("Eve")],
+            ];
+            ctx.insert_tuples("users", test_data, table_schema)
+                .unwrap();
+
+            // Test different LIMIT values
+            let test_cases = vec![
+                ("SELECT * FROM users LIMIT 3", 3),
+                ("SELECT * FROM users LIMIT 1", 1),
+                ("SELECT * FROM users LIMIT 10", 5), // More than available rows
+                ("SELECT name FROM users LIMIT 2", 2),
+            ];
+
+            for (sql, expected_rows) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_with_offset() {
+            let mut ctx = TestContext::new("test_select_with_offset");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("users", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+                vec![Value::new(3), Value::new("Charlie")],
+                vec![Value::new(4), Value::new("David")],
+                vec![Value::new(5), Value::new("Eve")],
+            ];
+            ctx.insert_tuples("users", test_data, table_schema)
+                .unwrap();
+
+            // Test OFFSET with LIMIT
+            let test_cases = vec![
+                ("SELECT * FROM users LIMIT 3 OFFSET 1", 3), // Skip first, take 3
+                ("SELECT * FROM users LIMIT 2 OFFSET 3", 2), // Skip first 3, take 2
+                ("SELECT * FROM users OFFSET 2", 3), // Skip first 2, take all remaining
+                ("SELECT * FROM users LIMIT 1 OFFSET 4", 1), // Skip first 4, take 1
+            ];
+
+            for (sql, expected_rows) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_with_aliases() {
+            let mut ctx = TestContext::new("test_select_with_aliases");
+
+            let table_schema = Schema::new(vec![
+                Column::new("employee_id", TypeId::Integer),
+                Column::new("first_name", TypeId::VarChar),
+                Column::new("last_name", TypeId::VarChar),
+                Column::new("birth_year", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("John"), Value::new("Doe"), Value::new(1990)],
+                vec![Value::new(2), Value::new("Jane"), Value::new("Smith"), Value::new(1985)],
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test column aliases
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT employee_id AS id, first_name AS fname, last_name AS lname FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Column alias query failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 rows");
+            
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns()[0].get_name(), "id", "First column should be aliased as 'id'");
+            assert_eq!(schema.get_columns()[1].get_name(), "fname", "Second column should be aliased as 'fname'");
+            assert_eq!(schema.get_columns()[2].get_name(), "lname", "Third column should be aliased as 'lname'");
+
+            // Test table alias
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT e.employee_id, e.first_name FROM employees e",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Table alias query failed");
+            assert_eq!(writer2.get_rows().len(), 2, "Should return 2 rows");
+        }
+
+        #[test]
+        fn test_select_with_different_data_types() {
+            let mut ctx = TestContext::new("test_select_with_different_data_types");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("active", TypeId::Boolean),
+                Column::new("salary", TypeId::BigInt),
+                Column::new("rating", TypeId::Float),
+                Column::new("score", TypeId::Decimal),
+            ]);
+
+            ctx.create_test_table("mixed_data", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(true),
+                    Value::new(50000i64),
+                    Value::new(4.5f32),
+                    Value::new(95.7f64),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(false),
+                    Value::new(60000i64),
+                    Value::new(3.8f32),
+                    Value::new(87.2f64),
+                ],
+            ];
+            ctx.insert_tuples("mixed_data", test_data, table_schema)
+                .unwrap();
+
+            // Test selecting different data types
+            let test_cases = vec![
+                ("SELECT id FROM mixed_data", 2, 1),
+                ("SELECT name FROM mixed_data", 2, 1),
+                ("SELECT active FROM mixed_data", 2, 1),
+                ("SELECT salary FROM mixed_data", 2, 1),
+                ("SELECT rating FROM mixed_data", 2, 1),
+                ("SELECT score FROM mixed_data", 2, 1),
+                ("SELECT id, name, active FROM mixed_data", 2, 3),
+                ("SELECT salary, rating, score FROM mixed_data", 2, 3),
+            ];
+
+            for (sql, expected_rows, expected_columns) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_with_null_values() {
+            let mut ctx = TestContext::new("test_select_with_null_values");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("optional_field", TypeId::VarChar),
+                Column::new("nullable_int", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("nullable_data", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new("has_value"),
+                    Value::new(100),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(Null),
+                    Value::new(Null),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new("another_value"),
+                    Value::new(Null),
+                ],
+            ];
+            ctx.insert_tuples("nullable_data", test_data, table_schema)
+                .unwrap();
+
+            // Test selecting NULL values
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT * FROM nullable_data", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query with NULL values failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return all 3 rows including those with NULLs");
+
+            // Test selecting specific columns with NULLs
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT name, optional_field FROM nullable_data", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "Query selecting columns with NULLs failed");
+            assert_eq!(writer2.get_rows().len(), 3, "Should return all 3 rows");
+        }
+
+        #[test]
+        fn test_select_empty_table() {
+            let mut ctx = TestContext::new("test_select_empty_table");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("empty_table", table_schema)
+                .unwrap();
+
+            // Test selecting from empty table
+            let test_cases = vec![
+                "SELECT * FROM empty_table",
+                "SELECT id FROM empty_table",
+                "SELECT name FROM empty_table",
+                "SELECT id, name FROM empty_table",
+                "SELECT 'constant' FROM empty_table",
+            ];
+
+            for sql in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), 0, "Empty table should return 0 rows for: {}", sql);
+            }
+        }
+
+        #[test]
+        fn test_select_performance_large_table() {
+            let mut ctx = TestContext::new("test_select_performance_large_table");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::VarChar),
+                Column::new("number", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("large_table", table_schema.clone())
+                .unwrap();
+
+            // Insert larger dataset
+            let mut test_data = Vec::new();
+            for i in 1..=1000 {
+                test_data.push(vec![
+                    Value::new(i),
+                    Value::new(format!("value_{}", i)),
+                    Value::new(i * 2),
+                ]);
+            }
+            ctx.insert_tuples("large_table", test_data, table_schema)
+                .unwrap();
+
+            // Test performance with various queries
+            let test_cases = vec![
+                ("SELECT * FROM large_table", 1000),
+                ("SELECT id FROM large_table", 1000),
+                ("SELECT id, value FROM large_table", 1000),
+                ("SELECT * FROM large_table LIMIT 100", 100),
+                ("SELECT id FROM large_table LIMIT 50", 50),
+            ];
+
+            for (sql, expected_rows) in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Query execution failed for: {}", sql);
+                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
             }
         }
     }
@@ -6477,6 +7011,532 @@ mod tests {
                     sql
                 );
             }
+        }
+
+        #[test]
+        fn test_right_join_operations() {
+            let mut ctx = TestContext::new("test_right_join_operations");
+
+            // Create employees table
+            let employees_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("dept_id", TypeId::Integer),
+            ]);
+            ctx.create_test_table("employees", employees_schema.clone())
+                .unwrap();
+
+            // Create departments table
+            let depts_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("budget", TypeId::Integer),
+            ]);
+            ctx.create_test_table("departments", depts_schema.clone())
+                .unwrap();
+
+            // Insert test data - some departments without employees
+            let employees_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new(1)],
+                vec![Value::new(2), Value::new("Bob"), Value::new(2)],
+            ];
+            ctx.insert_tuples("employees", employees_data, employees_schema)
+                .unwrap();
+
+            let depts_data = vec![
+                vec![Value::new(1), Value::new("Engineering"), Value::new(100000)],
+                vec![Value::new(2), Value::new("Sales"), Value::new(50000)],
+                vec![Value::new(3), Value::new("Marketing"), Value::new(75000)], // No employees
+                vec![Value::new(4), Value::new("HR"), Value::new(30000)], // No employees
+            ];
+            ctx.insert_tuples("departments", depts_data, depts_schema)
+                .unwrap();
+
+            // Right join - should return all departments, even those without employees
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT e.name, d.name FROM employees e RIGHT JOIN departments d ON e.dept_id = d.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Right join query execution failed");
+            assert_eq!(writer.get_rows().len(), 4, "Should return all departments");
+
+            // Right join with ordering to ensure consistent results
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT e.name, d.name FROM employees e RIGHT JOIN departments d ON e.dept_id = d.id ORDER BY d.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Right join with ORDER BY failed");
+            assert_eq!(writer2.get_rows().len(), 4);
+
+            // Verify NULL values for departments without employees
+            let rows = writer2.get_rows();
+            // Marketing and HR departments should have NULL employee names
+            let marketing_row = rows.iter().find(|row| row[1].to_string() == "Marketing");
+            let hr_row = rows.iter().find(|row| row[1].to_string() == "HR");
+            
+            assert!(marketing_row.is_some(), "Marketing department should be in results");
+            assert!(hr_row.is_some(), "HR department should be in results");
+        }
+
+        #[test]
+        fn test_full_outer_join_operations() {
+            let mut ctx = TestContext::new("test_full_outer_join_operations");
+
+            // Create customers table
+            let customers_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("city_id", TypeId::Integer),
+            ]);
+            ctx.create_test_table("customers", customers_schema.clone())
+                .unwrap();
+
+            // Create cities table
+            let cities_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("cities", cities_schema.clone())
+                .unwrap();
+
+            // Insert customers - some in cities not in cities table
+            let customers_data = vec![
+                vec![Value::new(1), Value::new("John"), Value::new(1)],
+                vec![Value::new(2), Value::new("Jane"), Value::new(2)],
+                vec![Value::new(3), Value::new("Bob"), Value::new(99)], // City doesn't exist
+            ];
+            ctx.insert_tuples("customers", customers_data, customers_schema)
+                .unwrap();
+
+            // Insert cities - some without customers
+            let cities_data = vec![
+                vec![Value::new(1), Value::new("New York")],
+                vec![Value::new(2), Value::new("Los Angeles")],
+                vec![Value::new(3), Value::new("Chicago")], // No customers
+            ];
+            ctx.insert_tuples("cities", cities_data, cities_schema)
+                .unwrap();
+
+            // Full outer join - should return all combinations
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT c.name, ci.name FROM customers c FULL OUTER JOIN cities ci ON c.city_id = ci.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Full outer join query execution failed");
+            // Should have: John-NY, Jane-LA, Bob-NULL, NULL-Chicago = 4 rows
+            assert_eq!(writer.get_rows().len(), 4, "Full outer join should return 4 rows");
+        }
+
+        #[test]
+        fn test_cross_join_operations() {
+            let mut ctx = TestContext::new("test_cross_join_operations");
+
+            // Create small tables for cross join
+            let colors_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("color", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("colors", colors_schema.clone())
+                .unwrap();
+
+            let sizes_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("size", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("sizes", sizes_schema.clone())
+                .unwrap();
+
+            let colors_data = vec![
+                vec![Value::new(1), Value::new("Red")],
+                vec![Value::new(2), Value::new("Blue")],
+            ];
+            ctx.insert_tuples("colors", colors_data, colors_schema)
+                .unwrap();
+
+            let sizes_data = vec![
+                vec![Value::new(1), Value::new("Small")],
+                vec![Value::new(2), Value::new("Large")],
+            ];
+            ctx.insert_tuples("sizes", sizes_data, sizes_schema)
+                .unwrap();
+
+            // Cross join
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT c.color, s.size FROM colors c CROSS JOIN sizes s",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Cross join query execution failed");
+            assert_eq!(writer.get_rows().len(), 4, "Cross join should return 2x2=4 rows");
+
+            // Alternative syntax for cross join
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT c.color, s.size FROM colors c, sizes s",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Implicit cross join query execution failed");
+            assert_eq!(writer2.get_rows().len(), 4, "Implicit cross join should return 4 rows");
+        }
+
+        #[test]
+        fn test_self_join_operations() {
+            let mut ctx = TestContext::new("test_self_join_operations");
+
+            // Create employees table with manager relationship
+            let employees_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("manager_id", TypeId::Integer),
+            ]);
+            ctx.create_test_table("employees", employees_schema.clone())
+                .unwrap();
+
+            let employees_data = vec![
+                vec![Value::new(1), Value::new("CEO"), Value::new(Null)], // No manager
+                vec![Value::new(2), Value::new("Manager1"), Value::new(1)], // Reports to CEO
+                vec![Value::new(3), Value::new("Manager2"), Value::new(1)], // Reports to CEO
+                vec![Value::new(4), Value::new("Employee1"), Value::new(2)], // Reports to Manager1
+                vec![Value::new(5), Value::new("Employee2"), Value::new(2)], // Reports to Manager1
+                vec![Value::new(6), Value::new("Employee3"), Value::new(3)], // Reports to Manager2
+            ];
+            ctx.insert_tuples("employees", employees_data, employees_schema)
+                .unwrap();
+
+            // Self join to find employee-manager relationships
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT e.name AS employee, m.name AS manager FROM employees e LEFT JOIN employees m ON e.manager_id = m.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Self join query execution failed");
+            assert_eq!(writer.get_rows().len(), 6, "Should return all employees");
+
+            // Self join to find colleagues (employees with same manager)
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT e1.name, e2.name FROM employees e1 JOIN employees e2 ON e1.manager_id = e2.manager_id AND e1.id != e2.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Colleagues self join query execution failed");
+            // Should find pairs of colleagues
+            assert!(writer2.get_rows().len() > 0, "Should find colleague pairs");
+        }
+
+        #[test]
+        fn test_multiple_table_joins() {
+            let mut ctx = TestContext::new("test_multiple_table_joins");
+
+            // Create multiple related tables
+            let customers_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("customers", customers_schema.clone())
+                .unwrap();
+
+            let orders_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("customer_id", TypeId::Integer),
+                Column::new("product_id", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+            ]);
+            ctx.create_test_table("orders", orders_schema.clone())
+                .unwrap();
+
+            let products_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+            ]);
+            ctx.create_test_table("products", products_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let customers_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+            ];
+            ctx.insert_tuples("customers", customers_data, customers_schema)
+                .unwrap();
+
+            let orders_data = vec![
+                vec![Value::new(1), Value::new(1), Value::new(1), Value::new(2)], // Alice orders 2 laptops
+                vec![Value::new(2), Value::new(1), Value::new(2), Value::new(1)], // Alice orders 1 mouse
+                vec![Value::new(3), Value::new(2), Value::new(1), Value::new(1)], // Bob orders 1 laptop
+            ];
+            ctx.insert_tuples("orders", orders_data, orders_schema)
+                .unwrap();
+
+            let products_data = vec![
+                vec![Value::new(1), Value::new("Laptop"), Value::new(1000)],
+                vec![Value::new(2), Value::new("Mouse"), Value::new(25)],
+            ];
+            ctx.insert_tuples("products", products_data, products_schema)
+                .unwrap();
+
+            // Three-table join
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT c.name, p.name, o.quantity FROM customers c JOIN orders o ON c.id = o.customer_id JOIN products p ON o.product_id = p.id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Three-table join query execution failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 order records");
+
+            // Three-table join with aggregation
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT c.name, COUNT(*) as order_count FROM customers c JOIN orders o ON c.id = o.customer_id JOIN products p ON o.product_id = p.id GROUP BY c.name",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Three-table join with aggregation failed");
+            assert_eq!(writer2.get_rows().len(), 2, "Should return 2 customer records");
+        }
+
+        #[test]
+        fn test_join_with_complex_conditions() {
+            let mut ctx = TestContext::new("test_join_with_complex_conditions");
+
+            // Create tables for complex join conditions
+            let sales_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("salesperson_id", TypeId::Integer),
+                Column::new("amount", TypeId::Integer),
+                Column::new("region", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("sales", sales_schema.clone())
+                .unwrap();
+
+            let salespeople_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("region", TypeId::VarChar),
+                Column::new("quota", TypeId::Integer),
+            ]);
+            ctx.create_test_table("salespeople", salespeople_schema.clone())
+                .unwrap();
+
+            let sales_data = vec![
+                vec![Value::new(1), Value::new(1), Value::new(1000), Value::new("North")],
+                vec![Value::new(2), Value::new(1), Value::new(2000), Value::new("North")],
+                vec![Value::new(3), Value::new(2), Value::new(1500), Value::new("South")],
+                vec![Value::new(4), Value::new(2), Value::new(800), Value::new("North")], // Different region
+            ];
+            ctx.insert_tuples("sales", sales_data, sales_schema)
+                .unwrap();
+
+            let salespeople_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new("North"), Value::new(2500)],
+                vec![Value::new(2), Value::new("Bob"), Value::new("South"), Value::new(2000)],
+            ];
+            ctx.insert_tuples("salespeople", salespeople_data, salespeople_schema)
+                .unwrap();
+
+            // Join with multiple conditions
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT sp.name, s.amount FROM salespeople sp JOIN sales s ON sp.id = s.salesperson_id AND sp.region = s.region",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Complex join condition query execution failed");
+            // Should exclude sales where salesperson and sale regions don't match
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 matching records");
+
+            // Join with comparison in ON clause
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT sp.name, s.amount FROM salespeople sp JOIN sales s ON sp.id = s.salesperson_id AND s.amount > 1000",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Join with amount comparison failed");
+            // Should only include sales > 1000
+            assert!(writer2.get_rows().len() < 4, "Should filter out smaller sales");
+        }
+
+        #[test]
+        fn test_join_performance_with_large_dataset() {
+            let mut ctx = TestContext::new("test_join_performance_with_large_dataset");
+
+            // Create larger tables to test join performance
+            let table_a_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("table_a", table_a_schema.clone())
+                .unwrap();
+
+            let table_b_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("a_id", TypeId::Integer),
+                Column::new("value", TypeId::VarChar),
+            ]);
+            ctx.create_test_table("table_b", table_b_schema.clone())
+                .unwrap();
+
+            // Insert larger dataset
+            let mut table_a_data = Vec::new();
+            let mut table_b_data = Vec::new();
+
+            for i in 1..=100 {
+                table_a_data.push(vec![
+                    Value::new(i),
+                    Value::new(format!("value_a_{}", i)),
+                ]);
+
+                // Create multiple B records for each A record
+                for j in 1..=3 {
+                    table_b_data.push(vec![
+                        Value::new(i * 10 + j),
+                        Value::new(i),
+                        Value::new(format!("value_b_{}_{}", i, j)),
+                    ]);
+                }
+            }
+
+            ctx.insert_tuples("table_a", table_a_data, table_a_schema)
+                .unwrap();
+            ctx.insert_tuples("table_b", table_b_data, table_b_schema)
+                .unwrap();
+
+            // Test join performance
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT a.value, b.value FROM table_a a JOIN table_b b ON a.id = b.a_id WHERE a.id <= 10",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Large dataset join query execution failed");
+            assert_eq!(writer.get_rows().len(), 30, "Should return 10 * 3 = 30 records");
+        }
+
+        #[test]
+        fn test_join_with_null_handling() {
+            let mut ctx = TestContext::new("test_join_with_null_handling");
+
+            // Create tables with NULL values
+            let teachers_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("department_id", TypeId::Integer),
+            ]);
+            ctx.create_test_table("teachers", teachers_schema.clone())
+                .unwrap();
+
+            let courses_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("teacher_id", TypeId::Integer),
+            ]);
+            ctx.create_test_table("courses", courses_schema.clone())
+                .unwrap();
+
+            let teachers_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new(1)],
+                vec![Value::new(2), Value::new("Bob"), Value::new(Null)], // NULL department
+                vec![Value::new(3), Value::new("Charlie"), Value::new(2)],
+            ];
+            ctx.insert_tuples("teachers", teachers_data, teachers_schema)
+                .unwrap();
+
+            let courses_data = vec![
+                vec![Value::new(1), Value::new("Math"), Value::new(1)],
+                vec![Value::new(2), Value::new("Physics"), Value::new(2)],
+                vec![Value::new(3), Value::new("Chemistry"), Value::new(3)],
+                vec![Value::new(4), Value::new("Biology"), Value::new(Null)], // NULL teacher
+            ];
+            ctx.insert_tuples("courses", courses_data, courses_schema)
+                .unwrap();
+
+            // Inner join - should exclude NULLs
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT t.name, c.name FROM teachers t JOIN courses c ON t.id = c.teacher_id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "Join with NULL values failed");
+            assert_eq!(writer.get_rows().len(), 3, "Inner join should exclude NULL matches");
+
+            // Left join - should include all teachers
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT t.name, c.name FROM teachers t LEFT JOIN courses c ON t.id = c.teacher_id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
+                .unwrap();
+
+            assert!(success2, "Left join with NULL values failed");
+            assert_eq!(writer2.get_rows().len(), 3, "Left join should include all teachers");
         }
     }
 
