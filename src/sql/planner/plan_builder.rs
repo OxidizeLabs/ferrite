@@ -812,10 +812,42 @@ impl LogicalPlanBuilder {
                         }
                     }
                 }
-                TableConstraint::ForeignKey { .. } => {
-                    // Foreign key constraints are more complex and would require 
-                    // cross-table validation, skip for now
-                    log::warn!("Table-level FOREIGN KEY constraints are not yet supported");
+                TableConstraint::ForeignKey { columns: fk_columns, foreign_table, referred_columns, .. } => {
+                    // Process FOREIGN KEY constraint
+                    if fk_columns.len() != 1 {
+                        log::warn!("Multi-column FOREIGN KEY constraints are not yet supported");
+                        continue;
+                    }
+                    if referred_columns.len() != 1 {
+                        log::warn!("FOREIGN KEY constraints with multiple referred columns are not yet supported");
+                        continue;
+                    }
+                    
+                    let fk_col_name = fk_columns[0].to_string();
+                    let referred_table = foreign_table.to_string();
+                    let referred_col_name = referred_columns[0].to_string();
+                    
+                    let column_found = columns.iter_mut().find(|col| col.get_name() == fk_col_name);
+                    match column_found {
+                        Some(column) => {
+                            // Create foreign key constraint
+                            use crate::catalog::column::ForeignKeyConstraint;
+                            let foreign_key_constraint = ForeignKeyConstraint {
+                                referenced_table: referred_table.clone(),
+                                referenced_column: referred_col_name.clone(),
+                                on_delete: None,
+                                on_update: None,
+                            };
+                            column.set_foreign_key(Some(foreign_key_constraint));
+                            log::debug!("Set FOREIGN KEY constraint on column '{}' referencing '{}({})'", fk_col_name, referred_table, referred_col_name);
+                        }
+                        None => {
+                            return Err(format!(
+                                "FOREIGN KEY constraint column '{}' not found in table",
+                                fk_col_name
+                            ));
+                        }
+                    }
                 }
                 TableConstraint::Check { .. } => {
                     // Check constraints at table level would require complex expression parsing
