@@ -743,9 +743,12 @@ impl LogicalPlanBuilder {
         }
 
         // If we get here, table doesn't exist, proceed with normal creation
-        let columns = self
+        let mut columns = self
             .schema_manager
             .convert_column_defs(&create_table.columns)?;
+
+        // Process table-level constraints
+        self.process_table_constraints(&create_table.constraints, &mut columns)?;
 
         // Double-check that we have columns after conversion
         if columns.is_empty() {
@@ -762,6 +765,69 @@ impl LogicalPlanBuilder {
             table_name,
             create_table.if_not_exists,
         ))
+    }
+
+    /// Process table-level constraints like PRIMARY KEY (col1, col2) and UNIQUE (col1, col2)
+    fn process_table_constraints(
+        &self,
+        constraints: &[TableConstraint],
+        columns: &mut [Column],
+    ) -> Result<(), String> {
+        for constraint in constraints {
+            match constraint {
+                TableConstraint::PrimaryKey { columns: pk_columns, .. } => {
+                    // Set primary key flag on the specified columns
+                    for pk_col_ident in pk_columns {
+                        let pk_col_name = pk_col_ident.to_string();
+                        let column_found = columns.iter_mut().find(|col| col.get_name() == pk_col_name);
+                        match column_found {
+                            Some(column) => {
+                                column.set_primary_key(true);
+                                column.set_not_null(true); // PRIMARY KEY implies NOT NULL
+                            }
+                            None => {
+                                return Err(format!(
+                                    "Primary key column '{}' not found in table",
+                                    pk_col_name
+                                ));
+                            }
+                        }
+                    }
+                }
+                TableConstraint::Unique { columns: unique_columns, .. } => {
+                    // Set unique flag on the specified columns
+                    for unique_col_ident in unique_columns {
+                        let unique_col_name = unique_col_ident.to_string();
+                        let column_found = columns.iter_mut().find(|col| col.get_name() == unique_col_name);
+                        match column_found {
+                            Some(column) => {
+                                column.set_unique(true);
+                            }
+                            None => {
+                                return Err(format!(
+                                    "Unique constraint column '{}' not found in table",
+                                    unique_col_name
+                                ));
+                            }
+                        }
+                    }
+                }
+                TableConstraint::ForeignKey { .. } => {
+                    // Foreign key constraints are more complex and would require 
+                    // cross-table validation, skip for now
+                    log::warn!("Table-level FOREIGN KEY constraints are not yet supported");
+                }
+                TableConstraint::Check { .. } => {
+                    // Check constraints at table level would require complex expression parsing
+                    log::warn!("Table-level CHECK constraints are not yet supported");
+                }
+                _ => {
+                    // Other constraint types not supported yet
+                    log::warn!("Unsupported table constraint type encountered");
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn build_create_index_plan(
