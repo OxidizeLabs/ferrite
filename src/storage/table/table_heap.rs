@@ -829,6 +829,9 @@ impl TableHeap {
         schema: &Schema,
         meta: Arc<TupleMeta>,
     ) -> Result<RID, String> {
+        // Expand values to match schema, handling AUTO_INCREMENT and DEFAULT values
+        let expanded_values = self.expand_values_for_schema(values, schema)?;
+        
         let _write_guard = self.latch.write();
 
         // Get the last page
@@ -836,7 +839,7 @@ impl TableHeap {
         let page_guard = self.get_page(last_page_id)?;
 
         // Create a temporary tuple to check size (with dummy RID)
-        let temp_tuple = Tuple::new(&values, &schema, RID::default());
+        let temp_tuple = Tuple::new(&expanded_values, &schema, RID::default());
 
         {
             let mut page = page_guard.write();
@@ -847,7 +850,7 @@ impl TableHeap {
                 let next_rid = page.get_next_rid();
 
                 // Create the tuple with the correct RID
-                let tuple = Tuple::new(&values, &schema, next_rid);
+                let tuple = Tuple::new(&expanded_values, &schema, next_rid);
 
                 // Insert the tuple
                 match page.insert_tuple_with_rid(&meta, &tuple, next_rid) {
@@ -864,7 +867,91 @@ impl TableHeap {
         }
 
         // If we get here, we need a new page
-        self.create_new_page_and_insert_from_values(values, schema, &meta)
+        self.create_new_page_and_insert_from_values(expanded_values, schema, &meta)
+    }
+
+    /// Expands provided values to match the full schema by handling AUTO_INCREMENT and DEFAULT values
+    fn expand_values_for_schema(
+        &self,
+        values: Vec<Value>,
+        schema: &Schema,
+    ) -> Result<Vec<Value>, String> {
+        let schema_column_count = schema.get_column_count() as usize;
+        
+        // If we already have the right number of values, return as-is
+        if values.len() == schema_column_count {
+            return Ok(values);
+        }
+        
+        // If we have more values than columns, that's an error
+        if values.len() > schema_column_count {
+            return Err(format!(
+                "Too many values provided: {} values for {} columns",
+                values.len(),
+                schema_column_count
+            ));
+        }
+        
+        let mut expanded_values = Vec::with_capacity(schema_column_count);
+        
+        // Handle case where fewer values are provided than schema columns
+        // This assumes positional mapping for now - in a more sophisticated implementation,
+        // we might want to consider column names if available
+        for i in 0..schema_column_count {
+            let column = schema.get_column(i).ok_or_else(|| {
+                format!("Column index {} out of bounds in schema", i)
+            })?;
+            
+            if i < values.len() {
+                // We have a value for this position, use it
+                expanded_values.push(values[i].clone());
+            } else {
+                // We need to generate a value for this column
+                if column.is_primary_key() {
+                    // For AUTO_INCREMENT primary keys, generate the next value
+                    // For now, we'll use a simple incrementing integer
+                    // In a real implementation, this should track the maximum value
+                    let auto_increment_value = self.get_next_auto_increment_value()?;
+                    expanded_values.push(Value::new(auto_increment_value));
+                } else if let Some(default_value) = column.get_default_value() {
+                    // Use the column's default value
+                    if default_value.is_current_timestamp() {
+                        // Handle CURRENT_TIMESTAMP default
+                        let current_time = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_err(|e| format!("Failed to get current timestamp: {}", e))?
+                            .as_secs();
+                        expanded_values.push(Value::new(current_time));
+                    } else {
+                        expanded_values.push(default_value.clone());
+                    }
+                } else {
+                    // No default value, use NULL (or error if NOT NULL)
+                    if column.is_not_null() {
+                        return Err(format!(
+                            "Column '{}' cannot be NULL and has no default value",
+                            column.get_name()
+                        ));
+                    }
+                    expanded_values.push(Value::new_with_type(
+                        crate::types_db::value::Val::Null,
+                        column.get_type(),
+                    ));
+                }
+            }
+        }
+        
+        Ok(expanded_values)
+    }
+    
+    /// Gets the next auto-increment value for this table
+    /// For now, this is a simple implementation - in a real system this would
+    /// be tracked per table and persisted
+    fn get_next_auto_increment_value(&self) -> Result<i32, String> {
+        // Simple implementation: start from 1 and increment
+        // In a real implementation, this should be tracked per table
+        static AUTO_INCREMENT_COUNTER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);
+        Ok(AUTO_INCREMENT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
     }
 
     // Helper method to create a new page and insert values

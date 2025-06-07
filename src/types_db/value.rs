@@ -182,6 +182,16 @@ impl Value {
         )
     }
 
+    /// Checks if this value represents a CURRENT_TIMESTAMP default value
+    pub fn is_current_timestamp(&self) -> bool {
+        match &self.value_ {
+            Val::VarLen(s) | Val::ConstLen(s) => {
+                s.to_uppercase() == "CURRENT_TIMESTAMP" || s.to_uppercase() == "NOW()"
+            }
+            _ => false,
+        }
+    }
+
     pub fn new_with_type(val: Val, type_id: TypeId) -> Self {
         Self {
             value_: val,
