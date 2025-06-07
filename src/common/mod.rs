@@ -4,6 +4,7 @@ pub mod exception;
 pub mod hash_util;
 pub mod logger;
 pub mod macros;
+pub mod performance_monitor;
 pub mod result_writer;
 pub mod rid;
 pub mod statement_type;
