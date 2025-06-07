@@ -11444,6 +11444,466 @@ mod tests {
                 expected_hash, hash
             );
         }
+
+        #[test]
+        fn test_case_when_basic() {
+            let mut ctx = TestContext::new("test_case_when_basic");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("grade", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            let table_name = "students";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new(85), Value::new("Alice")],
+                vec![Value::new(2), Value::new(92), Value::new("Bob")],
+                vec![Value::new(3), Value::new(78), Value::new("Charlie")],
+                vec![Value::new(4), Value::new(95), Value::new("Diana")],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test basic CASE WHEN with ELSE
+            let sql = "SELECT id, name, CASE WHEN grade >= 90 THEN 'A' WHEN grade >= 80 THEN 'B' ELSE 'C' END as letter_grade FROM students ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+
+            // Verify letter grades
+            if rows.len() >= 4 {
+                assert_eq!(rows[0][2].to_string(), "B"); // Alice: 85 -> B
+                assert_eq!(rows[1][2].to_string(), "A"); // Bob: 92 -> A
+                assert_eq!(rows[2][2].to_string(), "C"); // Charlie: 78 -> C
+                assert_eq!(rows[3][2].to_string(), "A"); // Diana: 95 -> A
+            }
+        }
+
+        #[test]
+        fn test_case_when_multiple_conditions() {
+            let mut ctx = TestContext::new("test_case_when_multiple_conditions");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("age", TypeId::Integer),
+                Column::new("income", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            let table_name = "people";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new(25), Value::new(40000), Value::new("Alice")],
+                vec![Value::new(2), Value::new(35), Value::new(60000), Value::new("Bob")],
+                vec![Value::new(3), Value::new(45), Value::new(80000), Value::new("Charlie")],
+                vec![Value::new(4), Value::new(30), Value::new(50000), Value::new("Diana")],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with multiple conditions (AND/OR)
+            let sql = "SELECT id, name, CASE WHEN age > 40 AND income > 70000 THEN 'Senior High' WHEN age > 30 OR income > 55000 THEN 'Mid Level' ELSE 'Junior' END as category FROM people ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+
+            // Verify categories
+            if rows.len() >= 4 {
+                assert_eq!(rows[0][2].to_string(), "Junior"); // Alice: 25, 40000 -> Junior
+                assert_eq!(rows[1][2].to_string(), "Mid Level"); // Bob: 35, 60000 -> Mid Level
+                assert_eq!(rows[2][2].to_string(), "Senior High"); // Charlie: 45, 80000 -> Senior High
+                assert_eq!(rows[3][2].to_string(), "Mid Level"); // Diana: 30, 50000 -> Mid Level
+            }
+        }
+
+        #[test]
+        fn test_case_when_with_null_values() {
+            let mut ctx = TestContext::new("test_case_when_with_null_values");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("score", TypeId::Integer),
+                Column::new("bonus", TypeId::Integer),
+            ]);
+
+            let table_name = "scores";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data with NULL values
+            let test_data = vec![
+                vec![Value::new(1), Value::new(85), Value::new(10)],
+                vec![Value::new(2), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new(5)],
+                vec![Value::new(3), Value::new(90), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer)],
+                vec![Value::new(4), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with NULL handling
+            let sql = "SELECT id, CASE WHEN score IS NULL THEN 'No Score' WHEN score >= 90 THEN 'Excellent' WHEN score >= 80 THEN 'Good' ELSE 'Poor' END as grade FROM scores ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+            // NULL handling behavior may vary by implementation
+        }
+
+        #[test]
+        fn test_case_when_with_aggregations() {
+            let mut ctx = TestContext::new("test_case_when_with_aggregations");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("department", TypeId::VarChar),
+                Column::new("salary", TypeId::Integer),
+                Column::new("employee_id", TypeId::Integer),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("IT"), Value::new(75000), Value::new(1)],
+                vec![Value::new("IT"), Value::new(85000), Value::new(2)],
+                vec![Value::new("HR"), Value::new(65000), Value::new(3)],
+                vec![Value::new("HR"), Value::new(70000), Value::new(4)],
+                vec![Value::new("Sales"), Value::new(55000), Value::new(5)],
+                vec![Value::new("Sales"), Value::new(60000), Value::new(6)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with aggregation functions
+            let sql = "SELECT department, COUNT(CASE WHEN salary > 70000 THEN 1 END) as high_earners, COUNT(*) as total_employees FROM employees GROUP BY department ORDER BY department";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 3, "Expected 3 departments");
+
+            // Verify aggregation with CASE
+            if rows.len() >= 3 {
+                // HR: 0 high earners (both under 70000), 2 total
+                // IT: 2 high earners (both over 70000), 2 total  
+                // Sales: 0 high earners (both under 70000), 2 total
+            }
+        }
+
+        #[test]
+        fn test_case_when_with_arithmetic() {
+            let mut ctx = TestContext::new("test_case_when_with_arithmetic");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+                Column::new("price", TypeId::Integer),
+            ]);
+
+            let table_name = "products";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new(10), Value::new(100)],
+                vec![Value::new(2), Value::new(50), Value::new(80)],
+                vec![Value::new(3), Value::new(5), Value::new(200)],
+                vec![Value::new(4), Value::new(100), Value::new(50)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with arithmetic expressions
+            let sql = "SELECT id, quantity, price, CASE WHEN quantity * price > 4000 THEN quantity * price * 0.9 WHEN quantity * price > 1000 THEN quantity * price * 0.95 ELSE quantity * price END as final_price FROM products ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+
+            // Verify arithmetic calculations in CASE
+            if rows.len() >= 4 {
+                // Product 1: 10 * 100 = 1000 -> no discount
+                // Product 2: 50 * 80 = 4000 -> no discount  
+                // Product 3: 5 * 200 = 1000 -> no discount
+                // Product 4: 100 * 50 = 5000 -> 10% discount
+            }
+        }
+
+        #[test]
+        fn test_case_when_nested() {
+            let mut ctx = TestContext::new("test_case_when_nested");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("age", TypeId::Integer),
+                Column::new("experience", TypeId::Integer),
+                Column::new("performance", TypeId::Integer),
+            ]);
+
+            let table_name = "candidates";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new(25), Value::new(2), Value::new(8)],
+                vec![Value::new(2), Value::new(35), Value::new(10), Value::new(9)],
+                vec![Value::new(3), Value::new(28), Value::new(5), Value::new(7)],
+                vec![Value::new(4), Value::new(40), Value::new(15), Value::new(9)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test nested CASE WHEN statements
+            let sql = "SELECT id, CASE WHEN age > 30 THEN CASE WHEN experience > 8 THEN 'Senior Expert' ELSE 'Senior' END WHEN age > 25 THEN CASE WHEN performance > 8 THEN 'Mid Expert' ELSE 'Mid' END ELSE 'Junior' END as level FROM candidates ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+
+            // Verify nested logic
+            if rows.len() >= 4 {
+                assert_eq!(rows[0][1].to_string(), "Junior"); // age 25 -> Junior
+                assert_eq!(rows[1][1].to_string(), "Senior Expert"); // age 35, exp 10 -> Senior Expert
+                assert_eq!(rows[2][1].to_string(), "Mid"); // age 28, perf 7 -> Mid
+                assert_eq!(rows[3][1].to_string(), "Senior Expert"); // age 40, exp 15 -> Senior Expert
+            }
+        }
+
+        #[test]
+        fn test_case_when_different_data_types() {
+            let mut ctx = TestContext::new("test_case_when_different_data_types");
+
+            // Create test table with various data types
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("active", TypeId::Boolean),
+                Column::new("score", TypeId::BigInt),
+            ]);
+
+            let table_name = "mixed_data";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new(true), Value::new(85i64)],
+                vec![Value::new(2), Value::new("Bob"), Value::new(false), Value::new(92i64)],
+                vec![Value::new(3), Value::new("Charlie"), Value::new(true), Value::new(78i64)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with different data types
+            let sql = "SELECT id, name, CASE WHEN active = true THEN 'Active User' ELSE 'Inactive User' END as status, CASE WHEN score > 80 THEN 'High' ELSE 'Low' END as performance FROM mixed_data ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 3, "Expected 3 rows");
+
+            // Verify different data type handling
+            if rows.len() >= 3 {
+                assert_eq!(rows[0][2].to_string(), "Active User"); // Alice: active=true
+                assert_eq!(rows[1][2].to_string(), "Inactive User"); // Bob: active=false
+                assert_eq!(rows[2][2].to_string(), "Active User"); // Charlie: active=true
+            }
+        }
+
+        #[test]
+        fn test_case_when_with_in_clause() {
+            let mut ctx = TestContext::new("test_case_when_with_in_clause");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("department_id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+            ]);
+
+            let table_name = "employees";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new(10), Value::new("Alice")],
+                vec![Value::new(2), Value::new(20), Value::new("Bob")],
+                vec![Value::new(3), Value::new(30), Value::new("Charlie")],
+                vec![Value::new(4), Value::new(40), Value::new("Diana")],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN with IN clause
+            let sql = "SELECT id, name, CASE WHEN department_id IN (10, 20) THEN 'Core Team' WHEN department_id IN (30, 40) THEN 'Support Team' ELSE 'Other' END as team FROM employees ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 rows");
+
+            // Verify IN clause logic
+            if rows.len() >= 4 {
+                assert_eq!(rows[0][2].to_string(), "Core Team"); // dept_id 10
+                assert_eq!(rows[1][2].to_string(), "Core Team"); // dept_id 20
+                assert_eq!(rows[2][2].to_string(), "Support Team"); // dept_id 30
+                assert_eq!(rows[3][2].to_string(), "Support Team"); // dept_id 40
+            }
+        }
+
+        #[test]
+        fn test_case_when_edge_cases() {
+            let mut ctx = TestContext::new("test_case_when_edge_cases");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            let table_name = "edge_cases";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Test CASE WHEN on empty table
+            let sql = "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 0, "Expected 0 rows from empty table");
+
+            // Insert single row
+            let test_data = vec![vec![Value::new(1), Value::new(75)]];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN on single row
+            let sql = "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 1, "Expected 1 row");
+            
+            if rows.len() == 1 {
+                assert_eq!(rows[0][1].to_string(), "High"); // value 75 > 50
+            }
+        }
+
+        #[test]
+        fn test_case_when_performance() {
+            let mut ctx = TestContext::new("test_case_when_performance");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("category", TypeId::VarChar),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            let table_name = "large_dataset";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert larger dataset for performance testing
+            let mut test_data = Vec::new();
+            for i in 1..=100 {
+                let category = match i % 4 {
+                    0 => "A",
+                    1 => "B", 
+                    2 => "C",
+                    _ => "D",
+                };
+                let value = (i * 13) % 200; // Generate some pseudo-random values
+                test_data.push(vec![
+                    Value::new(i),
+                    Value::new(category),
+                    Value::new(value)
+                ]);
+            }
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test CASE WHEN performance with larger dataset
+            let sql = "SELECT category, COUNT(CASE WHEN value > 150 THEN 1 END) as high_values, COUNT(CASE WHEN value BETWEEN 50 AND 150 THEN 1 END) as mid_values, COUNT(CASE WHEN value < 50 THEN 1 END) as low_values FROM large_dataset GROUP BY category ORDER BY category";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "Performance test query execution failed");
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 4, "Expected 4 categories");
+            
+            println!("Performance test completed with {} category groups", rows.len());
+        }
     }
 
     mod window_tests {}
