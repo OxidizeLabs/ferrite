@@ -745,6 +745,107 @@ impl BufferPoolManager {
         let pages = self.pages.read();
         pages[*frame_id as usize].clone()
     }
+
+    /// PERFORMANCE OPTIMIZATION: Flush multiple dirty pages efficiently
+    pub fn flush_dirty_pages_batch(&self, max_pages: usize) -> Result<usize, String> {
+        trace!("Starting batch flush of up to {} dirty pages", max_pages);
+        
+        // Collect dirty page IDs in a single lock acquisition
+        let dirty_pages: Vec<PageId> = {
+            let pages = self.pages.read();
+            pages
+                .iter()
+                .filter_map(|page_opt| {
+                    if let Some(page) = page_opt {
+                        let page_guard = page.read();
+                        if page_guard.is_dirty() {
+                            Some(page_guard.get_page_id())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .take(max_pages)
+                .collect()
+        };
+
+        let mut flushed_count = 0;
+        for page_id in dirty_pages {
+            if let Ok(()) = self.flush_page(page_id) {
+                flushed_count += 1;
+            }
+        }
+
+        trace!("Successfully flushed {} dirty pages in batch", flushed_count);
+        Ok(flushed_count)
+    }
+
+    /// PERFORMANCE OPTIMIZATION: Get available frame with reduced lock contention
+    fn get_available_frame_optimized(&self) -> Option<FrameId> {
+        // Quick check for free frames first
+        {
+            let mut free_list = self.free_list.write();
+            if let Some(frame_id) = free_list.pop() {
+                trace!("Got frame {} from free list (optimized)", frame_id);
+                return Some(frame_id);
+            }
+        }
+
+        // If no free frames, try LRU eviction with optimized locking
+        trace!("No free frames, attempting optimized eviction");
+        
+        // Collect eviction candidates in a single pass
+        let eviction_candidates: Vec<(FrameId, PageId, bool)> = {
+            let pages = self.pages.read();
+            let mut candidates = Vec::new();
+            
+            for (frame_id, page_opt) in pages.iter().enumerate() {
+                if let Some(page) = page_opt {
+                    let page_guard = page.read();
+                    let pin_count = page_guard.get_pin_count();
+                    let page_id = page_guard.get_page_id();
+                    let is_dirty = page_guard.is_dirty();
+                    
+                    if pin_count == 0 {
+                        candidates.push((frame_id as FrameId, page_id, is_dirty));
+                        if candidates.len() >= 4 { // Limit search depth
+                            break;
+                        }
+                    }
+                }
+            }
+            candidates
+        };
+
+        // Try to evict from candidates using LRU policy
+        for (frame_id, page_id, is_dirty) in eviction_candidates {
+            let mut replacer = self.replacer.write();
+            replacer.set_evictable(frame_id, true);
+            
+            if let Some(evicted_frame) = replacer.evict() {
+                if evicted_frame == frame_id {
+                    drop(replacer); // Release lock before eviction
+                    
+                    if is_dirty {
+                        // Write dirty page to disk
+                        if let Some(page) = self.get_page_internal(page_id) {
+                            let _ = self.write_page_to_disk(page_id, &page);
+                        }
+                    }
+                    
+                    // Complete eviction process
+                    self.evict_old_page(frame_id, page_id);
+                    trace!("Successfully evicted frame {} (optimized)", frame_id);
+                    return Some(frame_id);
+                }
+            }
+        }
+
+        warn!("No evictable frames found (optimized path)");
+        None
+    }
 }
 
 impl Clone for BufferPoolManager {
