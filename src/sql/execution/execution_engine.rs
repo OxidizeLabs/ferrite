@@ -6137,7 +6137,7 @@ mod tests {
         use crate::sql::execution::execution_engine::tests::{TestContext, TestResultWriter};
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Val::Null;
-        use crate::types_db::value::Value;
+        use crate::types_db::value::{Val, Value};
 
         #[test]
         fn test_simple_queries() {
@@ -6538,7 +6538,7 @@ mod tests {
                     Value::new(true),
                     Value::new(50000i64),
                     Value::new(4.5f32),
-                    Value::new(95.7f64),
+                    Value::new_with_type(Val::Decimal(95.7), TypeId::Decimal),
                 ],
                 vec![
                     Value::new(2),
@@ -6546,7 +6546,7 @@ mod tests {
                     Value::new(false),
                     Value::new(60000i64),
                     Value::new(3.8f32),
-                    Value::new(87.2f64),
+                    Value::new_with_type(Val::Decimal(87.2), TypeId::Decimal),
                 ],
             ];
             ctx.insert_tuples("mixed_data", test_data, table_schema)
@@ -6715,7 +6715,576 @@ mod tests {
         }
     }
 
-    mod aggregation_tests {}
+    mod aggregation_tests {
+        use crate::catalog::column::Column;
+        use crate::catalog::schema::Schema;
+        use crate::sql::execution::execution_engine::tests::{TestContext, TestResultWriter};
+        use crate::types_db::type_id::TypeId;
+        use crate::types_db::types::Type;
+        use crate::types_db::value::Val::Null;
+        use crate::types_db::value::{Val, Value};
+
+        #[test]
+        fn test_count_aggregation() {
+            let mut ctx = TestContext::new("test_count_aggregation");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("department", TypeId::VarChar),
+                Column::new("salary", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice"), Value::new("Engineering"), Value::new(70000)],
+                vec![Value::new(2), Value::new("Bob"), Value::new("Sales"), Value::new(50000)],
+                vec![Value::new(3), Value::new("Charlie"), Value::new("Engineering"), Value::new(80000)],
+                vec![Value::new(4), Value::new("David"), Value::new("Sales"), Value::new(55000)],
+                vec![Value::new(5), Value::new("Eve"), Value::new("Marketing"), Value::new(60000)],
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test COUNT(*)
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT COUNT(*) FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "COUNT(*) query failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 5, "Should count 5 employees");
+
+            // Test COUNT(column)
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT COUNT(name) FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "COUNT(column) query failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 5, "Should count 5 names");
+
+            // Test COUNT(DISTINCT column)
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql("SELECT COUNT(DISTINCT department) FROM employees", ctx.exec_ctx.clone(), &mut writer3)
+                .unwrap();
+
+            assert!(success3, "COUNT(DISTINCT) query failed");
+            assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 3, "Should count 3 distinct departments");
+        }
+
+        #[test]
+        fn test_sum_aggregation() {
+            let mut ctx = TestContext::new("test_sum_aggregation");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("amount", TypeId::Integer),
+                Column::new("category", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("transactions", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new(100), Value::new("A")],
+                vec![Value::new(2), Value::new(200), Value::new("B")],
+                vec![Value::new(3), Value::new(150), Value::new("A")],
+                vec![Value::new(4), Value::new(300), Value::new("B")],
+                vec![Value::new(5), Value::new(75), Value::new("C")],
+            ];
+            ctx.insert_tuples("transactions", test_data, table_schema)
+                .unwrap();
+
+            // Test SUM
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT SUM(amount) FROM transactions", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "SUM query failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 825, "Should sum to 825");
+
+            // Test SUM with WHERE
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT SUM(amount) FROM transactions WHERE category = 'A'", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "SUM with WHERE query failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 250, "Should sum category A to 250");
+        }
+
+        #[test]
+        fn test_avg_aggregation() {
+            let mut ctx = TestContext::new("test_avg_aggregation");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("score", TypeId::Integer),
+                Column::new("subject", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("grades", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new(85), Value::new("Math")],
+                vec![Value::new(2), Value::new(92), Value::new("Math")],
+                vec![Value::new(3), Value::new(78), Value::new("Math")],
+                vec![Value::new(4), Value::new(88), Value::new("Science")],
+                vec![Value::new(5), Value::new(94), Value::new("Science")],
+            ];
+            ctx.insert_tuples("grades", test_data, table_schema)
+                .unwrap();
+
+            // Test AVG
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT AVG(score) FROM grades", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "AVG query failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
+            // (85 + 92 + 78 + 88 + 94) / 5 = 87.4
+            let avg_result = writer.get_rows()[0][0].as_decimal().unwrap();
+            assert!((avg_result - 87.4).abs() < 0.1, "Average should be approximately 87.4, got {}", avg_result);
+
+            // Test AVG with WHERE
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT AVG(score) FROM grades WHERE subject = 'Math'", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "AVG with WHERE query failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
+            // (85 + 92 + 78) / 3 = 85
+            let math_avg = writer2.get_rows()[0][0].as_decimal().unwrap();
+            assert!((math_avg - 85.0).abs() < 0.1, "Math average should be 85, got {}", math_avg);
+        }
+
+        #[test]
+        fn test_min_max_aggregation() {
+            let mut ctx = TestContext::new("test_min_max_aggregation");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("temperature", TypeId::Integer),
+                Column::new("city", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("weather", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new(22), Value::new("NYC")],
+                vec![Value::new(2), Value::new(35), Value::new("Phoenix")],
+                vec![Value::new(3), Value::new(18), Value::new("Seattle")],
+                vec![Value::new(4), Value::new(28), Value::new("Denver")],
+                vec![Value::new(5), Value::new(15), Value::new("Boston")],
+            ];
+            ctx.insert_tuples("weather", test_data, table_schema)
+                .unwrap();
+
+            // Test MIN
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT MIN(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "MIN query failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 15, "Minimum temperature should be 15");
+
+            // Test MAX
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT MAX(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "MAX query failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 35, "Maximum temperature should be 35");
+
+            // Test MIN and MAX together
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql("SELECT MIN(temperature), MAX(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer3)
+                .unwrap();
+
+            assert!(success3, "MIN and MAX query failed");
+            assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 15, "MIN should be 15");
+            assert_eq!(writer3.get_rows()[0][1].as_integer().unwrap(), 35, "MAX should be 35");
+        }
+
+        #[test]
+        fn test_aggregation_with_group_by() {
+            let mut ctx = TestContext::new("test_aggregation_with_group_by");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("department", TypeId::VarChar),
+                Column::new("salary", TypeId::Integer),
+                Column::new("bonus", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Engineering"), Value::new(70000), Value::new(5000)],
+                vec![Value::new(2), Value::new("Engineering"), Value::new(80000), Value::new(6000)],
+                vec![Value::new(3), Value::new("Sales"), Value::new(50000), Value::new(3000)],
+                vec![Value::new(4), Value::new("Sales"), Value::new(55000), Value::new(4000)],
+                vec![Value::new(5), Value::new("Marketing"), Value::new(60000), Value::new(4500)],
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test COUNT with GROUP BY
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT department, COUNT(*) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "COUNT with GROUP BY failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 department groups");
+
+            // Test SUM with GROUP BY
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT department, SUM(salary) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "SUM with GROUP BY failed");
+            assert_eq!(writer2.get_rows().len(), 3, "Should return 3 department groups");
+
+            // Test AVG with GROUP BY
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql("SELECT department, AVG(salary) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer3)
+                .unwrap();
+
+            assert!(success3, "AVG with GROUP BY failed");
+            assert_eq!(writer3.get_rows().len(), 3, "Should return 3 department groups");
+
+            // Test multiple aggregations with GROUP BY
+            let mut writer4 = TestResultWriter::new();
+            let success4 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT department, COUNT(*), SUM(salary), AVG(salary), MIN(salary), MAX(salary) FROM employees GROUP BY department",
+                    ctx.exec_ctx.clone(),
+                    &mut writer4
+                )
+                .unwrap();
+
+            assert!(success4, "Multiple aggregations with GROUP BY failed");
+            assert_eq!(writer4.get_rows().len(), 3, "Should return 3 department groups");
+            assert_eq!(writer4.get_schema().get_columns().len(), 6, "Should return 6 columns");
+        }
+
+        #[test]
+        fn test_aggregation_with_having() {
+            let mut ctx = TestContext::new("test_aggregation_with_having");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("department", TypeId::VarChar),
+                Column::new("salary", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("employees", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Engineering"), Value::new(70000)],
+                vec![Value::new(2), Value::new("Engineering"), Value::new(80000)],
+                vec![Value::new(3), Value::new("Engineering"), Value::new(90000)],
+                vec![Value::new(4), Value::new("Sales"), Value::new(50000)],
+                vec![Value::new(5), Value::new("Sales"), Value::new(55000)],
+                vec![Value::new(6), Value::new("Marketing"), Value::new(60000)], // Only 1 person
+            ];
+            ctx.insert_tuples("employees", test_data, table_schema)
+                .unwrap();
+
+            // Test HAVING with COUNT
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT department, COUNT(*) FROM employees GROUP BY department HAVING COUNT(*) > 1",
+                    ctx.exec_ctx.clone(),
+                    &mut writer
+                )
+                .unwrap();
+
+            assert!(success, "HAVING with COUNT failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 departments with more than 1 employee");
+
+            // Test HAVING with AVG
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT department, AVG(salary) FROM employees GROUP BY department HAVING AVG(salary) > 60000",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2
+                )
+                .unwrap();
+
+            assert!(success2, "HAVING with AVG failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 department with avg salary > 60000");
+        }
+
+        #[test]
+        fn test_aggregation_with_null_values() {
+            let mut ctx = TestContext::new("test_aggregation_with_null_values");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+                Column::new("category", TypeId::VarChar),
+            ]);
+
+            ctx.create_test_table("test_nulls", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new(10), Value::new("A")],
+                vec![Value::new(2), Value::new(Null), Value::new("A")], // NULL value
+                vec![Value::new(3), Value::new(20), Value::new("B")],
+                vec![Value::new(4), Value::new(30), Value::new("A")],
+                vec![Value::new(5), Value::new(Null), Value::new("B")], // NULL value
+            ];
+            ctx.insert_tuples("test_nulls", test_data, table_schema)
+                .unwrap();
+
+            // Test COUNT(*) with NULLs - should count all rows
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT COUNT(*) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "COUNT(*) with NULLs failed");
+            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 5, "COUNT(*) should include NULL rows");
+
+            // Test COUNT(column) with NULLs - should exclude NULLs
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT COUNT(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "COUNT(column) with NULLs failed");
+            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 3, "COUNT(column) should exclude NULLs");
+
+            // Test SUM with NULLs - should ignore NULLs
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql("SELECT SUM(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer3)
+                .unwrap();
+
+            assert!(success3, "SUM with NULLs failed");
+            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 60, "SUM should be 10+20+30=60, ignoring NULLs");
+
+            // Test AVG with NULLs - should ignore NULLs
+            let mut writer4 = TestResultWriter::new();
+            let success4 = ctx
+                .engine
+                .execute_sql("SELECT AVG(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer4)
+                .unwrap();
+
+            assert!(success4, "AVG with NULLs failed");
+            let avg_result = writer4.get_rows()[0][0].as_decimal().unwrap();
+            assert!((avg_result - 20.0).abs() < 0.1, "AVG should be 60/3=20, got {}", avg_result);
+        }
+
+        #[test]
+        fn test_aggregation_on_empty_table() {
+            let mut ctx = TestContext::new("test_aggregation_on_empty_table");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("empty_table", table_schema)
+                .unwrap();
+
+            // Test COUNT(*) on empty table
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql("SELECT COUNT(*) FROM empty_table", ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+
+            assert!(success, "COUNT(*) on empty table failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
+            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 0, "COUNT(*) should be 0 on empty table");
+
+            // Test SUM on empty table - should return NULL
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql("SELECT SUM(value) FROM empty_table", ctx.exec_ctx.clone(), &mut writer2)
+                .unwrap();
+
+            assert!(success2, "SUM on empty table failed");
+            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
+            // SUM on empty table should return NULL (handled by the database engine)
+
+            // Test AVG on empty table - should return NULL
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql("SELECT AVG(value) FROM empty_table", ctx.exec_ctx.clone(), &mut writer3)
+                .unwrap();
+
+            assert!(success3, "AVG on empty table failed");
+            assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
+        }
+
+        #[test]
+        fn test_complex_aggregation_scenarios() {
+            let mut ctx = TestContext::new("test_complex_aggregation_scenarios");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("product", TypeId::VarChar),
+                Column::new("category", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("sales", table_schema.clone())
+                .unwrap();
+
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Laptop"), Value::new("Electronics"), Value::new(1000), Value::new(2)],
+                vec![Value::new(2), Value::new("Mouse"), Value::new("Electronics"), Value::new(25), Value::new(10)],
+                vec![Value::new(3), Value::new("Chair"), Value::new("Furniture"), Value::new(200), Value::new(5)],
+                vec![Value::new(4), Value::new("Desk"), Value::new("Furniture"), Value::new(500), Value::new(3)],
+                vec![Value::new(5), Value::new("Phone"), Value::new("Electronics"), Value::new(800), Value::new(1)],
+            ];
+            ctx.insert_tuples("sales", test_data, table_schema)
+                .unwrap();
+
+            // Test aggregation with calculated fields
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, SUM(price * quantity) as total_revenue FROM sales GROUP BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer
+                )
+                .unwrap();
+
+            assert!(success, "Aggregation with calculated fields failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 categories");
+
+            // Test multiple levels of aggregation
+            let mut writer2 = TestResultWriter::new();
+            let success2 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) as product_count, AVG(price) as avg_price, SUM(quantity) as total_quantity FROM sales GROUP BY category ORDER BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2
+                )
+                .unwrap();
+
+            assert!(success2, "Multiple aggregations failed");
+            assert_eq!(writer2.get_rows().len(), 2, "Should return 2 categories");
+            assert_eq!(writer2.get_schema().get_columns().len(), 4, "Should return 4 columns");
+
+            // Test aggregation with WHERE and HAVING
+            let mut writer3 = TestResultWriter::new();
+            let success3 = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) FROM sales WHERE price > 100 GROUP BY category HAVING COUNT(*) > 1",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3
+                )
+                .unwrap();
+
+            assert!(success3, "Complex aggregation with WHERE and HAVING failed");
+            // Should filter to products with price > 100, then group by category, then filter groups with count > 1
+        }
+
+        #[test]
+        fn test_aggregation_performance() {
+            let mut ctx = TestContext::new("test_aggregation_performance");
+
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("group_id", TypeId::Integer),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            ctx.create_test_table("large_dataset", table_schema.clone())
+                .unwrap();
+
+            // Insert larger dataset for performance testing
+            let mut test_data = Vec::new();
+            for i in 1..=1000 {
+                test_data.push(vec![
+                    Value::new(i),
+                    Value::new(i % 10), // 10 groups
+                    Value::new(i * 2),
+                ]);
+            }
+            ctx.insert_tuples("large_dataset", test_data, table_schema)
+                .unwrap();
+
+            // Test aggregation performance on larger dataset
+            let test_cases = vec![
+                "SELECT COUNT(*) FROM large_dataset",
+                "SELECT SUM(value) FROM large_dataset",
+                "SELECT AVG(value) FROM large_dataset",
+                "SELECT MIN(value), MAX(value) FROM large_dataset",
+                "SELECT group_id, COUNT(*) FROM large_dataset GROUP BY group_id",
+                "SELECT group_id, SUM(value), AVG(value) FROM large_dataset GROUP BY group_id",
+            ];
+
+            for sql in test_cases {
+                let mut writer = TestResultWriter::new();
+                let success = ctx
+                    .engine
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .unwrap();
+
+                assert!(success, "Performance test failed for: {}", sql);
+                assert!(writer.get_rows().len() > 0, "Should return results for: {}", sql);
+            }
+        }
+    }
 
     mod group_by_tests {
         use super::*;
