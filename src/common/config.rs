@@ -16,10 +16,20 @@ pub const INVALID_LSN: Lsn = u64::MAX; // invalid log sequence number
 pub const INVALID_TS: Timestamp = Timestamp::MAX;
 pub const HEADER_PAGE_ID: PageId = u64::MAX; // the header page id
 pub const DB_PAGE_SIZE: u64 = 4096; // size of a data page in bytes
-pub const BUFFER_POOL_SIZE: u64 = 10; // size of buffer pool
+
+// PERFORMANCE OPTIMIZATION: Dramatically increased buffer pool size
+pub const BUFFER_POOL_SIZE: u64 = 8192; // 32MB buffer pool (8192 * 4KB pages)
 pub const LOG_BUFFER_SIZE: u64 = (BUFFER_POOL_SIZE + 1) * DB_PAGE_SIZE; // size of a log buffer in bytes
 pub const BUCKET_SIZE: u64 = 50; // size of extendable hash bucket
-pub const LRUK_REPLACER_K: u64 = 10; // lookback window for lru-k replacer
+
+// PERFORMANCE OPTIMIZATION: Reduced LRU-K window for faster eviction decisions  
+pub const LRUK_REPLACER_K: u64 = 2; // lookback window for lru-k replacer (reduced from 10)
+
+// NEW PERFORMANCE PARAMETERS
+pub const BATCH_INSERT_THRESHOLD: usize = 100; // Process inserts in batches of 100
+pub const DISK_IO_BATCH_SIZE: usize = 16; // Batch disk operations
+pub const PAGE_PREFETCH_COUNT: usize = 4; // Number of pages to prefetch
+pub const FLUSH_THRESHOLD: usize = 1000; // Flush after 1000 dirty pages
 
 pub type FrameId = u64; // frame id type
 pub type PageId = u64; // page id type
