@@ -6233,18 +6233,30 @@ mod tests {
 
             assert!(success, "SELECT * query failed");
             assert_eq!(writer.get_rows().len(), 3, "Should return all 3 rows");
-            assert_eq!(writer.get_schema().get_columns().len(), 5, "Should return all 5 columns");
+            assert_eq!(
+                writer.get_schema().get_columns().len(),
+                5,
+                "Should return all 5 columns"
+            );
 
             // Test selecting specific columns
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT name, age FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT name, age FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "SELECT specific columns failed");
             assert_eq!(writer2.get_rows().len(), 3, "Should return all 3 rows");
-            assert_eq!(writer2.get_schema().get_columns().len(), 2, "Should return 2 columns");
+            assert_eq!(
+                writer2.get_schema().get_columns().len(),
+                2,
+                "Should return 2 columns"
+            );
         }
 
         #[test]
@@ -6263,8 +6275,7 @@ mod tests {
                 vec![Value::new(1), Value::new("Alice")],
                 vec![Value::new(2), Value::new("Bob")],
             ];
-            ctx.insert_tuples("users", test_data, table_schema)
-                .unwrap();
+            ctx.insert_tuples("users", test_data, table_schema).unwrap();
 
             // Test SELECT with constants
             let test_cases = vec![
@@ -6283,8 +6294,18 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
-                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
+                assert_eq!(
+                    writer.get_schema().get_columns().len(),
+                    expected_columns,
+                    "Column count mismatch for: {}",
+                    sql
+                );
             }
         }
 
@@ -6303,9 +6324,24 @@ mod tests {
                 .unwrap();
 
             let test_data = vec![
-                vec![Value::new(1), Value::new(100), Value::new(5), Value::new("Widget")],
-                vec![Value::new(2), Value::new(200), Value::new(3), Value::new("Gadget")],
-                vec![Value::new(3), Value::new(50), Value::new(10), Value::new("Tool")],
+                vec![
+                    Value::new(1),
+                    Value::new(100),
+                    Value::new(5),
+                    Value::new("Widget"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new(200),
+                    Value::new(3),
+                    Value::new("Gadget"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new(50),
+                    Value::new(10),
+                    Value::new("Tool"),
+                ],
             ];
             ctx.insert_tuples("products", test_data, table_schema)
                 .unwrap();
@@ -6327,8 +6363,18 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
-                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
+                assert_eq!(
+                    writer.get_schema().get_columns().len(),
+                    expected_columns,
+                    "Column count mismatch for: {}",
+                    sql
+                );
             }
         }
 
@@ -6359,21 +6405,37 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT DISTINCT department FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT DISTINCT department FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "DISTINCT query failed");
-            assert_eq!(writer.get_rows().len(), 2, "Should return 2 distinct departments");
+            assert_eq!(
+                writer.get_rows().len(),
+                2,
+                "Should return 2 distinct departments"
+            );
 
             // Test DISTINCT on multiple columns
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT DISTINCT department, city FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT DISTINCT department, city FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "DISTINCT multiple columns failed");
-            assert_eq!(writer2.get_rows().len(), 4, "Should return 4 distinct combinations");
+            assert_eq!(
+                writer2.get_rows().len(),
+                4,
+                "Should return 4 distinct combinations"
+            );
         }
 
         #[test]
@@ -6395,8 +6457,7 @@ mod tests {
                 vec![Value::new(4), Value::new("David")],
                 vec![Value::new(5), Value::new("Eve")],
             ];
-            ctx.insert_tuples("users", test_data, table_schema)
-                .unwrap();
+            ctx.insert_tuples("users", test_data, table_schema).unwrap();
 
             // Test different LIMIT values
             let test_cases = vec![
@@ -6414,7 +6475,12 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
             }
         }
 
@@ -6437,14 +6503,13 @@ mod tests {
                 vec![Value::new(4), Value::new("David")],
                 vec![Value::new(5), Value::new("Eve")],
             ];
-            ctx.insert_tuples("users", test_data, table_schema)
-                .unwrap();
+            ctx.insert_tuples("users", test_data, table_schema).unwrap();
 
             // Test OFFSET with LIMIT
             let test_cases = vec![
                 ("SELECT * FROM users LIMIT 3 OFFSET 1", 3), // Skip first, take 3
                 ("SELECT * FROM users LIMIT 2 OFFSET 3", 2), // Skip first 3, take 2
-                ("SELECT * FROM users OFFSET 2", 3), // Skip first 2, take all remaining
+                ("SELECT * FROM users OFFSET 2", 3),         // Skip first 2, take all remaining
                 ("SELECT * FROM users LIMIT 1 OFFSET 4", 1), // Skip first 4, take 1
             ];
 
@@ -6456,7 +6521,12 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
             }
         }
 
@@ -6475,8 +6545,18 @@ mod tests {
                 .unwrap();
 
             let test_data = vec![
-                vec![Value::new(1), Value::new("John"), Value::new("Doe"), Value::new(1990)],
-                vec![Value::new(2), Value::new("Jane"), Value::new("Smith"), Value::new(1985)],
+                vec![
+                    Value::new(1),
+                    Value::new("John"),
+                    Value::new("Doe"),
+                    Value::new(1990),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Jane"),
+                    Value::new("Smith"),
+                    Value::new(1985),
+                ],
             ];
             ctx.insert_tuples("employees", test_data, table_schema)
                 .unwrap();
@@ -6494,11 +6574,23 @@ mod tests {
 
             assert!(success, "Column alias query failed");
             assert_eq!(writer.get_rows().len(), 2, "Should return 2 rows");
-            
+
             let schema = writer.get_schema();
-            assert_eq!(schema.get_columns()[0].get_name(), "id", "First column should be aliased as 'id'");
-            assert_eq!(schema.get_columns()[1].get_name(), "fname", "Second column should be aliased as 'fname'");
-            assert_eq!(schema.get_columns()[2].get_name(), "lname", "Third column should be aliased as 'lname'");
+            assert_eq!(
+                schema.get_columns()[0].get_name(),
+                "id",
+                "First column should be aliased as 'id'"
+            );
+            assert_eq!(
+                schema.get_columns()[1].get_name(),
+                "fname",
+                "Second column should be aliased as 'fname'"
+            );
+            assert_eq!(
+                schema.get_columns()[2].get_name(),
+                "lname",
+                "Third column should be aliased as 'lname'"
+            );
 
             // Test table alias
             let mut writer2 = TestResultWriter::new();
@@ -6572,8 +6664,18 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
-                assert_eq!(writer.get_schema().get_columns().len(), expected_columns, "Column count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
+                assert_eq!(
+                    writer.get_schema().get_columns().len(),
+                    expected_columns,
+                    "Column count mismatch for: {}",
+                    sql
+                );
             }
         }
 
@@ -6618,17 +6720,29 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT * FROM nullable_data", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT * FROM nullable_data",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "Query with NULL values failed");
-            assert_eq!(writer.get_rows().len(), 3, "Should return all 3 rows including those with NULLs");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Should return all 3 rows including those with NULLs"
+            );
 
             // Test selecting specific columns with NULLs
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT name, optional_field FROM nullable_data", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT name, optional_field FROM nullable_data",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "Query selecting columns with NULLs failed");
@@ -6644,8 +6758,7 @@ mod tests {
                 Column::new("name", TypeId::VarChar),
             ]);
 
-            ctx.create_test_table("empty_table", table_schema)
-                .unwrap();
+            ctx.create_test_table("empty_table", table_schema).unwrap();
 
             // Test selecting from empty table
             let test_cases = vec![
@@ -6664,7 +6777,12 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), 0, "Empty table should return 0 rows for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    0,
+                    "Empty table should return 0 rows for: {}",
+                    sql
+                );
             }
         }
 
@@ -6710,7 +6828,12 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(writer.get_rows().len(), expected_rows, "Row count mismatch for: {}", sql);
+                assert_eq!(
+                    writer.get_rows().len(),
+                    expected_rows,
+                    "Row count mismatch for: {}",
+                    sql
+                );
             }
         }
     }
@@ -6722,7 +6845,7 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::types::Type;
         use crate::types_db::value::Val::Null;
-        use crate::types_db::value::{Val, Value};
+        use crate::types_db::value::Value;
 
         #[test]
         fn test_count_aggregation() {
@@ -6739,11 +6862,36 @@ mod tests {
                 .unwrap();
 
             let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new("Engineering"), Value::new(70000)],
-                vec![Value::new(2), Value::new("Bob"), Value::new("Sales"), Value::new(50000)],
-                vec![Value::new(3), Value::new("Charlie"), Value::new("Engineering"), Value::new(80000)],
-                vec![Value::new(4), Value::new("David"), Value::new("Sales"), Value::new(55000)],
-                vec![Value::new(5), Value::new("Eve"), Value::new("Marketing"), Value::new(60000)],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new("Engineering"),
+                    Value::new(70000),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new("Sales"),
+                    Value::new(50000),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new("Engineering"),
+                    Value::new(80000),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("David"),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Eve"),
+                    Value::new("Marketing"),
+                    Value::new(60000),
+                ],
             ];
             ctx.insert_tuples("employees", test_data, table_schema)
                 .unwrap();
@@ -6752,34 +6900,58 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT COUNT(*) FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT COUNT(*) FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "COUNT(*) query failed");
             assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 5, "Should count 5 employees");
+            assert_eq!(
+                writer.get_rows()[0][0].as_integer().unwrap(),
+                5,
+                "Should count 5 employees"
+            );
 
             // Test COUNT(column)
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT COUNT(name) FROM employees", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT COUNT(name) FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "COUNT(column) query failed");
             assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 5, "Should count 5 names");
+            assert_eq!(
+                writer2.get_rows()[0][0].as_integer().unwrap(),
+                5,
+                "Should count 5 names"
+            );
 
             // Test COUNT(DISTINCT column)
             let mut writer3 = TestResultWriter::new();
             let success3 = ctx
                 .engine
-                .execute_sql("SELECT COUNT(DISTINCT department) FROM employees", ctx.exec_ctx.clone(), &mut writer3)
+                .execute_sql(
+                    "SELECT COUNT(DISTINCT department) FROM employees",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3,
+                )
                 .unwrap();
 
             assert!(success3, "COUNT(DISTINCT) query failed");
             assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 3, "Should count 3 distinct departments");
+            assert_eq!(
+                writer3.get_rows()[0][0].as_integer().unwrap(),
+                3,
+                "Should count 3 distinct departments"
+            );
         }
 
         #[test]
@@ -6809,23 +6981,39 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT SUM(amount) FROM transactions", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT SUM(amount) FROM transactions",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "SUM query failed");
             assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 825, "Should sum to 825");
+            assert_eq!(
+                writer.get_rows()[0][0].as_integer().unwrap(),
+                825,
+                "Should sum to 825"
+            );
 
             // Test SUM with WHERE
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT SUM(amount) FROM transactions WHERE category = 'A'", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT SUM(amount) FROM transactions WHERE category = 'A'",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "SUM with WHERE query failed");
             assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 250, "Should sum category A to 250");
+            assert_eq!(
+                writer2.get_rows()[0][0].as_integer().unwrap(),
+                250,
+                "Should sum category A to 250"
+            );
         }
 
         #[test]
@@ -6855,27 +7043,43 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT AVG(score) FROM grades", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT AVG(score) FROM grades",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "AVG query failed");
             assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
             // (85 + 92 + 78 + 88 + 94) / 5 = 87.4
             let avg_result = writer.get_rows()[0][0].as_decimal().unwrap();
-            assert!((avg_result - 87.4).abs() < 0.1, "Average should be approximately 87.4, got {}", avg_result);
+            assert!(
+                (avg_result - 87.4).abs() < 0.1,
+                "Average should be approximately 87.4, got {}",
+                avg_result
+            );
 
             // Test AVG with WHERE
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT AVG(score) FROM grades WHERE subject = 'Math'", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT AVG(score) FROM grades WHERE subject = 'Math'",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "AVG with WHERE query failed");
             assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
             // (85 + 92 + 78) / 3 = 85
             let math_avg = writer2.get_rows()[0][0].as_decimal().unwrap();
-            assert!((math_avg - 85.0).abs() < 0.1, "Math average should be 85, got {}", math_avg);
+            assert!(
+                (math_avg - 85.0).abs() < 0.1,
+                "Math average should be 85, got {}",
+                math_avg
+            );
         }
 
         #[test]
@@ -6905,35 +7109,63 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT MIN(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT MIN(temperature) FROM weather",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "MIN query failed");
             assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 15, "Minimum temperature should be 15");
+            assert_eq!(
+                writer.get_rows()[0][0].as_integer().unwrap(),
+                15,
+                "Minimum temperature should be 15"
+            );
 
             // Test MAX
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT MAX(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT MAX(temperature) FROM weather",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "MAX query failed");
             assert_eq!(writer2.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 35, "Maximum temperature should be 35");
+            assert_eq!(
+                writer2.get_rows()[0][0].as_integer().unwrap(),
+                35,
+                "Maximum temperature should be 35"
+            );
 
             // Test MIN and MAX together
             let mut writer3 = TestResultWriter::new();
             let success3 = ctx
                 .engine
-                .execute_sql("SELECT MIN(temperature), MAX(temperature) FROM weather", ctx.exec_ctx.clone(), &mut writer3)
+                .execute_sql(
+                    "SELECT MIN(temperature), MAX(temperature) FROM weather",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3,
+                )
                 .unwrap();
 
             assert!(success3, "MIN and MAX query failed");
             assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 15, "MIN should be 15");
-            assert_eq!(writer3.get_rows()[0][1].as_integer().unwrap(), 35, "MAX should be 35");
+            assert_eq!(
+                writer3.get_rows()[0][0].as_integer().unwrap(),
+                15,
+                "MIN should be 15"
+            );
+            assert_eq!(
+                writer3.get_rows()[0][1].as_integer().unwrap(),
+                35,
+                "MAX should be 35"
+            );
         }
 
         #[test]
@@ -6951,11 +7183,36 @@ mod tests {
                 .unwrap();
 
             let test_data = vec![
-                vec![Value::new(1), Value::new("Engineering"), Value::new(70000), Value::new(5000)],
-                vec![Value::new(2), Value::new("Engineering"), Value::new(80000), Value::new(6000)],
-                vec![Value::new(3), Value::new("Sales"), Value::new(50000), Value::new(3000)],
-                vec![Value::new(4), Value::new("Sales"), Value::new(55000), Value::new(4000)],
-                vec![Value::new(5), Value::new("Marketing"), Value::new(60000), Value::new(4500)],
+                vec![
+                    Value::new(1),
+                    Value::new("Engineering"),
+                    Value::new(70000),
+                    Value::new(5000),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Engineering"),
+                    Value::new(80000),
+                    Value::new(6000),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Sales"),
+                    Value::new(50000),
+                    Value::new(3000),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                    Value::new(4000),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Marketing"),
+                    Value::new(60000),
+                    Value::new(4500),
+                ],
             ];
             ctx.insert_tuples("employees", test_data, table_schema)
                 .unwrap();
@@ -6964,31 +7221,55 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT department, COUNT(*) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT department, COUNT(*) FROM employees GROUP BY department",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "COUNT with GROUP BY failed");
-            assert_eq!(writer.get_rows().len(), 3, "Should return 3 department groups");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Should return 3 department groups"
+            );
 
             // Test SUM with GROUP BY
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT department, SUM(salary) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT department, SUM(salary) FROM employees GROUP BY department",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "SUM with GROUP BY failed");
-            assert_eq!(writer2.get_rows().len(), 3, "Should return 3 department groups");
+            assert_eq!(
+                writer2.get_rows().len(),
+                3,
+                "Should return 3 department groups"
+            );
 
             // Test AVG with GROUP BY
             let mut writer3 = TestResultWriter::new();
             let success3 = ctx
                 .engine
-                .execute_sql("SELECT department, AVG(salary) FROM employees GROUP BY department", ctx.exec_ctx.clone(), &mut writer3)
+                .execute_sql(
+                    "SELECT department, AVG(salary) FROM employees GROUP BY department",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3,
+                )
                 .unwrap();
 
             assert!(success3, "AVG with GROUP BY failed");
-            assert_eq!(writer3.get_rows().len(), 3, "Should return 3 department groups");
+            assert_eq!(
+                writer3.get_rows().len(),
+                3,
+                "Should return 3 department groups"
+            );
 
             // Test multiple aggregations with GROUP BY
             let mut writer4 = TestResultWriter::new();
@@ -7002,8 +7283,16 @@ mod tests {
                 .unwrap();
 
             assert!(success4, "Multiple aggregations with GROUP BY failed");
-            assert_eq!(writer4.get_rows().len(), 3, "Should return 3 department groups");
-            assert_eq!(writer4.get_schema().get_columns().len(), 6, "Should return 6 columns");
+            assert_eq!(
+                writer4.get_rows().len(),
+                3,
+                "Should return 3 department groups"
+            );
+            assert_eq!(
+                writer4.get_schema().get_columns().len(),
+                6,
+                "Should return 6 columns"
+            );
         }
 
         #[test]
@@ -7042,7 +7331,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "HAVING with COUNT failed");
-            assert_eq!(writer.get_rows().len(), 2, "Should return 2 departments with more than 1 employee");
+            assert_eq!(
+                writer.get_rows().len(),
+                2,
+                "Should return 2 departments with more than 1 employee"
+            );
 
             // Test HAVING with AVG
             let mut writer2 = TestResultWriter::new();
@@ -7056,7 +7349,11 @@ mod tests {
                 .unwrap();
 
             assert!(success2, "HAVING with AVG failed");
-            assert_eq!(writer2.get_rows().len(), 1, "Should return 1 department with avg salary > 60000");
+            assert_eq!(
+                writer2.get_rows().len(),
+                1,
+                "Should return 1 department with avg salary > 60000"
+            );
         }
 
         #[test]
@@ -7086,42 +7383,74 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT COUNT(*) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT COUNT(*) FROM test_nulls",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "COUNT(*) with NULLs failed");
-            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 5, "COUNT(*) should include NULL rows");
+            assert_eq!(
+                writer.get_rows()[0][0].as_integer().unwrap(),
+                5,
+                "COUNT(*) should include NULL rows"
+            );
 
             // Test COUNT(column) with NULLs - should exclude NULLs
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT COUNT(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT COUNT(value) FROM test_nulls",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "COUNT(column) with NULLs failed");
-            assert_eq!(writer2.get_rows()[0][0].as_integer().unwrap(), 3, "COUNT(column) should exclude NULLs");
+            assert_eq!(
+                writer2.get_rows()[0][0].as_integer().unwrap(),
+                3,
+                "COUNT(column) should exclude NULLs"
+            );
 
             // Test SUM with NULLs - should ignore NULLs
             let mut writer3 = TestResultWriter::new();
             let success3 = ctx
                 .engine
-                .execute_sql("SELECT SUM(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer3)
+                .execute_sql(
+                    "SELECT SUM(value) FROM test_nulls",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3,
+                )
                 .unwrap();
 
             assert!(success3, "SUM with NULLs failed");
-            assert_eq!(writer3.get_rows()[0][0].as_integer().unwrap(), 60, "SUM should be 10+20+30=60, ignoring NULLs");
+            assert_eq!(
+                writer3.get_rows()[0][0].as_integer().unwrap(),
+                60,
+                "SUM should be 10+20+30=60, ignoring NULLs"
+            );
 
             // Test AVG with NULLs - should ignore NULLs
             let mut writer4 = TestResultWriter::new();
             let success4 = ctx
                 .engine
-                .execute_sql("SELECT AVG(value) FROM test_nulls", ctx.exec_ctx.clone(), &mut writer4)
+                .execute_sql(
+                    "SELECT AVG(value) FROM test_nulls",
+                    ctx.exec_ctx.clone(),
+                    &mut writer4,
+                )
                 .unwrap();
 
             assert!(success4, "AVG with NULLs failed");
             let avg_result = writer4.get_rows()[0][0].as_decimal().unwrap();
-            assert!((avg_result - 20.0).abs() < 0.1, "AVG should be 60/3=20, got {}", avg_result);
+            assert!(
+                (avg_result - 20.0).abs() < 0.1,
+                "AVG should be 60/3=20, got {}",
+                avg_result
+            );
         }
 
         #[test]
@@ -7133,25 +7462,36 @@ mod tests {
                 Column::new("value", TypeId::Integer),
             ]);
 
-            ctx.create_test_table("empty_table", table_schema)
-                .unwrap();
+            ctx.create_test_table("empty_table", table_schema).unwrap();
 
             // Test COUNT(*) on empty table
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT COUNT(*) FROM empty_table", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(
+                    "SELECT COUNT(*) FROM empty_table",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
                 .unwrap();
 
             assert!(success, "COUNT(*) on empty table failed");
             assert_eq!(writer.get_rows().len(), 1, "Should return 1 row");
-            assert_eq!(writer.get_rows()[0][0].as_integer().unwrap(), 0, "COUNT(*) should be 0 on empty table");
+            assert_eq!(
+                writer.get_rows()[0][0].as_integer().unwrap(),
+                0,
+                "COUNT(*) should be 0 on empty table"
+            );
 
             // Test SUM on empty table - should return NULL
             let mut writer2 = TestResultWriter::new();
             let success2 = ctx
                 .engine
-                .execute_sql("SELECT SUM(value) FROM empty_table", ctx.exec_ctx.clone(), &mut writer2)
+                .execute_sql(
+                    "SELECT SUM(value) FROM empty_table",
+                    ctx.exec_ctx.clone(),
+                    &mut writer2,
+                )
                 .unwrap();
 
             assert!(success2, "SUM on empty table failed");
@@ -7162,7 +7502,11 @@ mod tests {
             let mut writer3 = TestResultWriter::new();
             let success3 = ctx
                 .engine
-                .execute_sql("SELECT AVG(value) FROM empty_table", ctx.exec_ctx.clone(), &mut writer3)
+                .execute_sql(
+                    "SELECT AVG(value) FROM empty_table",
+                    ctx.exec_ctx.clone(),
+                    &mut writer3,
+                )
                 .unwrap();
 
             assert!(success3, "AVG on empty table failed");
@@ -7185,14 +7529,43 @@ mod tests {
                 .unwrap();
 
             let test_data = vec![
-                vec![Value::new(1), Value::new("Laptop"), Value::new("Electronics"), Value::new(1000), Value::new(2)],
-                vec![Value::new(2), Value::new("Mouse"), Value::new("Electronics"), Value::new(25), Value::new(10)],
-                vec![Value::new(3), Value::new("Chair"), Value::new("Furniture"), Value::new(200), Value::new(5)],
-                vec![Value::new(4), Value::new("Desk"), Value::new("Furniture"), Value::new(500), Value::new(3)],
-                vec![Value::new(5), Value::new("Phone"), Value::new("Electronics"), Value::new(800), Value::new(1)],
+                vec![
+                    Value::new(1),
+                    Value::new("Laptop"),
+                    Value::new("Electronics"),
+                    Value::new(1000),
+                    Value::new(2),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Mouse"),
+                    Value::new("Electronics"),
+                    Value::new(25),
+                    Value::new(10),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Chair"),
+                    Value::new("Furniture"),
+                    Value::new(200),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("Desk"),
+                    Value::new("Furniture"),
+                    Value::new(500),
+                    Value::new(3),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Phone"),
+                    Value::new("Electronics"),
+                    Value::new(800),
+                    Value::new(1),
+                ],
             ];
-            ctx.insert_tuples("sales", test_data, table_schema)
-                .unwrap();
+            ctx.insert_tuples("sales", test_data, table_schema).unwrap();
 
             // Test aggregation with calculated fields
             let mut writer = TestResultWriter::new();
@@ -7221,7 +7594,11 @@ mod tests {
 
             assert!(success2, "Multiple aggregations failed");
             assert_eq!(writer2.get_rows().len(), 2, "Should return 2 categories");
-            assert_eq!(writer2.get_schema().get_columns().len(), 4, "Should return 4 columns");
+            assert_eq!(
+                writer2.get_schema().get_columns().len(),
+                4,
+                "Should return 4 columns"
+            );
 
             // Test aggregation with WHERE and HAVING
             let mut writer3 = TestResultWriter::new();
@@ -7281,14 +7658,17 @@ mod tests {
                     .unwrap();
 
                 assert!(success, "Performance test failed for: {}", sql);
-                assert!(writer.get_rows().len() > 0, "Should return results for: {}", sql);
+                assert!(
+                    writer.get_rows().len() > 0,
+                    "Should return results for: {}",
+                    sql
+                );
             }
         }
     }
 
     mod group_by_tests {
         use super::*;
-        use crate::types_db::types::Type;
         use crate::types_db::value::Val;
 
         #[test]
@@ -7560,11 +7940,36 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new("Engineering"), Value::new("NYC"), Value::new(10), Value::new(100000i64)],
-                vec![Value::new("Engineering"), Value::new("SF"), Value::new(15), Value::new(150000i64)],
-                vec![Value::new("Sales"), Value::new("NYC"), Value::new(8), Value::new(80000i64)],
-                vec![Value::new("Sales"), Value::new("SF"), Value::new(12), Value::new(120000i64)],
-                vec![Value::new("Marketing"), Value::new("NYC"), Value::new(5), Value::new(50000i64)],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("NYC"),
+                    Value::new(10),
+                    Value::new(100000i64),
+                ],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("SF"),
+                    Value::new(15),
+                    Value::new(150000i64),
+                ],
+                vec![
+                    Value::new("Sales"),
+                    Value::new("NYC"),
+                    Value::new(8),
+                    Value::new(80000i64),
+                ],
+                vec![
+                    Value::new("Sales"),
+                    Value::new("SF"),
+                    Value::new(12),
+                    Value::new(120000i64),
+                ],
+                vec![
+                    Value::new("Marketing"),
+                    Value::new("NYC"),
+                    Value::new(5),
+                    Value::new(50000i64),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -7581,7 +7986,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY multiple columns query failed");
-            assert_eq!(writer.get_rows().len(), 5, "Should return 5 unique department-location combinations");
+            assert_eq!(
+                writer.get_rows().len(),
+                5,
+                "Should return 5 unique department-location combinations"
+            );
 
             // Verify schema
             let schema = writer.get_schema();
@@ -7610,12 +8019,42 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new("Laptop"), Value::new("Electronics"), Value::new(1000), Value::new(true)],
-                vec![Value::new("Phone"), Value::new("Electronics"), Value::new(500), Value::new(true)],
-                vec![Value::new("Tablet"), Value::new("Electronics"), Value::new(300), Value::new(false)],
-                vec![Value::new("Shirt"), Value::new("Clothing"), Value::new(50), Value::new(true)],
-                vec![Value::new("Pants"), Value::new("Clothing"), Value::new(75), Value::new(false)],
-                vec![Value::new("Novel"), Value::new("Books"), Value::new(20), Value::new(true)],
+                vec![
+                    Value::new("Laptop"),
+                    Value::new("Electronics"),
+                    Value::new(1000),
+                    Value::new(true),
+                ],
+                vec![
+                    Value::new("Phone"),
+                    Value::new("Electronics"),
+                    Value::new(500),
+                    Value::new(true),
+                ],
+                vec![
+                    Value::new("Tablet"),
+                    Value::new("Electronics"),
+                    Value::new(300),
+                    Value::new(false),
+                ],
+                vec![
+                    Value::new("Shirt"),
+                    Value::new("Clothing"),
+                    Value::new(50),
+                    Value::new(true),
+                ],
+                vec![
+                    Value::new("Pants"),
+                    Value::new("Clothing"),
+                    Value::new(75),
+                    Value::new(false),
+                ],
+                vec![
+                    Value::new("Novel"),
+                    Value::new("Books"),
+                    Value::new(20),
+                    Value::new(true),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -7632,7 +8071,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY with WHERE clause query failed");
-            assert_eq!(writer.get_rows().len(), 3, "Should return 3 categories with available items");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Should return 3 categories with available items"
+            );
 
             // Verify schema
             let schema = writer.get_schema();
@@ -7660,12 +8103,42 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new("Team A"), Value::new("Alice"), Value::new(100), Value::new(5)],
-                vec![Value::new("Team A"), Value::new("Bob"), Value::new(150), Value::new(5)],
-                vec![Value::new("Team A"), Value::new("Charlie"), Value::new(80), Value::new(5)],
-                vec![Value::new("Team B"), Value::new("David"), Value::new(200), Value::new(4)],
-                vec![Value::new("Team B"), Value::new("Eve"), Value::new(120), Value::new(4)],
-                vec![Value::new("Team C"), Value::new("Frank"), Value::new(90), Value::new(3)],
+                vec![
+                    Value::new("Team A"),
+                    Value::new("Alice"),
+                    Value::new(100),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new("Team A"),
+                    Value::new("Bob"),
+                    Value::new(150),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new("Team A"),
+                    Value::new("Charlie"),
+                    Value::new(80),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new("Team B"),
+                    Value::new("David"),
+                    Value::new(200),
+                    Value::new(4),
+                ],
+                vec![
+                    Value::new("Team B"),
+                    Value::new("Eve"),
+                    Value::new(120),
+                    Value::new(4),
+                ],
+                vec![
+                    Value::new("Team C"),
+                    Value::new("Frank"),
+                    Value::new(90),
+                    Value::new(3),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -7682,7 +8155,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY with HAVING clause query failed");
-            assert_eq!(writer.get_rows().len(), 1, "Should return 1 team with more than 2 players");
+            assert_eq!(
+                writer.get_rows().len(),
+                1,
+                "Should return 1 team with more than 2 players"
+            );
 
             // Verify schema
             let schema = writer.get_schema();
@@ -7758,9 +8235,21 @@ mod tests {
             // Insert test data with NULL values
             let test_data = vec![
                 vec![Value::new("A"), Value::new(10), Value::new("Description A")],
-                vec![Value::new("A"), Value::new(Val::Null), Value::new("Description A2")],
-                vec![Value::new(Val::Null), Value::new(20), Value::new("Description B")],
-                vec![Value::new(Val::Null), Value::new(30), Value::new("Description B2")],
+                vec![
+                    Value::new("A"),
+                    Value::new(Val::Null),
+                    Value::new("Description A2"),
+                ],
+                vec![
+                    Value::new(Val::Null),
+                    Value::new(20),
+                    Value::new("Description B"),
+                ],
+                vec![
+                    Value::new(Val::Null),
+                    Value::new(30),
+                    Value::new("Description B2"),
+                ],
                 vec![Value::new("B"), Value::new(40), Value::new(Val::Null)],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
@@ -7778,7 +8267,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY with NULL values query failed");
-            assert_eq!(writer.get_rows().len(), 3, "Should return 3 groups (A, B, NULL)");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Should return 3 groups (A, B, NULL)"
+            );
 
             // Verify schema
             let schema = writer.get_schema();
@@ -7826,7 +8319,10 @@ mod tests {
                 )
                 .unwrap();
 
-            assert!(success, "GROUP BY with all aggregation functions query failed");
+            assert!(
+                success,
+                "GROUP BY with all aggregation functions query failed"
+            );
             assert_eq!(writer.get_rows().len(), 2, "Should return 2 groups");
 
             // Verify schema
@@ -7868,7 +8364,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY on empty table query failed");
-            assert_eq!(writer.get_rows().len(), 0, "Should return 0 rows for empty table");
+            assert_eq!(
+                writer.get_rows().len(),
+                0,
+                "Should return 0 rows for empty table"
+            );
 
             // Verify schema is still correct
             let schema = writer.get_schema();
@@ -7897,13 +8397,13 @@ mod tests {
             let mut test_data = Vec::new();
             let categories = vec!["A", "B", "C", "D", "E"];
             let subcategories = vec!["X", "Y", "Z"];
-            
+
             for i in 0..1000 {
                 let category = categories[i % categories.len()];
                 let subcategory = subcategories[i % subcategories.len()];
                 let value = (i % 100) as i32;
                 let timestamp = i as i64;
-                
+
                 test_data.push(vec![
                     Value::new(category),
                     Value::new(subcategory),
@@ -7926,7 +8426,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "GROUP BY performance test query failed");
-            assert_eq!(writer.get_rows().len(), 15, "Should return 15 groups (5 categories × 3 subcategories)");
+            assert_eq!(
+                writer.get_rows().len(),
+                15,
+                "Should return 15 groups (5 categories × 3 subcategories)"
+            );
 
             // Verify schema
             let schema = writer.get_schema();
@@ -7956,13 +8460,48 @@ mod tests {
 
             // Insert test data with some duplicates
             let test_data = vec![
-                vec![Value::new("Engineering"), Value::new("Python"), Value::new("Alice"), Value::new(9)],
-                vec![Value::new("Engineering"), Value::new("Python"), Value::new("Bob"), Value::new(8)],
-                vec![Value::new("Engineering"), Value::new("Java"), Value::new("Alice"), Value::new(7)],
-                vec![Value::new("Engineering"), Value::new("Java"), Value::new("Charlie"), Value::new(9)],
-                vec![Value::new("Marketing"), Value::new("Python"), Value::new("David"), Value::new(6)],
-                vec![Value::new("Marketing"), Value::new("Design"), Value::new("Eve"), Value::new(8)],
-                vec![Value::new("Marketing"), Value::new("Design"), Value::new("Frank"), Value::new(7)],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("Python"),
+                    Value::new("Alice"),
+                    Value::new(9),
+                ],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("Python"),
+                    Value::new("Bob"),
+                    Value::new(8),
+                ],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("Java"),
+                    Value::new("Alice"),
+                    Value::new(7),
+                ],
+                vec![
+                    Value::new("Engineering"),
+                    Value::new("Java"),
+                    Value::new("Charlie"),
+                    Value::new(9),
+                ],
+                vec![
+                    Value::new("Marketing"),
+                    Value::new("Python"),
+                    Value::new("David"),
+                    Value::new(6),
+                ],
+                vec![
+                    Value::new("Marketing"),
+                    Value::new("Design"),
+                    Value::new("Eve"),
+                    Value::new(8),
+                ],
+                vec![
+                    Value::new("Marketing"),
+                    Value::new("Design"),
+                    Value::new("Frank"),
+                    Value::new(7),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -8113,7 +8652,7 @@ mod tests {
                 vec![Value::new(1), Value::new("Engineering"), Value::new(100000)],
                 vec![Value::new(2), Value::new("Sales"), Value::new(50000)],
                 vec![Value::new(3), Value::new("Marketing"), Value::new(75000)], // No employees
-                vec![Value::new(4), Value::new("HR"), Value::new(30000)], // No employees
+                vec![Value::new(4), Value::new("HR"), Value::new(30000)],        // No employees
             ];
             ctx.insert_tuples("departments", depts_data, depts_schema)
                 .unwrap();
@@ -8151,8 +8690,11 @@ mod tests {
             // Marketing and HR departments should have NULL employee names
             let marketing_row = rows.iter().find(|row| row[1].to_string() == "Marketing");
             let hr_row = rows.iter().find(|row| row[1].to_string() == "HR");
-            
-            assert!(marketing_row.is_some(), "Marketing department should be in results");
+
+            assert!(
+                marketing_row.is_some(),
+                "Marketing department should be in results"
+            );
             assert!(hr_row.is_some(), "HR department should be in results");
         }
 
@@ -8208,7 +8750,11 @@ mod tests {
 
             assert!(success, "Full outer join query execution failed");
             // Should have: John-NY, Jane-LA, Bob-NULL, NULL-Chicago = 4 rows
-            assert_eq!(writer.get_rows().len(), 4, "Full outer join should return 4 rows");
+            assert_eq!(
+                writer.get_rows().len(),
+                4,
+                "Full outer join should return 4 rows"
+            );
         }
 
         #[test]
@@ -8257,7 +8803,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "Cross join query execution failed");
-            assert_eq!(writer.get_rows().len(), 4, "Cross join should return 2x2=4 rows");
+            assert_eq!(
+                writer.get_rows().len(),
+                4,
+                "Cross join should return 2x2=4 rows"
+            );
 
             // Alternative syntax for cross join
             let mut writer2 = TestResultWriter::new();
@@ -8271,7 +8821,11 @@ mod tests {
                 .unwrap();
 
             assert!(success2, "Implicit cross join query execution failed");
-            assert_eq!(writer2.get_rows().len(), 4, "Implicit cross join should return 4 rows");
+            assert_eq!(
+                writer2.get_rows().len(),
+                4,
+                "Implicit cross join should return 4 rows"
+            );
         }
 
         #[test]
@@ -8406,7 +8960,11 @@ mod tests {
                 .unwrap();
 
             assert!(success2, "Three-table join with aggregation failed");
-            assert_eq!(writer2.get_rows().len(), 2, "Should return 2 customer records");
+            assert_eq!(
+                writer2.get_rows().len(),
+                2,
+                "Should return 2 customer records"
+            );
         }
 
         #[test]
@@ -8433,17 +8991,47 @@ mod tests {
                 .unwrap();
 
             let sales_data = vec![
-                vec![Value::new(1), Value::new(1), Value::new(1000), Value::new("North")],
-                vec![Value::new(2), Value::new(1), Value::new(2000), Value::new("North")],
-                vec![Value::new(3), Value::new(2), Value::new(1500), Value::new("South")],
-                vec![Value::new(4), Value::new(2), Value::new(800), Value::new("North")], // Different region
+                vec![
+                    Value::new(1),
+                    Value::new(1),
+                    Value::new(1000),
+                    Value::new("North"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new(1),
+                    Value::new(2000),
+                    Value::new("North"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new(2),
+                    Value::new(1500),
+                    Value::new("South"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new(2),
+                    Value::new(800),
+                    Value::new("North"),
+                ], // Different region
             ];
             ctx.insert_tuples("sales", sales_data, sales_schema)
                 .unwrap();
 
             let salespeople_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new("North"), Value::new(2500)],
-                vec![Value::new(2), Value::new("Bob"), Value::new("South"), Value::new(2000)],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new("North"),
+                    Value::new(2500),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new("South"),
+                    Value::new(2000),
+                ],
             ];
             ctx.insert_tuples("salespeople", salespeople_data, salespeople_schema)
                 .unwrap();
@@ -8461,7 +9049,11 @@ mod tests {
 
             assert!(success, "Complex join condition query execution failed");
             // Should exclude sales where salesperson and sale regions don't match
-            assert_eq!(writer.get_rows().len(), 3, "Should return 3 matching records");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Should return 3 matching records"
+            );
 
             // Join with comparison in ON clause
             let mut writer2 = TestResultWriter::new();
@@ -8476,7 +9068,10 @@ mod tests {
 
             assert!(success2, "Join with amount comparison failed");
             // Should only include sales > 1000
-            assert!(writer2.get_rows().len() < 4, "Should filter out smaller sales");
+            assert!(
+                writer2.get_rows().len() < 4,
+                "Should filter out smaller sales"
+            );
         }
 
         #[test]
@@ -8504,10 +9099,7 @@ mod tests {
             let mut table_b_data = Vec::new();
 
             for i in 1..=100 {
-                table_a_data.push(vec![
-                    Value::new(i),
-                    Value::new(format!("value_a_{}", i)),
-                ]);
+                table_a_data.push(vec![Value::new(i), Value::new(format!("value_a_{}", i))]);
 
                 // Create multiple B records for each A record
                 for j in 1..=3 {
@@ -8536,7 +9128,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "Large dataset join query execution failed");
-            assert_eq!(writer.get_rows().len(), 30, "Should return 10 * 3 = 30 records");
+            assert_eq!(
+                writer.get_rows().len(),
+                30,
+                "Should return 10 * 3 = 30 records"
+            );
         }
 
         #[test]
@@ -8589,7 +9185,11 @@ mod tests {
                 .unwrap();
 
             assert!(success, "Join with NULL values failed");
-            assert_eq!(writer.get_rows().len(), 3, "Inner join should exclude NULL matches");
+            assert_eq!(
+                writer.get_rows().len(),
+                3,
+                "Inner join should exclude NULL matches"
+            );
 
             // Left join - should include all teachers
             let mut writer2 = TestResultWriter::new();
@@ -8603,7 +9203,11 @@ mod tests {
                 .unwrap();
 
             assert!(success2, "Left join with NULL values failed");
-            assert_eq!(writer2.get_rows().len(), 3, "Left join should include all teachers");
+            assert_eq!(
+                writer2.get_rows().len(),
+                3,
+                "Left join should include all teachers"
+            );
         }
     }
 
@@ -10124,7 +10728,11 @@ mod tests {
                 vec![Value::new("IT"), Value::new("Charlie"), Value::new(80000)],
                 vec![Value::new("HR"), Value::new("David"), Value::new(50000)],
                 vec![Value::new("HR"), Value::new("Eve"), Value::new(55000)],
-                vec![Value::new("Finance"), Value::new("Frank"), Value::new(60000)],
+                vec![
+                    Value::new("Finance"),
+                    Value::new("Frank"),
+                    Value::new(60000),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -10133,15 +10741,22 @@ mod tests {
             let sql = "SELECT department, COUNT(*) as emp_count FROM employees GROUP BY department HAVING COUNT(*) > 2";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with COUNT query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should only return IT department which has 3 employees (> 2)
-            assert_eq!(rows.len(), 1, "Expected 1 department with more than 2 employees");
+            assert_eq!(
+                rows.len(),
+                1,
+                "Expected 1 department with more than 2 employees"
+            );
             assert_eq!(ToString::to_string(&rows[0][0]), "IT");
             assert_eq!(rows[0][1].as_integer().unwrap(), 3);
         }
@@ -10177,13 +10792,16 @@ mod tests {
             let sql = "SELECT region, SUM(sales_amount) as total_sales FROM sales GROUP BY region HAVING SUM(sales_amount) > 200000";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with SUM query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should return North (370000) and East (200000) regions
             assert_eq!(rows.len(), 2, "Expected 2 regions with sales > 200000");
         }
@@ -10220,13 +10838,16 @@ mod tests {
             let sql = "SELECT class, AVG(grade) as avg_grade FROM grades GROUP BY class HAVING AVG(grade) > 85";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with AVG query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should return Math (90) and History (97.5) classes
             assert_eq!(rows.len(), 2, "Expected 2 classes with average grade > 85");
         }
@@ -10248,9 +10869,21 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new("Electronics"), Value::new("Laptop"), Value::new(1000)],
-                vec![Value::new("Electronics"), Value::new("Phone"), Value::new(800)],
-                vec![Value::new("Electronics"), Value::new("Tablet"), Value::new(600)],
+                vec![
+                    Value::new("Electronics"),
+                    Value::new("Laptop"),
+                    Value::new(1000),
+                ],
+                vec![
+                    Value::new("Electronics"),
+                    Value::new("Phone"),
+                    Value::new(800),
+                ],
+                vec![
+                    Value::new("Electronics"),
+                    Value::new("Tablet"),
+                    Value::new(600),
+                ],
                 vec![Value::new("Clothing"), Value::new("Shirt"), Value::new(30)],
                 vec![Value::new("Clothing"), Value::new("Jeans"), Value::new(80)],
                 vec![Value::new("Books"), Value::new("Novel"), Value::new(15)],
@@ -10262,13 +10895,16 @@ mod tests {
             let sql = "SELECT category, MIN(price) as min_price, MAX(price) as max_price FROM products GROUP BY category HAVING MIN(price) > 50";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with MIN/MAX query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should only return Electronics category (min price 600 > 50)
             assert_eq!(rows.len(), 1, "Expected 1 category with min price > 50");
             assert_eq!(ToString::to_string(&rows[0][0]), "Electronics");
@@ -10305,15 +10941,22 @@ mod tests {
             let sql = "SELECT customer_id, COUNT(*) as order_count, SUM(order_amount) as total_spent FROM orders GROUP BY customer_id HAVING COUNT(*) > 2 AND SUM(order_amount) > 400";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with multiple conditions query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should only return customer 1 (3 orders, total 450)
-            assert_eq!(rows.len(), 1, "Expected 1 customer with >2 orders and >400 total");
+            assert_eq!(
+                rows.len(),
+                1,
+                "Expected 1 customer with >2 orders and >400 total"
+            );
             assert_eq!(rows[0][0].as_integer().unwrap(), 1);
         }
 
@@ -10339,7 +10982,11 @@ mod tests {
                 vec![Value::new("A"), Value::new(30), Value::new("inactive")],
                 vec![Value::new("B"), Value::new(40), Value::new("active")],
                 vec![Value::new("B"), Value::new(50), Value::new("active")],
-                vec![Value::new("C"), Value::new(Val::Null), Value::new("inactive")],
+                vec![
+                    Value::new("C"),
+                    Value::new(Val::Null),
+                    Value::new("inactive"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -10348,13 +10995,16 @@ mod tests {
             let sql = "SELECT group_id, COUNT(*) as total_rows, COUNT(value) as non_null_values FROM test_nulls GROUP BY group_id HAVING COUNT(value) > 1";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with NULL values query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should return groups A and B (both have >1 non-null values)
             assert_eq!(rows.len(), 2, "Expected 2 groups with >1 non-null values");
         }
@@ -10387,13 +11037,16 @@ mod tests {
             let sql = "SELECT COUNT(*) as total_count, SUM(amount) as total_amount FROM transactions HAVING COUNT(*) > 3";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING without GROUP BY query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should return one row since COUNT(*) = 4 > 3
             assert_eq!(rows.len(), 1, "Expected 1 row when HAVING condition is met");
             assert_eq!(rows[0][0].as_integer().unwrap(), 4); // total count
@@ -10431,15 +11084,21 @@ mod tests {
             let sql = "SELECT department, AVG(salary) as avg_salary FROM employees GROUP BY department HAVING AVG(salary) > (SELECT AVG(salary) FROM employees)";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING with subquery failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should return departments with above-average salaries
-            assert!(rows.len() > 0, "Expected at least one department with above-average salary");
+            assert!(
+                rows.len() > 0,
+                "Expected at least one department with above-average salary"
+            );
         }
 
         #[test]
@@ -10484,16 +11143,22 @@ mod tests {
             let sql = "SELECT category, COUNT(*) as record_count, SUM(value * quantity) as total_value, AVG(value) as avg_value FROM large_sales GROUP BY category HAVING COUNT(*) > 15 AND SUM(value * quantity) > 50000";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING performance test query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Verify that performance is acceptable and results are returned
             assert!(rows.len() >= 0, "Query should complete successfully");
-            println!("Performance test completed with {} result groups", rows.len());
+            println!(
+                "Performance test completed with {} result groups",
+                rows.len()
+            );
         }
 
         #[test]
@@ -10516,7 +11181,11 @@ mod tests {
                 vec![Value::new("Group1"), Value::new(0), Value::new(true)],
                 vec![Value::new("Group1"), Value::new(-10), Value::new(false)],
                 vec![Value::new("Group2"), Value::new(100), Value::new(true)],
-                vec![Value::new("Group3"), Value::new(Val::Null), Value::new(true)],
+                vec![
+                    Value::new("Group3"),
+                    Value::new(Val::Null),
+                    Value::new(true),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -10525,13 +11194,16 @@ mod tests {
             let sql = "SELECT group_key, SUM(numeric_value) as total, COUNT(*) as count FROM edge_cases GROUP BY group_key HAVING SUM(numeric_value) != 0";
             let mut writer = TestResultWriter::new();
 
-            if let Err(e) = ctx.engine.execute_sql(sql, ctx.exec_ctx.clone(), &mut writer) {
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
                 println!("HAVING edge cases query failed: {:?}", e);
                 return; // Expected to fail in current implementation
             }
 
             let rows = writer.get_rows();
-            
+
             // Should exclude groups where SUM equals 0
             assert!(rows.len() >= 0, "Edge case query should complete");
         }
@@ -10739,9 +11411,17 @@ mod tests {
             // Insert test data with NULL values
             let test_data = vec![
                 vec![Value::new(1), Value::new(85), Value::new("Alice")],
-                vec![Value::new(2), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new("Bob")],
+                vec![
+                    Value::new(2),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                    Value::new("Bob"),
+                ],
                 vec![Value::new(3), Value::new(92), Value::new("Charlie")],
-                vec![Value::new(4), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new("Diana")],
+                vec![
+                    Value::new(4),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                    Value::new("Diana"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -10912,9 +11592,24 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(3), Value::new("Charlie"), Value::new(true), Value::new(95i64)],
-                vec![Value::new(1), Value::new("Alice"), Value::new(false), Value::new(85i64)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(true), Value::new(90i64)],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(true),
+                    Value::new(95i64),
+                ],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(false),
+                    Value::new(85i64),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(true),
+                    Value::new(90i64),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11027,7 +11722,7 @@ mod tests {
             assert!(success, "Query execution failed");
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 1, "Expected 1 row");
-            
+
             if rows.len() == 1 {
                 assert_eq!(rows[0][0].to_string(), "1");
                 assert_eq!(rows[0][1].to_string(), "100");
@@ -11052,12 +11747,18 @@ mod tests {
             // Insert larger dataset for performance testing
             let mut test_data = Vec::new();
             for i in 1..=50 {
-                let category = if i % 3 == 0 { "A" } else if i % 3 == 1 { "B" } else { "C" };
+                let category = if i % 3 == 0 {
+                    "A"
+                } else if i % 3 == 1 {
+                    "B"
+                } else {
+                    "C"
+                };
                 let random_value = (i * 17) % 100; // Generate some pseudo-random values
                 test_data.push(vec![
                     Value::new(i),
                     Value::new(random_value),
-                    Value::new(category)
+                    Value::new(category),
                 ]);
             }
             ctx.insert_tuples(table_name, test_data, table_schema)
@@ -11074,7 +11775,7 @@ mod tests {
             assert!(success, "Performance test query execution failed");
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 10, "Expected 10 rows due to LIMIT");
-            
+
             println!("Performance test completed with {} result rows", rows.len());
         }
     }
@@ -11510,10 +12211,30 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new(25), Value::new(40000), Value::new("Alice")],
-                vec![Value::new(2), Value::new(35), Value::new(60000), Value::new("Bob")],
-                vec![Value::new(3), Value::new(45), Value::new(80000), Value::new("Charlie")],
-                vec![Value::new(4), Value::new(30), Value::new(50000), Value::new("Diana")],
+                vec![
+                    Value::new(1),
+                    Value::new(25),
+                    Value::new(40000),
+                    Value::new("Alice"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new(35),
+                    Value::new(60000),
+                    Value::new("Bob"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new(45),
+                    Value::new(80000),
+                    Value::new("Charlie"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new(30),
+                    Value::new(50000),
+                    Value::new("Diana"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11557,9 +12278,21 @@ mod tests {
             // Insert test data with NULL values
             let test_data = vec![
                 vec![Value::new(1), Value::new(85), Value::new(10)],
-                vec![Value::new(2), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new(5)],
-                vec![Value::new(3), Value::new(90), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer)],
-                vec![Value::new(4), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer), Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer)],
+                vec![
+                    Value::new(2),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                    Value::new(5),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new(90),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                    Value::new_with_type(crate::types_db::value::Val::Null, TypeId::Integer),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11620,7 +12353,7 @@ mod tests {
             // Verify aggregation with CASE
             if rows.len() >= 3 {
                 // HR: 0 high earners (both under 70000), 2 total
-                // IT: 2 high earners (both over 70000), 2 total  
+                // IT: 2 high earners (both over 70000), 2 total
                 // Sales: 0 high earners (both under 70000), 2 total
             }
         }
@@ -11665,7 +12398,7 @@ mod tests {
             // Verify arithmetic calculations in CASE
             if rows.len() >= 4 {
                 // Product 1: 10 * 100 = 1000 -> no discount
-                // Product 2: 50 * 80 = 4000 -> no discount  
+                // Product 2: 50 * 80 = 4000 -> no discount
                 // Product 3: 5 * 200 = 1000 -> no discount
                 // Product 4: 100 * 50 = 5000 -> 10% discount
             }
@@ -11736,9 +12469,24 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new("Alice"), Value::new(true), Value::new(85i64)],
-                vec![Value::new(2), Value::new("Bob"), Value::new(false), Value::new(92i64)],
-                vec![Value::new(3), Value::new("Charlie"), Value::new(true), Value::new(78i64)],
+                vec![
+                    Value::new(1),
+                    Value::new("Alice"),
+                    Value::new(true),
+                    Value::new(85i64),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("Bob"),
+                    Value::new(false),
+                    Value::new(92i64),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("Charlie"),
+                    Value::new(true),
+                    Value::new(78i64),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11851,7 +12599,7 @@ mod tests {
             assert!(success, "Query execution failed");
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 1, "Expected 1 row");
-            
+
             if rows.len() == 1 {
                 assert_eq!(rows[0][1].to_string(), "High"); // value 75 > 50
             }
@@ -11877,16 +12625,12 @@ mod tests {
             for i in 1..=100 {
                 let category = match i % 4 {
                     0 => "A",
-                    1 => "B", 
+                    1 => "B",
                     2 => "C",
                     _ => "D",
                 };
                 let value = (i * 13) % 200; // Generate some pseudo-random values
-                test_data.push(vec![
-                    Value::new(i),
-                    Value::new(category),
-                    Value::new(value)
-                ]);
+                test_data.push(vec![Value::new(i), Value::new(category), Value::new(value)]);
             }
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11902,14 +12646,16 @@ mod tests {
             assert!(success, "Performance test query execution failed");
             let rows = writer.get_rows();
             assert_eq!(rows.len(), 4, "Expected 4 categories");
-            
-            println!("Performance test completed with {} category groups", rows.len());
+
+            println!(
+                "Performance test completed with {} category groups",
+                rows.len()
+            );
         }
     }
 
     mod window_tests {
         use super::*;
-        use crate::types_db::value::Val;
 
         #[test]
         fn test_row_number_window_function() {
@@ -11929,11 +12675,36 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new("IT"), Value::new(75000), Value::new("Alice")],
-                vec![Value::new(2), Value::new("IT"), Value::new(85000), Value::new("Bob")],
-                vec![Value::new(3), Value::new("HR"), Value::new(65000), Value::new("Charlie")],
-                vec![Value::new(4), Value::new("HR"), Value::new(70000), Value::new("Diana")],
-                vec![Value::new(5), Value::new("Sales"), Value::new(55000), Value::new("Eve")],
+                vec![
+                    Value::new(1),
+                    Value::new("IT"),
+                    Value::new(75000),
+                    Value::new("Alice"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("IT"),
+                    Value::new(85000),
+                    Value::new("Bob"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("HR"),
+                    Value::new(65000),
+                    Value::new("Charlie"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("HR"),
+                    Value::new(70000),
+                    Value::new("Diana"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                    Value::new("Eve"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -11949,11 +12720,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify ROW_NUMBER values
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, dept={}, salary={}, row_num={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: name={}, dept={}, salary={}, row_num={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("ROW_NUMBER window function not yet supported");
@@ -11997,11 +12774,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify ranking values
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, score={}, rank={}, dense_rank={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: name={}, score={}, rank={}, dense_rank={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("RANK window functions not yet supported");
@@ -12026,13 +12809,48 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new("IT"), Value::new(75000), Value::new("Alice")],
-                vec![Value::new(2), Value::new("IT"), Value::new(85000), Value::new("Bob")],
-                vec![Value::new(3), Value::new("IT"), Value::new(90000), Value::new("Charlie")],
-                vec![Value::new(4), Value::new("HR"), Value::new(65000), Value::new("Diana")],
-                vec![Value::new(5), Value::new("HR"), Value::new(70000), Value::new("Eve")],
-                vec![Value::new(6), Value::new("Sales"), Value::new(55000), Value::new("Frank")],
-                vec![Value::new(7), Value::new("Sales"), Value::new(60000), Value::new("Grace")],
+                vec![
+                    Value::new(1),
+                    Value::new("IT"),
+                    Value::new(75000),
+                    Value::new("Alice"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("IT"),
+                    Value::new(85000),
+                    Value::new("Bob"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("IT"),
+                    Value::new(90000),
+                    Value::new("Charlie"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("HR"),
+                    Value::new(65000),
+                    Value::new("Diana"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("HR"),
+                    Value::new(70000),
+                    Value::new("Eve"),
+                ],
+                vec![
+                    Value::new(6),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                    Value::new("Frank"),
+                ],
+                vec![
+                    Value::new(7),
+                    Value::new("Sales"),
+                    Value::new(60000),
+                    Value::new("Grace"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -12048,11 +12866,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 7, "Expected 7 rows");
-                
+
                 // Verify partitioned ranking
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, dept={}, salary={}, dept_rank={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: name={}, dept={}, salary={}, dept_rank={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("Partitioned window functions not yet supported");
@@ -12096,11 +12920,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify LAG/LEAD values
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: date={}, sales={}, prev_sales={}, next_sales={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: date={}, sales={}, prev_sales={}, next_sales={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("LAG/LEAD window functions not yet supported");
@@ -12125,11 +12955,36 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new("IT"), Value::new(75000), Value::new("Alice")],
-                vec![Value::new(2), Value::new("IT"), Value::new(85000), Value::new("Bob")],
-                vec![Value::new(3), Value::new("HR"), Value::new(65000), Value::new("Charlie")],
-                vec![Value::new(4), Value::new("HR"), Value::new(70000), Value::new("Diana")],
-                vec![Value::new(5), Value::new("Sales"), Value::new(55000), Value::new("Eve")],
+                vec![
+                    Value::new(1),
+                    Value::new("IT"),
+                    Value::new(75000),
+                    Value::new("Alice"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("IT"),
+                    Value::new(85000),
+                    Value::new("Bob"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("HR"),
+                    Value::new(65000),
+                    Value::new("Charlie"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("HR"),
+                    Value::new(70000),
+                    Value::new("Diana"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                    Value::new("Eve"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -12145,11 +13000,18 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify FIRST_VALUE/LAST_VALUE
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, dept={}, salary={}, lowest_paid={}, highest_paid={}", 
-                        i + 1, row[0], row[1], row[2], row[3], row[4]);
+                    println!(
+                        "Row {}: name={}, dept={}, salary={}, lowest_paid={}, highest_paid={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4]
+                    );
                 }
             } else {
                 println!("FIRST_VALUE/LAST_VALUE window functions not yet supported");
@@ -12194,11 +13056,18 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 6, "Expected 6 rows");
-                
+
                 // Verify running totals and moving averages
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: month={}, sales={}, running_total={}, moving_avg={}, total_months={}", 
-                        i + 1, row[0], row[1], row[2], row[3], row[4]);
+                    println!(
+                        "Row {}: month={}, sales={}, running_total={}, moving_avg={}, total_months={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4]
+                    );
                 }
             } else {
                 println!("Aggregation window functions not yet supported");
@@ -12241,11 +13110,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify window frame calculations
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: id={}, value={}, window_sum={}, range_sum={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: id={}, value={}, window_sum={}, range_sum={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("Window frame specifications not yet supported");
@@ -12292,11 +13167,16 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 8, "Expected 8 rows");
-                
+
                 // Verify NTILE quartiles
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, score={}, quartile={}", 
-                        i + 1, row[0], row[1], row[2]);
+                    println!(
+                        "Row {}: name={}, score={}, quartile={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2]
+                    );
                 }
             } else {
                 println!("NTILE window function not yet supported");
@@ -12340,11 +13220,17 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 5, "Expected 5 rows");
-                
+
                 // Verify PERCENT_RANK and CUME_DIST
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, salary={}, percent_rank={}, cume_dist={}", 
-                        i + 1, row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Row {}: name={}, salary={}, percent_rank={}, cume_dist={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
+                    );
                 }
             } else {
                 println!("PERCENT_RANK/CUME_DIST window functions not yet supported");
@@ -12370,13 +13256,55 @@ mod tests {
 
             // Insert test data
             let test_data = vec![
-                vec![Value::new(1), Value::new("IT"), Value::new(75000), Value::new("Alice"), Value::new("2020-01-15")],
-                vec![Value::new(2), Value::new("IT"), Value::new(85000), Value::new("Bob"), Value::new("2019-03-10")],
-                vec![Value::new(3), Value::new("IT"), Value::new(90000), Value::new("Charlie"), Value::new("2018-07-22")],
-                vec![Value::new(4), Value::new("HR"), Value::new(65000), Value::new("Diana"), Value::new("2021-02-01")],
-                vec![Value::new(5), Value::new("HR"), Value::new(70000), Value::new("Eve"), Value::new("2020-11-30")],
-                vec![Value::new(6), Value::new("Sales"), Value::new(55000), Value::new("Frank"), Value::new("2022-01-10")],
-                vec![Value::new(7), Value::new("Sales"), Value::new(60000), Value::new("Grace"), Value::new("2021-06-15")],
+                vec![
+                    Value::new(1),
+                    Value::new("IT"),
+                    Value::new(75000),
+                    Value::new("Alice"),
+                    Value::new("2020-01-15"),
+                ],
+                vec![
+                    Value::new(2),
+                    Value::new("IT"),
+                    Value::new(85000),
+                    Value::new("Bob"),
+                    Value::new("2019-03-10"),
+                ],
+                vec![
+                    Value::new(3),
+                    Value::new("IT"),
+                    Value::new(90000),
+                    Value::new("Charlie"),
+                    Value::new("2018-07-22"),
+                ],
+                vec![
+                    Value::new(4),
+                    Value::new("HR"),
+                    Value::new(65000),
+                    Value::new("Diana"),
+                    Value::new("2021-02-01"),
+                ],
+                vec![
+                    Value::new(5),
+                    Value::new("HR"),
+                    Value::new(70000),
+                    Value::new("Eve"),
+                    Value::new("2020-11-30"),
+                ],
+                vec![
+                    Value::new(6),
+                    Value::new("Sales"),
+                    Value::new(55000),
+                    Value::new("Frank"),
+                    Value::new("2022-01-10"),
+                ],
+                vec![
+                    Value::new(7),
+                    Value::new("Sales"),
+                    Value::new(60000),
+                    Value::new("Grace"),
+                    Value::new("2021-06-15"),
+                ],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
@@ -12392,11 +13320,19 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 7, "Expected 7 rows");
-                
+
                 // Verify complex window function results
                 for (i, row) in rows.iter().enumerate() {
-                    println!("Row {}: name={}, dept={}, salary={}, dept_rank={}, overall_rank={}, salary_diff={}", 
-                        i + 1, row[0], row[1], row[2], row[3], row[4], row[5]);
+                    println!(
+                        "Row {}: name={}, dept={}, salary={}, dept_rank={}, overall_rank={}, salary_diff={}",
+                        i + 1,
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                        row[5]
+                    );
                 }
             } else {
                 println!("Complex window queries not yet supported");
@@ -12418,7 +13354,8 @@ mod tests {
                 .unwrap();
 
             // Test window functions on empty table
-            let sql = "SELECT id, value, ROW_NUMBER() OVER (ORDER BY id) as row_num FROM edge_cases";
+            let sql =
+                "SELECT id, value, ROW_NUMBER() OVER (ORDER BY id) as row_num FROM edge_cases";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -12445,9 +13382,11 @@ mod tests {
             if success {
                 let rows = writer.get_rows();
                 assert_eq!(rows.len(), 1, "Expected 1 row");
-                
-                println!("Single row result: id={}, value={}, row_num={}, rank={}", 
-                    rows[0][0], rows[0][1], rows[0][2], rows[0][3]);
+
+                println!(
+                    "Single row result: id={}, value={}, row_num={}, rank={}",
+                    rows[0][0], rows[0][1], rows[0][2], rows[0][3]
+                );
             } else {
                 println!("Window functions on single row not yet supported");
             }
@@ -12637,7 +13576,7 @@ mod tests {
                 .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success);
-            
+
             if !writer.get_rows().is_empty() {
                 // Should only have original 2 users
                 println!("User count after rollback: {}", writer.get_rows()[0][0]);
@@ -12747,7 +13686,7 @@ mod tests {
                 .execute_sql(log_verify_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             assert!(success);
-            
+
             if !writer.get_rows().is_empty() {
                 println!("Transaction log entries: {}", writer.get_rows()[0][0]);
             }
@@ -12849,7 +13788,11 @@ mod tests {
 
             // Insert valid initial data
             let test_data = vec![
-                vec![Value::new(1), Value::new("alice@example.com"), Value::new(25)],
+                vec![
+                    Value::new(1),
+                    Value::new("alice@example.com"),
+                    Value::new(25),
+                ],
                 vec![Value::new(2), Value::new("bob@example.com"), Value::new(30)],
             ];
             ctx.insert_tuples(table_name, test_data, table_schema)
@@ -12878,11 +13821,11 @@ mod tests {
             // Attempt to insert duplicate ID (constraint violation in real system)
             let insert_duplicate_sql = "INSERT INTO users_with_constraints (id, email, age) VALUES (3, 'duplicate@example.com', 40)";
             let mut writer = TestResultWriter::new();
-            
+
             // This might succeed in the test system but would fail in production with proper constraints
-            let _result = ctx
-                .engine
-                .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+            let _result =
+                ctx.engine
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
 
             // For demonstration, rollback the transaction
             let rollback_sql = "ROLLBACK";
@@ -12903,7 +13846,10 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("User count after constraint violation rollback: {}", writer.get_rows()[0][0]);
+                println!(
+                    "User count after constraint violation rollback: {}",
+                    writer.get_rows()[0][0]
+                );
             }
         }
 
@@ -12923,9 +13869,7 @@ mod tests {
                 .unwrap();
 
             // Insert initial data
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Initial"), Value::new(100)],
-            ];
+            let test_data = vec![vec![Value::new(1), Value::new("Initial"), Value::new(100)]];
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
@@ -12941,7 +13885,8 @@ mod tests {
             assert!(success);
 
             // First operation
-            let insert1_sql = "INSERT INTO savepoint_test (id, name, amount) VALUES (2, 'Step1', 200)";
+            let insert1_sql =
+                "INSERT INTO savepoint_test (id, name, amount) VALUES (2, 'Step1', 200)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -12952,12 +13897,13 @@ mod tests {
             // Create savepoint (might not be supported)
             let savepoint_sql = "SAVEPOINT sp1";
             let mut writer = TestResultWriter::new();
-            let _savepoint_result = ctx
-                .engine
-                .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
+            let _savepoint_result =
+                ctx.engine
+                    .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
 
-            // Second operation  
-            let insert2_sql = "INSERT INTO savepoint_test (id, name, amount) VALUES (3, 'Step2', 300)";
+            // Second operation
+            let insert2_sql =
+                "INSERT INTO savepoint_test (id, name, amount) VALUES (3, 'Step2', 300)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -12968,9 +13914,9 @@ mod tests {
             // Rollback to savepoint (might not be supported)
             let rollback_savepoint_sql = "ROLLBACK TO sp1";
             let mut writer = TestResultWriter::new();
-            let _rollback_result = ctx
-                .engine
-                .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
+            let _rollback_result =
+                ctx.engine
+                    .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
 
             // Commit transaction
             let commit_sql = "COMMIT";
@@ -12991,7 +13937,10 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Final count after savepoint test: {}", writer.get_rows()[0][0]);
+                println!(
+                    "Final count after savepoint test: {}",
+                    writer.get_rows()[0][0]
+                );
             }
         }
 
@@ -13152,7 +14101,8 @@ mod tests {
             assert!(success);
 
             // Perform operations
-            let insert_sql = "INSERT INTO timeout_test (id, data, timestamp) VALUES (1, 'test', '2024-01-01')";
+            let insert_sql =
+                "INSERT INTO timeout_test (id, data, timestamp) VALUES (1, 'test', '2024-01-01')";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -13260,7 +14210,8 @@ mod tests {
             assert!(success);
 
             // Test Durability - verify changes persist after commit
-            let verify_sql = "SELECT account_id, balance, last_updated FROM acid_test ORDER BY account_id";
+            let verify_sql =
+                "SELECT account_id, balance, last_updated FROM acid_test ORDER BY account_id";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -13272,7 +14223,10 @@ mod tests {
                 let rows = writer.get_rows();
                 println!("Final state after ACID test:");
                 for row in rows {
-                    println!("  Account {}: Balance {}, Updated: {}", row[0], row[1], row[2]);
+                    println!(
+                        "  Account {}: Balance {}, Updated: {}",
+                        row[0], row[1], row[2]
+                    );
                 }
             }
 
@@ -13320,7 +14274,8 @@ mod tests {
             for i in 1..=50 {
                 let insert_sql = format!(
                     "INSERT INTO performance_test (id, batch_id, value, processed) VALUES ({}, 1, {}, 'batch')",
-                    i, i * 10
+                    i,
+                    i * 10
                 );
                 let mut writer = TestResultWriter::new();
                 let success = ctx
@@ -13358,7 +14313,10 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Records processed in batch transaction: {}", writer.get_rows()[0][0]);
+                println!(
+                    "Records processed in batch transaction: {}",
+                    writer.get_rows()[0][0]
+                );
             }
 
             // Test aggregation performance on transaction data
@@ -13373,7 +14331,10 @@ mod tests {
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
                 for row in rows {
-                    println!("Batch {}: Count={}, Sum={}, Avg={}", row[0], row[1], row[2], row[3]);
+                    println!(
+                        "Batch {}: Count={}, Sum={}, Avg={}",
+                        row[0], row[1], row[2], row[3]
+                    );
                 }
             }
 
