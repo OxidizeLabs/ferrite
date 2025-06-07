@@ -7288,6 +7288,8 @@ mod tests {
 
     mod group_by_tests {
         use super::*;
+        use crate::types_db::types::Type;
+        use crate::types_db::value::Val;
 
         #[test]
         // #[ignore]
@@ -7490,6 +7492,501 @@ mod tests {
                     sql
                 );
             }
+        }
+
+        #[test]
+        fn test_group_by_single_column() {
+            let mut ctx = TestContext::new("test_group_by_single_column");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("category", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+                Column::new("quantity", TypeId::Integer),
+            ]);
+
+            let table_name = "products";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("Electronics"), Value::new(100), Value::new(5)],
+                vec![Value::new("Electronics"), Value::new(150), Value::new(3)],
+                vec![Value::new("Clothing"), Value::new(50), Value::new(10)],
+                vec![Value::new("Clothing"), Value::new(75), Value::new(8)],
+                vec![Value::new("Books"), Value::new(25), Value::new(15)],
+                vec![Value::new("Books"), Value::new(30), Value::new(12)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test basic GROUP BY with single column
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) as item_count FROM products GROUP BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY single column query failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 categories");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 2, "Should have 2 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "category");
+            assert_eq!(schema.get_columns()[1].get_name(), "item_count");
+        }
+
+        #[test]
+        fn test_group_by_multiple_columns() {
+            let mut ctx = TestContext::new("test_group_by_multiple_columns");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("department", TypeId::VarChar),
+                Column::new("location", TypeId::VarChar),
+                Column::new("employee_count", TypeId::Integer),
+                Column::new("budget", TypeId::BigInt),
+            ]);
+
+            let table_name = "departments";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("Engineering"), Value::new("NYC"), Value::new(10), Value::new(100000i64)],
+                vec![Value::new("Engineering"), Value::new("SF"), Value::new(15), Value::new(150000i64)],
+                vec![Value::new("Sales"), Value::new("NYC"), Value::new(8), Value::new(80000i64)],
+                vec![Value::new("Sales"), Value::new("SF"), Value::new(12), Value::new(120000i64)],
+                vec![Value::new("Marketing"), Value::new("NYC"), Value::new(5), Value::new(50000i64)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with multiple columns
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT department, location, SUM(employee_count) as total_employees, AVG(budget) as avg_budget FROM departments GROUP BY department, location",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY multiple columns query failed");
+            assert_eq!(writer.get_rows().len(), 5, "Should return 5 unique department-location combinations");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 4, "Should have 4 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "department");
+            assert_eq!(schema.get_columns()[1].get_name(), "location");
+            assert_eq!(schema.get_columns()[2].get_name(), "total_employees");
+            assert_eq!(schema.get_columns()[3].get_name(), "avg_budget");
+        }
+
+        #[test]
+        fn test_group_by_with_where_clause() {
+            let mut ctx = TestContext::new("test_group_by_with_where_clause");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("product_name", TypeId::VarChar),
+                Column::new("category", TypeId::VarChar),
+                Column::new("price", TypeId::Integer),
+                Column::new("in_stock", TypeId::Boolean),
+            ]);
+
+            let table_name = "inventory";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("Laptop"), Value::new("Electronics"), Value::new(1000), Value::new(true)],
+                vec![Value::new("Phone"), Value::new("Electronics"), Value::new(500), Value::new(true)],
+                vec![Value::new("Tablet"), Value::new("Electronics"), Value::new(300), Value::new(false)],
+                vec![Value::new("Shirt"), Value::new("Clothing"), Value::new(50), Value::new(true)],
+                vec![Value::new("Pants"), Value::new("Clothing"), Value::new(75), Value::new(false)],
+                vec![Value::new("Novel"), Value::new("Books"), Value::new(20), Value::new(true)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with WHERE clause filtering
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) as available_items, AVG(price) as avg_price FROM inventory WHERE in_stock = true GROUP BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with WHERE clause query failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 categories with available items");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 3, "Should have 3 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "category");
+            assert_eq!(schema.get_columns()[1].get_name(), "available_items");
+            assert_eq!(schema.get_columns()[2].get_name(), "avg_price");
+        }
+
+        #[test]
+        fn test_group_by_with_having_clause() {
+            let mut ctx = TestContext::new("test_group_by_with_having_clause");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("team", TypeId::VarChar),
+                Column::new("player_name", TypeId::VarChar),
+                Column::new("score", TypeId::Integer),
+                Column::new("games_played", TypeId::Integer),
+            ]);
+
+            let table_name = "players";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("Team A"), Value::new("Alice"), Value::new(100), Value::new(5)],
+                vec![Value::new("Team A"), Value::new("Bob"), Value::new(150), Value::new(5)],
+                vec![Value::new("Team A"), Value::new("Charlie"), Value::new(80), Value::new(5)],
+                vec![Value::new("Team B"), Value::new("David"), Value::new(200), Value::new(4)],
+                vec![Value::new("Team B"), Value::new("Eve"), Value::new(120), Value::new(4)],
+                vec![Value::new("Team C"), Value::new("Frank"), Value::new(90), Value::new(3)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with HAVING clause
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT team, COUNT(*) as player_count, AVG(score) as avg_score FROM players GROUP BY team HAVING COUNT(*) > 2",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with HAVING clause query failed");
+            assert_eq!(writer.get_rows().len(), 1, "Should return 1 team with more than 2 players");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 3, "Should have 3 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "team");
+            assert_eq!(schema.get_columns()[1].get_name(), "player_count");
+            assert_eq!(schema.get_columns()[2].get_name(), "avg_score");
+        }
+
+        #[test]
+        fn test_group_by_with_order_by() {
+            let mut ctx = TestContext::new("test_group_by_with_order_by");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("region", TypeId::VarChar),
+                Column::new("sales_amount", TypeId::Integer),
+                Column::new("quarter", TypeId::Integer),
+            ]);
+
+            let table_name = "sales";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("North"), Value::new(1000), Value::new(1)],
+                vec![Value::new("North"), Value::new(1200), Value::new(2)],
+                vec![Value::new("South"), Value::new(800), Value::new(1)],
+                vec![Value::new("South"), Value::new(900), Value::new(2)],
+                vec![Value::new("East"), Value::new(1500), Value::new(1)],
+                vec![Value::new("West"), Value::new(700), Value::new(1)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with ORDER BY
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT region, SUM(sales_amount) as total_sales FROM sales GROUP BY region ORDER BY total_sales DESC",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with ORDER BY query failed");
+            assert_eq!(writer.get_rows().len(), 4, "Should return 4 regions");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 2, "Should have 2 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "region");
+            assert_eq!(schema.get_columns()[1].get_name(), "total_sales");
+        }
+
+        #[test]
+        fn test_group_by_with_null_values() {
+            let mut ctx = TestContext::new("test_group_by_with_null_values");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("category", TypeId::VarChar),
+                Column::new("value", TypeId::Integer),
+                Column::new("description", TypeId::VarChar),
+            ]);
+
+            let table_name = "test_nulls";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data with NULL values
+            let test_data = vec![
+                vec![Value::new("A"), Value::new(10), Value::new("Description A")],
+                vec![Value::new("A"), Value::new(Val::Null), Value::new("Description A2")],
+                vec![Value::new(Val::Null), Value::new(20), Value::new("Description B")],
+                vec![Value::new(Val::Null), Value::new(30), Value::new("Description B2")],
+                vec![Value::new("B"), Value::new(40), Value::new(Val::Null)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with NULL handling
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) as row_count, COUNT(value) as non_null_values FROM test_nulls GROUP BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with NULL values query failed");
+            assert_eq!(writer.get_rows().len(), 3, "Should return 3 groups (A, B, NULL)");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 3, "Should have 3 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "category");
+            assert_eq!(schema.get_columns()[1].get_name(), "row_count");
+            assert_eq!(schema.get_columns()[2].get_name(), "non_null_values");
+        }
+
+        #[test]
+        fn test_group_by_all_aggregation_functions() {
+            let mut ctx = TestContext::new("test_group_by_all_aggregation_functions");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("group_id", TypeId::VarChar),
+                Column::new("value", TypeId::Integer),
+                Column::new("weight", TypeId::Integer),
+            ]);
+
+            let table_name = "measurements";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("Group1"), Value::new(10), Value::new(1)],
+                vec![Value::new("Group1"), Value::new(20), Value::new(2)],
+                vec![Value::new("Group1"), Value::new(30), Value::new(3)],
+                vec![Value::new("Group2"), Value::new(5), Value::new(1)],
+                vec![Value::new("Group2"), Value::new(15), Value::new(4)],
+                vec![Value::new("Group2"), Value::new(25), Value::new(2)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test all aggregation functions with GROUP BY
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT group_id, COUNT(*) as count, SUM(value) as sum_val, AVG(value) as avg_val, MIN(value) as min_val, MAX(value) as max_val FROM measurements GROUP BY group_id",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with all aggregation functions query failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 groups");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 6, "Should have 6 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "group_id");
+            assert_eq!(schema.get_columns()[1].get_name(), "count");
+            assert_eq!(schema.get_columns()[2].get_name(), "sum_val");
+            assert_eq!(schema.get_columns()[3].get_name(), "avg_val");
+            assert_eq!(schema.get_columns()[4].get_name(), "min_val");
+            assert_eq!(schema.get_columns()[5].get_name(), "max_val");
+        }
+
+        #[test]
+        fn test_group_by_empty_table() {
+            let mut ctx = TestContext::new("test_group_by_empty_table");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("category", TypeId::VarChar),
+                Column::new("value", TypeId::Integer),
+            ]);
+
+            let table_name = "empty_table";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // No data inserted - table is empty
+
+            // Test GROUP BY on empty table
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, COUNT(*) as count FROM empty_table GROUP BY category",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY on empty table query failed");
+            assert_eq!(writer.get_rows().len(), 0, "Should return 0 rows for empty table");
+
+            // Verify schema is still correct
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 2, "Should have 2 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "category");
+            assert_eq!(schema.get_columns()[1].get_name(), "count");
+        }
+
+        #[test]
+        fn test_group_by_performance_large_dataset() {
+            let mut ctx = TestContext::new("test_group_by_performance_large_dataset");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("category", TypeId::VarChar),
+                Column::new("subcategory", TypeId::VarChar),
+                Column::new("value", TypeId::Integer),
+                Column::new("timestamp", TypeId::BigInt),
+            ]);
+
+            let table_name = "large_dataset";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert large dataset
+            let mut test_data = Vec::new();
+            let categories = vec!["A", "B", "C", "D", "E"];
+            let subcategories = vec!["X", "Y", "Z"];
+            
+            for i in 0..1000 {
+                let category = categories[i % categories.len()];
+                let subcategory = subcategories[i % subcategories.len()];
+                let value = (i % 100) as i32;
+                let timestamp = i as i64;
+                
+                test_data.push(vec![
+                    Value::new(category),
+                    Value::new(subcategory),
+                    Value::new(value),
+                    Value::new(timestamp),
+                ]);
+            }
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY performance with large dataset
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT category, subcategory, COUNT(*) as record_count, AVG(value) as avg_value, SUM(value) as total_value FROM large_dataset GROUP BY category, subcategory",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY performance test query failed");
+            assert_eq!(writer.get_rows().len(), 15, "Should return 15 groups (5 categories × 3 subcategories)");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 5, "Should have 5 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "category");
+            assert_eq!(schema.get_columns()[1].get_name(), "subcategory");
+            assert_eq!(schema.get_columns()[2].get_name(), "record_count");
+            assert_eq!(schema.get_columns()[3].get_name(), "avg_value");
+            assert_eq!(schema.get_columns()[4].get_name(), "total_value");
+        }
+
+        #[test]
+        fn test_group_by_distinct_operations() {
+            let mut ctx = TestContext::new("test_group_by_distinct_operations");
+
+            // Create test table
+            let table_schema = Schema::new(vec![
+                Column::new("department", TypeId::VarChar),
+                Column::new("skill", TypeId::VarChar),
+                Column::new("employee_name", TypeId::VarChar),
+                Column::new("rating", TypeId::Integer),
+            ]);
+
+            let table_name = "employee_skills";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data with some duplicates
+            let test_data = vec![
+                vec![Value::new("Engineering"), Value::new("Python"), Value::new("Alice"), Value::new(9)],
+                vec![Value::new("Engineering"), Value::new("Python"), Value::new("Bob"), Value::new(8)],
+                vec![Value::new("Engineering"), Value::new("Java"), Value::new("Alice"), Value::new(7)],
+                vec![Value::new("Engineering"), Value::new("Java"), Value::new("Charlie"), Value::new(9)],
+                vec![Value::new("Marketing"), Value::new("Python"), Value::new("David"), Value::new(6)],
+                vec![Value::new("Marketing"), Value::new("Design"), Value::new("Eve"), Value::new(8)],
+                vec![Value::new("Marketing"), Value::new("Design"), Value::new("Frank"), Value::new(7)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test GROUP BY with COUNT(DISTINCT)
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(
+                    "SELECT department, COUNT(DISTINCT skill) as unique_skills, COUNT(*) as total_records FROM employee_skills GROUP BY department",
+                    ctx.exec_ctx.clone(),
+                    &mut writer,
+                )
+                .unwrap();
+
+            assert!(success, "GROUP BY with COUNT(DISTINCT) query failed");
+            assert_eq!(writer.get_rows().len(), 2, "Should return 2 departments");
+
+            // Verify schema
+            let schema = writer.get_schema();
+            assert_eq!(schema.get_columns().len(), 3, "Should have 3 columns");
+            assert_eq!(schema.get_columns()[0].get_name(), "department");
+            assert_eq!(schema.get_columns()[1].get_name(), "unique_skills");
+            assert_eq!(schema.get_columns()[2].get_name(), "total_records");
         }
     }
 
