@@ -14,6 +14,7 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::value::Value;
 use log;
 use std::sync::Arc;
+use crate::types_db::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct TransactionalTableHeap {
@@ -78,6 +79,9 @@ impl TransactionalTableHeap {
             .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
+        // Validate check constraints before inserting
+        Self::validate_check_constraints(&values, schema)?;
+
         // Create metadata with transaction ID
         let meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
 
@@ -90,6 +94,166 @@ impl TransactionalTableHeap {
         txn.append_write_set(self.table_oid, rid);
 
         Ok(rid)
+    }
+
+    /// Validates check constraints for the given values against the schema
+    fn validate_check_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
+        for (i, column) in schema.get_columns().iter().enumerate() {
+            if let Some(constraint_expr) = column.get_check_constraint() {
+                if i >= values.len() {
+                    return Err(format!(
+                        "Value index {} out of bounds for constraint validation",
+                        i
+                    ));
+                }
+
+                let value = &values[i];
+
+                // For now, implement basic constraint validation for common patterns
+                // This can be extended to support full SQL expression parsing later
+                if !Self::evaluate_simple_constraint(constraint_expr, value, column.get_name())? {
+                    return Err(format!(
+                        "Check constraint violation for column '{}': {} (constraint: {})",
+                        column.get_name(),
+                        value,
+                        constraint_expr
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Evaluates simple check constraints without requiring full SQL parsing
+    fn evaluate_simple_constraint(
+        constraint: &str,
+        value: &Value,
+        column_name: &str,
+    ) -> Result<bool, String> {
+        let constraint = constraint.trim();
+
+        // Handle age >= 18 AND age <= 100 pattern
+        if constraint.contains(" AND ") {
+            let parts: Vec<&str> = constraint.split(" AND ").collect();
+            for part in parts {
+                if !Self::evaluate_simple_constraint(part.trim(), value, column_name)? {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+
+        // Handle OR patterns
+        if constraint.contains(" OR ") {
+            let parts: Vec<&str> = constraint.split(" OR ").collect();
+            for part in parts {
+                if Self::evaluate_simple_constraint(part.trim(), value, column_name)? {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+
+        // Handle simple comparison operators
+        if constraint.contains(">=") {
+            let parts: Vec<&str> = constraint.split(">=").collect();
+            if parts.len() == 2 {
+                let left = parts[0].trim();
+                let right = parts[1].trim();
+                
+                if left == column_name {
+                    if let Ok(threshold) = right.parse::<f64>() {
+                        if let Ok(val) = value.as_decimal() {
+                            return Ok(val >= threshold);
+                        } else if let Ok(val) = value.as_integer() {
+                            return Ok(val as f64 >= threshold);
+                        }
+                    }
+                }
+            }
+        }
+
+        if constraint.contains("<=") {
+            let parts: Vec<&str> = constraint.split("<=").collect();
+            if parts.len() == 2 {
+                let left = parts[0].trim();
+                let right = parts[1].trim();
+                
+                if left == column_name {
+                    if let Ok(threshold) = right.parse::<f64>() {
+                        if let Ok(val) = value.as_decimal() {
+                            return Ok(val <= threshold);
+                        } else if let Ok(val) = value.as_integer() {
+                            return Ok(val as f64 <= threshold);
+                        }
+                    }
+                }
+            }
+        }
+
+        if constraint.contains(" > ") {
+            let parts: Vec<&str> = constraint.split(" > ").collect();
+            if parts.len() == 2 {
+                let left = parts[0].trim();
+                let right = parts[1].trim();
+                
+                if left == column_name {
+                    if let Ok(threshold) = right.parse::<f64>() {
+                        if let Ok(val) = value.as_decimal() {
+                            return Ok(val > threshold);
+                        } else if let Ok(val) = value.as_integer() {
+                            return Ok(val as f64 > threshold);
+                        }
+                    }
+                }
+            }
+        }
+
+        if constraint.contains(" < ") {
+            let parts: Vec<&str> = constraint.split(" < ").collect();
+            if parts.len() == 2 {
+                let left = parts[0].trim();
+                let right = parts[1].trim();
+                
+                if left == column_name {
+                    if let Ok(threshold) = right.parse::<f64>() {
+                        if let Ok(val) = value.as_decimal() {
+                            return Ok(val < threshold);
+                        } else if let Ok(val) = value.as_integer() {
+                            return Ok((val as f64) < threshold);
+                        }
+                    }
+                }
+            }
+        }
+
+        if constraint.contains(" = ") {
+            let parts: Vec<&str> = constraint.split(" = ").collect();
+            if parts.len() == 2 {
+                let left = parts[0].trim();
+                let right = parts[1].trim();
+                
+                if left == column_name {
+                    if let Ok(threshold) = right.parse::<f64>() {
+                        if let Ok(val) = value.as_decimal() {
+                            return Ok((val - threshold).abs() < f64::EPSILON);
+                        } else if let Ok(val) = value.as_integer() {
+                            return Ok((val as f64 - threshold).abs() < f64::EPSILON);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we can't parse the constraint, return true (allow the insert)
+        // In a production system, you might want to be more strict here
+        log::warn!(
+            "Unable to evaluate check constraint '{}' for column '{}', allowing insert",
+            constraint,
+            column_name
+        );
+        Ok(true)
     }
 
     pub fn insert_tuple(
