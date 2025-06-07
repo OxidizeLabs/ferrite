@@ -648,18 +648,77 @@ impl Value {
                 .parse::<f32>()
                 .map(|f| Value::new_with_type(Val::Float(f), target_type))
                 .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e)),
-            (Val::VarLen(s), TypeId::Timestamp) => s
-                .parse::<u64>()
-                .map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e)),
-            (Val::VarLen(s), TypeId::Date) => s
-                .parse::<i32>()
-                .map(|d| Value::new_with_type(Val::Date(d), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e)),
-            (Val::VarLen(s), TypeId::Time) => s
-                .parse::<i32>()
-                .map(|t| Value::new_with_type(Val::Time(t), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e)),
+            (Val::VarLen(s), TypeId::Timestamp) => {
+                // Try parsing as Unix timestamp (seconds since epoch) first
+                if let Ok(t) = s.parse::<u64>() {
+                    return Ok(Value::new_with_type(Val::Timestamp(t), target_type));
+                }
+                
+                // Try parsing various timestamp formats
+                use chrono::{DateTime, NaiveDateTime};
+                
+                // Try ISO8601/RFC3339 format first
+                if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+                    let timestamp = dt.timestamp() as u64;
+                    return Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type));
+                }
+                
+                // Try standard format YYYY-MM-DD HH:MM:SS
+                let format = if s.contains('.') {
+                    "%Y-%m-%d %H:%M:%S.%f"
+                } else {
+                    "%Y-%m-%d %H:%M:%S"
+                };
+                
+                match NaiveDateTime::parse_from_str(s, format) {
+                    Ok(dt) => {
+                        let timestamp = dt.and_utc().timestamp() as u64;
+                        Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Timestamp: invalid format", s))
+                }
+            }
+            (Val::VarLen(s), TypeId::Date) => {
+                // Try parsing as Unix timestamp (days since epoch) first
+                if let Ok(d) = s.parse::<i32>() {
+                    return Ok(Value::new_with_type(Val::Date(d), target_type));
+                }
+                
+                // Try parsing as YYYY-MM-DD format
+                use chrono::NaiveDate;
+                match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                    Ok(date) => {
+                        // Convert to days since Unix epoch (1970-01-01)
+                        let unix_epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                        let days_since_epoch = date.signed_duration_since(unix_epoch).num_days() as i32;
+                        Ok(Value::new_with_type(Val::Date(days_since_epoch), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Date: invalid format", s))
+                }
+            }
+            (Val::VarLen(s), TypeId::Time) => {
+                // Try parsing as integer seconds since midnight first
+                if let Ok(t) = s.parse::<i32>() {
+                    return Ok(Value::new_with_type(Val::Time(t), target_type));
+                }
+                
+                // Try parsing as HH:MM:SS format
+                use chrono::{NaiveTime, Timelike};
+                let format = if s.contains('.') {
+                    "%H:%M:%S.%f"
+                } else {
+                    "%H:%M:%S"
+                };
+                
+                match NaiveTime::parse_from_str(s, format) {
+                    Ok(time) => {
+                        // Convert to seconds since midnight using Timelike trait
+                        let seconds_since_midnight = (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
+                        Ok(Value::new_with_type(Val::Time(seconds_since_midnight), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Time: invalid format", s))
+                }
+            }
             (Val::VarLen(s), TypeId::Interval) => s
                 .parse::<i64>()
                 .map(|i| Value::new_with_type(Val::Interval(i), target_type))
@@ -711,18 +770,77 @@ impl Value {
                 .parse::<f32>()
                 .map(|f| Value::new_with_type(Val::Float(f), target_type))
                 .map_err(|e| format!("Cannot convert string '{}' to Float: {}", s, e)),
-            (Val::ConstLen(s), TypeId::Timestamp) => s
-                .parse::<u64>()
-                .map(|t| Value::new_with_type(Val::Timestamp(t), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Timestamp: {}", s, e)),
-            (Val::ConstLen(s), TypeId::Date) => s
-                .parse::<i32>()
-                .map(|d| Value::new_with_type(Val::Date(d), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Date: {}", s, e)),
-            (Val::ConstLen(s), TypeId::Time) => s
-                .parse::<i32>()
-                .map(|t| Value::new_with_type(Val::Time(t), target_type))
-                .map_err(|e| format!("Cannot convert string '{}' to Time: {}", s, e)),
+            (Val::ConstLen(s), TypeId::Timestamp) => {
+                // Try parsing as Unix timestamp (seconds since epoch) first
+                if let Ok(t) = s.parse::<u64>() {
+                    return Ok(Value::new_with_type(Val::Timestamp(t), target_type));
+                }
+                
+                // Try parsing various timestamp formats
+                use chrono::{DateTime, NaiveDateTime};
+                
+                // Try ISO8601/RFC3339 format first
+                if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+                    let timestamp = dt.timestamp() as u64;
+                    return Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type));
+                }
+                
+                // Try standard format YYYY-MM-DD HH:MM:SS
+                let format = if s.contains('.') {
+                    "%Y-%m-%d %H:%M:%S.%f"
+                } else {
+                    "%Y-%m-%d %H:%M:%S"
+                };
+                
+                match NaiveDateTime::parse_from_str(s, format) {
+                    Ok(dt) => {
+                        let timestamp = dt.and_utc().timestamp() as u64;
+                        Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Timestamp: invalid format", s))
+                }
+            }
+            (Val::ConstLen(s), TypeId::Date) => {
+                // Try parsing as Unix timestamp (days since epoch) first
+                if let Ok(d) = s.parse::<i32>() {
+                    return Ok(Value::new_with_type(Val::Date(d), target_type));
+                }
+                
+                // Try parsing as YYYY-MM-DD format
+                use chrono::NaiveDate;
+                match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                    Ok(date) => {
+                        // Convert to days since Unix epoch (1970-01-01)
+                        let unix_epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                        let days_since_epoch = date.signed_duration_since(unix_epoch).num_days() as i32;
+                        Ok(Value::new_with_type(Val::Date(days_since_epoch), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Date: invalid format", s))
+                }
+            }
+            (Val::ConstLen(s), TypeId::Time) => {
+                // Try parsing as integer seconds since midnight first
+                if let Ok(t) = s.parse::<i32>() {
+                    return Ok(Value::new_with_type(Val::Time(t), target_type));
+                }
+                
+                // Try parsing as HH:MM:SS format
+                use chrono::{NaiveTime, Timelike};
+                let format = if s.contains('.') {
+                    "%H:%M:%S.%f"
+                } else {
+                    "%H:%M:%S"
+                };
+                
+                match NaiveTime::parse_from_str(s, format) {
+                    Ok(time) => {
+                        // Convert to seconds since midnight using Timelike trait
+                        let seconds_since_midnight = (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
+                        Ok(Value::new_with_type(Val::Time(seconds_since_midnight), target_type))
+                    }
+                    Err(_) => Err(format!("Cannot convert string '{}' to Time: invalid format", s))
+                }
+            }
             (Val::ConstLen(s), TypeId::Interval) => s
                 .parse::<i64>()
                 .map(|i| Value::new_with_type(Val::Interval(i), target_type))
@@ -3227,5 +3345,339 @@ mod comprehensive_cast_tests {
         let int_val = Value::new(42);
         let formatted_int = int_val.format_with_column_context(Some(&column));
         assert_eq!(formatted_int, "42");
+    }
+}
+
+#[cfg(test)]
+mod string_to_temporal_conversion_tests {
+    use super::*;
+    use crate::types_db::type_id::TypeId;
+
+    #[test]
+    fn test_varchar_to_date_conversions() {
+        // Valid date string formats
+        let date_str = Value::new("2023-01-01");
+        let result = date_str.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result.get_val() {
+            // 2023-01-01 should be 19358 days since Unix epoch (1970-01-01)
+            assert_eq!(*days, 19358);
+        } else {
+            panic!("Expected Date value");
+        }
+        
+        // Test another date
+        let date_str2 = Value::new("2000-01-01");
+        let result2 = date_str2.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result2.get_val() {
+            // 2000-01-01 should be 10957 days since Unix epoch
+            assert_eq!(*days, 10957);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Test Unix epoch date
+        let epoch_str = Value::new("1970-01-01");
+        let result3 = epoch_str.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result3.get_val() {
+            assert_eq!(*days, 0);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Test backward compatibility with integer strings
+        let int_date_str = Value::new("19358");
+        let result4 = int_date_str.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result4.get_val() {
+            assert_eq!(*days, 19358);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Invalid date format should fail
+        let invalid_date = Value::new("invalid-date");
+        assert!(invalid_date.cast_to(TypeId::Date).is_err());
+
+        let invalid_format = Value::new("01-01-2023");
+        assert!(invalid_format.cast_to(TypeId::Date).is_err());
+    }
+
+    #[test]
+    fn test_constlen_to_date_conversions() {
+        // Test with ConstLen (Char) strings
+        let date_str = Value::new_with_type(Val::ConstLen("2023-12-25".to_string()), TypeId::Char);
+        let result = date_str.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result.get_val() {
+            // 2023-12-25 should be 19716 days since Unix epoch
+            assert_eq!(*days, 19716);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Test integer format with ConstLen
+        let int_date_str = Value::new_with_type(Val::ConstLen("0".to_string()), TypeId::Char);
+        let result2 = int_date_str.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result2.get_val() {
+            assert_eq!(*days, 0);
+        } else {
+            panic!("Expected Date value");
+        }
+    }
+
+    #[test]
+    fn test_varchar_to_time_conversions() {
+        // Valid time string formats
+        let time_str = Value::new("12:30:45");
+        let result = time_str.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result.get_val() {
+            // 12:30:45 = 12*3600 + 30*60 + 45 = 45045 seconds since midnight
+            assert_eq!(*seconds, 45045);
+        } else {
+            panic!("Expected Time value");
+        }
+
+        // Test time with fractional seconds
+        let time_str_frac = Value::new("23:59:59.999");
+        let result2 = time_str_frac.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result2.get_val() {
+            // 23:59:59 = 23*3600 + 59*60 + 59 = 86399 seconds
+            // Fractional seconds are truncated in current implementation
+            assert_eq!(*seconds, 86399);
+        } else {
+            panic!("Expected Time value");
+        }
+
+        // Test midnight
+        let midnight = Value::new("00:00:00");
+        let result3 = midnight.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result3.get_val() {
+            assert_eq!(*seconds, 0);
+        } else {
+            panic!("Expected Time value");
+        }
+
+        // Test backward compatibility with integer strings
+        let int_time_str = Value::new("3600");
+        let result4 = int_time_str.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result4.get_val() {
+            assert_eq!(*seconds, 3600);
+        } else {
+            panic!("Expected Time value");
+        }
+
+        // Invalid time format should fail
+        let invalid_time = Value::new("25:00:00");
+        assert!(invalid_time.cast_to(TypeId::Time).is_err());
+
+        let invalid_format = Value::new("12:30");
+        assert!(invalid_format.cast_to(TypeId::Time).is_err());
+    }
+
+    #[test]
+    fn test_constlen_to_time_conversions() {
+        // Test with ConstLen (Char) strings
+        let time_str = Value::new_with_type(Val::ConstLen("08:15:30".to_string()), TypeId::Char);
+        let result = time_str.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result.get_val() {
+            // 08:15:30 = 8*3600 + 15*60 + 30 = 29730 seconds since midnight
+            assert_eq!(*seconds, 29730);
+        } else {
+            panic!("Expected Time value");
+        }
+
+        // Test with fractional seconds
+        let time_str_frac = Value::new_with_type(Val::ConstLen("14:22:33.500".to_string()), TypeId::Char);
+        let result2 = time_str_frac.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result2.get_val() {
+            // 14:22:33 = 14*3600 + 22*60 + 33 = 51753 seconds
+            assert_eq!(*seconds, 51753);
+        } else {
+            panic!("Expected Time value");
+        }
+    }
+
+    #[test]
+    fn test_varchar_to_timestamp_conversions() {
+        // Valid timestamp string formats
+        
+        // Test Unix timestamp string
+        let unix_ts_str = Value::new("1640995200");
+        let result = unix_ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result.get_val() {
+            assert_eq!(*ts, 1640995200);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+
+        // Test ISO8601/RFC3339 format
+        let iso_ts_str = Value::new("2023-01-01T12:00:00Z");
+        let result2 = iso_ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result2.get_val() {
+            // This should be parsed successfully as Unix timestamp
+            assert!(*ts > 0);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+
+        // Test standard format YYYY-MM-DD HH:MM:SS
+        let std_ts_str = Value::new("2023-01-01 15:30:45");
+        let result3 = std_ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result3.get_val() {
+            // Should be parsed successfully
+            assert!(*ts > 0);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+
+        // Test with fractional seconds
+        let frac_ts_str = Value::new("2023-01-01 15:30:45.123");
+        let result4 = frac_ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result4.get_val() {
+            // Should be parsed successfully
+            assert!(*ts > 0);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+
+        // Invalid timestamp format should fail
+        let invalid_ts = Value::new("invalid-timestamp");
+        assert!(invalid_ts.cast_to(TypeId::Timestamp).is_err());
+
+        let invalid_format = Value::new("2023/01/01 12:00:00");
+        assert!(invalid_format.cast_to(TypeId::Timestamp).is_err());
+    }
+
+    #[test]
+    fn test_constlen_to_timestamp_conversions() {
+        // Test with ConstLen (Char) strings
+        let ts_str = Value::new_with_type(Val::ConstLen("1672531200".to_string()), TypeId::Char);
+        let result = ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result.get_val() {
+            assert_eq!(*ts, 1672531200);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+
+        // Test standard datetime format
+        let std_ts_str = Value::new_with_type(Val::ConstLen("2023-06-15 09:45:30".to_string()), TypeId::Char);
+        let result2 = std_ts_str.cast_to(TypeId::Timestamp).unwrap();
+        if let Val::Timestamp(ts) = result2.get_val() {
+            assert!(*ts > 0);
+        } else {
+            panic!("Expected Timestamp value");
+        }
+    }
+
+    #[test]
+    fn test_temporal_conversion_edge_cases() {
+        // Test empty strings
+        let empty_str = Value::new("");
+        assert!(empty_str.cast_to(TypeId::Date).is_err());
+        assert!(empty_str.cast_to(TypeId::Time).is_err());
+        assert!(empty_str.cast_to(TypeId::Timestamp).is_err());
+
+        // Test whitespace strings
+        let ws_str = Value::new("   ");
+        assert!(ws_str.cast_to(TypeId::Date).is_err());
+        assert!(ws_str.cast_to(TypeId::Time).is_err());
+        assert!(ws_str.cast_to(TypeId::Timestamp).is_err());
+
+        // Test very large valid dates
+        let future_date = Value::new("2099-12-31");
+        let result = future_date.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result.get_val() {
+            assert!(*days > 19000);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Test historical dates
+        let past_date = Value::new("1900-01-01");
+        let result2 = past_date.cast_to(TypeId::Date).unwrap();
+        if let Val::Date(days) = result2.get_val() {
+            // Should be negative since it's before 1970
+            assert!(*days < 0);
+        } else {
+            panic!("Expected Date value");
+        }
+
+        // Test edge time values
+        let end_of_day = Value::new("23:59:59");
+        let result3 = end_of_day.cast_to(TypeId::Time).unwrap();
+        if let Val::Time(seconds) = result3.get_val() {
+            assert_eq!(*seconds, 86399); // 24*3600 - 1
+        } else {
+            panic!("Expected Time value");
+        }
+    }
+
+    #[test]
+    fn test_temporal_conversion_error_messages() {
+        // Test that error messages are informative
+        let invalid_date = Value::new("not-a-date");
+        let date_err = invalid_date.cast_to(TypeId::Date).unwrap_err();
+        assert!(date_err.contains("Cannot convert string"));
+        assert!(date_err.contains("Date"));
+        assert!(date_err.contains("invalid format"));
+
+        let invalid_time = Value::new("not-a-time");
+        let time_err = invalid_time.cast_to(TypeId::Time).unwrap_err();
+        assert!(time_err.contains("Cannot convert string"));
+        assert!(time_err.contains("Time"));
+        assert!(time_err.contains("invalid format"));
+
+        let invalid_timestamp = Value::new("not-a-timestamp");
+        let ts_err = invalid_timestamp.cast_to(TypeId::Timestamp).unwrap_err();
+        assert!(ts_err.contains("Cannot convert string"));
+        assert!(ts_err.contains("Timestamp"));
+        assert!(ts_err.contains("invalid format"));
+    }
+
+    #[test]
+    fn test_temporal_roundtrip_consistency() {
+        // Test that converting temporal values to strings and back produces consistent results
+        
+        // Date roundtrip
+        let original_date = Value::new_with_type(Val::Date(19358), TypeId::Date);
+        let date_as_string = original_date.cast_to(TypeId::VarChar).unwrap();
+        let date_back = date_as_string.cast_to(TypeId::Date).unwrap();
+        assert_eq!(original_date.get_val(), date_back.get_val());
+
+        // Time roundtrip
+        let original_time = Value::new_with_type(Val::Time(45045), TypeId::Time);
+        let time_as_string = original_time.cast_to(TypeId::VarChar).unwrap();
+        let time_back = time_as_string.cast_to(TypeId::Time).unwrap();
+        assert_eq!(original_time.get_val(), time_back.get_val());
+
+        // Timestamp roundtrip
+        let original_timestamp = Value::new_with_type(Val::Timestamp(1640995200), TypeId::Timestamp);
+        let ts_as_string = original_timestamp.cast_to(TypeId::VarChar).unwrap();
+        let ts_back = ts_as_string.cast_to(TypeId::Timestamp).unwrap();
+        assert_eq!(original_timestamp.get_val(), ts_back.get_val());
+    }
+
+    #[test]
+    fn test_mixed_format_temporal_conversions() {
+        // Test that both integer and string formats work for the same values
+        
+        // Date: integer vs string format
+        let date_int = Value::new("19358");
+        let date_str = Value::new("2023-01-01");
+        let int_result = date_int.cast_to(TypeId::Date).unwrap();
+        let str_result = date_str.cast_to(TypeId::Date).unwrap();
+        assert_eq!(int_result.get_val(), str_result.get_val());
+
+        // Time: integer vs string format  
+        let time_int = Value::new("45045");
+        let time_str = Value::new("12:30:45");
+        let int_result2 = time_int.cast_to(TypeId::Time).unwrap();
+        let str_result2 = time_str.cast_to(TypeId::Time).unwrap();
+        assert_eq!(int_result2.get_val(), str_result2.get_val());
+
+        // Timestamp: integer vs string format (Unix timestamp)
+        let ts_int = Value::new("1640995200");
+        let ts_unix_str = Value::new("1640995200");
+        let int_result3 = ts_int.cast_to(TypeId::Timestamp).unwrap();
+        let str_result3 = ts_unix_str.cast_to(TypeId::Timestamp).unwrap();
+        assert_eq!(int_result3.get_val(), str_result3.get_val());
     }
 }
